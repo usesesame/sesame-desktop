@@ -1,0 +1,78 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v1",
+  "protocolVersion": 1,
+  "compatibility": {
+    "minimumHostProtocolVersion": 1,
+    "currentHostProtocolVersion": 1,
+    "minimumExtensionProtocolVersion": 1,
+    "currentExtensionProtocolVersion": 1
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "credentialFieldBytes": 4096,
+    "titleBytes": 512,
+    "approvalSeconds": 30
+  },
+  "requestTypes": [
+    "capabilities",
+    "activate",
+    "fill",
+    "identity",
+    "save"
+  ],
+  "responseTypes": [
+    "capabilities",
+    "activated",
+    "fill",
+    "fill-unavailable",
+    "identity",
+    "identity-unavailable",
+    "saved",
+    "save-unavailable",
+    "error"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "identityFieldKeys": [
+    "fullName",
+    "email",
+    "phone",
+    "addressLine1",
+    "addressLine2",
+    "city",
+    "region",
+    "postalCode",
+    "country"
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
+    "origin": "Fill, identity, and save requests carry one normalized page origin. The extension and desktop recheck it before release or write.",
+    "tabIdentity": "Not transmitted to the native host. The extension binds the operation to the active tab and window and rechecks both before a page write.",
+    "documentToken": "Not transmitted to the native host. The extension creates a single-document token during prepare and requires it again during fill or clear.",
+    "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json"
+}

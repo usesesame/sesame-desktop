@@ -1,0 +1,64 @@
+title = "Sesame reviewed secret-scan exceptions"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deliberately invalid fictional OpenSSH fixtures"
+targetRules = ["private-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''src-tauri/src/commands/ssh_keys\.rs$''',
+  '''src/lib/controllers/ssh-key-controller\.test\.ts$''',
+]
+regexes = ['''-----BEGIN OPENSSH PRIVATE KEY----- fictional''']
+
+[[allowlists]]
+description = "Private-key header literals used by the support intake rejection filter"
+targetRules = ["private-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''backend/internal/httpapi/support_intake\.go$''']
+regexes = [
+  '''"otpauth://", "-----begin private key-----", "-----begin pgp private key block-----",''',
+  '''"-----begin rsa private key-----", "-----begin openssh private key-----",''',
+]
+
+[[allowlists]]
+description = "Public deterministic verification key in the cross-language Sync fixture"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''backend/internal/syncproto/testdata/envelope-signing-payload\.json$''']
+regexes = ['''"verifyingKey": "[A-Za-z0-9_-]{43}"''']
+
+[[allowlists]]
+description = "Public Chromium extension identity key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''extensions/sesame/manifests/(chrome|edge)\.json$''']
+regexes = ['''"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A''']
+
+[[allowlists]]
+description = "Internal isolated-world DOM property, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''extensions/sesame/src/content/field-writer\.ts$''']
+regexes = ['''__sesamePendingFillV1''']
+
+[[allowlists]]
+description = "Fictional password fixtures used by security and sanitization tests"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''src-tauri/src/lib\.rs$''',
+  '''src/lib/controllers/feedback-controller\.test\.ts$''',
+]
+regexes = [
+  '''pattern\.password = "northwind-2026"''',
+  '''password=hunter2fictional''',
+]

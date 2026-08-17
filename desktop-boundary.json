@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "directories": [
+    "design",
+    "public",
+    "src",
+    "src-tauri"
+  ],
+  "files": [
+    ".editorconfig",
+    ".env.example",
+    ".gitattributes",
+    ".gitignore",
+    ".node-version",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "TRADEMARKS.md",
+    "desktop-boundary.json",
+    "eslint.config.js",
+    "index.html",
+    "package-lock.json",
+    "package.json",
+    "quick-access.html",
+    "rust-toolchain.toml",
+    "svelte.config.js",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "vite.config.ts",
+    "vitest.config.ts",
+    ".github/workflows/future-desktop.yml",
+    "tools/desktop-boundary-contracts.test.mjs",
+    "tools/stage-browser-host.ps1",
+    "tools/version-contract.mjs"
+  ]
+}

@@ -1,0 +1,65 @@
+# Review routing. GitHub requests these owners automatically on a pull request
+# that touches a matching path. Later rules win, so the most sensitive paths are
+# listed last.
+#
+# The point is not gatekeeping for its own sake. Every path below is one where a
+# mistake is silent: it does not break a test, it changes what an attacker can
+# reach.
+
+* @d0mkaaa
+
+# ---------------------------------------------------------------------------
+# Delivery controls. Changing these changes what "passing" means, so they are
+# reviewed even when the product change is trivial.
+# ---------------------------------------------------------------------------
+/.github/                       @d0mkaaa
+/eslint.config.js               @d0mkaaa
+/backend/.golangci.yml          @d0mkaaa
+/package.json                   @d0mkaaa
+/tools/                        @d0mkaaa
+# A lockfile change is a supply-chain change. It is the diff a reviewer is
+# most likely to skim and least able to reconstruct later.
+/package-lock.json              @d0mkaaa
+/src-tauri/Cargo.lock           @d0mkaaa
+/backend/go.sum                 @d0mkaaa
+/website/package-lock.json      @d0mkaaa
+/admin/package-lock.json        @d0mkaaa
+/account/package-lock.json      @d0mkaaa
+/extensions/sesame/package-lock.json @d0mkaaa
+
+# ---------------------------------------------------------------------------
+# The vault core. Unlock, key derivation, encryption, backups, secure deletion.
+# ---------------------------------------------------------------------------
+/src-tauri/                     @d0mkaaa
+/src-tauri/src/vault/           @d0mkaaa
+/src-tauri/Cargo.toml           @d0mkaaa
+
+# ---------------------------------------------------------------------------
+# The native messaging boundary. This is where a credential crosses out of the
+# desktop process toward a page the user does not control.
+# ---------------------------------------------------------------------------
+/src-tauri/src/browser_fill.rs                    @d0mkaaa
+/src-tauri/src/browser_protocol.rs                @d0mkaaa
+/src-tauri/src/adapters/platform/browser_host.rs  @d0mkaaa
+/src-tauri/src/adapters/platform/browser_pipe.rs  @d0mkaaa
+# The desktop owns the wire because it owns the host. Changing it needs a new
+# tagged contract and a decided compatibility range, not an edited type.
+/src-tauri/contracts/                             @d0mkaaa
+/extensions/                                      @d0mkaaa
+
+# ---------------------------------------------------------------------------
+# Authentication, sessions, tokens, and the admin control plane.
+# ---------------------------------------------------------------------------
+/backend/internal/accounts/     @d0mkaaa
+/backend/internal/admin/        @d0mkaaa
+/backend/internal/httpapi/      @d0mkaaa
+/backend/internal/syncproto/    @d0mkaaa
+
+# ---------------------------------------------------------------------------
+# Documents that make security claims. A claim here must match shipped
+# behaviour, so a change to one usually means a change to code as well.
+# ---------------------------------------------------------------------------
+/backend/API.md                 @d0mkaaa
+/backend/openapi/               @d0mkaaa
+/.github/SECURITY.md            @d0mkaaa
+/extensions/sesame/SECURITY.md  @d0mkaaa

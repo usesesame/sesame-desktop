@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible problem without sharing vault data or secrets.
+title: "[Bug] "
+labels:
+  - type:bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach a vault, password-manager export, screenshot containing credentials, password, PIN, recovery kit, backup code, TOTP seed, session token, or database dump. Use fictional test data. Maintainers will close and remove reports that expose secrets.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Desktop vault
+        - Backend API
+        - Public website or account
+        - Admin application
+        - Browser helper prototype
+        - Build, release, or documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0 or a commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: What happened?
+      description: State the observed behaviour and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use a new test vault and fictional credentials where possible.
+      placeholder: |
+        1. Create a test vault...
+        2. Open...
+        3. Choose...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Windows version, browser version, install type, light/dark theme, display scaling
+  - type: textarea
+    id: safe-diagnostics
+    attributes:
+      label: Safe diagnostics
+      description: Paste only Sesame's redacted diagnostic code or secret-safe logs after reviewing them.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Secret check
+      options:
+        - label: I checked this report and it contains no vault, export, credentials, recovery material, TOTP data, tokens, or personal account data.
+          required: true

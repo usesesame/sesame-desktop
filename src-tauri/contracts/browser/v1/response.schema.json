@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v1/response.schema.json",
+  "title": "Sesame browser response v1",
+  "oneOf": [
+    { "$ref": "#/$defs/capabilities" },
+    { "$ref": "#/$defs/activated" },
+    { "$ref": "#/$defs/fillBoth" },
+    { "$ref": "#/$defs/fillUsername" },
+    { "$ref": "#/$defs/fillPassword" },
+    { "$ref": "#/$defs/fillUnavailable" },
+    { "$ref": "#/$defs/identity" },
+    { "$ref": "#/$defs/identityUnavailable" },
+    { "$ref": "#/$defs/saved" },
+    { "$ref": "#/$defs/saveUnavailable" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "possiblyEmptyUsername": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "reason": {
+      "enum": [
+        "desktopUnavailable",
+        "locked",
+        "noMatch",
+        "approvalUnavailable",
+        "approvalDeclined",
+        "approvalTimeout",
+        "staleRequest",
+        "invalidSelection",
+        "multipleMatches"
+      ]
+    },
+    "identityFields": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 4096 },
+        "email": { "type": "string", "maxLength": 4096 },
+        "phone": { "type": "string", "maxLength": 4096 },
+        "addressLine1": { "type": "string", "maxLength": 4096 },
+        "addressLine2": { "type": "string", "maxLength": 4096 },
+        "city": { "type": "string", "maxLength": 4096 },
+        "region": { "type": "string", "maxLength": 4096 },
+        "postalCode": { "type": "string", "maxLength": 4096 },
+        "country": { "type": "string", "maxLength": 4096 }
+      },
+      "description": "The present keys must exactly equal the fields named by the initiating identity request."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "installed", "desktopAvailable", "locked", "fillAvailable"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "capabilities" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "installed": { "const": true },
+        "desktopAvailable": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "fillAvailable": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "locked": { "const": true } }, "required": ["locked"] },
+          "then": { "properties": { "fillAvailable": { "const": false } } },
+          "else": { "properties": { "fillAvailable": { "const": true } } }
+        },
+        {
+          "anyOf": [
+            { "properties": { "desktopAvailable": { "const": true } }, "required": ["desktopAvailable"] },
+            { "properties": { "locked": { "const": true } }, "required": ["locked"] }
+          ]
+        }
+      ]
+    },
+    "activated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "opened"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "activated" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "opened": { "type": "boolean" }
+      }
+    },
+    "fillBoth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "username", "password"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "username": { "$ref": "#/$defs/possiblyEmptyUsername" },
+        "password": { "$ref": "#/$defs/credential" }
+      }
+    },
+    "fillUsername": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "username"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "username": { "$ref": "#/$defs/credential" }
+      }
+    },
+    "fillPassword": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "password"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "password": { "$ref": "#/$defs/credential" }
+      }
+    },
+    "unavailableBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "reason"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "type": "string" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "fillUnavailable": {
+      "allOf": [
+        { "$ref": "#/$defs/unavailableBase" },
+        { "properties": { "type": { "const": "fill-unavailable" } } }
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "identity"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "identity" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "identity": { "$ref": "#/$defs/identityFields" }
+      }
+    },
+    "identityUnavailable": {
+      "allOf": [
+        { "$ref": "#/$defs/unavailableBase" },
+        { "properties": { "type": { "const": "identity-unavailable" } } }
+      ]
+    },
+    "saved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "saved"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "saved" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "saved": { "const": true }
+      }
+    },
+    "saveUnavailable": {
+      "allOf": [
+        { "$ref": "#/$defs/unavailableBase" },
+        { "properties": { "type": { "const": "save-unavailable" } } }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "message"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "error" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "message": {
+          "enum": [
+            "Unsupported protocol version.",
+            "Invalid browser request.",
+            "Unsupported browser request.",
+            "Browser response unavailable."
+          ]
+        }
+      }
+    }
+  }
+}

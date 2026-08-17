@@ -1,0 +1,43 @@
+import { getVersion } from '@tauri-apps/api/app'
+import { readable } from 'svelte/store'
+
+const embeddedVersion = __SESAME_APP_VERSION__
+const hasTauriInternals = typeof window !== 'undefined' &&
+  Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+let resolvedVersion: Promise<string> | undefined
+
+export function resolveAppVersion(): Promise<string> {
+  if (!hasTauriInternals) return Promise.resolve(embeddedVersion)
+  resolvedVersion ??= getVersion().catch(() => embeddedVersion)
+  return resolvedVersion
+}
+
+export const appVersion = readable(hasTauriInternals ? '' : embeddedVersion, (set) => {
+  if (hasTauriInternals) void resolveAppVersion().then(set)
+})
+export const APP_CHANNEL = 'Early beta'
+
+function configuredSiteOrigin(): string | undefined {
+  const value = import.meta.env.VITE_SESAME_SITE_ORIGIN?.trim()
+  if (!value) return undefined
+  let url: URL
+  try { url = new URL(value) } catch { return undefined }
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    return undefined
+  }
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    return undefined
+  }
+  return url.origin
+}
+
+const siteOrigin = configuredSiteOrigin()
+export const SUPPORT_PORTAL_URL = siteOrigin ? `${siteOrigin}/support` : undefined
+export const SUPPORT_PORTAL_AVAILABLE = SUPPORT_PORTAL_URL !== undefined
+
+export const SYNC_STATUS_URL = siteOrigin ? `${siteOrigin}/roadmap#sync` : undefined
+
+/// Sync is not enabled; dev build plus explicit opt-in only.
+export const SYNC_PREVIEW_AVAILABLE =
+  import.meta.env.DEV && import.meta.env.VITE_SESAME_SYNC_PREVIEW === 'true'

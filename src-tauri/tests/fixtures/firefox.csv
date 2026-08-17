@@ -1,0 +1,2 @@
+url,username,password,httpRealm,formActionOrigin,guid,timeCreated,timeLastUsed,timePasswordChanged
+https://mozilla.test/login,fox@example.test,fictional-firefox-value,,https://mozilla.test,{00000000-0000-0000-0000-000000000001},1700000000000,1700000000000,1700000000000

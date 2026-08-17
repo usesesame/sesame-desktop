@@ -1,0 +1,2 @@
+Personal,Fictional Login,person,fictional-password,https://fictional.test/,Fictional note,,$oneTimeCode,otpauth://totp/Fictional?secret=JBSWY3DPEHPK3PXP,Security Question,Fictional answer
+Work,Fictional Card,,,,,,$type,bankCard

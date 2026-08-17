@@ -1,0 +1,26 @@
+{
+  "identifier": "app.usesesame.desktop.wdio",
+  "build": {
+    "beforeBuildCommand": "npm run desktop:build:wdio"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Sesame",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true,
+        "decorations": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "capabilities": ["main-capability"],
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    }
+  }
+}

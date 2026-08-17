@@ -1,0 +1,519 @@
+use std::{
+    io::{self, ErrorKind, Read, Write},
+    path::{Path, PathBuf},
+};
+
+use serde::Serialize;
+use tauri::Manager;
+
+use crate::browser_protocol::{
+    BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES, PROTOCOL_VERSION,
+};
+
+const HOST_NAME: &str = "app.usesesame.browser";
+pub const HOST_FILE_NAME: &str = "sesame-browser-host.exe";
+const PINNED_CHROMIUM_EXTENSION_ID: &str = "idbkfhhjnniibleeanchljhakfhecnlg";
+const PINNED_CHROMIUM_LAUNCHER_ORIGIN: &str = "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserIntegrationStatus {
+    supported: bool,
+    host_available: bool,
+    manifest_ready: bool,
+    chrome_registered: bool,
+    edge_registered: bool,
+    ready: bool,
+    code: &'static str,
+}
+
+#[derive(Debug)]
+pub struct RegistrationError {
+    diagnostic_code: &'static str,
+    message: &'static str,
+}
+
+impl RegistrationError {
+    fn new(diagnostic_code: &'static str, message: &'static str) -> Self {
+        Self {
+            diagnostic_code,
+            message,
+        }
+    }
+
+    pub fn diagnostic_code(&self) -> &'static str {
+        self.diagnostic_code
+    }
+
+    pub fn message(&self) -> &'static str {
+        self.message
+    }
+}
+
+struct IntegrationPaths {
+    host: PathBuf,
+    manifest: PathBuf,
+}
+
+pub fn run() {
+    crate::diagnostics::record_browser_host_process("host_started");
+    if !launcher_origin_allowed(std::env::args_os().nth(1).as_deref()) {
+        crate::diagnostics::record_browser_host_process("host_origin_rejected");
+        return;
+    }
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    match serve(stdin.lock(), stdout.lock()) {
+        Ok(response_count) if response_count > 0 => {
+            crate::diagnostics::record_browser_host_process("host_response_sent")
+        }
+        Ok(_) => crate::diagnostics::record_browser_host_process("host_no_request"),
+        Err(error) if error.kind() == ErrorKind::InvalidData => {
+            crate::diagnostics::record_browser_host_process("host_protocol_error")
+        }
+        Err(_) => crate::diagnostics::record_browser_host_process("host_io_error"),
+    }
+}
+
+fn launcher_origin_allowed(origin: Option<&std::ffi::OsStr>) -> bool {
+    // Chrome registers the origin with a trailing slash but launches it bare; accept only those two spellings.
+    origin.is_some_and(|value| {
+        value == std::ffi::OsStr::new(PINNED_CHROMIUM_LAUNCHER_ORIGIN)
+            || value == std::ffi::OsStr::new(&format!("{PINNED_CHROMIUM_LAUNCHER_ORIGIN}/"))
+    })
+}
+
+#[cfg(windows)]
+pub fn register(app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, RegistrationError> {
+    use std::fs;
+
+    let paths = integration_paths(app)?;
+    if !paths.host.is_file() {
+        return Err(RegistrationError::new(
+            "registration_host_missing",
+            "Sesame's browser helper is missing from this build.",
+        ));
+    }
+
+    let folder = paths.manifest.parent().ok_or_else(|| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not prepare its browser connection.",
+        )
+    })?;
+    fs::create_dir_all(folder).map_err(|_| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not prepare its browser connection.",
+        )
+    })?;
+    let bytes = manifest_bytes(&paths.host).map_err(|_| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not prepare its browser connection.",
+        )
+    })?;
+    fs::write(&paths.manifest, bytes).map_err(|_| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not save its browser connection.",
+        )
+    })?;
+
+    for registry_path in [chrome_registry_path(), edge_registry_path()] {
+        write_registry_default(registry_path, &paths.manifest).map_err(|_| {
+            RegistrationError::new(
+                "registration_registry_failed",
+                "Sesame could not register its browser connection.",
+            )
+        })?;
+    }
+
+    let status = status(app);
+    if !status.ready {
+        return Err(RegistrationError::new(
+            "registration_registry_failed",
+            "Sesame could not verify its browser connection.",
+        ));
+    }
+    Ok(status)
+}
+
+#[cfg(not(windows))]
+pub fn register(_app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, RegistrationError> {
+    Err(RegistrationError::new(
+        "registration_unsupported",
+        "Sesame browser integration is currently available on Windows only.",
+    ))
+}
+
+#[cfg(windows)]
+pub fn status(app: &tauri::AppHandle) -> BrowserIntegrationStatus {
+    let Ok(paths) = integration_paths(app) else {
+        return browser_status(true, false, false, false, false);
+    };
+    let host_available = paths.host.is_file();
+    let manifest_ready = manifest_matches(&paths.manifest, &paths.host);
+    let chrome_registered = registry_default_matches(chrome_registry_path(), &paths.manifest);
+    let edge_registered = registry_default_matches(edge_registry_path(), &paths.manifest);
+    browser_status(
+        true,
+        host_available,
+        manifest_ready,
+        chrome_registered,
+        edge_registered,
+    )
+}
+
+#[cfg(not(windows))]
+pub fn status(_app: &tauri::AppHandle) -> BrowserIntegrationStatus {
+    browser_status(false, false, false, false, false)
+}
+
+fn browser_status(
+    supported: bool,
+    host_available: bool,
+    manifest_ready: bool,
+    chrome_registered: bool,
+    edge_registered: bool,
+) -> BrowserIntegrationStatus {
+    let ready =
+        supported && host_available && manifest_ready && chrome_registered && edge_registered;
+    let code = if !supported {
+        "unsupported"
+    } else if !host_available {
+        "hostMissing"
+    } else if !manifest_ready {
+        "manifestMissing"
+    } else if !chrome_registered || !edge_registered {
+        "registrationMissing"
+    } else {
+        "ready"
+    };
+    BrowserIntegrationStatus {
+        supported,
+        host_available,
+        manifest_ready,
+        chrome_registered,
+        edge_registered,
+        ready,
+        code,
+    }
+}
+
+fn integration_paths(app: &tauri::AppHandle) -> Result<IntegrationPaths, RegistrationError> {
+    let app_executable = std::env::current_exe().map_err(|_| {
+        RegistrationError::new(
+            "registration_host_missing",
+            "Sesame could not locate its browser helper.",
+        )
+    })?;
+    let folder = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| {
+            RegistrationError::new(
+                "registration_manifest_failed",
+                "Sesame could not locate its browser connection folder.",
+            )
+        })?
+        .join("native-messaging");
+    Ok(IntegrationPaths {
+        host: app_executable.with_file_name(HOST_FILE_NAME),
+        manifest: folder.join(format!("{HOST_NAME}.json")),
+    })
+}
+
+fn manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "name": HOST_NAME,
+        "description": "Sesame Browser Helper native host",
+        "path": host,
+        "type": "stdio",
+        "allowed_origins": [
+            format!("chrome-extension://{PINNED_CHROMIUM_EXTENSION_ID}/")
+        ]
+    }))
+}
+
+fn manifest_matches(manifest_path: &Path, host: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(manifest_path) else {
+        return false;
+    };
+    let Ok(actual) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Ok(expected) =
+        manifest_bytes(host).and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes))
+    else {
+        return false;
+    };
+    actual == expected
+}
+
+#[cfg(windows)]
+fn chrome_registry_path() -> &'static str {
+    r"Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser"
+}
+
+#[cfg(windows)]
+fn edge_registry_path() -> &'static str {
+    r"Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser"
+}
+
+#[cfg(windows)]
+fn write_registry_default(subkey: &str, value: &Path) -> Result<(), u32> {
+    use std::{ffi::OsStr, ptr};
+
+    use windows_sys::Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{
+            RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE,
+            REG_OPTION_NON_VOLATILE, REG_SZ,
+        },
+    };
+
+    let subkey = wide(OsStr::new(subkey));
+    let value = wide(value.as_os_str());
+    let mut key: HKEY = ptr::null_mut();
+    let create_result = unsafe {
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            ptr::null_mut(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            ptr::null(),
+            &mut key,
+            ptr::null_mut(),
+        )
+    };
+    if create_result != ERROR_SUCCESS {
+        return Err(create_result);
+    }
+    let set_result = unsafe {
+        RegSetValueExW(
+            key,
+            ptr::null(),
+            0,
+            REG_SZ,
+            value.as_ptr().cast::<u8>(),
+            (value.len() * size_of::<u16>()) as u32,
+        )
+    };
+    unsafe {
+        RegCloseKey(key);
+    }
+    if set_result == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(set_result)
+    }
+}
+
+#[cfg(windows)]
+fn registry_default_matches(subkey: &str, expected: &Path) -> bool {
+    use std::{ffi::OsStr, os::windows::ffi::OsStringExt, ptr};
+
+    use windows_sys::Win32::{
+        Foundation::ERROR_SUCCESS,
+        System::Registry::{
+            RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
+            REG_SZ,
+        },
+    };
+
+    let subkey = wide(OsStr::new(subkey));
+    let mut key: HKEY = ptr::null_mut();
+    let open_result = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut key,
+        )
+    };
+    if open_result != ERROR_SUCCESS {
+        return false;
+    }
+
+    let mut value_type = 0;
+    let mut byte_count = 0;
+    let size_result = unsafe {
+        RegQueryValueExW(
+            key,
+            ptr::null(),
+            ptr::null(),
+            &mut value_type,
+            ptr::null_mut(),
+            &mut byte_count,
+        )
+    };
+    if size_result != ERROR_SUCCESS || value_type != REG_SZ || byte_count < 2 {
+        unsafe {
+            RegCloseKey(key);
+        }
+        return false;
+    }
+
+    let mut value = vec![0_u16; (byte_count as usize).div_ceil(size_of::<u16>())];
+    let query_result = unsafe {
+        RegQueryValueExW(
+            key,
+            ptr::null(),
+            ptr::null(),
+            &mut value_type,
+            value.as_mut_ptr().cast::<u8>(),
+            &mut byte_count,
+        )
+    };
+    unsafe {
+        RegCloseKey(key);
+    }
+    if query_result != ERROR_SUCCESS || value_type != REG_SZ {
+        return false;
+    }
+    while value.last() == Some(&0) {
+        value.pop();
+    }
+    std::ffi::OsString::from_wide(&value).as_os_str() == expected.as_os_str()
+}
+
+#[cfg(windows)]
+fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    value.encode_wide().chain(Some(0)).collect()
+}
+
+fn serve<R: Read, W: Write>(mut input: R, mut output: W) -> io::Result<usize> {
+    serve_with_relay(&mut input, &mut output, desktop_response)
+}
+
+fn serve_with_relay<R, W, F>(input: &mut R, output: &mut W, mut relay: F) -> io::Result<usize>
+where
+    R: Read,
+    W: Write,
+    F: FnMut(&BrowserRequest) -> BrowserResponse,
+{
+    let mut response_count = 0;
+    loop {
+        let mut size_bytes = [0_u8; 4];
+        match input.read_exact(&mut size_bytes) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(response_count),
+            Err(error) => return Err(error),
+        }
+        let size = u32::from_le_bytes(size_bytes) as usize;
+        if size == 0 || size > MAX_NATIVE_MESSAGE_BYTES {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "invalid native message size",
+            ));
+        }
+        let mut payload = vec![0_u8; size];
+        input.read_exact(&mut payload)?;
+        let request = match serde_json::from_slice::<BrowserRequest>(&payload) {
+            Ok(request) => request,
+            Err(_) => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "invalid native message",
+                ));
+            }
+        };
+        if request.version != PROTOCOL_VERSION {
+            write_message(
+                output,
+                &BrowserResponse::error(&request.request_id, "Unsupported protocol version."),
+            )?;
+            response_count += 1;
+            continue;
+        }
+        if !request.validate() {
+            write_message(
+                output,
+                &BrowserResponse::error(&request.request_id, "Invalid browser request."),
+            )?;
+            response_count += 1;
+            continue;
+        }
+
+        // This process never opens a vault or derives a key; it relays the broker's closed schema.
+        let response = relay(&request);
+        if !response.validate_for(&request) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "invalid desktop broker response",
+            ));
+        }
+        write_message(output, &response)?;
+        response_count += 1;
+    }
+}
+
+fn desktop_response(request: &BrowserRequest) -> BrowserResponse {
+    let request_bytes = match serde_json::to_vec(request) {
+        Ok(bytes) if !bytes.is_empty() && bytes.len() <= MAX_NATIVE_MESSAGE_BYTES => bytes,
+        _ => return unavailable_without_desktop(request),
+    };
+    let response_bytes = match crate::browser_pipe::request(&request_bytes) {
+        Ok(bytes) => bytes,
+        Err(_) => return unavailable_without_desktop(request),
+    };
+    match serde_json::from_slice::<BrowserResponse>(&response_bytes) {
+        Ok(response) if response.validate_for(request) => response,
+        _ => unavailable_without_desktop(request),
+    }
+}
+
+fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
+    if request.message_type == "capabilities" {
+        BrowserResponse::capabilities(&request.request_id, false, true)
+    } else if request.message_type == "activate" {
+        BrowserResponse::activated(&request.request_id, launch_desktop_app())
+    } else {
+        BrowserResponse::unavailable(&request.request_id, "desktopUnavailable")
+    }
+}
+
+#[cfg(windows)]
+fn launch_desktop_app() -> bool {
+    let Ok(host_executable) = std::env::current_exe() else {
+        return false;
+    };
+    let app_executable = desktop_executable_for(&host_executable);
+    app_executable.is_file() && std::process::Command::new(app_executable).spawn().is_ok()
+}
+
+#[cfg(not(windows))]
+fn launch_desktop_app() -> bool {
+    false
+}
+
+fn desktop_executable_for(host_executable: &Path) -> PathBuf {
+    host_executable.with_file_name(if cfg!(windows) {
+        "sesame.exe"
+    } else {
+        "sesame"
+    })
+}
+
+fn write_message<W: Write>(output: &mut W, response: &BrowserResponse) -> io::Result<()> {
+    let bytes = response.to_zeroizing_bytes().map_err(|_| {
+        io::Error::new(
+            ErrorKind::InvalidData,
+            "native response could not be encoded",
+        )
+    })?;
+    if bytes.is_empty() || bytes.len() > MAX_NATIVE_MESSAGE_BYTES {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "native response too large",
+        ));
+    }
+    output.write_all(&(bytes.len() as u32).to_le_bytes())?;
+    output.write_all(&bytes)?;
+    output.flush()
+}

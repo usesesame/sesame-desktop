@@ -1,0 +1,347 @@
+/* =========================================================================
+   Sesame design tokens
+========================================================================= */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Type ---------------------------------------------------------- */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-display: "Sitka Text", Sitka, Constantia, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-code: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  --type-1: 0.75rem;   /* 12px */
+  --type-2: 0.8125rem; /* 13px */
+  --type-3: 0.9375rem; /* 15px */
+  --type-4: 1.125rem;  /* 18px */
+  --type-5: 1.5rem;    /* 24px */
+  --type-6: 1.875rem;  /* 30px */
+
+  /* ---- Spacing ---------------------------------------------------------- */
+  --space-1: 0.25rem; /* 4px */
+  --space-2: 0.5rem;  /* 8px */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem;    /* 16px */
+  --space-5: 1.5rem;  /* 24px */
+  --space-6: 2rem;    /* 32px */
+  --space-7: 2.5rem;  /* 40px */
+
+  /* ---- Radii ----------------------------------------------------------- */
+  --radius-sm: 0.5rem;   /* 8px */
+  --radius-md: 0.75rem;  /* 12px */
+  --radius-lg: 1rem;     /* 16px */
+  --radius-xl: 1.25rem;  /* 20px */
+  --radius-pill: 999px;
+
+  /* ---- Base and surfaces ------------------------------------------------ */
+  --bg: #f6f4ee;
+  --bg-2: #f1efe6;
+  --bg-workspace: #f8f7f2;
+  --surface: #fffefa;
+  --surface-glass: rgba(255, 254, 249, .88);
+  --surface-2: #fcfcf8;
+  --surface-3: #f6f7f1;
+  --surface-inset: #f3f7ef;
+  --surface-note: #f8f8f2;
+  --welcome-glow: #fbecd0;
+  --welcome-glow-mid: #f7f4ed;
+
+  /* ---- Borders ----------------------------------------------------------- */
+  --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
+  --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
+  --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
+  --border-input: #d9ddd5;
+
+  /* ---- Fields ----------------------------------------------------------- */
+  --field-bg: var(--surface-inset);
+  --field-border: var(--border-input);
+  --field-border-hover: color-mix(in srgb, var(--text-2) 25%, var(--field-border));
+  --field-ring: 0 0 0 3px color-mix(in srgb, var(--gold) 34%, transparent);
+  --field-ring-danger: 0 0 0 3px color-mix(in srgb, var(--danger) 26%, transparent);
+
+  /* ---- Text ------------------------------------------------------------- */
+  --text-heading: #273329;
+  --text: #334136;
+  --text-2: #536154;
+  --text-muted: #758075;
+  --text-faint: #8b9588;
+  --eyebrow: #728071;
+
+  /* ---- Green accent --accent is the button; --accent-link stays readable as text. */
+  --accent: #2e4735;
+  --accent-hover: #38543f;
+  --accent-active: #263e2d;
+  --accent-2: #34513c;
+  --accent-2-hover: #42684b;
+  --accent-link: #3e6047;
+  --on-accent: #fffdf6;
+  --tint: #eef4ea;
+  --tint-hover: #f5f9f3;
+
+  /* ---- Green chips and status ------------------------------------------- */
+  --chip-bg: #edf4e9;
+  --chip-icon: #55785e;
+  --ok-text: #4f7757;
+  --ok-bg: #eaf3e9;
+
+  /* ---- Gold bright for brand marks and focus; the soft family for avatars and chips. */
+  --gold: #eabf52;
+  --gold-mark-text: #28352a;
+  --gold-soft-bg: #fdedc2;
+  --gold-text: #846827;
+  --gold-text-soft: #947d41;
+  --gold-tint-bg: #fffaf0;
+  --gold-border: #ecd497;
+
+  /* ---- Warn ------------------------------------------------------------- */
+  --warn-text: #a5663e;
+  --warn-bg: #fff0da;
+
+  /* ---- Danger ----------------------------------------------------------- */
+  --danger: #a63f35;
+  --danger-strong: #bd473e;
+  --danger-bg: #fffaf8;
+  --danger-tint: #ffe6e0;
+  --on-danger: #fffdf6;
+
+  /* ---- Rings and progress ----------------------------------------------- */
+  --ring-track: #e8eee5;
+  --ring-fill: #c5ddbe;
+  --spinner-track: #e6ebdf;
+  --dash-border: #acc6aa;
+
+  /* ---- Elevation */
+  --edge-top: rgba(255, 255, 255, .9);
+  --shadow-raise:
+    inset 0 1px 0 var(--edge-top),
+    0 1px 2px rgba(45, 55, 45, .06),
+    0 8px 24px rgba(45, 55, 45, .07);
+
+  /* ---- Control surface */
+  --control-hover: rgba(0, 0, 0, .035);
+  --control-active-bg: linear-gradient(rgba(0, 0, 0, .055), rgba(0, 0, 0, .03));
+  --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .8);
+  --control-active-lift: 0 1px 3px rgba(45, 55, 45, .12);
+
+  /* ---- Effects */
+  --focus-ring: var(--gold);
+  --edge-highlight: rgba(255, 255, 255, .7);
+  --scrollbar-thumb: rgba(90, 105, 90, .32);
+  --scrollbar-thumb-hover: rgba(90, 105, 90, .55);
+  --backdrop: rgba(30, 40, 32, .38);
+
+  --shadow-panel: 0 1px 3px rgba(45, 55, 45, .05), 0 6px 16px rgba(45, 55, 45, .05), 0 22px 46px rgba(45, 55, 45, .07), inset 0 1px 0 rgba(255, 255, 255, .7);
+  --shadow-card: 0 24px 60px rgba(60, 69, 52, .08);
+  /* The website's two-layer card shadow */
+  --shadow-raised: 0 1px 2px rgba(45, 55, 45, .05), 0 8px 24px rgba(45, 55, 45, .06);
+  --shadow-lift: 0 2px 4px rgba(45, 55, 45, .05), 0 18px 44px rgba(45, 55, 45, .11);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, .08), 0 2px 6px rgba(45, 55, 45, .1);
+  --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent), 0 12px 30px rgba(45, 55, 45, .07);
+  --shadow-toast: 0 14px 34px rgba(32, 48, 37, .17);
+  --shadow-pop: 0 12px 28px rgba(39, 53, 42, .13);
+  --shadow-modal: 0 25px 70px rgba(26, 34, 27, .2);
+
+  /* ---- Motion */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-inout: cubic-bezier(.4, 0, .2, 1);
+  --t-fast: .16s;
+  --t-mid: .28s;
+  --t-slow: .7s;
+
+  /* ---- Base typography  */
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* =========================================================================
+   Dark palette
+  ========================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #16150e;
+    --bg-2: #12110b;
+    --bg-workspace: #1a1910;
+    /* Elevation order matches light: bg < inset < 3 < 2 < surface. */
+    --surface: #201e15;
+    --surface-glass: rgba(32, 30, 21, .9);
+    --surface-2: #1e1c14;
+    --surface-3: #1b1912;
+    --surface-inset: #191710;
+    --surface-note: #232014;
+    --welcome-glow: #2f2a19;
+    --welcome-glow-mid: #201d12;
+
+    --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
+    --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
+    --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
+    --border-input: #3b3729;
+
+    --text-heading: #e9efe1;
+    --text: #d2dac8;
+    --text-2: #b0baa6;
+    --text-muted: #8a9683;
+    --text-faint: #6f7d69;
+    --eyebrow: #8a9683;
+
+    --accent: #3d6a4b;
+    --accent-hover: #487a58;
+    --accent-active: #34603f;
+    --accent-2: #3d6a4b;
+    --accent-2-hover: #4a8159;
+    --accent-link: #83bd90;
+    --on-accent: #f1f7ec;
+    --tint: #232a23;
+    --tint-hover: #283026;
+
+    --chip-bg: #232c22;
+    --chip-icon: #86b791;
+    --ok-text: #9cc9a4;
+    --ok-bg: #253327;
+
+    --gold: #e6bf58;
+    --gold-mark-text: #21301f;
+    --gold-soft-bg: #38311d;
+    --gold-text: #e6c67f;
+    --gold-text-soft: #b89a5a;
+    --gold-tint-bg: #2a2615;
+    --gold-border: #574a29;
+
+    --warn-text: #d9a066;
+    --warn-bg: #362b1a;
+
+    --danger: #e59084;
+    --danger-strong: #c25a4f;
+    --danger-bg: #241917;
+    --danger-tint: #3a221d;
+    --on-danger: #241917;
+
+    --ring-track: #2c3527;
+    --ring-fill: #5c8c66;
+    --spinner-track: #2a3227;
+    --dash-border: #4a5c46;
+
+    --edge-top: rgba(255, 255, 255, .06);
+    --shadow-raise:
+      inset 0 1px 0 var(--edge-top),
+      0 1px 2px rgba(0, 0, 0, .35),
+      0 10px 28px rgba(0, 0, 0, .4);
+
+    --control-hover: rgba(255, 255, 255, .045);
+    --control-active-bg: linear-gradient(rgba(255, 255, 255, .12), rgba(255, 255, 255, .07));
+    --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .09);
+    --control-active-lift: 0 1px 3px rgba(0, 0, 0, .25);
+
+    --edge-highlight: rgba(255, 255, 255, .05);
+    --scrollbar-thumb: rgba(200, 214, 196, .18);
+    --scrollbar-thumb-hover: rgba(200, 214, 196, .34);
+    --backdrop: rgba(0, 0, 0, .6);
+
+    --shadow-panel: 0 1px 3px rgba(0, 0, 0, .3), 0 8px 22px rgba(0, 0, 0, .34), 0 26px 52px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .05);
+    --shadow-card: 0 24px 60px rgba(0, 0, 0, .45);
+    --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
+    --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
+    --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);
+    --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent), 0 14px 34px rgba(0, 0, 0, .34);
+    --shadow-toast: 0 14px 34px rgba(0, 0, 0, .5);
+    --shadow-pop: 0 12px 28px rgba(0, 0, 0, .5);
+    --shadow-modal: 0 25px 70px rgba(0, 0, 0, .55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #16150e;
+  --bg-2: #12110b;
+  --bg-workspace: #1a1910;
+  --surface: #201e15;
+  --surface-glass: rgba(32, 30, 21, .9);
+  --surface-2: #1e1c14;
+  --surface-3: #1b1912;
+  --surface-inset: #191710;
+  --surface-note: #232014;
+  --welcome-glow: #2f2a19;
+  --welcome-glow-mid: #201d12;
+
+  --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
+  --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
+  --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
+  --border-input: #3b3729;
+
+  --text-heading: #e9efe1;
+  --text: #d2dac8;
+  --text-2: #b0baa6;
+  --text-muted: #8a9683;
+  --text-faint: #6f7d69;
+  --eyebrow: #8a9683;
+
+  --accent: #3d6a4b;
+  --accent-hover: #487a58;
+  --accent-active: #34603f;
+  --accent-2: #3d6a4b;
+  --accent-2-hover: #4a8159;
+  --accent-link: #83bd90;
+  --on-accent: #f1f7ec;
+  --tint: #232a23;
+  --tint-hover: #283026;
+
+  --chip-bg: #232c22;
+  --chip-icon: #86b791;
+  --ok-text: #9cc9a4;
+  --ok-bg: #253327;
+
+  --gold: #e6bf58;
+  --gold-mark-text: #21301f;
+  --gold-soft-bg: #38311d;
+  --gold-text: #e6c67f;
+  --gold-text-soft: #b89a5a;
+  --gold-tint-bg: #2a2615;
+  --gold-border: #574a29;
+
+  --warn-text: #d9a066;
+  --warn-bg: #362b1a;
+
+  --danger: #e59084;
+  --danger-strong: #c25a4f;
+  --danger-bg: #241917;
+  --danger-tint: #3a221d;
+  --on-danger: #241917;
+
+  --ring-track: #2c3527;
+  --ring-fill: #5c8c66;
+  --score-ring: #2f4030;
+  --spinner-track: #2a3227;
+  --dash-border: #4a5c46;
+
+  --edge-highlight: rgba(255, 255, 255, .05);
+  --scrollbar-thumb: rgba(200, 214, 196, .18);
+  --scrollbar-thumb-hover: rgba(200, 214, 196, .34);
+  --backdrop: rgba(0, 0, 0, .6);
+
+  --shadow-panel: 0 1px 3px rgba(0, 0, 0, .3), 0 8px 22px rgba(0, 0, 0, .34), 0 26px 52px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .05);
+  --shadow-card: 0 24px 60px rgba(0, 0, 0, .45);
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);
+  --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent), 0 14px 34px rgba(0, 0, 0, .34);
+  --shadow-toast: 0 14px 34px rgba(0, 0, 0, .5);
+  --shadow-pop: 0 12px 28px rgba(0, 0, 0, .5);
+  --shadow-modal: 0 25px 70px rgba(0, 0, 0, .55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

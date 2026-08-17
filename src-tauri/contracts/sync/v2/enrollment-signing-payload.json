@@ -1,0 +1,12 @@
+{
+  "_comment": "Cross-language contract for the Sync device enrollment proof. All values are fictional. Go asserts this in control_plane_test.go; Rust asserts it in src-tauri/src/sync/identity.rs. Both compare against this file rather than against each other, so a change on either side shows up as a failure here instead of as a signature that silently stops verifying. This fixture exists because the two sides had already drifted: Rust concatenated bytes while Go marshalled JSON, and Go's payload carried a createdAt the server stamped on arrival, so no client could produce a proof that verified.",
+  "input": {
+    "vaultId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "deviceId": "BBBBBBBBBBBBBBBBBBBBBB",
+    "signingPublicKeyByte": 17,
+    "encryptionPublicKeyByte": 34,
+    "challengeByte": 51,
+    "keyLength": 32
+  },
+  "signingPayload": "{\"vaultId\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"deviceId\":\"BBBBBBBBBBBBBBBBBBBBBB\",\"signingPublicKey\":\"ERERERERERERERERERERERERERERERERERERERERERE\",\"encryptionPublicKey\":\"IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI\",\"challenge\":\"MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM\"}"
+}

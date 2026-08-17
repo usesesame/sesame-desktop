@@ -1,0 +1,221 @@
+[[permission]]
+identifier = "vault-lifecycle"
+description = "Vault setup, unlock, lock, recovery, and local unlock settings for the main window."
+commands.allow = [
+  "get_vault_status",
+  "create_vault",
+  "resume_recovery_setup",
+  "complete_recovery_setup",
+  "unlock_vault",
+  "change_master_password",
+  "unlock_recovery_vault",
+  "set_unlock_pin",
+  "remove_unlock_pin",
+  "unlock_pin_vault",
+  "enable_windows_hello",
+  "disable_windows_hello",
+  "unlock_with_windows_hello",
+  "set_auto_lock_minutes",
+  "lock_vault",
+  "get_recovery_health",
+]
+
+[[permission]]
+identifier = "vault-read"
+description = "Redacted vault snapshots and explicit item reads for the main window."
+commands.allow = [
+  "get_vault_snapshot",
+  "get_login_card",
+  "search_entries",
+  "suggest_field_values",
+  "get_login_summary",
+  "get_duplicate_groups",
+  "refresh_totp",
+  "get_identity",
+  "get_secure_note",
+  "get_card",
+  "get_wifi_network",
+  "get_ssh_key",
+  "get_software_license",
+  "get_document",
+  "get_custom_record",
+  "preview_trashed_item",
+  "preview_history_version",
+  "get_merge_comparison",
+]
+
+[[permission]]
+identifier = "vault-edit"
+description = "Item and folder mutation, deletion, restoration, and duplicate merging for the main window."
+commands.allow = [
+  "save_login",
+  "set_login_folders",
+  "bulk_assign_folder",
+  "create_folder",
+  "rename_folder",
+  "delete_folder",
+  "set_login_favourite",
+  "record_login_use",
+  "delete_login",
+  "save_identity",
+  "delete_identity",
+  "save_secure_note",
+  "delete_secure_note",
+  "save_card",
+  "delete_card",
+  "save_wifi_network",
+  "delete_wifi_network",
+  "save_ssh_key",
+  "delete_ssh_key",
+  "save_software_license",
+  "delete_software_license",
+  "save_document",
+  "delete_document",
+  "add_document_attachment",
+  "remove_document_attachment",
+  "save_custom_record",
+  "delete_custom_record",
+  "restore_trashed_item",
+  "restore_history_version",
+  "merge_duplicate_logins",
+]
+
+[[permission]]
+identifier = "vault-tools"
+description = "Local password analysis, deliberate breach checking, and auto-type for the main window."
+commands.allow = [
+  "check_password_strength",
+  "check_password_breach",
+  "auto_type",
+]
+
+[[permission]]
+identifier = "backup-import"
+description = "Import, backup, export, restore, verification, and local-vault deletion for the main window."
+commands.allow = [
+  "preview_import",
+  "commit_import",
+  "cancel_import",
+  "create_backup",
+  "export_backup",
+  "export_vault_csv",
+  "export_recovery_kit",
+  "delete_local_vault",
+  "inspect_backup",
+  "verify_backup",
+  "restore_backup",
+]
+
+[[permission]]
+identifier = "account-service"
+description = "Optional desktop account linking and disconnection for the main window."
+commands.allow = [
+  "link_desktop_service",
+  "get_service_connection_status",
+  "disconnect_service",
+]
+
+[[permission]]
+identifier = "desktop-updater"
+description = "Deliberate public update checks and installation for the main window."
+commands.allow = [
+  "check_desktop_update",
+  "download_and_install_desktop_update",
+]
+
+[[permission]]
+identifier = "diagnostics"
+description = "Local diagnostic recording, review, export, and clearing for the main window."
+commands.allow = [
+  "record_diagnostic",
+  "get_diagnostic_status",
+  "export_diagnostics",
+  "clear_diagnostics",
+]
+
+[[permission]]
+identifier = "external-navigation"
+description = "Rust-policy-checked external navigation for the main window."
+commands.allow = ["open_external_url"]
+
+[[permission]]
+identifier = "browser-approval"
+description = "Browser-helper status, repair, and approval lifecycle for the main window."
+commands.allow = [
+  "get_browser_integration_status",
+  "repair_browser_integration",
+  "get_pending_browser_fill",
+  "resolve_browser_fill",
+  "get_pending_browser_save",
+  "resolve_browser_save",
+  "get_pending_browser_identity_fill",
+  "resolve_browser_identity_fill",
+]
+
+[[permission]]
+identifier = "desktop-settings"
+description = "Tray, quick-access shortcut, and autostart settings for the main window."
+commands.allow = [
+  "set_tray_enabled",
+  "set_quick_access_shortcut",
+  "get_autostart_enabled",
+  "set_autostart_enabled",
+]
+
+[[permission]]
+identifier = "website-icons"
+description = "Opt-in website-icon fetching and local cache controls for the main window."
+commands.allow = [
+  "get_website_icon",
+  "clear_website_icon_cache",
+  "get_website_icon_cache_status",
+]
+
+[[permission]]
+identifier = "clipboard-guard"
+description = "Digest-based clipboard auto-clear lifecycle for the main window."
+commands.allow = [
+  "arm_clipboard_clear",
+  "clear_clipboard_if_unchanged",
+]
+
+[[permission]]
+identifier = "quick-access"
+description = "The quick-access window's redacted status/search, selected secret fetch, and guarded copy lifecycle."
+commands.allow = [
+  "get_quick_access_status",
+  "search_quick_access_entries",
+  "get_quick_access_secret",
+  "arm_clipboard_clear",
+  "clear_clipboard_if_unchanged",
+]
+
+[[permission]]
+identifier = "sync-preview"
+description = "Compile-time-gated Sync preview commands for the main window only."
+commands.allow = [
+  "sync_status",
+  "sync_enroll_device",
+  "sync_this_device_fingerprint",
+  "sync_disable",
+  "sync_prepare_approval",
+  "sync_approve_prepared_device",
+  "sync_upload_vault",
+  "sync_download_vault",
+  "sync_conflict_details",
+  "sync_resolve_conflict",
+  "sync_list_conflict_backups",
+  "sync_restore_conflict_backup",
+  "sync_remove_device",
+  "sync_deny_device",
+  "sync_activate_device",
+  "sync_reset_vault",
+  "sync_coordinator_status",
+  "sync_now",
+  "sync_adopt_vault",
+]
+
+[[permission]]
+identifier = "desktop-e2e"
+description = "Compile-time-gated desktop test bridge for the main window."
+commands.allow = ["desktop_e2e_config"]

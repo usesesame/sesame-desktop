@@ -1,0 +1,94 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+website/dist
+website/.ssr
+website/test-results
+admin/test-results
+test-results
+coverage
+.nyc_output
+backend/.cache
+.gocache
+.cache
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+isolated-target
+target/
+.phase4-target/
+*.local
+
+# Local configuration and credentials
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+.envrc
+.direnv/
+.npmrc
+
+# Signing and private keys
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.pdb
+
+# Local databases and dumps
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+
+# Release artifacts are produced by the signing pipeline and must not be
+# committed with source code.
+release-artifacts/
+release-evidence/
+
+# VM evidence handoffs and transient scratch directories are working-tree
+# artifacts. They are gitleaks-scanned but must never enter repository history.
+sesame-*-vm-*.zip
+backend/.tmp/
+# Secrets a self-hosted deployment generates for itself.
+backend/deploy/compose/.env
+
+# Sesame vaults, backups, and diagnostics
+*.sesame
+*.sesame.prev
+*.sesame.tmp
+sesame-diagnostics-*.jsonl
+
+# Password-manager exports can contain readable credentials
+bitwarden_export*
+lastpass_export*
+dashlane_export*
+Chrome Passwords.csv
+logins.csv
+*.1pux
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v1/request.schema.json",
+  "title": "Sesame browser request v1",
+  "oneOf": [
+    { "$ref": "#/$defs/capabilities" },
+    { "$ref": "#/$defs/activate" },
+    { "$ref": "#/$defs/fill" },
+    { "$ref": "#/$defs/identity" },
+    { "$ref": "#/$defs/save" }
+  ],
+  "$defs": {
+    "baseProperties": {
+      "version": { "const": 1 },
+      "requestId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,64}$"
+      }
+    },
+    "origin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "capabilities" },
+        "requestId": { "$ref": "#/$defs/baseProperties/requestId" }
+      }
+    },
+    "activate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "activate" },
+        "requestId": { "$ref": "#/$defs/baseProperties/requestId" }
+      }
+    },
+    "fill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "origin"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/baseProperties/requestId" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "fields": { "enum": ["username", "password", "both"] }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "origin", "fields"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "identity" },
+        "requestId": { "$ref": "#/$defs/baseProperties/requestId" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "fields": {
+          "type": "string",
+          "pattern": "^(fullName|email|phone|addressLine1|addressLine2|city|region|postalCode|country)(,(fullName|email|phone|addressLine1|addressLine2|city|region|postalCode|country))*$",
+          "description": "Comma-separated known keys. Peers also reject duplicate keys."
+        }
+      }
+    },
+    "save": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "origin", "kind", "password"],
+      "properties": {
+        "version": { "const": 1 },
+        "type": { "const": "save" },
+        "requestId": { "$ref": "#/$defs/baseProperties/requestId" },
+        "origin": { "$ref": "#/$defs/origin" },
+        "kind": { "enum": ["new", "update"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "username": { "type": "string", "maxLength": 4096 },
+        "password": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    }
+  }
+}

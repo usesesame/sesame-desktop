@@ -1,0 +1,5 @@
+type,name,url,email,username,password,note,totp,createTime,modifyTime,vault
+login,Fictional Login,https://fictional.test/,person@example.test,person,fictional-password,Fictional note,otpauth://totp/Fictional?secret=JBSWY3DPEHPK3PXP,1700000000,1700000100,Personal
+login,Multi URL Login,"https://a.fictional.test/, https://b.fictional.test/",,multiuser,multi-password,,,1700000200,1700000200,Work
+alias,Fictional Alias,,alias@example.test,,,,,1700000300,1700000300,Personal
+creditCard,Fictional Card,,,,,"{""cardholderName"":""Test Person"",""number"":""4111111111111111""}",,1700000400,1700000400,Personal

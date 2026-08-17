@@ -1,0 +1,169 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 1,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "capabilities request",
+      "valid": true,
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-1" }
+    },
+    {
+      "name": "activate request",
+      "valid": true,
+      "message": { "version": 1, "type": "activate", "requestId": "activate-1" }
+    },
+    {
+      "name": "fill request defaults to both fields",
+      "valid": true,
+      "message": { "version": 1, "type": "fill", "requestId": "fill-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "identity request names a unique subset",
+      "valid": true,
+      "message": { "version": 1, "type": "identity", "requestId": "identity-1", "origin": "https://example.test", "fields": "email,phone" }
+    },
+    {
+      "name": "save request carries an explicit kind",
+      "valid": true,
+      "message": { "version": 1, "type": "save", "requestId": "save-1", "origin": "https://example.test", "kind": "new", "title": "Example test account", "username": "person@example.test", "password": "fictional-example-value" }
+    },
+    {
+      "name": "future protocol request",
+      "valid": false,
+      "message": { "version": 2, "type": "capabilities", "requestId": "future-1" }
+    },
+    {
+      "name": "request id contains punctuation",
+      "valid": false,
+      "message": { "version": 1, "type": "activate", "requestId": "bad.id" }
+    },
+    {
+      "name": "fill request omits origin",
+      "valid": false,
+      "message": { "version": 1, "type": "fill", "requestId": "fill-2" }
+    },
+    {
+      "name": "identity request repeats a field",
+      "valid": false,
+      "message": { "version": 1, "type": "identity", "requestId": "identity-2", "origin": "https://example.test", "fields": "email,email" }
+    },
+    {
+      "name": "save request omits password",
+      "valid": false,
+      "message": { "version": 1, "type": "save", "requestId": "save-2", "origin": "https://example.test", "kind": "update" }
+    },
+    {
+      "name": "closed request rejects unknown property",
+      "valid": false,
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-2", "token": "fictional-non-secret" }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "available desktop capabilities",
+      "hostValid": true,
+      "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-1" },
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true },
+      "extensionResult": { "ok": true, "protocolVersion": 1, "capabilities": { "desktopAvailable": true, "locked": false, "fillAvailable": true } }
+    },
+    {
+      "name": "desktop activation succeeds",
+      "hostValid": true,
+      "request": { "version": 1, "type": "activate", "requestId": "activate-1" },
+      "message": { "version": 1, "type": "activated", "requestId": "activate-1", "opened": true },
+      "extensionResult": { "ok": true, "opened": true }
+    },
+    {
+      "name": "desktop activation failure is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 1, "type": "activate", "requestId": "activate-2" },
+      "message": { "version": 1, "type": "activated", "requestId": "activate-2", "opened": false },
+      "extensionResult": { "ok": false, "code": "desktop-launch-failed" }
+    },
+    {
+      "name": "fill returns both requested fields",
+      "hostValid": true,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-1", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "fill", "requestId": "fill-1", "username": "person@example.test", "password": "fictional-example-value" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "fictional-example-value" } }
+    },
+    {
+      "name": "fill returns only requested username",
+      "hostValid": true,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-username-1", "origin": "https://example.test", "fields": "username" },
+      "message": { "version": 1, "type": "fill", "requestId": "fill-username-1", "username": "person@example.test" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "" } }
+    },
+    {
+      "name": "locked fill is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-locked-1", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "fill-unavailable", "requestId": "fill-locked-1", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "vault-locked" }
+    },
+    {
+      "name": "identity response nests exactly the requested fields",
+      "hostValid": true,
+      "request": { "version": 1, "type": "identity", "requestId": "identity-1", "origin": "https://example.test", "fields": "email,phone" },
+      "message": { "version": 1, "type": "identity", "requestId": "identity-1", "identity": { "email": "person@example.test", "phone": "555-0100" } },
+      "extensionResult": { "ok": true, "identity": { "email": "person@example.test", "phone": "555-0100" } }
+    },
+    {
+      "name": "legacy flat identity response is rejected",
+      "hostValid": false,
+      "request": { "version": 1, "type": "identity", "requestId": "identity-flat-1", "origin": "https://example.test", "fields": "email" },
+      "message": { "version": 1, "type": "identity", "requestId": "identity-flat-1", "email": "person@example.test" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "identity response cannot add an unrequested field",
+      "hostValid": false,
+      "request": { "version": 1, "type": "identity", "requestId": "identity-extra-1", "origin": "https://example.test", "fields": "email" },
+      "message": { "version": 1, "type": "identity", "requestId": "identity-extra-1", "identity": { "email": "person@example.test", "fullName": "Example Person" } },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "save succeeds",
+      "hostValid": true,
+      "request": { "version": 1, "type": "save", "requestId": "save-1", "origin": "https://example.test", "kind": "new", "password": "fictional-example-value" },
+      "message": { "version": 1, "type": "saved", "requestId": "save-1", "saved": true },
+      "extensionResult": { "ok": true, "saved": true }
+    },
+    {
+      "name": "declined save is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 1, "type": "save", "requestId": "save-declined-1", "origin": "https://example.test", "kind": "update", "password": "fictional-example-value" },
+      "message": { "version": 1, "type": "save-unavailable", "requestId": "save-declined-1", "reason": "approvalDeclined" },
+      "extensionResult": { "ok": false, "code": "approval-declined" }
+    },
+    {
+      "name": "allowlisted host error is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-error-1", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "error", "requestId": "fill-error-1", "message": "Invalid browser request." },
+      "extensionResult": { "ok": false, "code": "host-rejected-request" }
+    },
+    {
+      "name": "response request id mismatch",
+      "hostValid": false,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-binding-1", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "fill-unavailable", "requestId": "other-request", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "request-mismatch" }
+    },
+    {
+      "name": "future response protocol",
+      "hostValid": false,
+      "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-future-1" },
+      "message": { "version": 2, "type": "capabilities", "requestId": "capabilities-future-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true },
+      "extensionResult": { "ok": false, "code": "protocol-mismatch" }
+    },
+    {
+      "name": "capabilities response rejects an extra property",
+      "hostValid": false,
+      "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-extra-1" },
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-extra-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true, "username": "must-not-cross" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    }
+  ]
+}

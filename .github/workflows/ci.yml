@@ -1,0 +1,335 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Jobs are split by what each one actually needs, so a type error does not hide
+# the Go, Rust, and frontend results behind it. Only `rust` and `release-gate`
+# need a Windows runner; the vault core depends on windows-sys and the desktop
+# bundle is a Windows build.
+#
+# `npm run ci:all` still runs everything locally from a clean clone.
+
+# Read-only by default. A job that needs more asks for it itself; nothing here
+# writes to the repository, and the release workflow is where publishing lives.
+permissions:
+  contents: read
+
+env:
+  # Build-only non-routable endpoints. Deployed origins are supplied by the
+  # release environment; no production domain is compiled into clients.
+  VITE_SESAME_SITE_ORIGIN: https://website.test.invalid
+  VITE_SESAME_API_URL: https://api.test.invalid
+  VITE_SESAME_ACCOUNT_URL: https://account.test.invalid
+  VITE_SESAME_PRIVACY_EMAIL: privacy@website.test.invalid
+  SESAME_API_BASE_URL: https://api.test.invalid
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fast feedback. These finish in a couple of minutes and catch most of
+  # what a reviewer would otherwise catch by hand.
+  # ---------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - run: npm ci
+
+      - name: Check the version contract
+        run: npm run version:check
+
+      - name: Lint TypeScript and Svelte
+        run: npm run lint:js
+
+      - name: Lint Go
+        run: npm run lint:go
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check and unit test the desktop app
+        run: npm run desktop:check
+
+      # Every tools/*-contracts.test.mjs suite, plus the generated overlay
+      # token check. Repo-wide, so it is its own step rather than part of one
+      # surface's check.
+      - name: Run the contract suites
+        run: npm run contracts
+
+  # ---------------------------------------------------------------------
+  # Go. The integration tests skip without a database, so this is the only
+  # job that proves the PostgreSQL paths work.
+  # ---------------------------------------------------------------------
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: sesame_test
+          POSTGRES_USER: sesame
+          POSTGRES_PASSWORD: sesame-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sesame -d sesame_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SESAME_TEST_DATABASE_URL: postgres://sesame:sesame-test-only@127.0.0.1:5432/sesame_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: backend/.node-version
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - run: npm ci
+
+      - name: Build and test the server
+        run: npm run ci
+
+      - name: Run PostgreSQL integration and race tests
+        run: npm run test:race
+
+      - name: Check Go vulnerabilities
+        run: npm run vuln:check
+
+  # ---------------------------------------------------------------------
+  # Rust. Windows because the vault core depends on windows-sys.
+  #
+  # clippy runs without `-D warnings` on purpose. The lints that must not
+  # regress are `deny` in src-tauri/Cargo.toml, so clippy already fails this
+  # job when one appears.
+  # ---------------------------------------------------------------------
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+
+      # cargo fmt does not build, so it runs before staging and fails fast.
+      - name: Check formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      # tauri-build validates the externalBin sidecar declared in
+      # tauri.conf.json, so every cargo command that compiles the crate fails
+      # with "resource path ... doesn't exist" until the host is staged. That
+      # includes clippy, not only cargo test. This is the same script as
+      # `npm run extension:host:stage`, called directly so a Rust-only job does
+      # not need a Node install.
+      - name: Stage the native messaging host
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/stage-browser-host.ps1
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Run the vault core tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # ---------------------------------------------------------------------
+  # Browser suites. These build their target first, so they are the slowest
+  # of the Linux jobs.
+  # ---------------------------------------------------------------------
+  website:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: website/.node-version
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - run: npm ci
+
+      - name: Build and test the website
+        run: npm run ci
+
+  admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: admin/.node-version
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - run: npm ci
+
+      - name: Build and test the admin portal
+        run: npm run ci
+
+  account:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: account
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: account/.node-version
+          cache: npm
+          cache-dependency-path: account/package-lock.json
+
+      - run: npm ci
+
+      - name: Build and test the account portal
+        run: npm run ci
+
+  extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extensions/sesame
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: extensions/sesame/.node-version
+          cache: npm
+          cache-dependency-path: extensions/sesame/package-lock.json
+
+      - run: npm ci
+
+      - name: Build and test the browser extension
+        run: npm run ci
+
+  # ---------------------------------------------------------------------
+  # Supply chain. Independent of the product jobs, so a new advisory does
+  # not read as a broken build.
+  # ---------------------------------------------------------------------
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Secret scanning must inspect repository history, not only HEAD.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - run: npm ci
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+      - name: Generate locked SBOM and provenance
+        run: npm run supply-chain:sbom
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supply-chain-evidence
+          path: release-evidence
+          retention-days: 30
+
+      - name: Install Rust audit tool
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Audit Rust dependencies
+        # Both advisories affect quick-xml's namespace reader. The only locked
+        # quick-xml 0.39 dependency is a Linux-only Wayland build tool; it is
+        # absent from Sesame's Windows dependency graph and no patched
+        # wayland-scanner release exists yet. Keep these explicit, reviewable
+        # exceptions until upstream can move to quick-xml >= 0.41.
+        run: >-
+          cargo audit --file src-tauri/Cargo.lock
+          --ignore RUSTSEC-2026-0194
+          --ignore RUSTSEC-2026-0195
+
+      - name: Scan for secrets
+        # The hosted action requires a commercial licence for organization
+        # repositories. Run the pinned open-source CLI directly instead.
+        run: >-
+          go run github.com/zricethezav/gitleaks/v8@v8.30.1
+          git --redact --verbose .
+
+  # ---------------------------------------------------------------------
+  # The desktop release gate: type check, cargo test, and a no-bundle Tauri
+  # build so a broken production build is caught before a human runs it.
+  # ---------------------------------------------------------------------
+  release-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Run release check
+        run: npm run release:build

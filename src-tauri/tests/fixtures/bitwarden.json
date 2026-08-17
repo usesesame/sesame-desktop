@@ -1,0 +1,49 @@
+{
+  "encrypted": false,
+  "folders": [
+    { "id": "folder-work", "name": "Work" }
+  ],
+  "items": [
+    {
+      "type": 1,
+      "folderId": "folder-work",
+      "name": "Fictional Research Portal",
+      "notes": "Lab account, created for importer tests only.",
+      "login": {
+        "username": "ada@example.test",
+        "password": "invented-password-with-comma,inside",
+        "totp": "otpauth://totp/Research%20Portal:ada?secret=JBSWY3DPEHPK3PXP&issuer=Research%20Portal",
+        "uris": [
+          { "match": null, "uri": "https://accounts.research.test/login" },
+          { "match": null, "uri": "https://research.test/sso" }
+        ]
+      },
+      "fields": [
+        { "name": "Backup codes", "value": "alpha-code\nbeta-code,with-comma", "type": 0 },
+        { "name": "Recovery email", "value": "recover@example.test", "type": 0 },
+        { "name": "Recovery mobile", "value": "+370 600 00000", "type": 0 },
+        { "name": "Unrelated custom field", "value": "leave unmapped", "type": 0 }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "日本語のテスト",
+      "notes": "",
+      "login": {
+        "username": "利用者",
+        "password": "架空の秘密",
+        "totp": "",
+        "uris": [{ "uri": "" }]
+      },
+      "fields": [
+        { "name": "Recovery email", "value": "", "type": 0 }
+      ]
+    },
+    {
+      "type": 2,
+      "name": "Secure note without a login",
+      "notes": "Ignored by Sesame",
+      "fields": []
+    }
+  ]
+}

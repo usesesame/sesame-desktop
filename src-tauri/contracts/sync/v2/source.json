@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "usesesame/Sesame",
+  "sourceCommit": "a453151520fe9af8fb7625f568be4e16d40542ce",
+  "sourcePath": "backend/internal/syncproto/testdata",
+  "files": {
+    "enrollment-signing-payload.json": "750e5952a2cee9dcd392cc7511578a56a8fbce4cde04a46fee2f7b0ad0451808",
+    "envelope-signing-payload.json": "d3f3b101466d45fb4f1d63af2f938e5a24e8f22d4b3020513f4770337d91d7b3",
+    "key-package-signing-payload.json": "6a88af78e7c6873e31fc59e13db378a7d1a751406258d8fbd3034f0009900d69",
+    "snapshot-aad.json": "1e2a7f00b18825248b596ccd43164e7cdcca63b5aa029b4cbef490784fd02b75"
+  }
+}

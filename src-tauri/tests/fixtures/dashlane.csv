@@ -1,0 +1,4 @@
+username,username2,username3,title,password,note,url,category,otpSecret
+"sam,qa",,,"Contoso, Staging","fictional-""quoted""-password","Line one, with comma. Line two follows.",https://staging.contoso.test/login,work,JBSWY3DPEHPK3PXP
+čarlis@example.test,,,„Miško“ paskyra,netikras-slaptazodis,,,personal,
+,,,,,,,,

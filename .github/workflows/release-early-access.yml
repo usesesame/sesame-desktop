@@ -1,0 +1,219 @@
+name: Unsigned Windows early-access release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  VITE_SESAME_SITE_ORIGIN: https://usesesame.app
+  VITE_SESAME_API_URL: https://api.usesesame.app
+  VITE_SESAME_PRIVACY_EMAIL: privacy@usesesame.app
+  SESAME_API_BASE_URL: https://api.usesesame.app
+  SESAME_RELEASE_ARCHITECTURE: x86_64
+  SESAME_RELEASE_CHANNEL: beta
+  SESAME_SUPPORTED_WINDOWS: Windows 10,Windows 11
+  SESAME_RELEASE_NOTES_URL: https://usesesame.app/releases/${{ github.ref_name }}
+  SESAME_UPDATER_SIGNING_KEY_ID: ${{ vars.SESAME_UPDATER_SIGNING_KEY_ID }}
+
+jobs:
+  build-and-attest:
+    runs-on: windows-latest
+    environment: release-build
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      manifest: ${{ steps.evidence.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Require an exact source-version tag
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF -ne "refs/tags/v$version") { throw "Release tag does not match package version $version." }
+
+      - name: Run the complete release gate
+        run: npm run release:check
+
+      - name: Generate the reviewed dependency evidence
+        run: npm run supply-chain:sbom
+
+      - name: Build the immutable unsigned Windows installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+        run: npm run release:bundle:windows:unsigned
+
+      - id: evidence
+        name: Freeze the installer, updater signature, manifest, and SBOM
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+          if ($null -eq $installer) { throw 'The NSIS installer was not produced.' }
+          $signature = "$($installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $signature -PathType Leaf)) { throw 'The mandatory Tauri updater signature was not produced.' }
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $sbom = "release-evidence/sesame-$version.cdx.json"
+          $manifest = (node tools/prepare-release-evidence.mjs $installer.FullName $signature $sbom release-handoff).Trim()
+          Copy-Item -LiteralPath tools/verify-sesame-release.ps1 -Destination release-handoff/verify-sesame-release.ps1
+          "manifest=$manifest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install the pinned Sigstore client
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2, Cosign v3.0.6
+
+      - name: Keylessly sign the final installer and release manifest
+        shell: pwsh
+        run: |
+          $manifest = '${{ steps.evidence.outputs.manifest }}'
+          $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
+          $artifact = "release-handoff/$($record.artifact.filename)"
+          cosign sign-blob --yes $artifact --bundle "$artifact.sigstore.json"
+          cosign sign-blob --yes "release-handoff/$manifest" --bundle "release-handoff/$manifest.sigstore.json"
+
+      - name: Verify Sigstore and write the immutable evidence record
+        shell: pwsh
+        run: |
+          $manifest = '${{ steps.evidence.outputs.manifest }}'
+          $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
+          $artifact = "release-handoff/$($record.artifact.filename)"
+          node tools/create-sigstore-evidence.mjs $artifact "release-handoff/$manifest" "$artifact.sigstore.json" "release-handoff/$manifest.sigstore.json" release-handoff/sigstore-evidence.json
+
+      - name: Create the signed candidate receipt
+        env:
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+          SESAME_RELEASE_CANDIDATE_SIGNING_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_SIGNING_KEY }}
+        shell: pwsh
+        run: |
+          $manifest = '${{ steps.evidence.outputs.manifest }}'
+          $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
+          $artifact = "release-handoff/$($record.artifact.filename)"
+          $signature = "release-handoff/$($record.updaterSignature.filename)"
+          $env:SESAME_RELEASE_ARTIFACT_OBJECT_KEY = "windows/$($record.version)/$($record.artifact.filename)"
+          node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
+          $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
+          Copy-Item -LiteralPath $candidate -Destination release-handoff/
+          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
+          node tools/create-static-update-manifest.mjs $candidate release-handoff/latest.json
+
+      - name: Prepare and audit the public-only evidence set
+        shell: pwsh
+        run: |
+          node tools/prepare-public-release-evidence.mjs release-handoff public-release-evidence '${{ steps.evidence.outputs.manifest }}'
+          node tools/audit-public-release-evidence.mjs public-release-evidence
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sesame-release-${{ github.ref_name }}
+          path: |
+            release-handoff
+            public-release-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  verify-fresh:
+    needs: build-and-attest
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sesame-release-${{ github.ref_name }}
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2, Cosign v3.0.6
+
+      - name: Independently verify every release layer
+        env:
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+        run: node tools/verify-release-evidence.mjs release-handoff '${{ needs.build-and-attest.outputs.manifest }}' --internal
+
+      - name: Re-audit the exact public evidence payload
+        run: node tools/audit-public-release-evidence.mjs public-release-evidence
+
+  publish-candidate:
+    needs: [build-and-attest, verify-fresh]
+    runs-on: ubuntu-latest
+    environment: release-publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sesame-release-${{ github.ref_name }}
+
+      - name: Check out the public evidence repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: usesesame/sesame-releases
+          token: ${{ secrets.SESAME_RELEASES_REPOSITORY_TOKEN }}
+          path: public-repository
+
+      - name: Publish the reviewed evidence set
+        shell: bash
+        run: |
+          if [ -e "public-repository/releases/${GITHUB_REF_NAME}" ]; then
+            echo "Evidence already exists for ${GITHUB_REF_NAME}; released versions are immutable."
+            exit 1
+          fi
+          mkdir -p "public-repository/releases/${GITHUB_REF_NAME}"
+          cp public-release-evidence/* "public-repository/releases/${GITHUB_REF_NAME}/"
+          cd public-repository
+          git config user.name sesame-release-bot
+          git config user.email release-bot@users.noreply.github.com
+          git add "releases/${GITHUB_REF_NAME}"
+          git commit -m "Publish Sesame ${GITHUB_REF_NAME} verification evidence"
+          git push origin HEAD:main
+
+      - name: Submit the cryptographically verified candidate
+        env:
+          SESAME_RELEASE_API_URL: ${{ secrets.SESAME_RELEASE_API_URL }}
+          SESAME_RELEASE_CANDIDATE_TOKEN: ${{ secrets.SESAME_RELEASE_CANDIDATE_TOKEN }}
+        run: node tools/submit-release-candidate.mjs release-handoff/*.candidate.json

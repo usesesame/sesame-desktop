@@ -1,0 +1,4 @@
+folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+Personal,1,login,"Northwind, Billing","Invoice owner says ""Marta""; renews in May",,0,https://billing.northwind.test/sign-in,marta@northwind.test,"fictional,password",JBSWY3DPEHPK3PXP
+Work,0,login,Žalias paštas,,,0,,vartotojas@žalias.test,not-a-real-secret,
+Archive,0,note,Not a login,"This row must be ignored",,0,,,,

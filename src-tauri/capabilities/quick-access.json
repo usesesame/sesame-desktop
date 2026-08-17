@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-access-capability",
+  "description": "The quick-access popup: a minimal subset of the main window's permissions.",
+  "windows": ["quick-access"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-hide",
+    "core:webview:deny-internal-toggle-devtools",
+    "clipboard-manager:allow-write-text",
+    "quick-access"
+  ]
+}

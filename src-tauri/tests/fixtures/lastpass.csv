@@ -1,0 +1,4 @@
+url,username,password,extra,name,grouping,fav
+https://portal.fabrikam.test/login,"dev,one","fictional-""quoted""-password","First line, contains comma. Second note.","Fabrikam, Dev",Engineering,1
+,naudotojas@example.test,visiškai-netikras,"Unicode pastaba: žąsis",Lietuviška paskyra,Personal,0
+,,,,,,0

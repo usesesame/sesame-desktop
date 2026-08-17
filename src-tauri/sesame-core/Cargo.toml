@@ -1,0 +1,51 @@
+[package]
+name = "sesame-core"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+description = "Platform-agnostic vault, crypto, migration, item, and Sync boundary shared by every Sesame frontend (Windows now; the eventual iOS/Android/other-platform surfaces later)."
+authors = ["Sesame"]
+edition = "2021"
+
+# Same reasoning as the desktop crate this was extracted from: a panic here is
+# a usability failure at the worst possible moment (someone locked out of a
+# credential), and on a mobile FFI boundary a Rust panic that unwinds across
+# the C ABI is undefined behavior, not just a bad user experience. Every
+# fallible path returns a typed result; every `unwrap`/`expect`/`panic!` in
+# non-test code is a bug, not a shortcut. Test modules opt out with
+# `#![cfg_attr(test, allow(clippy::unwrap_used))]`.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+
+[lib]
+name = "sesame_core"
+# `rlib` is what the Windows desktop crate links against today. `staticlib`
+# and `cdylib` are for the FFI boundary `ffi.rs` exposes: a future iOS build
+# links the former, a future Android build the latter. Neither mobile build
+# exists yet (`IOS-001`/`AND-001` are still Planned); building these crate
+# types now proves the boundary is link-shaped for them without committing to
+# either platform's toolchain today.
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+ed25519-dalek = "2"
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1.3"
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+minisign-verify = "0.2.5"
+totp-rs = { version = "5", features = ["otpauth"] }
+url = "2.5"
+zeroize = "1.8"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Memory"] }

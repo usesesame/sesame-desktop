@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Secret-safe product support
+    url: https://usesesame.app/support
+    about: Use the support form for account or beta help. Never send a vault, export, password, recovery kit, backup code, or TOTP seed.

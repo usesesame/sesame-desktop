@@ -1,0 +1,67 @@
+name: Planned work item
+description: Propose a scoped change for one Sesame product area.
+title: "[Plan] "
+labels:
+  - type:chore
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Desktop
+        - Backend
+        - Website
+        - Admin
+        - Extension
+        - Documentation
+        - Build and release
+    validations:
+      required: true
+  - type: input
+    id: work_id
+    attributes:
+      label: Work ledger ID
+      description: Add or reserve the stable ID before implementation starts.
+      placeholder: OVR-005
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user, security, reliability, or maintenance problem without prescribing a large solution.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Required outcome
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Observable result
+        - [ ] Automated validation
+        - [ ] Documentation or evidence
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Boundaries and dependencies
+      description: Name excluded work, API or schema dependencies, security impact, and the expected review order.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Required validation and evidence
+      description: Name exact automated commands, manual checks, gates, and where retained evidence will live.
+      placeholder: |
+        - Command and expected result
+        - Manual or fault-path check
+        - Gate or reference document to update
+    validations:
+      required: true

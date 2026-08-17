@@ -1,0 +1,2 @@
+Title,UserName,Password,URL,Notes,Tags
+Fictional KeePass login,person@example.test,fictional-keepass-password,https://keepass.example.test/login,Fictional fixture only,"personal, import"

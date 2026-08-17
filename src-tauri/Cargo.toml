@@ -1,0 +1,87 @@
+[workspace]
+members = ["sesame-core"]
+# Every existing `cargo test`/`clippy`/`check` invocation in this repo's npm
+# scripts and CI passes `--manifest-path src-tauri/Cargo.toml` without
+# `--workspace`, because that predates this workspace existing. Cargo's
+# default scope for that invocation is `default-members`, not `members`, so
+# without this, `sesame-core` would silently stop being tested/linted by
+# every one of those existing commands the moment it was extracted.
+default-members = [".", "sesame-core"]
+
+[package]
+name = "sesame"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+default-run = "sesame"
+description = "A calm, local-first password and recovery vault"
+authors = ["Sesame"]
+edition = "2021"
+
+[features]
+browser-helper-dev = []
+wdio = []
+# Sesame Sync is not enabled; no shipping binary may contain a way to reach a Sync endpoint.
+# This feature gates the network client and the Tauri commands, and it is not in
+# any default set: a release build compiles neither, which is a stronger barrier
+# than a runtime check because there is no code path to enable by accident.
+# Development uses `cargo run --features sync-preview` against a local API.
+sync-preview = []
+
+# A panic in the vault core is a usability failure at the worst possible moment:
+# the user is trying to reach a credential they cannot get any other way. Error
+# paths must return a VaultResult, not unwind. Test modules opt out with
+# `#![cfg_attr(test, allow(clippy::unwrap_used))]`, since a panicking assertion
+# is exactly what a test should do.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+
+[[bin]]
+name = "sesame"
+path = "src/main.rs"
+
+[[bin]]
+name = "sesame-browser-host"
+path = "src/bin/sesame-browser-host.rs"
+required-features = ["browser-helper-dev"]
+
+[lib]
+name = "sesame_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+sesame-core = { path = "sesame-core" }
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+ed25519-dalek = "2"
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1.3"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+minisign-verify = "0.2.5"
+totp-rs = { version = "5", features = ["otpauth"] }
+url = "2.5"
+zeroize = "1.8"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_DataExchange", "Win32_System_ErrorReporting", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_RemoteDesktop", "Win32_System_StationsAndDesktops", "Win32_System_SystemInformation", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
