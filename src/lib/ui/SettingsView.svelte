@@ -363,13 +363,13 @@
         <section class="settings-group" aria-labelledby="settings-group-data-support">
           <h3 id="settings-group-data-support">Diagnostics and support</h3>
           <div class="settings-list">
-            <article>
+            <article class="settings-row-expandable">
               <span class="settings-icon"><Icon name="file-key" size={16} /></span>
               <div class="setting-copy"><strong>Local diagnostics</strong><p>{diagnosticEventCount} {diagnosticEventCount === 1 ? 'event' : 'events'} stored, {diagnosticErrorCount} flagged. Routine events clear after a day; flagged ones are kept for support. Events record categories and timing only, never vault contents or raw errors.</p></div>
               <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={onExportDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Export</button><button type="button" class="text-button" on:click={onClearDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Clear</button></div>
               {#if diagnosticStatus.recent.length > 0}
                 <details class="diagnostics-detail">
-                  <summary>View recent activity</summary>
+                  <summary><Icon name="chevron-right" size={14} />Recent activity</summary>
                   {#if diagnosticStatus.byOperation.length > 0}
                     <div class="diagnostics-breakdown">
                       <strong>By area</strong>
@@ -402,7 +402,7 @@
                 </details>
               {/if}
             </article>
-            <article>
+            <article class="settings-row-expandable">
               <span class="settings-icon"><Icon name="help-circle" size={16} /></span>
               <div class="setting-copy"><strong>Sesame support</strong><p>Open your support requests or prepare a new report. Sesame never uploads diagnostics or vault data automatically.</p>{#if supportPortalAvailable}<p class="tiny-note">{accountLinked ? 'This desktop is linked to a Sesame account. Sign in to usesesame.app in the browser that opens to keep replies with your account.' : 'This desktop is not linked to a Sesame account. Sign in on usesesame.app first if you want to find this request again later.'}</p>{/if}</div>
               {#if supportPortalAvailable}
@@ -410,16 +410,16 @@
               {:else}
                 <span class="status-pill">Not configured</span>
               {/if}
+              {#if supportReviewOpen}
+                <section class="support-review" aria-label="Review support details">
+                  <div><strong>Review details before opening support</strong><p>Only these short fields are passed to the web form. No diagnostic file, raw error, vault record, or account token is sent.</p></div>
+                  <dl><div><dt>App version</dt><dd>{$appVersion || 'Loading...'}</dd></div><div><dt>Browser integration</dt><dd>{supportBrowserIntegration}</dd></div></dl>
+                  <label>Safe diagnostic code <span>optional</span><input bind:value={supportDiagnosticCode} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="UI-7F2A" /></label>
+                  <label>Safe request ID <span>optional</span><input bind:value={supportRequestID} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="req-1234" /></label>
+                  <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={() => (supportReviewOpen = false)}>Cancel</button><button type="button" class="primary-button settings-manage" on:click={openReviewedSupport}>Continue to support</button></div>
+                </section>
+              {/if}
             </article>
-            {#if supportReviewOpen}
-              <section class="support-review" aria-label="Review support details">
-                <div><strong>Review details before opening support</strong><p>Only these short fields are passed to the web form. No diagnostic file, raw error, vault record, or account token is sent.</p></div>
-                <dl><div><dt>App version</dt><dd>{$appVersion || 'Loading...'}</dd></div><div><dt>Browser integration</dt><dd>{supportBrowserIntegration}</dd></div></dl>
-                <label>Safe diagnostic code <span>optional</span><input bind:value={supportDiagnosticCode} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="UI-7F2A" /></label>
-                <label>Safe request ID <span>optional</span><input bind:value={supportRequestID} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="req-1234" /></label>
-                <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={() => (supportReviewOpen = false)}>Cancel</button><button type="button" class="primary-button settings-manage" on:click={openReviewedSupport}>Continue to support</button></div>
-              </section>
-            {/if}
           </div>
         </section>
       </div>
