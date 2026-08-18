@@ -30,7 +30,7 @@ description = "Public deterministic verification key in the cross-language Sync 
 targetRules = ["generic-api-key"]
 condition = "AND"
 regexTarget = "line"
-paths = ['''backend/internal/syncproto/testdata/envelope-signing-payload\.json$''']
+paths = ['''src-tauri/contracts/sync/v2/envelope-signing-payload\.json$''']
 regexes = ['''"verifyingKey": "[A-Za-z0-9_-]{43}"''']
 
 [[allowlists]]
