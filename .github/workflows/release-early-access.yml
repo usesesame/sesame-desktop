@@ -164,6 +164,11 @@ jobs:
         with:
           name: sesame-release-${{ github.ref_name }}
 
+      # Verification builds verify-updater-artifact, and the Tauri build script
+      # refuses to run without the browser host sidecar in place.
+      - name: Stage the browser host sidecar
+        run: npm run desktop:host:stage
+
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2, Cosign v3.0.6
 
       - name: Independently verify every release layer
