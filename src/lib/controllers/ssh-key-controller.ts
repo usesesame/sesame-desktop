@@ -11,7 +11,7 @@ function emptyKeyDraft(): SshKeyInput {
 
 function draftFrom(key: SshKey): SshKeyInput {
   const { id, title, keyType, privateKey, publicKey, passphrase, notes, tags } = key
-  return { id, title, keyType, privateKey, publicKey, passphrase, notes, tags }
+  return { id, title, keyType, privateKey, publicKey, passphrase, notes, tags: tags ?? [] }
 }
 
 interface SshKeyControllerOptions {

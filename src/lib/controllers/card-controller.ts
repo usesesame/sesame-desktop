@@ -11,7 +11,7 @@ function emptyCardDraft(): CardInput {
 
 function draftFrom(card: Card): CardInput {
   const { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags } = card
-  return { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags }
+  return { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags: tags ?? [] }
 }
 
 interface CardControllerOptions {

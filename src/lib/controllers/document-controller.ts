@@ -11,7 +11,7 @@ function emptyDocumentDraft(): DocumentMetadataInput {
 
 function draftFrom(document: DocumentMetadata): DocumentMetadataInput {
   const { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags } = document
-  return { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags }
+  return { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags: tags ?? [] }
 }
 
 // URL-safe no-pad alphabet; Rust's decoder expects exactly this.
@@ -77,7 +77,7 @@ export function createDocumentController({ stores, feedback, modal }: DocumentCo
   /// Snapshot never carries attachment bytes; refetch the full record instead.
   async function refreshAttachments(id: string) {
     const document = await getDocument(id)
-    state.patch({ documentAttachments: document.attachments })
+    state.patch({ documentAttachments: document.attachments ?? [] })
   }
 
   return {
@@ -95,7 +95,7 @@ export function createDocumentController({ stores, feedback, modal }: DocumentCo
       feedback.clearError()
       try {
         const document = await getDocument(id)
-        state.patch({ documentDraft: draftFrom(document), documentAttachments: document.attachments, editorTitle: 'Edit document' })
+        state.patch({ documentDraft: draftFrom(document), documentAttachments: document.attachments ?? [], editorTitle: 'Edit document' })
       } catch (error) {
         modal.close('document-editor')
         feedback.setError(error)

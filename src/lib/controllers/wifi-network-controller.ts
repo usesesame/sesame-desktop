@@ -11,7 +11,7 @@ function emptyNetworkDraft(): WifiNetworkInput {
 
 function draftFrom(network: WifiNetwork): WifiNetworkInput {
   const { id, title, ssid, password, securityType, notes, tags } = network
-  return { id, title, ssid, password, securityType, notes, tags }
+  return { id, title, ssid, password, securityType, notes, tags: tags ?? [] }
 }
 
 interface WifiNetworkControllerOptions {

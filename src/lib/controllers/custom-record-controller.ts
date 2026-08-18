@@ -11,7 +11,7 @@ function emptyRecordDraft(): CustomRecordInput {
 
 function draftFrom(record: CustomRecord): CustomRecordInput {
   const { id, title, fields, notes, tags } = record
-  return { id, title, fields, notes, tags }
+  return { id, title, fields, notes, tags: tags ?? [] }
 }
 
 interface CustomRecordControllerOptions {

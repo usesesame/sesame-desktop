@@ -852,7 +852,7 @@ pub struct SecureNote {
     pub title: String,
     #[serde(default)]
     pub content: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub legacy_fields: Vec<LegacyField>,
@@ -917,7 +917,7 @@ pub struct Card {
     pub brand: String,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub legacy_fields: Vec<LegacyField>,
@@ -987,7 +987,7 @@ pub struct WifiNetwork {
     pub security_type: String,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
@@ -1051,7 +1051,7 @@ pub struct SshKey {
     pub passphrase: String,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
@@ -1117,7 +1117,7 @@ pub struct SoftwareLicense {
     pub purchase_date: String,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
@@ -1185,7 +1185,7 @@ pub struct DocumentMetadata {
     pub expiry_date: String,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
@@ -1193,7 +1193,7 @@ pub struct DocumentMetadata {
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub attachments: Vec<Attachment>,
 }
 
@@ -1286,7 +1286,7 @@ pub struct CustomRecord {
     pub fields: Vec<CustomFieldEntry>,
     #[serde(default)]
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at: u64,
@@ -2002,5 +2002,76 @@ impl Zeroize for LegacyField {
     fn zeroize(&mut self) {
         self.label.zeroize();
         self.value.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![cfg_attr(test, allow(clippy::unwrap_used))]
+    use super::*;
+
+    /// Every saved-record editor in the desktop reads these arrays straight off
+    /// the record it loads (`draft.tags.join(', ')`), and `src/lib/types.ts`
+    /// declares them as always present. A field serde drops when it is empty is
+    /// therefore not a smaller payload, it is an editor that throws before it
+    /// can paint, so the record looks like it saved nothing.
+    #[test]
+    fn empty_record_arrays_stay_present_for_the_desktop_editors() {
+        fn assert_present(label: &str, value: serde_json::Value, fields: &[&str]) {
+            for field in fields {
+                assert!(
+                    value.get(field).is_some(),
+                    "{label}.{field} is missing when empty; the desktop editor reads it directly"
+                );
+            }
+        }
+
+        assert_present(
+            "SecureNote",
+            serde_json::to_value(SecureNote::default()).unwrap(),
+            &["tags"],
+        );
+        assert_present(
+            "Card",
+            serde_json::to_value(Card::default()).unwrap(),
+            &["tags"],
+        );
+        assert_present(
+            "WifiNetwork",
+            serde_json::to_value(WifiNetwork::default()).unwrap(),
+            &["tags"],
+        );
+        assert_present(
+            "SshKey",
+            serde_json::to_value(SshKey::default()).unwrap(),
+            &["tags"],
+        );
+        assert_present(
+            "SoftwareLicense",
+            serde_json::to_value(SoftwareLicense::default()).unwrap(),
+            &["tags"],
+        );
+        assert_present(
+            "DocumentMetadata",
+            serde_json::to_value(DocumentMetadata::default()).unwrap(),
+            &["tags", "attachments"],
+        );
+        assert_present(
+            "CustomRecord",
+            serde_json::to_value(CustomRecord::default()).unwrap(),
+            &["tags"],
+        );
+    }
+
+    /// Records written before this contract existed have no `tags` key at all.
+    #[test]
+    fn records_stored_without_the_array_keys_still_load() {
+        let note: SecureNote =
+            serde_json::from_str(r#"{"id":"a","title":"Wi-Fi","content":"example note body"}"#).unwrap();
+        assert!(note.tags.is_empty());
+        let document: DocumentMetadata =
+            serde_json::from_str(r#"{"id":"b","title":"Passport"}"#).unwrap();
+        assert!(document.tags.is_empty());
+        assert!(document.attachments.is_empty());
     }
 }

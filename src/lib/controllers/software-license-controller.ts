@@ -11,7 +11,7 @@ function emptyLicenseDraft(): SoftwareLicenseInput {
 
 function draftFrom(license: SoftwareLicense): SoftwareLicenseInput {
   const { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags } = license
-  return { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags }
+  return { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags: tags ?? [] }
 }
 
 interface SoftwareLicenseControllerOptions {
