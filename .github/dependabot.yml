@@ -6,22 +6,8 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
 
-  # The extension owns its lockfile and keeps its own dependabot configuration
-  # for after extraction. Until then the monorepo must still see its updates.
-  - package-ecosystem: npm
-    directory: /extensions/sesame
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
   - package-ecosystem: cargo
     directory: /src-tauri
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: gomod
-    directory: /backend
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
