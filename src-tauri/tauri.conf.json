@@ -66,7 +66,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0MTgyNTgwRUM5RDMwQTUKUldTbE1KM3NnQ1VZeEdPYTE0SENEMlFYZnFIN3ZvRzVndGVEWUpCY2ZYSTZvVlNDNkRLdmtSWGsK"
     }
   }
 }
