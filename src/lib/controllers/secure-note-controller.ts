@@ -11,7 +11,7 @@ function emptyNoteDraft(): SecureNoteInput {
 
 function draftFrom(note: SecureNote): SecureNoteInput {
   const { id, title, content, tags } = note
-  return { id, title, content, tags }
+  return { id, title, content, tags: tags ?? [] }
 }
 
 interface SecureNoteControllerOptions {
