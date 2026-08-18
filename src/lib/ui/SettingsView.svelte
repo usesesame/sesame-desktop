@@ -5,8 +5,6 @@
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
   import { SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
-  import { appVersion, resolveAppVersion } from '../app-meta'
-  import type { SupportPortalPrefill } from '../vault'
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
@@ -64,8 +62,6 @@
   export let browserIntegrationWorking = false
   export let onRefreshBrowserIntegration: () => void
   export let onRepairBrowserIntegration: () => void
-  export let onOpenSupportPortal: (prefill?: SupportPortalPrefill) => void
-  export let supportPortalAvailable = false
   export let onOpenWebsite: (url: string) => void
 
   const syncStatusUrl = SYNC_STATUS_URL
@@ -79,9 +75,6 @@
   ]
   let tab: TabId = 'general'
   const tabButtons: HTMLButtonElement[] = []
-  let supportReviewOpen = false
-  let supportDiagnosticCode = ''
-  let supportRequestID = ''
   let recordingShortcut = false
 
   function formatAccelerator(value: string): string {
@@ -159,21 +152,6 @@
     tabButtons[nextIndex]?.focus()
   }
 
-  $: supportBrowserIntegration = browserIntegration?.ready
-    ? 'ready'
-    : browserIntegration?.code?.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64) || 'unknown'
-
-  $: accountLinked = serviceConnection.state === 'connected'
-
-  async function openReviewedSupport() {
-    const currentAppVersion = await resolveAppVersion()
-    onOpenSupportPortal({
-      appVersion: currentAppVersion,
-      ...(supportDiagnosticCode.trim() ? { diagnosticCode: supportDiagnosticCode.trim() } : {}),
-      browserIntegration: supportBrowserIntegration,
-      ...(supportRequestID.trim() ? { requestId: supportRequestID.trim() } : {}),
-    })
-  }
 </script>
 
 <svelte:window on:keydown={handleShortcutKeydown} />
@@ -360,8 +338,8 @@
             </article>
           </div>
         </section>
-        <section class="settings-group" aria-labelledby="settings-group-data-support">
-          <h3 id="settings-group-data-support">Diagnostics and support</h3>
+        <section class="settings-group" aria-labelledby="settings-group-data-diagnostics">
+          <h3 id="settings-group-data-diagnostics">Diagnostics</h3>
           <div class="settings-list">
             <article class="settings-row-expandable">
               <span class="settings-icon"><Icon name="file-key" size={16} /></span>
@@ -400,24 +378,6 @@
                   </div>
                   <p class="tiny-note">Each launch gets one random session id, which groups these events in the exported file. Codes and categories only, never vault contents.</p>
                 </details>
-              {/if}
-            </article>
-            <article class="settings-row-expandable">
-              <span class="settings-icon"><Icon name="help-circle" size={16} /></span>
-              <div class="setting-copy"><strong>Sesame support</strong><p>Open your support requests or prepare a new report. Sesame never uploads diagnostics or vault data automatically.</p>{#if supportPortalAvailable}<p class="tiny-note">{accountLinked ? 'This desktop is linked to a Sesame account. Sign in to usesesame.app in the browser that opens to keep replies with your account.' : 'This desktop is not linked to a Sesame account. Sign in on usesesame.app first if you want to find this request again later.'}</p>{/if}</div>
-              {#if supportPortalAvailable}
-                <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={() => (supportReviewOpen = !supportReviewOpen)}>Contact support</button><button type="button" class="text-button" on:click={() => onOpenSupportPortal()}>View tickets</button></div>
-              {:else}
-                <span class="status-pill">Not configured</span>
-              {/if}
-              {#if supportReviewOpen}
-                <section class="support-review" aria-label="Review support details">
-                  <div><strong>Review details before opening support</strong><p>Only these short fields are passed to the web form. No diagnostic file, raw error, vault record, or account token is sent.</p></div>
-                  <dl><div><dt>App version</dt><dd>{$appVersion || 'Loading...'}</dd></div><div><dt>Browser integration</dt><dd>{supportBrowserIntegration}</dd></div></dl>
-                  <label>Safe diagnostic code <span>optional</span><input bind:value={supportDiagnosticCode} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="UI-7F2A" /></label>
-                  <label>Safe request ID <span>optional</span><input bind:value={supportRequestID} maxlength="64" pattern="[A-Za-z0-9._-]+" placeholder="req-1234" /></label>
-                  <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={() => (supportReviewOpen = false)}>Cancel</button><button type="button" class="primary-button settings-manage" on:click={openReviewedSupport}>Continue to support</button></div>
-                </section>
               {/if}
             </article>
           </div>

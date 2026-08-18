@@ -33,8 +33,6 @@ function configuredSiteOrigin(): string | undefined {
 }
 
 const siteOrigin = configuredSiteOrigin()
-export const SUPPORT_PORTAL_URL = siteOrigin ? `${siteOrigin}/support` : undefined
-export const SUPPORT_PORTAL_AVAILABLE = SUPPORT_PORTAL_URL !== undefined
 
 export const SYNC_STATUS_URL = siteOrigin ? `${siteOrigin}/roadmap#sync` : undefined
 

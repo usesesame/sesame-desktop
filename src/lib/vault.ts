@@ -3,7 +3,6 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { SUPPORT_PORTAL_URL } from './app-meta'
 import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, QuickAccessEntry, QuickAccessSecret, QuickAccessStatus, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpRefresh, VaultEntry, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
@@ -1319,25 +1318,6 @@ export async function openWebsite(url: string, purpose: 'savedLogin' | 'support'
   } else {
     await invoke('open_external_url', { url, purpose })
   }
-}
-
-export type SupportPortalPrefill = {
-  appVersion?: string
-  diagnosticCode?: string
-  browserIntegration?: string
-  requestId?: string
-}
-
-export async function openSupportPortal(prefill: SupportPortalPrefill = {}): Promise<void> {
-  if (!SUPPORT_PORTAL_URL) {
-    throw new Error('Support is not configured in this Sesame build.')
-  }
-  // Only this short, user-reviewed metadata goes in the URL; vault data is never attached.
-  const url = new URL(SUPPORT_PORTAL_URL)
-  for (const [name, value] of Object.entries(prefill)) {
-    if (value && /^[A-Za-z0-9._-]{1,64}$/.test(value)) url.searchParams.set(name, value)
-  }
-  await openWebsite(url.toString(), 'support')
 }
 
 export async function controlWindow(action: 'minimize' | 'toggle-maximize' | 'close'): Promise<void> {
