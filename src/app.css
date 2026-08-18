@@ -965,7 +965,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-panel .settings-groups { animation: view-enter .22s cubic-bezier(.2, .7, .2, 1) both; }
 .settings-groups { display: grid; gap: var(--space-5); }
 .settings-group > h3 { margin: 0 0 var(--space-2); padding-left: var(--space-3); color: var(--text-muted); font-size: var(--type-1); font-weight: 600; letter-spacing: .02em; }
-.settings-list { padding: var(--space-2) var(--space-5); border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-panel); }
+.settings-list { --settings-row-indent: calc(36px + var(--space-4)); padding: var(--space-2) var(--space-5); border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-panel); }
 .settings-view article { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) 0; border-bottom: 1px solid var(--border-soft); }
 .settings-view article:last-child { border-bottom: 0; }
 .settings-view article > div { flex: 1; min-width: 0; }
@@ -973,24 +973,35 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-icon { display: grid; flex: none; width: 36px; height: 36px; place-items: center; border-radius: var(--radius-md); color: var(--chip-icon); background: var(--chip-bg); }
 .settings-manage { min-height: 34px; padding: 0 var(--space-4); }
 .diagnostic-actions { display: flex; flex: none !important; align-items: center; gap: var(--space-2); }
-.diagnostics-detail { flex: 1 0 100%; margin-top: var(--space-1); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
-.diagnostics-detail summary { cursor: pointer; color: var(--text); font-size: var(--type-1); font-weight: 650; user-select: none; }
+/* Rows that reveal a panel below themselves: the panel is a full-width flex line
+   of its own, so the copy column keeps its width instead of being crushed. */
+.settings-view article.settings-row-expandable { flex-wrap: wrap; }
+.settings-row-expandable > .diagnostics-detail, .settings-row-expandable > .support-review { flex: 1 0 calc(100% - var(--settings-row-indent)); margin-left: var(--settings-row-indent); }
+/* Collapsed it is only a quiet toggle; the inset panel appears once it opens. */
+.diagnostics-detail { margin-top: var(--space-2); padding: 0; border: 0; border-radius: var(--radius-lg); background: transparent; }
+.diagnostics-detail[open] { margin-top: var(--space-3); padding: var(--space-4); background: var(--surface-inset); }
+.diagnostics-detail summary { display: flex; align-items: center; gap: var(--space-2); color: var(--text); font-size: var(--type-1); font-weight: 650; list-style: none; cursor: pointer; user-select: none; }
+.diagnostics-detail summary::-webkit-details-marker { display: none; }
+.diagnostics-detail summary:focus-visible { border-radius: var(--radius-sm); outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.diagnostics-detail summary svg { flex: none; color: var(--text-muted); transition: transform var(--t-fast) ease; }
+.diagnostics-detail[open] summary svg { transform: rotate(90deg); }
 .diagnostics-breakdown { display: grid; gap: var(--space-1); margin-top: var(--space-4); }
-.diagnostics-breakdown strong { color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.diagnostics-breakdown strong { color: var(--text-muted); font-size: var(--type-1); font-weight: 600; }
 .diagnostics-breakdown ul { margin: 0; padding: 0; list-style: none; }
-.diagnostics-breakdown li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; border-top: 1px solid var(--border-soft); font-size: var(--type-1); }
-.diagnostics-breakdown li small { color: var(--text-muted); font-size: 11px; }
+.diagnostics-breakdown li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; font-size: var(--type-1); }
+.diagnostics-breakdown li + li { border-top: 1px solid var(--border-soft); }
+.diagnostics-breakdown li small { color: var(--text-muted); font-size: var(--type-1); }
 .diagnostics-breakdown .diagnostic-code { overflow-wrap: anywhere; font-family: var(--font-code); }
 .diagnostics-breakdown .diagnostic-code.error { color: var(--danger-strong); font-weight: 650; }
 .diagnostics-breakdown .diagnostic-code.warn { color: var(--warn-text); font-weight: 650; }
-.diagnostics-detail .tiny-note { margin-top: var(--space-3); font-size: 11px; }
-.support-review { display: grid; gap: var(--space-3); margin: var(--space-3) 0 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
-.support-review p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.diagnostics-detail .tiny-note { margin-top: var(--space-3); font-size: var(--type-1); }
+.support-review { display: grid; gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-4); border: 0; border-radius: var(--radius-lg); background: var(--surface-inset); }
+.support-review p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--type-1); line-height: 1.5; }
 .support-review dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0; }
-.support-review dl div { padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--surface-inset); }
-.support-review dt { color: var(--text-muted); font-size: 11px; }
-.support-review dd { margin: 3px 0 0; color: var(--text); font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
-.support-review label { display: grid; gap: 5px; color: var(--text); font-size: 12px; font-weight: 650; }
+.support-review dl div { padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--surface); }
+.support-review dt { color: var(--text-muted); font-size: var(--type-1); }
+.support-review dd { margin: 3px 0 0; color: var(--text); font-size: var(--type-2); font-weight: 650; overflow-wrap: anywhere; }
+.support-review label { display: grid; gap: 5px; color: var(--text); font-size: var(--type-2); font-weight: 650; }
 .support-review label span { color: var(--text-muted); font-weight: 400; }
 .support-review input { width: 100%; min-height: 36px; }
 .breach-check p.breach-found { color: var(--danger); font-weight: 650; }
@@ -1022,6 +1033,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .switch.active > span { transform: translateX(19px); }
 .settings-view article strong { color: var(--text); font-size: var(--type-2); }
 .settings-view article p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-1); }
+/* A secondary note under the row copy stays one step quieter than the copy. */
+.settings-view article .tiny-note { color: var(--text-faint); }
 
 /* =========================================================================
    Feature: data controls (export + delete vault)
