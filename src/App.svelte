@@ -3,8 +3,7 @@
   import { autoLockOptions, clipboardClearOptions } from './lib/preferences'
   import { isSortMode } from './lib/vault-collections'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
-  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, openSupportPortal, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
-  import { SUPPORT_PORTAL_AVAILABLE } from './lib/app-meta'
+  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
   import type { ImportSource, View } from './lib/types'
   import { createFeedbackController } from './lib/controllers/feedback-controller'
   import { createLoginController } from './lib/controllers/login-controller'
@@ -600,8 +599,6 @@
         browserIntegrationWorking={$settingsState.browserIntegrationWorking}
         onRefreshBrowserIntegration={() => settingsController.refreshBrowserIntegration(true)}
         onRepairBrowserIntegration={settingsController.repairBrowserIntegration}
-        onOpenSupportPortal={openSupportPortal}
-        supportPortalAvailable={SUPPORT_PORTAL_AVAILABLE}
         onOpenWebsite={(url) => void openWebsite(url)}
       />
     {/if}

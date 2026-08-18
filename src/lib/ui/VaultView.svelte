@@ -389,7 +389,7 @@
         </section>
 
         {#if breachCheckOpen}
-          <section class="support-review breach-check" aria-label="Check for breaches">
+          <section class="inset-panel breach-check" aria-label="Check for breaches">
             {#if breachCheckResult}
               <p class:breach-found={breachCheckResult.breached}>{breachCheckResult.breached ? `Found in ${breachCheckResult.count.toLocaleString()} known breaches. Replace this password.` : 'Not found in known breaches.'}</p>
               <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={onRunBreachCheck}>Check again</button><button type="button" class="text-button" on:click={onToggleBreachCheck}>Close</button></div>
