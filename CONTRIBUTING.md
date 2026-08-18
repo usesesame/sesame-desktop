@@ -1,122 +1,140 @@
 # Contributing to Sesame
 
-Sesame is split into products with different trust boundaries. Whenever
-possible, keep a change in one primary area:
+This repository is the Sesame desktop app:
 
-- `src/` and `src-tauri/`: desktop interface and local vault core
-- `backend/`: vault-blind Go API and PostgreSQL migrations
-- `website/`: public pages, account portal, and support portal
-- `admin/`: separate vault-blind administration application
-- `extensions/sesame/`: maintained TypeScript browser extension
+- `src/`: the Svelte interface
+- `src-tauri/`: the Tauri host and the Rust vault core
+- `design/`: the design tokens every Sesame surface shares
+- `tools/`: contract checks, release helpers, and CI scripts
 - `.github/`: delivery controls
 
-Do not combine unrelated product work in one pull request. If an API contract
-must land before its consumer, use separate linked issues and state the merge
-order.
+The rest of Sesame lives in its own repositories, one per trust boundary:
 
-## Your first change
+- [sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension):
+  the Chrome and Edge extension
+- `sesame-server`: the vault-blind Go API, the account portal, and the admin app
+- `sesame-website`: the public site
+
+Work on those belongs in those repositories. Keep a pull request here to one
+thing. If a change here needs a matching change over there, open both, link
+them, and say in each which one merges first.
+
+Talk to the owner before you start, so that two people do not rewrite the same
+file from different directions.
+
+## Getting set up
+
+You need Node.js 24.13, Rust 1.93.1, and the Windows WebView2 runtime.
 
 ```bash
 npm ci
+npm run desktop:ci
 ```
 
-```bash
-npm run ci:all
+That passes on a fresh clone with no `.env`, no API running, and no database.
+If it fails before you have touched anything, the problem is your toolchain and
+not your change.
+
+To run the app while you work:
+
+```powershell
+npm.cmd run tauri dev
 ```
 
-That runs clean from a fresh clone with no `.env`, no running API, no
-PostgreSQL, no staged browser host, and no generated frontend output. If it
-fails before you have changed anything, the problem is your toolchain, not your
-change. You need Node.js 24.13, Rust 1.93.1, Go 1.25 or newer, and the Windows
-WebView2 runtime.
+`npm run desktop:dev` runs the same interface in a browser against an
+in-memory preview vault. It is quicker for interface work, but it never reaches
+the Rust core, so anything touching the vault needs the real app.
 
-The table under "Before review" maps each part of the repository to the checks
-that cover it.
+## Never commit secrets
 
-Before changing code, confirm the work item with the owner.
-Long plans and dated reviews are inputs, not task queues. Record exact commands
-and results before handing work to another contributor.
+Real vaults, password-manager exports, passwords, PINs, recovery kits, backup
+codes, TOTP seeds, account tokens, production data, private signing material,
+and screenshots showing any of them stay out of the repository and out of pull
+requests. Tests and documentation use invented data.
 
-## Never include secrets
+CI scans the full history. If a secret reaches a branch, rotate it. Amending
+the commit does not unpublish it.
 
-Do not commit or attach real vaults, password-manager exports, passwords, PINs,
-recovery kits, backup codes, TOTP seeds, account tokens, production database
-data, private signing material, or screenshots containing them. Tests and
-documentation must use fictional data.
+## Before you open a pull request
 
-CI runs a full-history secret scan. A secret that reaches a branch must be
-rotated; amending a commit cannot remove it.
-
-## Before review
-
-Run the checks for the area you changed and list the exact commands in the pull
-request. As a minimum:
+Run the checks for what you touched, and paste the commands you actually ran
+into the pull request.
 
 | You changed | Run |
 | --- | --- |
-| `src/` | `npm run lint:js`, `npm run desktop:check` |
-| `src-tauri/` | `npm run lint:rust`, `cargo check --manifest-path src-tauri/Cargo.toml --workspace` |
-| `backend/` | `npm run lint:go`, `npm run backend:test` |
-| `website/` | `npm run website:check` |
-| `admin/` | `npm run admin:check` |
-| `extensions/sesame/` | `npm run extension:ci` |
-| Anything | `npm run contracts` |
+| `src/` | `npm run desktop:lint:js`, `npm run desktop:check` |
+| `src-tauri/` | `npm run desktop:lint:rust`, `cargo test --manifest-path src-tauri/Cargo.toml` |
+| `design/` or `tools/` | `npm run desktop:contracts` |
+| Anything, before review | `npm run desktop:ci` |
 
-The test suites were removed in 2026-08 and are being rewritten. Until they
-land, the commands above check types, lint, and builds, and `npm run contracts`
-checks the repository's structural invariants. None of them checks behaviour,
-so a change to unlock, migration, import, or the fill flow needs describing and
-exercising by hand in the pull request.
+Use the `desktop:` scripts. The older `npm run contracts`, `npm run
+version:check`, and `npm run ci:all` reach into the other products and fail in
+this repository.
 
-Phase 0 release blockers also need the evidence named in their issue. A
-documentation claim must describe shipped behaviour, not an intended feature.
+There is no behaviour test suite yet. The checks above cover types, lint,
+builds, and the structural contracts, and that is all they cover. So if you
+change unlock, migration, import, backup, or the browser fill flow, exercise it
+by hand and write in the pull request what you did and what you saw.
+
+If you change what the desktop is allowed to depend on, run `npm run
+desktop:boundary:verify`. It copies the files listed in `desktop-boundary.json`
+into a temporary directory and runs `npm ci` and `npm run desktop:ci` there,
+which is how we know the desktop still stands on its own.
 
 ## Filling in the pull request template
 
 The security and data boundary section is not a formality. Tick "not
 applicable" only when the change cannot affect unlock, encryption, backup,
 import, browser messaging, authentication, or audit behaviour. If you had to
-think about whether it applies, it applies: explain what changed and what still
-holds.
+stop and think about whether it applies, it applies, so say what changed and
+what still holds.
 
-Under Validation, name the exact commands you ran. "Tested" is not an answer.
+Under Validation, name the commands. "Tested" tells a reviewer nothing.
 
 ## Code rules
 
-Lint encodes the rules that matter, so `npm run lint:all` is the fastest way to
-find out whether a change respects them. The rules exist for a reason and the
-reason is written down:
+Lint encodes most of these, so `npm run desktop:lint:js` and `npm run
+desktop:lint:rust` are the fastest way to find out whether your change fits.
+The reasons behind them:
 
-- No `console` output in shipped frontends, and no raw error strings, paths,
-  domains, or entry identifiers in diagnostics.
-- No cross-surface imports. The website, the admin app, and the desktop UI are
-  separate products that happen to share a repository.
-- No `unwrap()` in the Rust vault core. A panic in a vault process is a
-  usability failure at the worst possible moment.
-- No credential persistence in extension storage. See
-  [extensions/sesame/DESIGN.md](extensions/sesame/DESIGN.md).
+- No `console` output in the shipped frontend, and no raw error strings, paths,
+  domains, or entry identifiers in diagnostics. Diagnostics are made to be
+  handed to support, so they carry codes and categories, never contents.
+- No `unwrap()` in the Rust vault core. A panic there strands someone in front
+  of the one copy of a credential they cannot get any other way.
+- The Rust host owns secrets and filesystem access. The interface reaches them
+  through Tauri IPC and nothing else.
+- No credential persistence in extension storage. The reasoning is in
+  [DESIGN.md](https://github.com/usesesame/sesame-browser-extension/blob/main/DESIGN.md)
+  in the extension repository.
 
-## Interface copy
+## Writing interface copy
 
-Write like a useful desktop tool. Buttons start with a verb (`Import`, `Copy`,
-`Create backup`), labels explain state (`Missing`, `3 codes stored`), and errors
-say what failed and the next safe action. Security text states a boundary
-plainly rather than promising a feeling, and never claims more than the current
-implementation does.
+Write like a desktop tool that respects the reader. Buttons start with a verb
+(`Import`, `Copy`, `Create backup`). Labels state the state (`Missing`,
+`3 codes stored`). Errors say what failed and what to do next.
 
-Avoid `seamless`, `effortless`, `peace of mind`, `powerful`, "not X but Y"
-contrasts, three-item marketing lists when one precise sentence will do, and
-icons used as decoration rather than as controls.
+Security text states the boundary plainly instead of promising a feeling, and
+never claims more than the code does. Leave out "seamless", "effortless",
+"peace of mind", and "powerful", along with "not X but Y" contrasts and
+three-item lists where one accurate sentence does the work. Icons are controls,
+not decoration.
 
-No em dashes. Use a comma, a colon, a full stop, or brackets. That covers
-interface copy, code comments, commit messages, and documentation.
+No em dashes anywhere: interface copy, code comments, commit messages,
+documentation. A comma, a colon, a full stop, or brackets will do the job.
+
+## The browser extension boundary
+
+The extension itself is in
+[sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension).
+The desktop side of that boundary is here, in
+`src-tauri/src/adapters/platform/browser_host.rs` and `browser_pipe.rs`, with
+the wire format under `src-tauri/contracts/browser/`.
+
+Changing either side needs a security-boundary review and the clean-profile
+verification described in the extension repository's
+[README](https://github.com/usesesame/sesame-browser-extension/blob/main/README.md).
 
 ## Reporting a security issue
 
 Do not open a public issue. Follow [.github/SECURITY.md](.github/SECURITY.md).
-
-## Browser extension
-
-`extensions/sesame/` is the maintained browser extension. Changes to its
-native-host boundary require a security-boundary review and the clean-profile
-verification in [extensions/sesame/README.md](extensions/sesame/README.md).
