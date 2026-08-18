@@ -19,7 +19,10 @@ env:
   SESAME_RELEASE_ARCHITECTURE: x86_64
   SESAME_RELEASE_CHANNEL: beta
   SESAME_SUPPORTED_WINDOWS: Windows 10,Windows 11
-  SESAME_RELEASE_NOTES_URL: https://usesesame.app/releases/${{ github.ref_name }}
+  # The GitHub release carries the real notes, checksum, and verification
+  # instructions. The marketing site has no per-version page, so pointing there
+  # produced a 404 on every release.
+  SESAME_RELEASE_NOTES_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
   SESAME_UPDATER_SIGNING_KEY_ID: ${{ vars.SESAME_UPDATER_SIGNING_KEY_ID }}
 
 jobs:
