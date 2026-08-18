@@ -1,5 +1,5 @@
 import { getVersion } from '@tauri-apps/api/app'
-import { readable } from 'svelte/store'
+import { derived, readable } from 'svelte/store'
 
 const embeddedVersion = __SESAME_APP_VERSION__
 const hasTauriInternals = typeof window !== 'undefined' &&
@@ -15,7 +15,20 @@ export function resolveAppVersion(): Promise<string> {
 export const appVersion = readable(hasTauriInternals ? '' : embeddedVersion, (set) => {
   if (hasTauriInternals) void resolveAppVersion().then(set)
 })
-export const APP_CHANNEL = 'Early beta'
+
+// The channel is read off the version rather than pinned to a literal, so a
+// build cannot ship claiming a maturity it left behind two releases ago.
+export function channelForVersion(version: string): string {
+  const prerelease = /^\d+\.\d+\.\d+-([0-9A-Za-z.-]+)$/.exec(version)?.[1]
+  if (prerelease) {
+    const label = prerelease.split('.')[0]
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return ''
+  return version.startsWith('0.') ? 'Beta' : 'Stable'
+}
+
+export const appChannel = derived(appVersion, channelForVersion)
 
 function configuredSiteOrigin(): string | undefined {
   const value = import.meta.env.VITE_SESAME_SITE_ORIGIN?.trim()

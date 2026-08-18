@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
-  import { APP_CHANNEL, appVersion } from '../app-meta'
+  import { appChannel, appVersion } from '../app-meta'
 
   export let navigation: Array<{ id: string; label: string; icon: string }>
   export let activeView: string
@@ -24,6 +24,6 @@
   <div class="sidebar-bottom">
     <button type="button" class="lock-button" on:click={onLock}><span class="nav-icon"><Icon name="lock" size={15} /></span> Lock vault</button>
     <p class="sidebar-status"><span class="status-dot" aria-hidden="true"></span>{preview ? 'Preview mode' : 'Local vault'} · <span>{autoLockMinutes}m auto-lock</span></p>
-    <p class="sidebar-build" aria-label={$appVersion ? `Sesame desktop version ${$appVersion}, ${APP_CHANNEL}` : 'Sesame desktop version loading'}><span>Sesame desktop</span><span>{$appVersion ? `v${$appVersion}` : 'Version loading'} · {APP_CHANNEL}</span></p>
+    <p class="sidebar-build" aria-label={$appVersion ? `Sesame desktop version ${$appVersion}${$appChannel ? `, ${$appChannel}` : ''}` : 'Sesame desktop version loading'}><span>Sesame desktop</span><span>{$appVersion ? `v${$appVersion}` : 'Version loading'}{$appChannel ? ` · ${$appChannel}` : ''}</span></p>
   </div>
 </aside>

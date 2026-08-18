@@ -18,6 +18,10 @@ env:
   SESAME_API_BASE_URL: https://api.usesesame.app
   SESAME_RELEASE_ARCHITECTURE: x86_64
   SESAME_RELEASE_CHANNEL: beta
+  # Compiled into the binary, so it has to stay valid for every future release
+  # rather than name this one. /releases/latest only resolves for a release
+  # that is not marked as a pre-release, which is why publish no longer does.
+  SESAME_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
   SESAME_SUPPORTED_WINDOWS: Windows 10,Windows 11
   # The GitHub release carries the real notes, checksum, and verification
   # instructions. The marketing site has no per-version page, so pointing there
@@ -68,6 +72,24 @@ jobs:
 
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
+
+      # option_env! turns any missing value into a build with updates silently
+      # switched off, which is how 0.1.0 shipped unable to update itself. Fail
+      # the release instead of discovering it from a user's screenshot.
+      - name: Require a complete signed-update configuration
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+        run: |
+          $required = 'TAURI_SIGNING_PRIVATE_KEY', 'SESAME_UPDATER_PUBLIC_KEY', 'SESAME_RELEASE_CANDIDATE_PUBLIC_KEY', 'SESAME_RELEASE_CANDIDATE_KEY_ID', 'SESAME_UPDATE_MANIFEST_URL'
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "$name is empty. The build would ship without a working updater."
+            }
+          }
 
       - name: Build the immutable unsigned Windows installer
         env:
@@ -228,7 +250,7 @@ jobs:
             echo "SHA-256 of $installer"
             echo "    $sha256"
           } > release-notes.md
-          gh release create "$GITHUB_REF_NAME"             --repo "$GITHUB_REPOSITORY"             --title "Sesame $GITHUB_REF_NAME"             --notes-file release-notes.md             --prerelease             "release-handoff/$installer"             "release-handoff/$installer.sig"             "release-handoff/latest.json"             public-release-evidence/*
+          gh release create "$GITHUB_REF_NAME"             --repo "$GITHUB_REPOSITORY"             --title "Sesame $GITHUB_REF_NAME"             --notes-file release-notes.md             "release-handoff/$installer"             "release-handoff/$installer.sig"             "release-handoff/latest.json"             public-release-evidence/*
 
       - name: Submit the cryptographically verified candidate
         env:

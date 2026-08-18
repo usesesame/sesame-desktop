@@ -10,7 +10,7 @@
 
 <ModalShell onClose={onContinue} labelledby="beta-onboarding-heading" describedby="beta-onboarding-description" tone="beta-onboarding" modalClass="beta-onboarding-modal" initialFocus={focusContinue}>
   <span class="beta-onboarding-icon"><Icon name="shield" size={21} /></span>
-  <p class="eyebrow">Private beta</p>
+  <p class="eyebrow">Public beta</p>
   <h2 id="beta-onboarding-heading">Before you add important logins</h2>
   <p id="beta-onboarding-description" class="beta-onboarding-intro">
     Sesame is still being tested. Your vault stays on this device and is not synced to a cloud account.

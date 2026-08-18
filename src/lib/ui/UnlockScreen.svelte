@@ -133,7 +133,7 @@
     {#if status.preview}
       <p class="tiny-note">Browser preview only. No vault file is created here.</p>
     {:else if !status.exists}
-      <p class="tiny-note">Early beta: keep an encrypted backup somewhere safe.</p>
+      <p class="tiny-note">Keep an encrypted backup somewhere safe.</p>
     {/if}
   </section>
 </main>
