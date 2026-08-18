@@ -41,7 +41,11 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
+      # The release gate runs cargo fmt and clippy, neither of which ships with
+      # the bare toolchain.
       - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+        with:
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
