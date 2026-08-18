@@ -21,7 +21,7 @@
                     "desktop:ci":  "npm run desktop:version:check \u0026\u0026 npm run desktop:lint:js \u0026\u0026 npm run desktop:contracts \u0026\u0026 npm run desktop:check \u0026\u0026 npm run desktop:build \u0026\u0026 npm run desktop:lint:rust \u0026\u0026 cargo test --manifest-path src-tauri/Cargo.toml \u0026\u0026 cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview",
                     "desktop:boundary:verify":  "node tools/verify-desktop-boundary.mjs --run",
                     "browser:fixtures":  "node tools/serve-browser-retail-fixtures.mjs",
-                    "desktop:bundle:prepare":  "npm run desktop:build \u0026\u0026 npm run extension:host:stage",
+                    "desktop:bundle:prepare":  "npm run desktop:build \u0026\u0026 npm run desktop:host:stage",
                     "website:dev":  "npm --prefix website run dev",
                     "website:build":  "npm --prefix website run build",
                     "website:check":  "npm --prefix website run check",

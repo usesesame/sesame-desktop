@@ -29,7 +29,7 @@
     "tsconfig.node.json",
     "vite.config.ts",
     "vitest.config.ts",
-    ".github/workflows/future-desktop.yml",
+    ".github/workflows/ci.yml",
     "tools/desktop-boundary-contracts.test.mjs",
     "tools/stage-browser-host.ps1",
     "tools/version-contract.mjs"
