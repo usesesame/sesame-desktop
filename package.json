@@ -71,7 +71,7 @@
                     "ci:all":  "npm run ci:local \u0026\u0026 npm run release:build",
                     "release:check":  "npm run desktop:ci \u0026\u0026 npm run desktop:host:stage",
                     "release:build":  "npm run release:check \u0026\u0026 tauri build --no-bundle",
-                    "release:bundle:windows:unsigned":  "tauri build --bundles nsis --no-sign",
+                    "release:bundle:windows:unsigned":  "tauri build --bundles nsis",
                     "installer:evidence:collect":  "powershell -NoProfile -ExecutionPolicy Bypass -File tools/collect-installer-lifecycle-evidence.ps1",
                     "installer:evidence:compare":  "powershell -NoProfile -ExecutionPolicy Bypass -File tools/compare-installer-lifecycle-evidence.ps1",
                     "installer:lab:prepare":  "node tools/prepare-installer-vm-pair.mjs",
