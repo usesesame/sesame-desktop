@@ -17,6 +17,7 @@ const candidateSigningKey = process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY
 const updaterPublicKey = process.env.SESAME_UPDATER_PUBLIC_KEY
 const supportedWindows = process.env.SESAME_SUPPORTED_WINDOWS
 const releaseNotesURL = process.env.SESAME_RELEASE_NOTES_URL
+const publicArtifactURL = process.env.SESAME_PUBLIC_UPDATE_ARTIFACT_URL
 const channel = process.env.SESAME_RELEASE_CHANNEL ?? 'beta'
 const architecture = process.env.SESAME_RELEASE_ARCHITECTURE
 const validHTTPSURL = (value) => {
@@ -97,6 +98,7 @@ const candidate = {
   supportedWindows,
   releaseNotesURL,
   artifact: {
+    url: publicArtifactURL,
     objectKey: artifactObjectKey,
     sha256: artifactSHA256,
     bytes: artifact.length,
@@ -118,12 +120,15 @@ const candidate = {
   },
 }
 const signingPayload = [
-  'sesame-release-candidate-v2', candidate.version, candidate.channel, candidate.platform, candidate.architecture,
-  candidate.supportedWindows, candidate.releaseNotesURL, candidate.artifact.objectKey, candidate.artifact.sha256,
+  'sesame-release-candidate-v3', candidate.version, candidate.channel, candidate.platform, candidate.architecture,
+  candidate.supportedWindows, candidate.releaseNotesURL, candidate.artifact.url, candidate.artifact.objectKey, candidate.artifact.sha256,
   String(candidate.artifact.bytes), candidate.artifact.updaterSignature, candidate.artifact.updaterSigningKeyId,
   distributionClass, 'true', sigstore.issuer, sigstore.certificateIdentity, sigstore.artifactBundleSha256, sigstoreEvidenceDigest,
   String(authenticodeVerified), authenticodeSubject, authenticodeThumbprint, authenticodeEvidenceDigest,
 ].join('\n')
+if (!validHTTPSURL(publicArtifactURL)) {
+  throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')
+}
 const candidateSeed = Buffer.from(candidateSigningKey, 'base64url')
 if (candidateSeed.length !== 32) throw new Error('SESAME_RELEASE_CANDIDATE_SIGNING_KEY must be a base64url 32-byte Ed25519 seed.')
 const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), candidateSeed])

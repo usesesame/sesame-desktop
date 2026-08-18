@@ -122,10 +122,12 @@ jobs:
           $artifact = "release-handoff/$($record.artifact.filename)"
           $signature = "release-handoff/$($record.updaterSignature.filename)"
           $env:SESAME_RELEASE_ARTIFACT_OBJECT_KEY = "windows/$($record.version)/$($record.artifact.filename)"
+          # The candidate signs this URL, so it has to be set before the
+          # candidate is built rather than only for the update manifest.
+          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
           node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
           $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
           Copy-Item -LiteralPath $candidate -Destination release-handoff/
-          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
           node tools/create-static-update-manifest.mjs $candidate release-handoff/latest.json
 
       - name: Prepare and audit the public-only evidence set
