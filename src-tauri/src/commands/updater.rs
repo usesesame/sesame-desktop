@@ -163,7 +163,7 @@ fn verify_candidate_receipt(
 
     let claims: Vec<&str> = receipt.payload.split('\n').collect();
     let expected_sigstore_identity = format!(
-        "https://github.com/usesesame/Sesame/.github/workflows/release-early-access.yml@refs/tags/v{announced_version}"
+        "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v{announced_version}"
     );
     if claims.len() != 22
         || claims[0] != "sesame-release-candidate-v2"

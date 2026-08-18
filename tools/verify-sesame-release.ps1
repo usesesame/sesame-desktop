@@ -10,8 +10,8 @@ $manifests = @(Get-ChildItem -LiteralPath $root -Filter 'sesame-*-windows-*.rele
 if ($manifests.Count -ne 1) { throw 'The evidence directory must contain exactly one Sesame release manifest.' }
 $manifestPath = $manifests[0].FullName
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-$expectedIdentity = "https://github.com/usesesame/Sesame/.github/workflows/release-early-access.yml@refs/tags/v$($manifest.version)"
-if ($manifest.source.repository -ne 'usesesame/Sesame' -or $manifest.source.workflow -ne '.github/workflows/release-early-access.yml' -or $manifest.source.ref -ne "refs/tags/v$($manifest.version)" -or $manifest.sigstore.issuer -ne 'https://token.actions.githubusercontent.com' -or $manifest.sigstore.certificateIdentity -ne $expectedIdentity) {
+$expectedIdentity = "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v$($manifest.version)"
+if ($manifest.source.repository -ne 'usesesame/sesame-desktop' -or $manifest.source.workflow -ne '.github/workflows/release-early-access.yml' -or $manifest.source.ref -ne "refs/tags/v$($manifest.version)" -or $manifest.sigstore.issuer -ne 'https://token.actions.githubusercontent.com' -or $manifest.sigstore.certificateIdentity -ne $expectedIdentity) {
   throw 'The release manifest does not use the pinned Sesame Sigstore identity.'
 }
 if ($manifest.schemaVersion -ne 1 -or $manifest.product -ne 'Sesame' -or $manifest.releaseKind -ne 'unsigned-windows-early-access' -or $manifest.windowsTrust.authenticodeVerified -ne $false -or $manifest.windowsTrust.smartScreenReputationPromised -ne $false -or $manifest.windowsTrust.label -ne 'Unsigned Windows early-access build') {

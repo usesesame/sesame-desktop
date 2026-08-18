@@ -28,7 +28,7 @@ function fictionalCandidate() {
       distributionClass: 'production',
       sigstoreVerified: true,
       sigstoreIssuer: 'https://token.actions.githubusercontent.com',
-      sigstoreIdentity: 'https://github.com/usesesame/Sesame/.github/workflows/release.yml@refs/tags/v1.2.3',
+      sigstoreIdentity: 'https://github.com/usesesame/sesame-desktop/.github/workflows/release.yml@refs/tags/v1.2.3',
       sigstoreBundleSha256: 'b'.repeat(64),
       sigstoreEvidence: { schemaVersion: 1, verified: true, artifactSha256: 'a'.repeat(64) },
       authenticodeVerified: true,

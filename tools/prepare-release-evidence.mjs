@@ -20,7 +20,7 @@ const ref = required('GITHUB_REF')
 const architecture = required('SESAME_RELEASE_ARCHITECTURE')
 const channel = process.env.SESAME_RELEASE_CHANNEL?.trim() || 'beta'
 if (repository !== RELEASE_REPOSITORY || ref !== `refs/tags/v${version}` || !/^[0-9a-f]{40}$/.test(commit)) {
-  throw new Error('Release evidence must come from the protected Sesame version tag in the private source repository.')
+  throw new Error('Release evidence must come from the protected Sesame version tag in usesesame/sesame-desktop.')
 }
 
 const output = path.resolve(outputInput)

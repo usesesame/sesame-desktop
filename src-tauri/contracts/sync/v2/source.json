@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceRepository": "usesesame/Sesame",
+  "sourceRepository": "usesesame/sesame-desktop",
   "sourceCommit": "a453151520fe9af8fb7625f568be4e16d40542ce",
   "sourcePath": "backend/internal/syncproto/testdata",
   "files": {

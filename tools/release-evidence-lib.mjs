@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 export const SIGSTORE_ISSUER = 'https://token.actions.githubusercontent.com'
-export const RELEASE_REPOSITORY = 'usesesame/Sesame'
+export const RELEASE_REPOSITORY = 'usesesame/sesame-desktop'
 export const RELEASE_WORKFLOW = '.github/workflows/release-early-access.yml'
 
 const sha256Pattern = /^[0-9a-f]{64}$/

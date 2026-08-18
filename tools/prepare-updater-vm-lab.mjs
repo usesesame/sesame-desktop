@@ -136,7 +136,7 @@ try {
     'early_access',
     'true',
     'https://token.actions.githubusercontent.com',
-    'https://github.com/usesesame/Sesame/.github/workflows/release-early-access.yml@refs/tags/v0.1.1',
+    'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1',
     'b'.repeat(64),
     Buffer.alloc(32, 0xcc).toString('base64url'),
     'false',

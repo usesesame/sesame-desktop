@@ -51,7 +51,7 @@ if (
   claims[12] !== 'early_access' ||
   claims[13] !== 'true' ||
   claims[14] !== 'https://token.actions.githubusercontent.com' ||
-  claims[15] !== 'https://github.com/usesesame/Sesame/.github/workflows/release-early-access.yml@refs/tags/v0.1.1' ||
+  claims[15] !== 'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1' ||
   claims[18] !== 'false' ||
   good.signature !== detachedSignature ||
   good.candidateReceipt.signingKeyId !== keys.candidateKeyID
