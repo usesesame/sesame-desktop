@@ -1132,10 +1132,11 @@ button.no-totp:hover { filter: brightness(.97); }
 .editor-section p code { color: var(--accent-link); font-size: var(--type-1); }
 .field-only-label { margin: 0; }
 .password-field { position: relative; display: block; }
-.password-field input { padding-right: 68px; }
+.password-field input { padding-right: 98px; }
 .password-field .icon-button { position: absolute; top: 50%; width: 28px; height: 28px; transform: translateY(-50%); }
-.password-field .icon-button:nth-of-type(1) { right: 34px; }
-.password-field .icon-button:nth-of-type(2) { right: 4px; }
+.password-field .icon-button:nth-of-type(1) { right: 64px; }
+.password-field .icon-button:nth-of-type(2) { right: 34px; }
+.password-field .icon-button:nth-of-type(3) { right: 4px; }
 .editor-generator { display: grid; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-4); background: var(--surface-inset); }
 .editor-generator-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--text-muted); font-size: var(--type-1); }
 .editor-generator .generator-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; }
