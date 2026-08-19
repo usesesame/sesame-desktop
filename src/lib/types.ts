@@ -123,6 +123,7 @@ export interface HistorySummary {
   itemId: string
   kind: string
   capturedAt: number
+  changed: string[]
 }
 
 export interface RestoreHistoryVersionResult {
