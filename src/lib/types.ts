@@ -704,6 +704,7 @@ export interface BrowserIntegrationStatus {
   manifestReady: boolean
   chromeRegistered: boolean
   edgeRegistered: boolean
+  firefoxRegistered: boolean
   ready: boolean
   code: BrowserIntegrationCode
 }

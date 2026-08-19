@@ -46,6 +46,7 @@
         <li class:ok={status.manifestReady}><Icon name={status.manifestReady ? 'check' : 'alert'} size={13} /> Connection files</li>
         <li class:ok={status.chromeRegistered}><Icon name={status.chromeRegistered ? 'check' : 'alert'} size={13} /> Chrome registration</li>
         <li class:ok={status.edgeRegistered}><Icon name={status.edgeRegistered ? 'check' : 'alert'} size={13} /> Edge registration</li>
+        <li class:ok={status.firefoxRegistered}><Icon name={status.firefoxRegistered ? 'check' : 'alert'} size={13} /> Firefox registration</li>
       </ul>
     {/if}
   </div>
