@@ -236,7 +236,14 @@ jobs:
         run: |
           installer=$(jq -r '.artifact.filename' "release-handoff/$MANIFEST")
           sha256=$(jq -r '.artifact.sha256' "release-handoff/$MANIFEST")
+          changes=$(awk -v want="## ${GITHUB_REF_NAME#v}" '$0 == want { inside = 1; next } /^## / { if (inside) exit } inside' CHANGELOG.md)
+          if [ -z "$(printf '%s' "$changes" | tr -d '[:space:]')" ]; then
+            echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}." >&2
+            exit 1
+          fi
           {
+            echo "$changes"
+            echo
             echo "Early access build for Windows 10 and 11, x64."
             echo
             echo "This installer is not Authenticode signed, so SmartScreen will warn you."

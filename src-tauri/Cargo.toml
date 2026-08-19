@@ -10,7 +10,7 @@ default-members = [".", "sesame-core"]
 
 [package]
 name = "sesame"
-version = "0.1.0"
+version = "0.1.1"
 license = "AGPL-3.0-or-later"
 default-run = "sesame"
 description = "A calm, local-first password and recovery vault"
