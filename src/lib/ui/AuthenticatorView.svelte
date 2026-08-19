@@ -53,7 +53,10 @@
   // Codes are derived in Rust, so the window is authoritative there. Count down
   // locally and re-read once the shortest one runs out.
   function tick() {
-    if (!codes.length) return
+    if (!codes.length) {
+      if (loadFailed) void load()
+      return
+    }
     let expired = false
     codes = codes.map((code) => {
       const remaining = code.remaining - 1
@@ -96,15 +99,15 @@
 
 <header class="view-header">
   <div>
-    <h2>{codes.length === 1 ? '1 code saved' : `${codes.length} codes saved`}</h2>
-    <p>Every two-factor code in your vault, counting down together. Codes are generated on this device. Select one to copy it.</p>
+    <!-- A failed read knows nothing about the count, so it must not claim zero. -->
+    <h2>{loading || loadFailed ? 'Authenticator' : codes.length === 1 ? '1 code saved' : `${codes.length} codes saved`}</h2>
   </div>
 </header>
 
 {#if loading}
   <p class="authenticator-status" role="status">Reading your codes…</p>
 {:else if loadFailed}
-  <p class="authenticator-status" role="alert">Sesame could not read your codes. Unlock the vault and try again.</p>
+  <p class="authenticator-status" role="alert">Sesame could not read your codes. It keeps trying, and Refresh retries now.</p>
 {:else if !codes.length}
   <div class="authenticator-empty">
     <span class="authenticator-empty-icon"><Icon name="shield" size={22} /></span>
