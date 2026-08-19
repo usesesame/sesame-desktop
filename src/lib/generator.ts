@@ -58,7 +58,7 @@ export function makePassword(config: PasswordGeneratorConfig): string {
     const replacement = secureRandomIndex(index + 1)
     ;[characters[index], characters[replacement]] = [characters[replacement], characters[index]]
   }
-  return characters.join('')
+  return characters.slice(0, Math.max(config.length, 0)).join('')
 }
 
 export function generatorEntropy(config: PasswordGeneratorConfig): number {
