@@ -826,6 +826,7 @@ export interface TotpCodeEntry {
   initials: string
   code: string
   remaining: number
+  period: number
 }
 
 export type Theme = 'auto' | 'light' | 'dark'

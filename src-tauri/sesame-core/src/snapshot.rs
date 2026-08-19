@@ -221,6 +221,7 @@ pub fn login_card_for(payload: &VaultPayload, entry: &VaultEntry) -> LoginCard {
         .totp
         .as_deref()
         .and_then(current_totp)
+        .map(|(code, remaining, _)| (code, remaining))
         .map_or((None, None), |(code, remaining)| {
             (Some(code), Some(remaining))
         });
@@ -364,11 +365,12 @@ pub fn duplicate_groups_for(payload: &VaultPayload) -> Vec<DuplicateGroup> {
     groups
 }
 
-pub fn current_totp(value: &str) -> Option<(String, u64)> {
+/// Returns the code, the seconds left in the window, and the window length.
+pub fn current_totp(value: &str) -> Option<(String, u64, u64)> {
     let totp = totp_from_value(value)?;
     let code = totp.generate_current().ok()?;
     let remaining = totp.step - (unix_timestamp() % totp.step);
-    Some((code, remaining))
+    Some((code, remaining, totp.step))
 }
 
 // Real sites issue 80-bit secrets; the RFC's 128-bit floor would reject ordinary 2FA.

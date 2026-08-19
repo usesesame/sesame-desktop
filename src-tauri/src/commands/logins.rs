@@ -182,7 +182,7 @@ pub fn list_totp_codes(
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
     let mut codes = Vec::new();
     for entry in &session.payload.entries {
-        let Some((code, remaining)) = entry.totp.as_deref().and_then(current_totp) else {
+        let Some((code, remaining, period)) = entry.totp.as_deref().and_then(current_totp) else {
             continue;
         };
         codes.push(crate::vault::types::TotpCodeEntry {
@@ -192,6 +192,7 @@ pub fn list_totp_codes(
             initials: crate::vault::util::initials_for(&entry.title),
             code,
             remaining,
+            period,
         });
     }
     codes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
@@ -218,7 +219,7 @@ pub fn refresh_totp(
         .totp
         .as_deref()
         .and_then(current_totp)
-        .map_or((None, None), |(code, remaining)| {
+        .map_or((None, None), |(code, remaining, _)| {
             (Some(code), Some(remaining))
         });
     Ok(crate::vault::types::TotpRefresh {

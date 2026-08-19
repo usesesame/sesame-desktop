@@ -413,8 +413,8 @@ function previewTotpCodes(): TotpCodeEntry[] {
   const second = new Date().getSeconds()
   const remaining = 30 - (second % 30)
   return [
-    { id: 'preview-1', title: 'Gmail', site: 'mail.google.com', initials: 'G', code: '482914', remaining },
-    { id: 'preview-2', title: 'GitHub', site: 'github.com', initials: 'GH', code: '205663', remaining },
+    { id: 'preview-1', title: 'Gmail', site: 'mail.google.com', initials: 'G', code: '482914', remaining, period: 30 },
+    { id: 'preview-2', title: 'GitHub', site: 'github.com', initials: 'GH', code: '205663', remaining, period: 30 },
   ]
 }
 
