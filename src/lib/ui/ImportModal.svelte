@@ -15,6 +15,10 @@
   const { imports } = useAppStores()
   let sourceButton: HTMLButtonElement
 
+  // Authenticator apps export codes, not items, so they have nothing to attach.
+  const authenticatorSources: ImportSource[] = ['otpauth-txt', 'aegis-json', '2fas-json']
+  $: importsWholeItems = !authenticatorSources.includes($imports.source)
+
   function sourceOptions() {
     const dialog = sourceButton?.closest<HTMLElement>('[role="dialog"]')
     return [...(dialog?.querySelectorAll<HTMLButtonElement>('#import-source-options [role="option"]') ?? [])]
@@ -138,7 +142,9 @@
       {#if $imports.preview.passkeysNotImported > 0}
         <div class="import-conflict-note"><Icon name="key" size={16} /><p><strong>Passkeys are left in your old manager.</strong><span>Sesame has no passkey item yet, so {$imports.preview.passkeysNotImported === 1 ? 'one passkey stays' : `these ${$imports.preview.passkeysNotImported} passkeys stay`} where {$imports.preview.passkeysNotImported === 1 ? 'it is' : 'they are'}. Keep that manager until Sesame can store them.</span></p></div>
       {/if}
-      <div class="import-conflict-note"><Icon name="file-key" size={16} /><p><strong>File attachments are not in this export.</strong><span>This export format carries no attached files, so anything attached to an item stays only in your old manager. Save those files separately before you remove it.</span></p></div>
+      {#if importsWholeItems}
+        <div class="import-conflict-note"><Icon name="file-key" size={16} /><p><strong>File attachments are not in this export.</strong><span>This export format carries no attached files, so anything attached to an item stays only in your old manager. Save those files separately before you remove it.</span></p></div>
+      {/if}
       {#if $imports.preview.intentionallyOmittedItems > 0}
         <div class="import-conflict-note"><Icon name="alert" size={16} /><p><strong>Some items are not imported.</strong><span>Sesame does not yet support this item type. Keep the original export until you have checked that the imported items are complete.</span></p></div>
       {/if}
