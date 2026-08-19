@@ -79,14 +79,22 @@ pub fn domain_from_url(value: &str) -> String {
     if value.is_empty() {
         return "No website saved".into();
     }
-    value
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .trim_start_matches("www.")
-        .split('/')
+    let without_scheme = value.split_once("://").map_or(value, |(_, rest)| rest);
+    let authority = without_scheme
+        .split(['/', '?', '#'])
         .next()
-        .unwrap_or(value)
-        .to_string()
+        .unwrap_or(without_scheme);
+    // A saved URL may carry user:password@ before the host, and showing that
+    // back as the site label would put the secret on screen.
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
+        .to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host);
+    if host.is_empty() {
+        return "No website saved".into();
+    }
+    host.to_string()
 }
 
 pub fn initials_for(value: &str) -> String {
@@ -138,6 +146,20 @@ pub fn record_value(
         .find_map(|name| headers.get(*name).and_then(|index| record.get(*index)))
         .unwrap_or_default()
         .trim()
+        .to_string()
+}
+
+// A password is stored exactly as it was exported. Trimming it would change
+// the secret and lock the owner out of the account it belongs to.
+pub fn record_secret(
+    record: &csv::StringRecord,
+    headers: &HashMap<String, usize>,
+    names: &[&str],
+) -> String {
+    names
+        .iter()
+        .find_map(|name| headers.get(*name).and_then(|index| record.get(*index)))
+        .unwrap_or_default()
         .to_string()
 }
 

@@ -7,7 +7,8 @@ use crate::{
     snapshot::totp_from_value,
     types::*,
     util::{
-        domain_from_url, non_empty, normalise_header, normalise_url, random_id, record_value,
+        domain_from_url, non_empty, normalise_header, normalise_url, random_id, record_secret,
+        record_value,
         split_backup_codes, unix_timestamp,
     },
     VaultEntry, VaultResult,
@@ -193,7 +194,7 @@ pub fn import_bitwarden_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
@@ -507,7 +508,7 @@ pub fn import_lastpass_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
@@ -543,7 +544,7 @@ pub fn import_dashlane_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let headers = reader
         .headers()
@@ -563,7 +564,7 @@ pub fn import_dashlane_csv_entries(
         })?;
         let title = record_value(&record, &headers, &["title", "name", "website"]);
         let username = record_value(&record, &headers, &["username", "login", "email"]);
-        let password = record_value(&record, &headers, &["password"]);
+        let password = record_secret(&record, &headers, &["password"]);
         if title.is_empty() && username.is_empty() && password.is_empty() {
             continue;
         }
@@ -673,7 +674,7 @@ pub fn import_proton_pass_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let headers = reader
         .headers()
@@ -718,7 +719,7 @@ pub fn import_proton_pass_csv_entries(
         }
         let title = record_value(&record, &headers, &["name"]);
         let username = record_value(&record, &headers, &["username"]);
-        let password = record_value(&record, &headers, &["password"]);
+        let password = record_secret(&record, &headers, &["password"]);
         let email = record_value(&record, &headers, &["email"]);
         if title.is_empty() && username.is_empty() && password.is_empty() && email.is_empty() {
             continue;
@@ -793,7 +794,7 @@ pub fn import_keeper_csv_entries(
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .has_headers(false)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
@@ -810,7 +811,7 @@ pub fn import_keeper_csv_entries(
         let folder = record.get(0).unwrap_or_default().trim().to_string();
         let title = record.get(1).unwrap_or_default().trim().to_string();
         let username = record.get(2).unwrap_or_default().trim().to_string();
-        let password = record.get(3).unwrap_or_default().trim().to_string();
+        let password = record.get(3).unwrap_or_default().to_string();
         let url = record.get(4).unwrap_or_default().trim().to_string();
         let notes = record.get(5).unwrap_or_default().trim().to_string();
         let mut totp = None;
@@ -875,7 +876,7 @@ pub fn import_nordpass_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let headers = reader
         .headers()
@@ -913,7 +914,7 @@ pub fn import_nordpass_csv_entries(
         let title = record_value(&record, &headers, &["name"]);
         let item_type = record_value(&record, &headers, &["type"]).to_ascii_lowercase();
         let username = record_value(&record, &headers, &["username"]);
-        let password = record_value(&record, &headers, &["password"]);
+        let password = record_secret(&record, &headers, &["password"]);
         if title.is_empty() && item_type.is_empty() && username.is_empty() && password.is_empty() {
             // Empty-folder placeholder row.
             continue;
@@ -1041,7 +1042,7 @@ pub fn import_flexible_csv_entries(
 ) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let headers = reader
         .headers()
@@ -1080,7 +1081,7 @@ pub fn import_flexible_csv_entries(
         let title = record_value(&record, &headers, title_names);
         let url = record_value(&record, &headers, url_names);
         let username = record_value(&record, &headers, username_names);
-        let password = record_value(&record, &headers, password_names);
+        let password = record_secret(&record, &headers, password_names);
         if title.is_empty() && username.is_empty() && password.is_empty() {
             continue;
         }
