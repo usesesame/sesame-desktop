@@ -50,8 +50,8 @@
       onEditSelected()
     }
   }
-  $: eyebrow = $selection.activeView === 'vault' ? 'Vault' : $selection.activeView === 'security' ? 'Security' : $selection.activeView === 'tools' ? 'Tools' : $selection.activeView === 'items' ? 'Tools' : $selection.activeView === 'backups' ? 'Data' : 'Preferences'
-  $: title = $selection.activeView === 'vault' ? 'Your logins' : $selection.activeView === 'security' ? (duplicateReviewOpen ? 'Duplicate review' : 'Checkup') : $selection.activeView === 'tools' ? 'Password tools' : $selection.activeView === 'items' ? 'Items' : $selection.activeView === 'backups' ? 'Backups' : 'Settings'
+  $: eyebrow = $selection.activeView === 'vault' ? 'Vault' : $selection.activeView === 'authenticator' ? 'Vault' : $selection.activeView === 'security' ? 'Security' : $selection.activeView === 'tools' ? 'Tools' : $selection.activeView === 'items' ? 'Tools' : $selection.activeView === 'backups' ? 'Data' : 'Preferences'
+  $: title = $selection.activeView === 'vault' ? 'Your logins' : $selection.activeView === 'authenticator' ? 'Authenticator' : $selection.activeView === 'security' ? (duplicateReviewOpen ? 'Duplicate review' : 'Checkup') : $selection.activeView === 'tools' ? 'Password tools' : $selection.activeView === 'items' ? 'Items' : $selection.activeView === 'backups' ? 'Backups' : 'Settings'
   const themeIcon = { auto: 'monitor', light: 'sun', dark: 'moon' } as const
 </script>
 

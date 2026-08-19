@@ -169,6 +169,35 @@ pub fn get_duplicate_groups(
     ))
 }
 
+/// Every saved code at once, for the authenticator view. Requires an unlocked
+/// vault, and returns derived codes only so the seed never crosses the boundary.
+#[tauri::command]
+pub fn list_totp_codes(
+    state: State<'_, VaultState>,
+) -> VaultResult<Vec<crate::vault::types::TotpCodeEntry>> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    let mut codes = Vec::new();
+    for entry in &session.payload.entries {
+        let Some((code, remaining)) = entry.totp.as_deref().and_then(current_totp) else {
+            continue;
+        };
+        codes.push(crate::vault::types::TotpCodeEntry {
+            id: entry.id.clone(),
+            title: entry.title.clone(),
+            site: crate::vault::util::domain_from_url(&entry.url),
+            initials: crate::vault::util::initials_for(&entry.title),
+            code,
+            remaining,
+        });
+    }
+    codes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(codes)
+}
+
 #[tauri::command]
 pub fn refresh_totp(
     id: String,

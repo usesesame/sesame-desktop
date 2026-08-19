@@ -251,6 +251,18 @@ pub struct DuplicateGroup {
     pub entries: Vec<CleanupEntry>,
 }
 
+/// Codes for the authenticator view. Derived values only: the seed stays in Rust.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpCodeEntry {
+    pub id: String,
+    pub title: String,
+    pub site: String,
+    pub initials: String,
+    pub code: String,
+    pub remaining: u64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TotpRefresh {
@@ -1690,6 +1702,71 @@ pub struct LastPassCsvEntry {
     pub name: String,
     #[serde(default)]
     pub grouping: String,
+}
+
+#[derive(Deserialize)]
+pub struct AegisExport {
+    #[serde(default)]
+    pub db: AegisDb,
+}
+
+#[derive(Deserialize, Default)]
+pub struct AegisDb {
+    #[serde(default)]
+    pub entries: Vec<AegisEntry>,
+}
+
+#[derive(Deserialize)]
+pub struct AegisEntry {
+    #[serde(default, rename = "type")]
+    pub entry_type: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub issuer: String,
+    #[serde(default)]
+    pub info: AegisInfo,
+}
+
+#[derive(Deserialize, Default)]
+pub struct AegisInfo {
+    #[serde(default)]
+    pub secret: String,
+    #[serde(default)]
+    pub digits: Option<u32>,
+    #[serde(default)]
+    pub period: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct TwoFasExport {
+    #[serde(default)]
+    pub services: Vec<TwoFasService>,
+}
+
+#[derive(Deserialize)]
+pub struct TwoFasService {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub secret: String,
+    #[serde(default)]
+    pub otp: Option<TwoFasOtp>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TwoFasOtp {
+    #[serde(default)]
+    pub account: String,
+    #[serde(default)]
+    pub issuer: String,
+    #[serde(default)]
+    pub digits: Option<u32>,
+    #[serde(default)]
+    pub period: Option<u64>,
+    #[serde(default)]
+    pub token_type: String,
 }
 
 #[derive(Deserialize)]

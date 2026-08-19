@@ -813,8 +813,20 @@ export type ImportSource =
   | 'proton-pass-csv'
   | 'keeper-csv'
   | 'nordpass-csv'
+  | 'otpauth-txt'
+  | 'aegis-json'
+  | '2fas-json'
 
-export type View = 'vault' | 'security' | 'tools' | 'items' | 'backups' | 'settings'
+export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'items' | 'backups' | 'settings'
+
+export interface TotpCodeEntry {
+  id: string
+  title: string
+  site: string
+  initials: string
+  code: string
+  remaining: number
+}
 
 export type Theme = 'auto' | 'light' | 'dark'
 

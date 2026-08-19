@@ -23,8 +23,8 @@ pub fn read_import_file(path: &Path) -> VaultResult<Zeroizing<String>> {
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "csv" | "json") {
-        return Err("Choose a .csv or .json export file.".into());
+    if !matches!(extension.as_str(), "csv" | "json" | "txt") {
+        return Err("Choose a .csv, .json, or .txt export file.".into());
     }
     let bytes = Zeroizing::new(crate::util::require_file_with_limit(
         path,
@@ -95,6 +95,18 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
             login_only_parsed_import(entries, logins, omitted)
         }
         "bitwarden-json" => import_bitwarden_json_entries(content)?,
+        "otpauth-txt" => {
+            let (entries, logins) = import_otpauth_list_entries(content)?;
+            login_only_parsed_import(entries, logins, 0)
+        }
+        "aegis-json" => {
+            let (entries, logins) = import_aegis_json_entries(content)?;
+            login_only_parsed_import(entries, logins, 0)
+        }
+        "2fas-json" => {
+            let (entries, logins) = import_2fas_json_entries(content)?;
+            login_only_parsed_import(entries, logins, 0)
+        }
         "lastpass-csv" => {
             let (entries, logins) = import_lastpass_csv_entries(content)?;
             login_only_parsed_import(entries, logins, 0)
@@ -1175,6 +1187,203 @@ pub fn import_flexible_csv_entries(
         imported.push(entry);
     }
     Ok((imported, fidelity))
+}
+
+/// A 2FA code has no password, so these entries carry a title and a secret only.
+fn totp_entry(
+    issuer: &str,
+    account: &str,
+    otpauth: String,
+    fidelity: &mut FidelityCounts,
+) -> Option<VaultEntry> {
+    if totp_from_value(&otpauth).is_none() {
+        fidelity.record(FieldDisposition::Malformed);
+        return None;
+    }
+    let title = match (issuer.trim(), account.trim()) {
+        ("", "") => return None,
+        ("", account) => account.to_string(),
+        (issuer, _) => issuer.to_string(),
+    };
+    fidelity.record(FieldDisposition::Imported);
+    Some(imported_entry(
+        title,
+        String::new(),
+        account.trim().to_string(),
+        String::new(),
+        Some(otpauth),
+        Vec::new(),
+        None,
+        None,
+        None,
+        fidelity,
+    ))
+}
+
+/// Aegis, Ente Auth and KeePassXC all export a plain list of otpauth links.
+pub fn import_otpauth_list_entries(
+    content: &str,
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+    let mut fidelity = FidelityCounts::default();
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || !line.starts_with("otpauth://") {
+            continue;
+        }
+        let (issuer, account) = otpauth_labels(line);
+        if let Some(entry) = totp_entry(&issuer, &account, line.to_string(), &mut fidelity) {
+            entries.push(entry);
+        }
+    }
+    if entries.is_empty() {
+        return Err(
+            "That file has no otpauth:// links in it. Export your codes again as plain text."
+                .into(),
+        );
+    }
+    Ok((entries, fidelity))
+}
+
+/// Reads the issuer and account out of an otpauth link without a URL crate.
+fn otpauth_labels(url: &str) -> (String, String) {
+    let after_scheme = url.trim_start_matches("otpauth://");
+    let path = after_scheme
+        .split_once('/')
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    let (label, query) = path.split_once('?').unwrap_or((path, ""));
+    let label = percent_decode(label);
+    let (label_issuer, account) = match label.split_once(':') {
+        Some((issuer, account)) => (issuer.trim().to_string(), account.trim().to_string()),
+        None => (String::new(), label.trim().to_string()),
+    };
+    let query_issuer = query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == "issuer")
+        .map(|(_, value)| percent_decode(value))
+        .unwrap_or_default();
+    let issuer = if query_issuer.is_empty() {
+        label_issuer
+    } else {
+        query_issuer
+    };
+    (issuer, account)
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Builds the otpauth link the vault stores, so digits and period survive the import.
+fn otpauth_url(issuer: &str, account: &str, secret: &str, digits: u32, period: u64) -> String {
+    let label = if issuer.trim().is_empty() {
+        encode_component(account)
+    } else {
+        format!("{}:{}", encode_component(issuer), encode_component(account))
+    };
+    let mut url = format!(
+        "otpauth://totp/{label}?secret={}",
+        secret.replace([' ', '-'], "").to_ascii_uppercase()
+    );
+    if !issuer.trim().is_empty() {
+        url.push_str(&format!("&issuer={}", encode_component(issuer)));
+    }
+    url.push_str(&format!("&digits={digits}&period={period}"));
+    url
+}
+
+fn encode_component(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.trim().bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+pub fn import_aegis_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+    let export: AegisExport = serde_json::from_str(content).map_err(|_| {
+        "Sesame could not read that Aegis export. Export it again as an unencrypted JSON file."
+            .to_string()
+    })?;
+    let mut fidelity = FidelityCounts::default();
+    let mut entries = Vec::new();
+    for item in export.db.entries {
+        // Aegis exports HOTP and Steam entries too, and Sesame stores time-based codes.
+        if !item.entry_type.eq_ignore_ascii_case("totp") {
+            fidelity.record(FieldDisposition::IntentionallyOmitted);
+            continue;
+        }
+        let url = otpauth_url(
+            &item.issuer,
+            &item.name,
+            &item.info.secret,
+            item.info.digits.unwrap_or(6),
+            item.info.period.unwrap_or(30),
+        );
+        if let Some(entry) = totp_entry(&item.issuer, &item.name, url, &mut fidelity) {
+            entries.push(entry);
+        }
+    }
+    if entries.is_empty() {
+        return Err("That Aegis export has no time-based codes in it.".into());
+    }
+    Ok((entries, fidelity))
+}
+
+pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+    let export: TwoFasExport = serde_json::from_str(content).map_err(|_| {
+        "Sesame could not read that 2FAS export. Export it again without a password.".to_string()
+    })?;
+    let mut fidelity = FidelityCounts::default();
+    let mut entries = Vec::new();
+    for service in export.services {
+        let otp = service.otp.unwrap_or_default();
+        if !otp.token_type.is_empty() && !otp.token_type.eq_ignore_ascii_case("totp") {
+            fidelity.record(FieldDisposition::IntentionallyOmitted);
+            continue;
+        }
+        let issuer = if otp.issuer.trim().is_empty() {
+            service.name.clone()
+        } else {
+            otp.issuer.clone()
+        };
+        let url = otpauth_url(
+            &issuer,
+            &otp.account,
+            &service.secret,
+            otp.digits.unwrap_or(6),
+            otp.period.unwrap_or(30),
+        );
+        if let Some(entry) = totp_entry(&issuer, &otp.account, url, &mut fidelity) {
+            entries.push(entry);
+        }
+    }
+    if entries.is_empty() {
+        return Err("That 2FAS export has no time-based codes in it.".into());
+    }
+    Ok((entries, fidelity))
 }
 
 pub fn imported_entry(

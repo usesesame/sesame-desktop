@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, QuickAccessEntry, QuickAccessSecret, QuickAccessStatus, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpRefresh, VaultEntry, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, QuickAccessEntry, QuickAccessSecret, QuickAccessStatus, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -408,6 +408,21 @@ export async function getDuplicateGroups(): Promise<DuplicateGroup[]> {
   return invoke<DuplicateGroup[]>('get_duplicate_groups')
 }
 
+// Browser preview has no Rust side, so the view has something to render.
+function previewTotpCodes(): TotpCodeEntry[] {
+  const second = new Date().getSeconds()
+  const remaining = 30 - (second % 30)
+  return [
+    { id: 'preview-1', title: 'Gmail', site: 'mail.google.com', initials: 'G', code: '482914', remaining },
+    { id: 'preview-2', title: 'GitHub', site: 'github.com', initials: 'GH', code: '205663', remaining },
+  ]
+}
+
+export async function listTotpCodes(): Promise<TotpCodeEntry[]> {
+  if (previewMode) return previewTotpCodes()
+  return invoke<TotpCodeEntry[]>('list_totp_codes')
+}
+
 export async function refreshTotp(id: string): Promise<TotpRefresh> {
   if (previewMode) {
     const card = previewCards[id]
@@ -416,15 +431,21 @@ export async function refreshTotp(id: string): Promise<TotpRefresh> {
   return invoke<TotpRefresh>('refresh_totp', { id })
 }
 
+function importFileFilter(source: ImportSource): { name: string; extensions: string[] } {
+  if (source === 'otpauth-txt') return { name: 'Authenticator export', extensions: ['txt'] }
+  if (source === 'bitwarden-json' || source === 'aegis-json' || source === '2fas-json') {
+    return { name: 'JSON export', extensions: ['json'] }
+  }
+  return { name: 'CSV export', extensions: ['csv'] }
+}
+
 // The export is parsed and held in Rust; its contents never enter the webview.
 export async function chooseImportFile(source: ImportSource): Promise<string | null> {
   if (previewMode) return 'preview-export.csv'
   const chosen = await open({
     multiple: false,
     directory: false,
-    filters: [source === 'bitwarden-json'
-      ? { name: 'JSON export', extensions: ['json'] }
-      : { name: 'CSV export', extensions: ['csv'] }],
+    filters: [importFileFilter(source)],
   })
   return typeof chosen === 'string' ? chosen : null
 }
