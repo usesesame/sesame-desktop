@@ -251,8 +251,15 @@ jobs:
             echo "Every file here was built in public CI from tag $GITHUB_REF_NAME and signed"
             echo "keylessly with Sigstore, binding it to this repository and that commit."
             echo
-            echo "Verify it before running, with the script attached to this release:"
-            echo "    .\verify-sesame-release.ps1"
+            echo "Verify it before running. Download every file on this release into one"
+            echo "folder, install Cosign (winget install sigstore.cosign), then in that folder:"
+            echo
+            echo '    Unblock-File .\verify-sesame-release.ps1'
+            echo '    .\verify-sesame-release.ps1 -Installer .\'"$installer"' -EvidenceDirectory .'
+            echo
+            echo "Both parameters are required. Without Cosign the script stops rather than"
+            echo "skipping the publisher check; add -HashOnly to check the hash alone, which"
+            echo "proves the file is intact but not who published it."
             echo
             echo "SHA-256 of $installer"
             echo "    $sha256"
