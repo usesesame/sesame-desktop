@@ -60,6 +60,7 @@
   import VaultView from './lib/ui/VaultView.svelte'
   import CheckupView from './lib/ui/CheckupView.svelte'
   import ToolsView from './lib/ui/ToolsView.svelte'
+  import AuthenticatorView from './lib/ui/AuthenticatorView.svelte'
   import BackupsView from './lib/ui/BackupsView.svelte'
   import ItemsView from './lib/ui/ItemsView.svelte'
   import SettingsView from './lib/ui/SettingsView.svelte'
@@ -326,6 +327,7 @@
 
   const navigation: Array<{ id: View; label: string; icon: string }> = [
     { id: 'vault', label: 'Vault', icon: 'vault' },
+    { id: 'authenticator', label: 'Authenticator', icon: 'shield' },
     { id: 'security', label: 'Security checkup', icon: 'shield' },
     { id: 'tools', label: 'Tools', icon: 'key' },
     { id: 'items', label: 'Items', icon: 'folder' },
@@ -348,6 +350,9 @@
     { value: 'proton-pass-csv', label: 'Proton Pass CSV' },
     { value: 'keeper-csv', label: 'Keeper CSV' },
     { value: 'nordpass-csv', label: 'NordPass CSV' },
+    { value: 'otpauth-txt', label: 'Authenticator app (otpauth links)' },
+    { value: 'aegis-json', label: 'Aegis JSON' },
+    { value: '2fas-json', label: '2FAS JSON' },
   ]
 
   async function openSwitchingJourney() {
@@ -530,6 +535,8 @@
         onOpenDuplicateReview={cleanupController.openDuplicateReview}
         onShowSecurityFilter={cleanupController.showSecurityFilter}
       />
+    {:else if $selection.activeView === 'authenticator'}
+      <AuthenticatorView onOpenImport={importController.open} />
     {:else if $selection.activeView === 'tools'}
       <ToolsView onCopy={loginController.copy} onUseInLogin={(password) => loginController.openNew(password)} />
     {:else if $selection.activeView === 'items'}

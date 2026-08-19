@@ -58,6 +58,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_login_summary,
             commands::get_duplicate_groups,
             commands::refresh_totp,
+            commands::list_totp_codes,
             commands::save_login,
             commands::set_login_folders,
             commands::bulk_assign_folder,

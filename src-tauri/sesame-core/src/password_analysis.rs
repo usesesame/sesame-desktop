@@ -70,7 +70,10 @@ pub fn analyse_password(entry: &VaultEntry, reused: bool) -> PasswordAnalysis {
     }
 
     let mut issues = Vec::new();
-    if score < 3 {
+    // A code-only entry saves a 2FA secret and no password. Calling that weak
+    // reports a password problem where there is no password at all, and is_old
+    // already treats an empty password the same way.
+    if score < 3 && !password.is_empty() {
         issues.push(PasswordIssue {
             kind: "weak-password",
             explanation: "This password is short or has too little character variety.",

@@ -153,3 +153,69 @@ fn bitwarden_passkeys_are_reported_rather_than_dropped_in_silence() {
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].password, "secret");
 }
+
+const OTPAUTH_LIST: &str = "\
+otpauth://totp/GitHub:me%40example.test?secret=JBSWY3DPEHPK3PXP&issuer=GitHub&digits=6&period=30
+# a comment line that is not a link
+otpauth://totp/Fastmail?secret=JBSWY3DPEHPK3PXP&digits=8&period=60
+";
+
+#[test]
+fn an_otpauth_list_becomes_code_only_entries() {
+    let parsed = parse_import_entries(OTPAUTH_LIST, "otpauth-txt").expect("otpauth import");
+    assert_eq!(parsed.entries.len(), 2);
+    let github = &parsed.entries[0];
+    assert_eq!(github.title, "GitHub");
+    assert_eq!(github.username, "me@example.test");
+    // A code has no password to save, which is the whole point of the format.
+    assert!(github.password.is_empty());
+    assert!(github.totp.is_some());
+    assert_eq!(parsed.entries[1].title, "Fastmail");
+}
+
+#[test]
+fn a_file_with_no_links_is_refused_with_a_readable_message() {
+    let error = parse_import_entries("nothing to see here\n", "otpauth-txt").err().expect("should be refused");
+    assert!(error.contains("otpauth://"), "unexpected message: {error}");
+}
+
+const AEGIS_JSON: &str = r#"{
+  "db": { "entries": [
+    { "type": "totp", "name": "me@example.test", "issuer": "GitHub",
+      "info": { "secret": "JBSWY3DPEHPK3PXP", "digits": 6, "period": 30 } },
+    { "type": "hotp", "name": "counter", "issuer": "Legacy",
+      "info": { "secret": "JBSWY3DPEHPK3PXP" } }
+  ] }
+}"#;
+
+#[test]
+fn aegis_time_based_codes_import_and_counter_based_ones_are_counted() {
+    let parsed = parse_import_entries(AEGIS_JSON, "aegis-json").expect("aegis import");
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].title, "GitHub");
+    assert_eq!(parsed.entries[0].username, "me@example.test");
+    assert_eq!(parsed.fidelity.logins.intentionally_omitted, 1);
+}
+
+const TWOFAS_JSON: &str = r#"{
+  "services": [
+    { "name": "GitHub", "secret": "JBSWY3DPEHPK3PXP",
+      "otp": { "account": "me@example.test", "issuer": "GitHub", "digits": 6, "period": 30, "tokenType": "TOTP" } },
+    { "name": "NoOtpBlock", "secret": "JBSWY3DPEHPK3PXP" }
+  ]
+}"#;
+
+#[test]
+fn twofas_services_import_with_and_without_an_otp_block() {
+    let parsed = parse_import_entries(TWOFAS_JSON, "2fas-json").expect("2fas import");
+    assert_eq!(parsed.entries.len(), 2);
+    assert_eq!(parsed.entries[0].title, "GitHub");
+    assert_eq!(parsed.entries[1].title, "NoOtpBlock");
+}
+
+#[test]
+fn a_malformed_secret_is_counted_rather_than_saved_as_a_broken_code() {
+    let broken = r#"{ "services": [ { "name": "Bad", "secret": "!!!!", "otp": { "account": "x" } } ] }"#;
+    let error = parse_import_entries(broken, "2fas-json").err().expect("should be refused");
+    assert!(error.contains("no time-based codes"), "unexpected: {error}");
+}
