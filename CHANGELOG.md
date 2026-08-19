@@ -4,6 +4,19 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.1.2
+
+- Importing no longer changes your passwords. Every CSV import trimmed spaces
+  off each field, so a password saved with a leading or trailing space arrived
+  in your vault without it and no longer opened the account. If you imported
+  before this release, check any sign-in that stopped working.
+- The site shown beside an entry is now the site. An address saved with a
+  user:password@ prefix used to print that password into the list, a query
+  string showed whatever token it carried, and an address saved in capitals
+  appeared as a separate site from the same one saved in lower case.
+- Checking for updates says so when you are already up to date, instead of
+  looking like a button that does nothing.
+
 ## 0.1.1
 
 - Sesame can now check for and install its own updates. The 0.1.0 installer
