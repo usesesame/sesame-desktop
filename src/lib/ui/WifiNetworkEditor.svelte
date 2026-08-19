@@ -54,7 +54,17 @@
     <label>Name <span class="field-hint">How this network appears in your list, e.g. "Home Wi-Fi"</span><input bind:this={titleInput} bind:value={networkDraft.title} required maxlength="160" placeholder="e.g. Home Wi-Fi" autocomplete="off" /></label>
     <label>Network name (SSID)<input bind:value={networkDraft.ssid} maxlength="64" autocomplete="off" /></label>
     <label>Password<input bind:value={networkDraft.password} maxlength="256" autocomplete="off" /></label>
-    <label>Security type <span class="field-hint">Optional, e.g. WPA2</span><input bind:value={networkDraft.securityType} maxlength="32" autocomplete="off" /></label>
+    <label>Security type <span class="field-hint">Optional</span>
+      <input bind:value={networkDraft.securityType} list="wifi-security-types" maxlength="32" autocomplete="off" placeholder="e.g. WPA2" />
+      <datalist id="wifi-security-types">
+        <option value="WPA3"></option>
+        <option value="WPA2/WPA3"></option>
+        <option value="WPA2"></option>
+        <option value="WPA"></option>
+        <option value="WEP"></option>
+        <option value="Open"></option>
+      </datalist>
+    </label>
     <label>Notes<textarea bind:value={networkDraft.notes} rows="4" maxlength="4000"></textarea></label>
     <label>Tags <span class="field-hint">Comma separated, optional</span><input value={networkDraft.tags.join(', ')} on:input={(event) => (networkDraft = { ...networkDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel" /></label>
   </div>
