@@ -1249,6 +1249,7 @@ export async function getBrowserIntegrationStatus(): Promise<BrowserIntegrationS
       manifestReady: false,
       chromeRegistered: false,
       edgeRegistered: false,
+      firefoxRegistered: false,
       ready: false,
       code: 'unsupported',
     }

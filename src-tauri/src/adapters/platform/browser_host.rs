@@ -14,6 +14,7 @@ const HOST_NAME: &str = "app.usesesame.browser";
 pub const HOST_FILE_NAME: &str = "sesame-browser-host.exe";
 const PINNED_CHROMIUM_EXTENSION_ID: &str = "idbkfhhjnniibleeanchljhakfhecnlg";
 const PINNED_CHROMIUM_LAUNCHER_ORIGIN: &str = "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg";
+const PINNED_FIREFOX_EXTENSION_ID: &str = "sesame@usesesame.app";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +24,7 @@ pub struct BrowserIntegrationStatus {
     manifest_ready: bool,
     chrome_registered: bool,
     edge_registered: bool,
+    firefox_registered: bool,
     ready: bool,
     code: &'static str,
 }
@@ -53,11 +55,15 @@ impl RegistrationError {
 struct IntegrationPaths {
     host: PathBuf,
     manifest: PathBuf,
+    /// Firefox reads a different manifest shape, so it gets its own file.
+    firefox_manifest: PathBuf,
 }
 
 pub fn run() {
     crate::diagnostics::record_browser_host_process("host_started");
-    if !launcher_origin_allowed(std::env::args_os().nth(1).as_deref()) {
+    let mut args = std::env::args_os().skip(1);
+    let (first, second) = (args.next(), args.next());
+    if !launcher_allowed(first.as_deref(), second.as_deref()) {
         crate::diagnostics::record_browser_host_process("host_origin_rejected");
         return;
     }
@@ -73,6 +79,17 @@ pub fn run() {
         }
         Err(_) => crate::diagnostics::record_browser_host_process("host_io_error"),
     }
+}
+
+/// Chromium passes the calling extension origin first. Firefox passes the manifest
+/// path first and the extension id second, so each browser is checked where it speaks.
+/// This stays an explicit two-entry allowlist; it is never widened to a wildcard.
+fn launcher_allowed(first: Option<&std::ffi::OsStr>, second: Option<&std::ffi::OsStr>) -> bool {
+    launcher_origin_allowed(first) || firefox_launcher_allowed(second)
+}
+
+fn firefox_launcher_allowed(extension_id: Option<&std::ffi::OsStr>) -> bool {
+    extension_id.is_some_and(|value| value == std::ffi::OsStr::new(PINNED_FIREFOX_EXTENSION_ID))
 }
 
 fn launcher_origin_allowed(origin: Option<&std::ffi::OsStr>) -> bool {
@@ -119,9 +136,25 @@ pub fn register(app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, Regi
             "Sesame could not save its browser connection.",
         )
     })?;
+    let firefox_bytes = firefox_manifest_bytes(&paths.host).map_err(|_| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not prepare its browser connection.",
+        )
+    })?;
+    fs::write(&paths.firefox_manifest, firefox_bytes).map_err(|_| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not save its browser connection.",
+        )
+    })?;
 
-    for registry_path in [chrome_registry_path(), edge_registry_path()] {
-        write_registry_default(registry_path, &paths.manifest).map_err(|_| {
+    for (registry_path, manifest) in [
+        (chrome_registry_path(), &paths.manifest),
+        (edge_registry_path(), &paths.manifest),
+        (firefox_registry_path(), &paths.firefox_manifest),
+    ] {
+        write_registry_default(registry_path, manifest).map_err(|_| {
             RegistrationError::new(
                 "registration_registry_failed",
                 "Sesame could not register its browser connection.",
@@ -150,24 +183,28 @@ pub fn register(_app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, Reg
 #[cfg(windows)]
 pub fn status(app: &tauri::AppHandle) -> BrowserIntegrationStatus {
     let Ok(paths) = integration_paths(app) else {
-        return browser_status(true, false, false, false, false);
+        return browser_status(true, false, false, false, false, false);
     };
     let host_available = paths.host.is_file();
-    let manifest_ready = manifest_matches(&paths.manifest, &paths.host);
+    let manifest_ready = manifest_matches(&paths.manifest, &paths.host)
+        && firefox_manifest_matches(&paths.firefox_manifest, &paths.host);
     let chrome_registered = registry_default_matches(chrome_registry_path(), &paths.manifest);
     let edge_registered = registry_default_matches(edge_registry_path(), &paths.manifest);
+    let firefox_registered =
+        registry_default_matches(firefox_registry_path(), &paths.firefox_manifest);
     browser_status(
         true,
         host_available,
         manifest_ready,
         chrome_registered,
         edge_registered,
+        firefox_registered,
     )
 }
 
 #[cfg(not(windows))]
 pub fn status(_app: &tauri::AppHandle) -> BrowserIntegrationStatus {
-    browser_status(false, false, false, false, false)
+    browser_status(false, false, false, false, false, false)
 }
 
 fn browser_status(
@@ -176,16 +213,21 @@ fn browser_status(
     manifest_ready: bool,
     chrome_registered: bool,
     edge_registered: bool,
+    firefox_registered: bool,
 ) -> BrowserIntegrationStatus {
-    let ready =
-        supported && host_available && manifest_ready && chrome_registered && edge_registered;
+    let ready = supported
+        && host_available
+        && manifest_ready
+        && chrome_registered
+        && edge_registered
+        && firefox_registered;
     let code = if !supported {
         "unsupported"
     } else if !host_available {
         "hostMissing"
     } else if !manifest_ready {
         "manifestMissing"
-    } else if !chrome_registered || !edge_registered {
+    } else if !chrome_registered || !edge_registered || !firefox_registered {
         "registrationMissing"
     } else {
         "ready"
@@ -196,6 +238,7 @@ fn browser_status(
         manifest_ready,
         chrome_registered,
         edge_registered,
+        firefox_registered,
         ready,
         code,
     }
@@ -221,6 +264,7 @@ fn integration_paths(app: &tauri::AppHandle) -> Result<IntegrationPaths, Registr
     Ok(IntegrationPaths {
         host: app_executable.with_file_name(HOST_FILE_NAME),
         manifest: folder.join(format!("{HOST_NAME}.json")),
+        firefox_manifest: folder.join(format!("{HOST_NAME}.firefox.json")),
     })
 }
 
@@ -234,6 +278,31 @@ fn manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
             format!("chrome-extension://{PINNED_CHROMIUM_EXTENSION_ID}/")
         ]
     }))
+}
+
+fn firefox_manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec_pretty(&serde_json::json!({
+        "name": HOST_NAME,
+        "description": "Sesame Browser Helper native host",
+        "path": host,
+        "type": "stdio",
+        "allowed_extensions": [PINNED_FIREFOX_EXTENSION_ID]
+    }))
+}
+
+fn firefox_manifest_matches(manifest_path: &Path, host: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(manifest_path) else {
+        return false;
+    };
+    let Ok(actual) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Ok(expected) = firefox_manifest_bytes(host)
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes))
+    else {
+        return false;
+    };
+    actual == expected
 }
 
 fn manifest_matches(manifest_path: &Path, host: &Path) -> bool {
@@ -259,6 +328,11 @@ fn chrome_registry_path() -> &'static str {
 #[cfg(windows)]
 fn edge_registry_path() -> &'static str {
     r"Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser"
+}
+
+#[cfg(windows)]
+fn firefox_registry_path() -> &'static str {
+    r"Software\Mozilla\NativeMessagingHosts\app.usesesame.browser"
 }
 
 #[cfg(windows)]
@@ -516,4 +590,61 @@ fn write_message<W: Write>(output: &mut W, response: &BrowserResponse) -> io::Re
     output.write_all(&(bytes.len() as u32).to_le_bytes())?;
     output.write_all(&bytes)?;
     output.flush()
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn the_pinned_chromium_origin_is_accepted_bare_and_with_a_slash() {
+        assert!(launcher_allowed(
+            Some(OsStr::new(PINNED_CHROMIUM_LAUNCHER_ORIGIN)),
+            None
+        ));
+        assert!(launcher_allowed(
+            Some(OsStr::new(&format!("{PINNED_CHROMIUM_LAUNCHER_ORIGIN}/"))),
+            None
+        ));
+    }
+
+    /// Firefox passes the manifest path first and the extension id second.
+    #[test]
+    fn the_pinned_firefox_extension_id_is_accepted_in_the_second_argument() {
+        assert!(launcher_allowed(
+            Some(OsStr::new(
+                r"C:\Users\someone\AppData\Local\Sesame\host.json"
+            )),
+            Some(OsStr::new(PINNED_FIREFOX_EXTENSION_ID)),
+        ));
+    }
+
+    #[test]
+    fn another_extension_is_refused_in_either_position() {
+        assert!(!launcher_allowed(
+            Some(OsStr::new(
+                "chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh"
+            )),
+            None
+        ));
+        assert!(!launcher_allowed(
+            Some(OsStr::new("/path/to/host.json")),
+            Some(OsStr::new("someone-else@example.test")),
+        ));
+    }
+
+    #[test]
+    fn a_launch_with_no_arguments_is_refused() {
+        assert!(!launcher_allowed(None, None));
+    }
+
+    /// The firefox id must not be honoured where Chromium states its origin.
+    #[test]
+    fn the_firefox_id_is_not_accepted_in_the_chromium_position() {
+        assert!(!launcher_allowed(
+            Some(OsStr::new(PINNED_FIREFOX_EXTENSION_ID)),
+            None
+        ));
+    }
 }
