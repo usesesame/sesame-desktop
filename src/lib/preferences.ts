@@ -12,6 +12,7 @@ const KEYS = {
   panelWidths: 'sesame-panel-widths',
   sortMode: 'sesame-sort-mode',
   quickAccessShortcut: 'sesame-quick-access-shortcut',
+  switchingChecklist: 'sesame-switching-checklist-v1',
 } as const
 
 export const DEFAULT_QUICK_ACCESS_SHORTCUT = 'Ctrl+Alt+S'
@@ -173,4 +174,41 @@ export function storePanelWidths(widths: PanelWidths): void {
     list: validWidth(widths.list, PANEL_WIDTH_LIMITS.list),
     rail: validWidth(widths.rail, PANEL_WIDTH_LIMITS.rail),
   }))
+}
+
+export interface SwitchingChecklist {
+  regularSites: boolean
+  recoveryDetails: boolean
+  browserFill: boolean
+  dualRun: boolean
+}
+
+const emptySwitchingChecklist = (): SwitchingChecklist => ({
+  regularSites: false,
+  recoveryDetails: false,
+  browserFill: false,
+  dualRun: false,
+})
+
+// The dual-run period runs for two weeks, so these ticks outlive the guide that sets them.
+export function readSwitchingChecklist(): SwitchingChecklist {
+  const raw = read(KEYS.switchingChecklist)
+  if (!raw) return emptySwitchingChecklist()
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return emptySwitchingChecklist()
+    const record = parsed as Record<string, unknown>
+    return {
+      regularSites: record.regularSites === true,
+      recoveryDetails: record.recoveryDetails === true,
+      browserFill: record.browserFill === true,
+      dualRun: record.dualRun === true,
+    }
+  } catch {
+    return emptySwitchingChecklist()
+  }
+}
+
+export function storeSwitchingChecklist(checklist: SwitchingChecklist): void {
+  write(KEYS.switchingChecklist, JSON.stringify(checklist))
 }
