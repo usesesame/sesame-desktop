@@ -13,6 +13,9 @@
   let copiedId = ''
   let copiedTimer: number | undefined
   let ticker: number | undefined
+  let refreshing = false
+  let failures = 0
+  let retryAt = 0
 
   $: filtered = filterCodes(codes, query)
 
@@ -23,13 +26,22 @@
       code.title.toLowerCase().includes(needle) || code.site.toLowerCase().includes(needle))
   }
 
+  // Guarded and backed off: a failure leaves every code at zero, which would
+  // otherwise ask for a fresh read every second for as long as the view is open.
   async function load() {
+    if (refreshing || Date.now() < retryAt) return
+    refreshing = true
     try {
       codes = await listTotpCodes()
       loadFailed = false
+      failures = 0
+      retryAt = 0
     } catch {
+      failures += 1
+      retryAt = Date.now() + (failures >= 3 ? 5_000 : 1_500)
       loadFailed = true
     } finally {
+      refreshing = false
       loading = false
     }
   }

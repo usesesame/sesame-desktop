@@ -219,3 +219,15 @@ fn a_malformed_secret_is_counted_rather_than_saved_as_a_broken_code() {
     let error = parse_import_entries(broken, "2fas-json").err().expect("should be refused");
     assert!(error.contains("no time-based codes"), "unexpected: {error}");
 }
+
+#[test]
+fn a_link_with_no_label_is_named_rather_than_dropped_in_silence() {
+    let parsed = parse_import_entries(
+        "otpauth://totp/?secret=JBSWY3DPEHPK3PXP&digits=6&period=30\n",
+        "otpauth-txt",
+    )
+    .expect("otpauth import");
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].title, "Imported code");
+    assert!(parsed.entries[0].totp.is_some());
+}
