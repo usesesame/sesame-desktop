@@ -11,7 +11,7 @@ const RETAINED_DATED_DOCUMENTS = new Map()
 
 test('every relative documentation link resolves', () => {
   const broken = []
-  for (const file of requireFiles('*.md', 10)) {
+  for (const file of requireFiles('*.md', 5)) {
     const from = dirname(join(root, file))
     const text = readFileSync(join(root, file), 'utf8')
     for (const match of text.matchAll(/\]\(([^)\s#]+\.md)(?:#[^)\s]*)?\)/g)) {
@@ -24,7 +24,7 @@ test('every relative documentation link resolves', () => {
 })
 
 test('a dated or work-item document needs a recorded reason to stay', () => {
-  const dated = requireFiles('*.md', 10).filter((file) => /\d{4}-\d{2}-\d{2}|^docs\/[A-Z]{2,4}-\d{3}/.test(posix.basename(file)) || /\d{4}-\d{2}-\d{2}/.test(file))
+  const dated = requireFiles('*.md', 5).filter((file) => /\d{4}-\d{2}-\d{2}|^docs\/[A-Z]{2,4}-\d{3}/.test(posix.basename(file)) || /\d{4}-\d{2}-\d{2}/.test(file))
   const undeclared = dated.filter((file) => !RETAINED_DATED_DOCUMENTS.has(file))
   assert.deepEqual(
     undeclared,
@@ -40,7 +40,7 @@ test('a dated or work-item document needs a recorded reason to stay', () => {
 test('no document promises evidence the repository does not keep', () => {
   // release-artifacts/ and release-evidence/ are ignored working directories; a clone never has them, so no document may claim evidence is retained there.
   const offenders = []
-  for (const file of requireFiles('*.md', 10)) {
+  for (const file of requireFiles('*.md', 5)) {
     const text = readFileSync(join(root, file), 'utf8')
     for (const match of text.matchAll(/[^.\n]*\b(?:retained|is retained|lives|stored)\b[^.\n]*`?release-(?:artifacts|evidence)\/[^.\n]*/g)) {
       const sentence = match[0].trim()

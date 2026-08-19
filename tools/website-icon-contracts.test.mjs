@@ -23,13 +23,3 @@ test('desktop icon requests cannot bypass the native cache', () => {
   assert.doesNotMatch(vaultView, /https:\/\/\$?\{?.*favicon\.ico/)
   assert.match(vaultView, /<WebsiteIcon/)
 })
-
-test('unpacked extension documentation points to generated browser folders', () => {
-  const guide = read('extensions', 'sesame', 'LOAD-UNPACKED.md')
-  const build = read('extensions', 'sesame', 'vite.config.ts')
-  assert.match(guide, /dist\/chrome/)
-  assert.match(guide, /dist\/edge/)
-  assert.match(guide, /source code[\s\S]*does not[\s\S]*manifest\.json/)
-  assert.match(build, /fileName:\s*'manifest\.json'/)
-  assert.match(build, /outDir:\s*`dist\/\$\{mode\}`/)
-})

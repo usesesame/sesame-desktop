@@ -19,7 +19,7 @@ function filesUnder(directory) {
   })
 }
 
-test('the future desktop repository owns a closed standalone command surface', () => {
+test('the desktop repository owns a closed standalone command surface', () => {
   const boundary = JSON.parse(read('desktop-boundary.json'))
   assert.equal(boundary.schemaVersion, 1)
   for (const directory of boundary.directories) {
@@ -35,7 +35,11 @@ test('the future desktop repository owns a closed standalone command surface', (
 
   const pkg = JSON.parse(read('package.json'))
   assert.equal(pkg.scripts['desktop:version:check'], 'node tools/version-contract.mjs check')
-  assert.equal(pkg.scripts['desktop:contracts'], 'node --test tools/desktop-boundary-contracts.test.mjs')
+  // The glob has to stay flat. tools/cross-repo/ holds suites that read former
+  // sibling products, and a recursive glob would drag them back into this gate.
+  assert.equal(pkg.scripts['desktop:contracts'], 'npm run contracts')
+  assert.match(pkg.scripts.contracts, /node --test "tools\/\*-contracts\.test\.mjs"/)
+  assert.doesNotMatch(pkg.scripts.contracts, /tools\/\*\*/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:version:check/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:lint:js/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:contracts/)
