@@ -31,6 +31,7 @@
   import ModalHost from './lib/ui/ModalHost.svelte'
   import WorkspaceShell from './lib/ui/WorkspaceShell.svelte'
   import UnlockScreen from './lib/ui/UnlockScreen.svelte'
+  import WelcomeScreen from './lib/ui/WelcomeScreen.svelte'
   import RecoveryKitScreen from './lib/ui/RecoveryKitScreen.svelte'
   import ImportModal from './lib/ui/ImportModal.svelte'
   import LoginEditor from './lib/ui/LoginEditor.svelte'
@@ -122,6 +123,7 @@
     onRecoveryVerified: () => settingsController.markRecoveryVerified(),
   })
   const onboardingState = onboardingController.state
+  let setupWelcomeSeen = false
   onPinSetupFinished = () => {
     if (onboardingState.value().step === 'pin-choice') onboardingController.advance()
   }
@@ -426,6 +428,8 @@
       onSaveToFile={$onboardingState.step === 'recovery-verify' ? undefined : (kit) => exportRecoveryKit(kit)}
     />
   {/key}
+{:else if !$vault.status.unlocked && !$vault.status.exists && !setupWelcomeSeen}
+  <WelcomeScreen onStart={() => (setupWelcomeSeen = true)} />
 {:else if !$vault.status.unlocked}
   <UnlockScreen
     status={$vault.status}
@@ -639,6 +643,7 @@
         bind:confirmPin={$settingsState.pinSetupConfirm}
         errorMessage={$feedbackState.errorMessage}
         working={$settingsState.pinWorking}
+        setupStep={$onboardingState.step === 'pin-choice' ? 3 : 0}
         onEdit={feedbackController.clearError}
         onCancel={settingsController.closePinSetup}
         onSave={settingsController.savePin}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
+  import SetupProgress from './SetupProgress.svelte'
 
   export let pin = ''
   export let confirmPin = ''
@@ -9,6 +10,7 @@
   export let onCancel: () => void
   export let onSave: () => void
   export let onEdit: () => void = () => {}
+  export let setupStep = 0
 
   $: pinsComplete = pin.length === 6 && confirmPin.length === 6
   $: pinsMatch = pin === confirmPin
@@ -40,7 +42,10 @@
   modalClass="pin-setup-modal"
   ariaBusy={working}
 >
-  <span class="confirm-icon"><Icon name="key" size={20} /></span>
+  <div class="setup-head">
+    <span class="confirm-icon"><Icon name="key" size={20} /></span>
+    {#if setupStep}<SetupProgress step={setupStep} />{/if}
+  </div>
   <h2 id="pin-setup-heading">Set a PIN</h2>
   <p id="pin-setup-description">Use six digits for everyday unlock on this device. Your master password or recovery kit remains the fallback.</p>
   <form novalidate on:submit|preventDefault={onSave}>
