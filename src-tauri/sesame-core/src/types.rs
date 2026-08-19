@@ -1733,6 +1733,8 @@ pub struct AegisInfo {
     #[serde(default)]
     pub secret: String,
     #[serde(default)]
+    pub algo: String,
+    #[serde(default)]
     pub digits: Option<u32>,
     #[serde(default)]
     pub period: Option<u64>,
@@ -1742,6 +1744,9 @@ pub struct AegisInfo {
 pub struct TwoFasExport {
     #[serde(default)]
     pub services: Vec<TwoFasService>,
+    /// Present when the export was made with a password, in which case services is empty.
+    #[serde(default, rename = "servicesEncrypted")]
+    pub services_encrypted: String,
 }
 
 #[derive(Deserialize)]
@@ -1759,6 +1764,8 @@ pub struct TwoFasService {
 pub struct TwoFasOtp {
     #[serde(default)]
     pub account: String,
+    #[serde(default)]
+    pub algorithm: String,
     #[serde(default)]
     pub issuer: String,
     #[serde(default)]

@@ -182,7 +182,7 @@ fn a_file_with_no_links_is_refused_with_a_readable_message() {
 const AEGIS_JSON: &str = r#"{
   "db": { "entries": [
     { "type": "totp", "name": "me@example.test", "issuer": "GitHub",
-      "info": { "secret": "JBSWY3DPEHPK3PXP", "digits": 6, "period": 30 } },
+      "info": { "secret": "JBSWY3DPEHPK3PXP", "digits": 6, "period": 30, "algo": "SHA256" } },
     { "type": "hotp", "name": "counter", "issuer": "Legacy",
       "info": { "secret": "JBSWY3DPEHPK3PXP" } }
   ] }
@@ -230,4 +230,44 @@ fn a_link_with_no_label_is_named_rather_than_dropped_in_silence() {
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].title, "Imported code");
     assert!(parsed.entries[0].totp.is_some());
+}
+
+#[test]
+fn an_aegis_hash_algorithm_survives_the_import() {
+    let parsed = parse_import_entries(AEGIS_JSON, "aegis-json").expect("aegis import");
+    let totp = parsed.entries[0].totp.as_deref().expect("totp");
+    // Without this the code imports cleanly and then generates the wrong digits
+    // forever, because otpauth treats a missing algorithm as SHA1.
+    assert!(totp.contains("algorithm=SHA256"), "algorithm lost: {totp}");
+}
+
+#[test]
+fn an_unknown_hash_algorithm_is_refused_rather_than_read_as_sha1() {
+    let export = r#"{ "db": { "entries": [
+        { "type": "totp", "name": "me", "issuer": "Odd",
+          "info": { "secret": "JBSWY3DPEHPK3PXP", "algo": "MD5" } } ] } }"#;
+    let error = parse_import_entries(export, "aegis-json")
+        .err()
+        .expect("should be refused");
+    assert!(error.contains("no time-based codes"), "unexpected: {error}");
+}
+
+#[test]
+fn a_password_protected_2fas_export_says_so() {
+    let export = r#"{ "services": [], "servicesEncrypted": "abc123", "schemaVersion": 4 }"#;
+    let error = parse_import_entries(export, "2fas-json")
+        .err()
+        .expect("should be refused");
+    assert!(error.contains("password protected"), "unexpected: {error}");
+}
+
+#[test]
+fn an_encoded_colon_in_a_label_does_not_split_the_issuer() {
+    let parsed = parse_import_entries(
+        "otpauth://totp/ACME%3A%20Inc:me@example.test?secret=JBSWY3DPEHPK3PXP\n",
+        "otpauth-txt",
+    )
+    .expect("otpauth import");
+    assert_eq!(parsed.entries[0].title, "ACME: Inc");
+    assert_eq!(parsed.entries[0].username, "me@example.test");
 }

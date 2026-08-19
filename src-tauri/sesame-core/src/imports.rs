@@ -441,6 +441,13 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
     if !key.key_fingerprint.trim().is_empty() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
+    // SshKey has no legacy_fields, so custom fields cannot be carried. Count them
+    // rather than letting the report claim nothing was left behind.
+    for field in &item.fields {
+        if field.value.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+            fidelity.record(FieldDisposition::IntentionallyOmitted);
+        }
+    }
     let now = unix_timestamp();
     SshKey {
         id: random_id(),
@@ -1255,10 +1262,13 @@ fn otpauth_labels(url: &str) -> (String, String) {
         .map(|(_, rest)| rest)
         .unwrap_or("");
     let (label, query) = path.split_once('?').unwrap_or((path, ""));
-    let label = percent_decode(label);
+    // Split first, decode second: an encoded colon belongs to the text, not the separator.
     let (label_issuer, account) = match label.split_once(':') {
-        Some((issuer, account)) => (issuer.trim().to_string(), account.trim().to_string()),
-        None => (String::new(), label.trim().to_string()),
+        Some((issuer, account)) => (
+            percent_decode(issuer).trim().to_string(),
+            percent_decode(account).trim().to_string(),
+        ),
+        None => (String::new(), percent_decode(label).trim().to_string()),
     };
     let query_issuer = query
         .split('&')
@@ -1294,7 +1304,25 @@ fn percent_decode(value: &str) -> String {
 }
 
 /// Builds the otpauth link the vault stores, so digits and period survive the import.
-fn otpauth_url(issuer: &str, account: &str, secret: &str, digits: u32, period: u64) -> String {
+/// SHA1 is the otpauth default. An unknown name must not fall back to it: the
+/// entry would parse, import, and then generate codes that never work.
+fn normalised_algorithm(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "" | "SHA1" => Some("SHA1"),
+        "SHA256" => Some("SHA256"),
+        "SHA512" => Some("SHA512"),
+        _ => None,
+    }
+}
+
+fn otpauth_url(
+    issuer: &str,
+    account: &str,
+    secret: &str,
+    digits: u32,
+    period: u64,
+    algorithm: &str,
+) -> String {
     let label = if issuer.trim().is_empty() {
         encode_component(account)
     } else {
@@ -1307,7 +1335,7 @@ fn otpauth_url(issuer: &str, account: &str, secret: &str, digits: u32, period: u
     if !issuer.trim().is_empty() {
         url.push_str(&format!("&issuer={}", encode_component(issuer)));
     }
-    url.push_str(&format!("&digits={digits}&period={period}"));
+    url.push_str(&format!("&digits={digits}&period={period}&algorithm={algorithm}"));
     url
 }
 
@@ -1337,12 +1365,17 @@ pub fn import_aegis_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>,
             fidelity.record(FieldDisposition::IntentionallyOmitted);
             continue;
         }
+        let Some(algorithm) = normalised_algorithm(&item.info.algo) else {
+            fidelity.record(FieldDisposition::Malformed);
+            continue;
+        };
         let url = otpauth_url(
             &item.issuer,
             &item.name,
             &item.info.secret,
             item.info.digits.unwrap_or(6),
             item.info.period.unwrap_or(30),
+            algorithm,
         );
         if let Some(entry) = totp_entry(&item.issuer, &item.name, url, &mut fidelity) {
             entries.push(entry);
@@ -1358,6 +1391,11 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
     let export: TwoFasExport = serde_json::from_str(content).map_err(|_| {
         "Sesame could not read that 2FAS export. Export it again without a password.".to_string()
     })?;
+    if !export.services_encrypted.trim().is_empty() {
+        return Err(
+            "That 2FAS export is password protected. Export it again without a password.".into(),
+        );
+    }
     let mut fidelity = FidelityCounts::default();
     let mut entries = Vec::new();
     for service in export.services {
@@ -1371,12 +1409,17 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
         } else {
             otp.issuer.clone()
         };
+        let Some(algorithm) = normalised_algorithm(&otp.algorithm) else {
+            fidelity.record(FieldDisposition::Malformed);
+            continue;
+        };
         let url = otpauth_url(
             &issuer,
             &otp.account,
             &service.secret,
             otp.digits.unwrap_or(6),
             otp.period.unwrap_or(30),
+            algorithm,
         );
         if let Some(entry) = totp_entry(&issuer, &otp.account, url, &mut fidelity) {
             entries.push(entry);
