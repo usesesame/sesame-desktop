@@ -92,3 +92,64 @@ fn an_unreasonably_large_file_is_refused_before_it_is_parsed() {
 fn an_unknown_source_is_refused_rather_than_guessed_at() {
     assert!(parse_import_entries("name,url,username,password\n", "not-a-real-manager").is_err());
 }
+
+const BITWARDEN_SSH_AND_PASSKEY: &str = r#"{
+  "folders": [],
+  "items": [
+    {
+      "type": 5,
+      "name": "Deploy key",
+      "notes": "build server",
+      "sshKey": {
+        "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+        "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build",
+        "keyFingerprint": "SHA256:zzz"
+      }
+    },
+    {
+      "type": 1,
+      "name": "Example",
+      "login": {
+        "username": "person",
+        "password": "secret",
+        "uris": [{ "uri": "https://example.test" }],
+        "fido2Credentials": [
+          { "credentialId": "one", "rpId": "example.test" },
+          { "credentialId": "two", "rpId": "example.test" }
+        ]
+      }
+    }
+  ]
+}"#;
+
+#[test]
+fn a_bitwarden_ssh_key_becomes_an_ssh_key_item() {
+    let parsed = parse_import_entries(BITWARDEN_SSH_AND_PASSKEY, "bitwarden-json")
+        .expect("Bitwarden JSON import");
+    assert_eq!(parsed.ssh_keys.len(), 1);
+    let key = &parsed.ssh_keys[0];
+    assert_eq!(key.title, "Deploy key");
+    assert_eq!(key.key_type, "ssh-ed25519");
+    assert!(key.private_key.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+    assert_eq!(key.public_key, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build");
+    assert_eq!(key.notes, "build server");
+}
+
+#[test]
+fn a_bitwarden_ssh_key_is_no_longer_counted_as_unsupported() {
+    let parsed = parse_import_entries(BITWARDEN_SSH_AND_PASSKEY, "bitwarden-json")
+        .expect("Bitwarden JSON import");
+    assert_eq!(parsed.intentionally_omitted_items, 0);
+    assert_eq!(parsed.fidelity.unsupported_items.intentionally_omitted, 0);
+}
+
+#[test]
+fn bitwarden_passkeys_are_reported_rather_than_dropped_in_silence() {
+    let parsed = parse_import_entries(BITWARDEN_SSH_AND_PASSKEY, "bitwarden-json")
+        .expect("Bitwarden JSON import");
+    assert_eq!(parsed.passkeys_not_imported, 2);
+    assert_eq!(parsed.fidelity.passkeys.intentionally_omitted, 2);
+    // The login carrying them still imports normally.
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].password, "secret");
+}

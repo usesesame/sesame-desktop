@@ -401,6 +401,9 @@ pub struct ImportPreview {
     pub secure_notes: usize,
     pub cards: usize,
     pub identities: usize,
+    pub ssh_keys: usize,
+    /// Passkeys are readable in the export but Sesame cannot store them yet.
+    pub passkeys_not_imported: usize,
     pub intentionally_omitted_items: usize,
     pub fidelity: ImportFidelity,
 }
@@ -444,6 +447,8 @@ pub struct ImportFidelity {
     pub secure_notes: FidelityCounts,
     pub cards: FidelityCounts,
     pub identities: FidelityCounts,
+    pub ssh_keys: FidelityCounts,
+    pub passkeys: FidelityCounts,
     pub unsupported_items: FidelityCounts,
 }
 
@@ -463,6 +468,7 @@ pub struct ImportResult {
     pub imported_secure_notes: usize,
     pub imported_cards: usize,
     pub imported_identities: usize,
+    pub imported_ssh_keys: usize,
     pub skipped_exact_duplicates: usize,
     pub revision_backup_name: Option<String>,
 }
@@ -1717,9 +1723,26 @@ pub struct BitwardenJsonItem {
     pub card: Option<BitwardenJsonCard>,
     #[serde(default)]
     pub identity: Option<BitwardenJsonIdentity>,
+    #[serde(default, rename = "sshKey")]
+    pub ssh_key: Option<BitwardenJsonSshKey>,
     #[serde(default)]
     pub fields: Vec<BitwardenJsonField>,
 }
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BitwardenJsonSshKey {
+    #[serde(default)]
+    pub private_key: String,
+    #[serde(default)]
+    pub public_key: String,
+    #[serde(default)]
+    pub key_fingerprint: String,
+}
+
+/// Counted, never stored: Sesame has no passkey item yet, and silent loss is worse than a number.
+#[derive(Deserialize)]
+pub struct BitwardenJsonPasskey {}
 
 #[derive(Deserialize, Default)]
 pub struct BitwardenJsonIdentity {
@@ -1787,6 +1810,8 @@ pub struct BitwardenJsonLogin {
     pub totp: String,
     #[serde(default)]
     pub uris: Vec<BitwardenJsonUri>,
+    #[serde(default, rename = "fido2Credentials")]
+    pub fido2_credentials: Vec<BitwardenJsonPasskey>,
 }
 
 #[derive(Deserialize)]

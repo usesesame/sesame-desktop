@@ -101,7 +101,10 @@ export function createImportController({ stores, feedback, modal, refreshDiagnos
         const identities = result.importedIdentities
           ? ` ${result.importedIdentities} saved ${result.importedIdentities === 1 ? 'identity was' : 'identities were'} imported too.`
           : ''
-        feedback.showNotice('Import complete', `${result.importedEntries} ${result.importedEntries === 1 ? 'login was' : 'logins were'} imported locally.${notes}${cards}${identities}${skipped}${undo}`)
+        const sshKeys = result.importedSshKeys
+          ? ` ${result.importedSshKeys} SSH ${result.importedSshKeys === 1 ? 'key was' : 'keys were'} imported too.`
+          : ''
+        feedback.showNotice('Import complete', `${result.importedEntries} ${result.importedEntries === 1 ? 'login was' : 'logins were'} imported locally.${notes}${cards}${identities}${sshKeys}${skipped}${undo}`)
         if (result.snapshot.entries[0]) await selectEntry(result.snapshot.entries[0].id)
       } catch (error) {
         void recordDiagnostic('import_commit', 'failed')

@@ -436,8 +436,8 @@ export async function previewImportFile(path: string, source: ImportSource): Pro
     return {
       importId: 'preview-import',
       preview: {
-        totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, intentionallyOmittedItems: 0,
-        fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, unsupportedItems: { ...emptyFidelityCounts } },
+        totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 1, passkeysNotImported: 2, intentionallyOmittedItems: 0,
+        fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts, imported: 2 }, passkeys: { ...emptyFidelityCounts, intentionallyOmitted: 2 }, unsupportedItems: { ...emptyFidelityCounts } },
       },
     }
   }
@@ -445,7 +445,7 @@ export async function previewImportFile(path: string, source: ImportSource): Pro
 }
 
 export async function commitImport(importId: string, skipExactDuplicates: boolean): Promise<ImportResult> {
-  if (previewMode) return { snapshot: previewSnapshot, importedEntries: 3, importedSecureNotes: 0, importedCards: 0, importedIdentities: 0, skippedExactDuplicates: 0 }
+  if (previewMode) return { snapshot: previewSnapshot, importedEntries: 3, importedSecureNotes: 0, importedCards: 0, importedIdentities: 0, importedSshKeys: 1, skippedExactDuplicates: 0 }
   return invoke<ImportResult>('commit_import', { importId, skipExactDuplicates })
 }
 

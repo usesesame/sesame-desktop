@@ -12,7 +12,7 @@ use crate::vault::snapshot::{
 use crate::vault::storage::{commit_payload_change, materialize_entry_folder};
 use crate::vault::{
     Card, ExistingImportRelation, Identity, ImportPreview, ImportPreviewResult, ImportResult,
-    SecureNote, TaggedItem, VaultEntry, VaultPayload, VaultResult, VaultState,
+    SecureNote, SshKey, TaggedItem, VaultEntry, VaultPayload, VaultResult, VaultState,
 };
 
 /// Same global ID namespace as editor, history, and trash mutations.
@@ -22,6 +22,7 @@ fn insert_imported_items(
     secure_notes: Vec<SecureNote>,
     cards: Vec<Card>,
     identities: Vec<Identity>,
+    ssh_keys: Vec<SshKey>,
 ) -> VaultResult<()> {
     for entry in &mut entries {
         materialize_entry_folder(payload, entry)?;
@@ -37,6 +38,9 @@ fn insert_imported_items(
     }
     for identity in identities {
         payload.insert_active_item(TaggedItem::Identity(identity))?;
+    }
+    for key in ssh_keys {
+        payload.insert_active_item(TaggedItem::SshKey(key))?;
     }
     Ok(())
 }
@@ -131,6 +135,8 @@ pub fn preview_import(
         secure_notes: parsed.secure_notes.len(),
         cards: parsed.cards.len(),
         identities: parsed.identities.len(),
+        ssh_keys: parsed.ssh_keys.len(),
+        passkeys_not_imported: parsed.passkeys_not_imported,
         intentionally_omitted_items: parsed.intentionally_omitted_items,
         fidelity: parsed.fidelity.clone(),
     };
@@ -163,7 +169,7 @@ pub fn commit_import(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before importing.")?;
-    let (imported, secure_notes, cards, identities) = {
+    let (imported, secure_notes, cards, identities, ssh_keys) = {
         let mut slot = state
             .pending_import
             .lock()
@@ -191,9 +197,17 @@ pub fn commit_import(
     let imported_secure_notes = secure_notes.len();
     let imported_cards = cards.len();
     let imported_identities = identities.len();
-    // No duplicate-key model for notes, cards, and identities: every one is kept.
+    let imported_ssh_keys = ssh_keys.len();
+    // No duplicate-key model for notes, cards, identities, and SSH keys: every one is kept.
     let mut next_payload = session.payload.clone();
-    insert_imported_items(&mut next_payload, entries, secure_notes, cards, identities)?;
+    insert_imported_items(
+        &mut next_payload,
+        entries,
+        secure_notes,
+        cards,
+        identities,
+        ssh_keys,
+    )?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(ImportResult {
@@ -201,6 +215,7 @@ pub fn commit_import(
         imported_secure_notes,
         imported_cards,
         imported_identities,
+        imported_ssh_keys,
         imported_entries,
         skipped_exact_duplicates,
         revision_backup_name,
