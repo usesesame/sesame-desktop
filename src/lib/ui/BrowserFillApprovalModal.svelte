@@ -70,6 +70,11 @@
 
   <div class="browser-fill-footer">
     <span>{remaining > 0 ? `Expires in ${remaining}s` : 'Request expired'}</span>
+    <label class="browser-fill-remember">
+      <input type="checkbox" bind:checked={$browserFill.remember} disabled={working} />
+      <span><strong>Fill this login here without asking for 15 minutes</strong><small>Applies to {request.hostname} and this login only. Sesame forgets it when the vault locks or changes, and it is never saved to disk.</small></span>
+    </label>
+
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
       <button type="button" class="primary-button" disabled={!$browserFill.selectedId || working || remaining === 0} on:click={onConfirm}>

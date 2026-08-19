@@ -670,7 +670,7 @@
         onOpenDeleteVault={cleanupController.openDeleteVault}
       />
     {:else if active?.kind === 'delete-vault'}
-      <DeleteVaultModal bind:deleteVaultText={$cleanupState.deleteVaultText} dataActionWorking={$cleanupState.dataActionWorking} onCancel={cleanupController.closeDeleteVault} onConfirm={cleanupController.confirmDeleteVault} />
+      <DeleteVaultModal bind:deleteVaultPassword={$cleanupState.deleteVaultPassword} errorMessage={$feedbackState.errorMessage} dataActionWorking={$cleanupState.dataActionWorking} onCancel={cleanupController.closeDeleteVault} onConfirm={cleanupController.confirmDeleteVault} />
     {:else if active?.kind === 'delete-login'}
       <ConfirmDeleteModal deleteCandidate={$cleanupState.deleteCandidate} deleteBatch={$cleanupState.deleteBatch} cleanupWorking={$cleanupState.cleanupWorking} onCancel={cleanupController.cancelDelete} onConfirm={cleanupController.confirmDelete} />
     {:else if active?.kind === 'merge'}

@@ -1054,10 +1054,9 @@ button.no-totp:hover { filter: brightness(.97); }
 .data-confirm { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text); font-size: var(--type-2); line-height: 1.45; }
 .data-confirm input { width: 17px; height: 17px; flex: none; margin-top: 1px; accent-color: var(--accent); }
 .delete-vault-modal > p { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
-.delete-vault-modal > p code { border-radius: 4px; padding: 1px 4px; color: var(--danger); background: var(--danger-tint); font-family: var(--font-code); font-size: .9em; font-weight: 700; }
-.delete-vault-input { display: grid; gap: var(--space-2); margin-top: var(--space-5); color: var(--text); font-size: var(--type-2); font-weight: 700; }
-.delete-vault-input input { width: 100%; border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface); font-family: var(--font-code); font-size: var(--type-3); outline: none; }
-.delete-vault-input input:focus { border-color: var(--danger); box-shadow: var(--field-ring-danger); outline: none; }
+.delete-vault-input { display: block; margin-top: var(--space-5); color: var(--text); font-size: var(--type-2); font-weight: 700; }
+.delete-vault-modal input { width: 100%; margin-top: var(--space-2); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface); font-size: var(--type-3); outline: none; }
+.delete-vault-modal input:focus { border-color: var(--danger); box-shadow: var(--field-ring-danger); outline: none; }
 
 /* =========================================================================
    Feature: import

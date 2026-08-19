@@ -67,18 +67,25 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
     }, browserFill.value().request ? 500 : 3_000)
   }
 
-  async function resolve(loginId: string | null) {
+  async function resolve(loginId: string | null, remember = false) {
     const current = browserFill.value()
     const request = current.request
     if (!request || current.working) return
     browserFill.patch({ working: true })
     try {
-      await resolveBrowserFillRequest(request.approvalId, loginId)
-      if (loginId) feedback.showNotice('Login approved', `Filled one login for ${request.hostname}.`)
+      await resolveBrowserFillRequest(request.approvalId, loginId, remember)
+      if (loginId) {
+        feedback.showNotice(
+          'Login approved',
+          remember
+            ? `Filled one login for ${request.hostname}. This login fills there without asking for the next 15 minutes.`
+            : `Filled one login for ${request.hostname}.`,
+        )
+      }
     } catch (error) {
       if (loginId) feedback.setError(error)
     } finally {
-      if (browserFill.value().request?.approvalId === request.approvalId) browserFill.patch({ request: null, selectedId: '' })
+      if (browserFill.value().request?.approvalId === request.approvalId) browserFill.patch({ request: null, selectedId: '', remember: false })
       browserFill.patch({ working: false })
     }
   }

@@ -58,8 +58,9 @@ pub fn resolve_browser_fill(
     state: State<'_, browser_fill::BrowserFillState>,
     approval_id: String,
     login_id: Option<String>,
+    remember: bool,
 ) -> VaultResult<()> {
-    browser_fill::resolve(&app, state, approval_id, login_id)
+    browser_fill::resolve(&app, state, approval_id, login_id, remember)
 }
 
 #[tauri::command]
