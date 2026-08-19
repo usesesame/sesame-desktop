@@ -121,13 +121,14 @@ try {
   const archiveBytes = await readFile(archive)
   const updaterSignature = (await readFile(signaturePath, 'utf8')).trim()
   const receiptPayload = [
-    'sesame-release-candidate-v2',
+    'sesame-release-candidate-v3',
     '0.1.1',
     'beta',
     'windows',
     'x86_64',
     'Windows 10,Windows 11',
     'https://releases.example.invalid/rel003-updater-lab',
+    `http://${host}:${port}/artifact`,
     'windows/0.1.1/Sesame_0.1.1_x64-setup.exe',
     sha256(archiveBytes),
     String(archiveBytes.length),

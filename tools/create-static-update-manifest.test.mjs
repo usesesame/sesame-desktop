@@ -20,6 +20,7 @@ function fictionalCandidate() {
     supportedWindows: 'Windows 10,Windows 11',
     releaseNotesURL: 'https://releases.example.test/v1.2.3',
     artifact: {
+      url: 'https://releases.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe',
       objectKey: 'windows/v1.2.3/Sesame_1.2.3_x64-setup.exe',
       sha256: 'a'.repeat(64),
       bytes: 42,
@@ -47,8 +48,8 @@ function fictionalCandidate() {
   const digest = (value) => createHash('sha256').update(stableJSON(value)).digest('base64url')
   const artifact = candidate.artifact
   const payload = [
-    'sesame-release-candidate-v2', candidate.version, candidate.channel, candidate.platform,
-    candidate.architecture, candidate.supportedWindows, candidate.releaseNotesURL, artifact.objectKey,
+    'sesame-release-candidate-v3', candidate.version, candidate.channel, candidate.platform,
+    candidate.architecture, candidate.supportedWindows, candidate.releaseNotesURL, artifact.url, artifact.objectKey,
     artifact.sha256, String(artifact.bytes), artifact.updaterSignature, artifact.updaterSigningKeyId,
     artifact.distributionClass, String(artifact.sigstoreVerified), artifact.sigstoreIssuer,
     artifact.sigstoreIdentity, artifact.sigstoreBundleSha256, digest(artifact.sigstoreEvidence),
@@ -80,8 +81,9 @@ test('static updater manifest carries the public artifact and exact signed recei
     assert.deepEqual(Object.keys(manifest.platforms), ['windows-x86_64-nsis'])
     assert.equal(manifest.platforms['windows-x86_64-nsis'].signature, 'A'.repeat(64))
     assert.equal(manifest.candidateReceipt.signingKeyId, 'candidate-1')
-    assert.equal(manifest.candidateReceipt.payload.split('\n').length, 22)
-    assert.equal(manifest.candidateReceipt.payload.split('\n')[8], 'a'.repeat(64))
+    assert.equal(manifest.candidateReceipt.payload.split('\n').length, 23)
+    assert.equal(manifest.candidateReceipt.payload.split('\n')[9], 'a'.repeat(64))
+    assert.equal(manifest.candidateReceipt.payload.split('\n')[7], 'https://releases.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe')
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

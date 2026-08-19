@@ -165,35 +165,47 @@ fn verify_candidate_receipt(
     let expected_sigstore_identity = format!(
         "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v{announced_version}"
     );
-    if claims.len() != 22
-        || claims[0] != "sesame-release-candidate-v2"
+    // Claim 7 is the download URL the publisher signed. Comparing it to the URL
+    // this manifest actually points at is what stops a tampered manifest from
+    // redirecting an otherwise genuine receipt at a different file.
+    let manifest_url = manifest
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if claims.len() != 23
+        || claims[0] != "sesame-release-candidate-v3"
         || claims[1] != announced_version
         || claims[3] != expected_platform
         || claims[4] != expected_architecture
         || claims[7].is_empty()
-        || !valid_sha256(claims[8])
-        || claims[9].parse::<u64>().ok().is_none_or(|bytes| bytes == 0)
-        || claims[10] != updater_signature
-        || claims[11].is_empty()
-        || (claims[12] != "early_access" && claims[12] != "production")
-        || claims[13] != "true"
-        || claims[14] != "https://token.actions.githubusercontent.com"
-        || claims[15] != expected_sigstore_identity
-        || !valid_sha256(claims[16])
-        || !valid_base64url_sha256(claims[17])
-        || (claims[18] != "true" && claims[18] != "false")
-        || (claims[12] == "early_access" && claims[18] != "false")
-        || (claims[12] == "production" && claims[18] != "true")
-        || (claims[18] == "true" && (claims[19].is_empty() || claims[20].is_empty()))
-        || (claims[18] == "true" && !valid_base64url_sha256(claims[21]))
-        || (claims[18] == "false" && !claims[21].is_empty())
+        || claims[7] != manifest_url
+        || claims[8].is_empty()
+        || !valid_sha256(claims[9])
+        || claims[10]
+            .parse::<u64>()
+            .ok()
+            .is_none_or(|bytes| bytes == 0)
+        || claims[11] != updater_signature
+        || claims[12].is_empty()
+        || (claims[13] != "early_access" && claims[13] != "production")
+        || claims[14] != "true"
+        || claims[15] != "https://token.actions.githubusercontent.com"
+        || claims[16] != expected_sigstore_identity
+        || !valid_sha256(claims[17])
+        || !valid_base64url_sha256(claims[18])
+        || (claims[19] != "true" && claims[19] != "false")
+        || (claims[13] == "early_access" && claims[19] != "false")
+        || (claims[13] == "production" && claims[19] != "true")
+        || (claims[19] == "true" && (claims[20].is_empty() || claims[21].is_empty()))
+        || (claims[19] == "true" && !valid_base64url_sha256(claims[22]))
+        || (claims[19] == "false" && !claims[22].is_empty())
     {
         return Err(
             "Sesame rejected an update whose manifest did not match its signed release receipt."
                 .into(),
         );
     }
-    Ok(claims[8].to_owned())
+    Ok(claims[9].to_owned())
 }
 
 fn valid_sha256(value: &str) -> bool {

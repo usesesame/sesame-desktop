@@ -40,19 +40,20 @@ if (existsSync(updaterVerifier)) {
 }
 const claims = good.candidateReceipt.payload.split('\n')
 if (
-  claims.length !== 22 ||
-  claims[0] !== 'sesame-release-candidate-v2' ||
+  claims.length !== 23 ||
+  claims[0] !== 'sesame-release-candidate-v3' ||
   claims[1] !== good.version ||
   claims[3] !== 'windows' ||
   claims[4] !== 'x86_64' ||
-  claims[8] !== hash(artifact) ||
-  claims[9] !== String(artifact.length) ||
-  claims[10] !== detachedSignature ||
-  claims[12] !== 'early_access' ||
-  claims[13] !== 'true' ||
-  claims[14] !== 'https://token.actions.githubusercontent.com' ||
-  claims[15] !== 'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1' ||
-  claims[18] !== 'false' ||
+  claims[7] !== good.url ||
+  claims[9] !== hash(artifact) ||
+  claims[10] !== String(artifact.length) ||
+  claims[11] !== detachedSignature ||
+  claims[13] !== 'early_access' ||
+  claims[14] !== 'true' ||
+  claims[15] !== 'https://token.actions.githubusercontent.com' ||
+  claims[16] !== 'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1' ||
+  claims[19] !== 'false' ||
   good.signature !== detachedSignature ||
   good.candidateReceipt.signingKeyId !== keys.candidateKeyID
 ) {

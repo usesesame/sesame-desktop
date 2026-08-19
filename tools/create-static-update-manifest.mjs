@@ -72,8 +72,8 @@ if (!sigstoreEvidenceDigest || (artifact.authenticodeVerified && !authenticodeEv
 }
 
 const candidatePayload = [
-  'sesame-release-candidate-v2', candidate.version, candidate.channel, candidate.platform,
-  candidate.architecture, candidate.supportedWindows, candidate.releaseNotesURL, artifact.objectKey,
+  'sesame-release-candidate-v3', candidate.version, candidate.channel, candidate.platform,
+  candidate.architecture, candidate.supportedWindows, candidate.releaseNotesURL, artifact.url, artifact.objectKey,
   artifact.sha256, String(artifact.bytes), artifact.updaterSignature, artifact.updaterSigningKeyId,
   artifact.distributionClass, String(artifact.sigstoreVerified), artifact.sigstoreIssuer,
   artifact.sigstoreIdentity, artifact.sigstoreBundleSha256, sigstoreEvidenceDigest,
