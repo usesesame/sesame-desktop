@@ -75,6 +75,9 @@
     if (hadPassword) takeGenerated()
   }
 
+  // Starts hidden every time the editor opens, since the component is rebuilt.
+  let passwordVisible = false
+
   function focusInitial() {
     if (focusUrl && urlInput) {
       urlInput.focus()
@@ -120,7 +123,8 @@
     </div>
     <label>Password
       <span class="password-field">
-        <input bind:value={loginDraft.password} maxlength="8192" type="password" autocomplete="new-password" />
+        <input bind:value={loginDraft.password} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" />
+        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
         <button type="button" class="icon-button" aria-label="Generate a password" title="Generate a password" on:click={generatePassword}><Icon name="refresh" size={15} /></button>
         <button type="button" class="icon-button" aria-label="Password options" title="Password options" aria-expanded={generatorOpen} on:click={() => (generatorOpen = !generatorOpen)}><Icon name="settings" size={15} /></button>
       </span>
