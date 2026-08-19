@@ -97,13 +97,6 @@
   })
 </script>
 
-<header class="view-header">
-  <div>
-    <!-- A failed read knows nothing about the count, so it must not claim zero. -->
-    <h2>{loading || loadFailed ? 'Authenticator' : codes.length === 1 ? '1 code saved' : `${codes.length} codes saved`}</h2>
-  </div>
-</header>
-
 {#if loading}
   <p class="authenticator-status" role="status">Reading your codes…</p>
 {:else if loadFailed}

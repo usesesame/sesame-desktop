@@ -94,3 +94,22 @@ test('desktop Sync fixtures are digest-bound local snapshots', () => {
   for (const name of Object.keys(source.files)) assert.match(rust, new RegExp(name.replaceAll('.', '\\.')))
   assert.doesNotMatch(rust, /\.\.\/backend\/internal\/syncproto\/testdata/)
 })
+
+// A command missing from the ACL compiles, ships, and is then denied at runtime.
+// Nothing else in the build compares the two lists, so this does.
+test('every registered command is reachable through a permission group', () => {
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const handler = lib.slice(lib.indexOf('generate_handler!'))
+  const registered = [...handler.matchAll(/commands::([a-z0-9_]+)\s*,/g)].map((match) => match[1])
+  assert.ok(registered.length > 50, `expected the full command surface, found ${registered.length}`)
+
+  const permissions = read('src-tauri', 'permissions', 'desktop.toml')
+  const allowed = new Set([...permissions.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]))
+
+  const unreachable = registered.filter((command) => !allowed.has(command))
+  assert.deepEqual(
+    unreachable,
+    [],
+    `these commands are registered but no permission group allows them: ${unreachable.join(', ')}`,
+  )
+})
