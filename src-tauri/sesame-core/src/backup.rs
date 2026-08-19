@@ -440,6 +440,11 @@ pub fn validate_backup_file(file: &VaultFile) -> VaultResult<()> {
     if let Some(recovery_wrap) = &file.recovery_wrap {
         validate_cipher_blob(recovery_wrap)?;
     }
+    if let Some(pin_wrap) = &file.pin_wrap {
+        crate::crypto::validate_kdf_params(&pin_wrap.kdf)
+            .map_err(|_| "That backup has invalid PIN key-derivation settings.".to_string())?;
+        validate_cipher_blob(&pin_wrap.key_wrap)?;
+    }
     validate_cipher_blob(&file.payload)?;
     Ok(())
 }

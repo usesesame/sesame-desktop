@@ -568,7 +568,7 @@ pub struct CipherBlob {
     pub ciphertext: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct VaultPayload {
     pub vault_name: String,
     pub folders: Vec<Folder>,

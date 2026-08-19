@@ -308,7 +308,7 @@ pub fn rotate_master_password_for_session(
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
-    validate_unlock_pin(pin)?;
+    validate_new_unlock_pin(pin)?;
 
     let mut pepper = [0_u8; 32];
     fill_random(&mut pepper);
@@ -369,6 +369,22 @@ pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> 
 pub fn validate_unlock_pin(pin: &str) -> VaultResult<()> {
     if pin.len() != 6 || !pin.bytes().all(|value| value.is_ascii_digit()) {
         return Err("Use a 6-digit PIN.".into());
+    }
+    Ok(())
+}
+
+/// Only for choosing a PIN. Unlocking still accepts whatever was already set,
+/// so tightening this never locks anyone out of a vault they already have.
+pub fn validate_new_unlock_pin(pin: &str) -> VaultResult<()> {
+    validate_unlock_pin(pin)?;
+    let digits: Vec<u8> = pin.bytes().map(|value| value - b'0').collect();
+    if digits.windows(2).all(|pair| pair[0] == pair[1]) {
+        return Err("Choose a PIN that is not the same digit six times.".into());
+    }
+    let ascending = digits.windows(2).all(|pair| pair[1] == pair[0] + 1);
+    let descending = digits.windows(2).all(|pair| pair[0] == pair[1] + 1);
+    if ascending || descending {
+        return Err("Choose a PIN that is not six digits in a row.".into());
     }
     Ok(())
 }

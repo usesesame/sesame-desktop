@@ -65,6 +65,14 @@ const emptyDiagnostics: DiagnosticStatus = { exists: false, eventCount: 0, error
 const emptyService: ServiceConnectionStatus = { state: 'disconnected', connected: false, online: false, syncAvailable: false, browserHelperAvailable: false }
 const emptyWebsiteIconCache: WebsiteIconCacheStatus = { entryCount: 0, iconCount: 0, sizeBytes: 0 }
 
+export function isTrivialPin(pin: string): boolean {
+  const digits = Array.from(pin, (character) => Number(character))
+  const repeated = digits.every((digit) => digit === digits[0])
+  const ascending = digits.every((digit, index) => index === 0 || digit === digits[index - 1] + 1)
+  const descending = digits.every((digit, index) => index === 0 || digit === digits[index - 1] - 1)
+  return repeated || ascending || descending
+}
+
 export function createSettingsController({ stores, feedback, modal, onPinSetupFinished }: SettingsControllerOptions) {
   const { selection, settings, vault } = stores
   const state = controllerStore({
@@ -305,6 +313,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       const current = state.value()
       if (current.pinWorking) return
       if (!/^\d{6}$/.test(current.pinSetupValue)) return feedback.setErrorMessage('Use exactly six digits.')
+      if (isTrivialPin(current.pinSetupValue)) return feedback.setErrorMessage('Choose a PIN that is not one repeated digit or six digits in a row.')
       if (current.pinSetupValue !== current.pinSetupConfirm) return feedback.setErrorMessage('Those PINs do not match.')
       state.patch({ pinWorking: true })
       feedback.clearError()
