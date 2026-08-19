@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
 use crate::imports::ParsedImport;
-use crate::types::{Card, Identity, SecureNote, VaultEntry};
+use crate::types::{Card, Identity, SecureNote, SshKey, VaultEntry};
 use crate::util::random_id;
 use crate::VaultResult;
 
@@ -18,6 +18,7 @@ pub struct PendingImport {
     pub secure_notes: Vec<SecureNote>,
     pub cards: Vec<Card>,
     pub identities: Vec<Identity>,
+    pub ssh_keys: Vec<SshKey>,
     created: Instant,
 }
 
@@ -33,6 +34,7 @@ impl PendingImport {
             secure_notes: parsed.secure_notes,
             cards: parsed.cards,
             identities: parsed.identities,
+            ssh_keys: parsed.ssh_keys,
             created,
         }
     }
@@ -43,12 +45,22 @@ impl PendingImport {
     }
 
     /// Moves everything out so the drop guard has nothing left to wipe.
-    pub fn into_parts(mut self) -> (Vec<VaultEntry>, Vec<SecureNote>, Vec<Card>, Vec<Identity>) {
+    #[allow(clippy::type_complexity)]
+    pub fn into_parts(
+        mut self,
+    ) -> (
+        Vec<VaultEntry>,
+        Vec<SecureNote>,
+        Vec<Card>,
+        Vec<Identity>,
+        Vec<SshKey>,
+    ) {
         (
             std::mem::take(&mut self.entries),
             std::mem::take(&mut self.secure_notes),
             std::mem::take(&mut self.cards),
             std::mem::take(&mut self.identities),
+            std::mem::take(&mut self.ssh_keys),
         )
     }
 }
@@ -66,6 +78,9 @@ impl Drop for PendingImport {
         }
         for identity in &mut self.identities {
             identity.zeroize();
+        }
+        for key in &mut self.ssh_keys {
+            key.zeroize();
         }
     }
 }

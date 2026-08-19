@@ -122,6 +122,8 @@
         <div><dt>Secure notes found</dt><dd>{$imports.preview.secureNotes}</dd></div>
         <div><dt>Cards found</dt><dd>{$imports.preview.cards}</dd></div>
         <div><dt>Saved identities found</dt><dd>{$imports.preview.identities}</dd></div>
+        <div><dt>SSH keys found</dt><dd>{$imports.preview.sshKeys}</dd></div>
+        <div><dt>Passkeys Sesame cannot store yet</dt><dd>{$imports.preview.passkeysNotImported}</dd></div>
         <div><dt>Items Sesame cannot import yet</dt><dd>{$imports.preview.intentionallyOmittedItems}</dd></div>
       </dl>
       {#if $imports.preview.invalidTotp > 0 || $imports.preview.invalidUrls > 0}
@@ -133,6 +135,10 @@
       {#if $imports.preview.preservedLegacyFields > 0}
         <div class="import-conflict-note"><Icon name="archive" size={16} /><p><strong>Extra imported fields are retained.</strong><span>Sesame keeps them in Legacy data on the related login. Review them after import.</span></p></div>
       {/if}
+      {#if $imports.preview.passkeysNotImported > 0}
+        <div class="import-conflict-note"><Icon name="key" size={16} /><p><strong>Passkeys are left in your old manager.</strong><span>Sesame has no passkey item yet, so {$imports.preview.passkeysNotImported === 1 ? 'one passkey stays' : `these ${$imports.preview.passkeysNotImported} passkeys stay`} where {$imports.preview.passkeysNotImported === 1 ? 'it is' : 'they are'}. Keep that manager until Sesame can store them.</span></p></div>
+      {/if}
+      <div class="import-conflict-note"><Icon name="file-key" size={16} /><p><strong>File attachments are not in this export.</strong><span>This export format carries no attached files, so anything attached to an item stays only in your old manager. Save those files separately before you remove it.</span></p></div>
       {#if $imports.preview.intentionallyOmittedItems > 0}
         <div class="import-conflict-note"><Icon name="alert" size={16} /><p><strong>Some items are not imported.</strong><span>Sesame does not yet support this item type. Keep the original export until you have checked that the imported items are complete.</span></p></div>
       {/if}

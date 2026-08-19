@@ -551,6 +551,8 @@ export interface ImportFidelity {
   secureNotes: FidelityCounts
   cards: FidelityCounts
   identities: FidelityCounts
+  sshKeys: FidelityCounts
+  passkeys: FidelityCounts
   unsupportedItems: FidelityCounts
 }
 
@@ -567,6 +569,8 @@ export interface ImportPreview {
   secureNotes: number
   cards: number
   identities: number
+  sshKeys: number
+  passkeysNotImported: number
   intentionallyOmittedItems: number
   fidelity: ImportFidelity
 }
@@ -613,6 +617,7 @@ export interface ImportResult {
   importedSecureNotes: number
   importedCards: number
   importedIdentities: number
+  importedSshKeys: number
   skippedExactDuplicates: number
   revisionBackupName?: string
 }

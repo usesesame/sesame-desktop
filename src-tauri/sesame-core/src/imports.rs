@@ -76,6 +76,9 @@ pub struct ParsedImport {
     pub secure_notes: Vec<SecureNote>,
     pub cards: Vec<Card>,
     pub identities: Vec<Identity>,
+    pub ssh_keys: Vec<SshKey>,
+    /// Readable in the export, but Sesame has no passkey item: reported, never dropped in silence.
+    pub passkeys_not_imported: usize,
     /// Aggregate-only: disclosure must not release import content to the webview.
     pub intentionally_omitted_items: usize,
     /// Field-level disposition counts; see the import fidelity report.
@@ -244,10 +247,12 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
     let mut secure_notes = Vec::new();
     let mut cards = Vec::new();
     let mut identities = Vec::new();
+    let mut ssh_keys = Vec::new();
+    let mut passkeys_not_imported = 0;
     let mut intentionally_omitted_items = 0;
     let mut fidelity = ImportFidelity::default();
     for item in export.items {
-        // Bitwarden item types: 1 login, 2 note, 3 card, 4 identity; anything past 4 is counted as omitted.
+        // Bitwarden item types: 1 login, 2 note, 3 card, 4 identity, 5 SSH key; anything past 5 is counted as omitted.
         match item.item_type {
             Some(2) => {
                 secure_notes.push(bitwarden_json_secure_note(item, &mut fidelity.secure_notes));
@@ -259,6 +264,10 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             }
             Some(4) => {
                 identities.push(bitwarden_json_identity(item, &mut fidelity.identities));
+                continue;
+            }
+            Some(5) => {
+                ssh_keys.push(bitwarden_json_ssh_key(item, &mut fidelity.ssh_keys));
                 continue;
             }
             Some(other) if other != 1 => {
@@ -279,6 +288,12 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         let Some(login) = item.login else {
             continue;
         };
+        for _ in 0..login.fido2_credentials.len() {
+            passkeys_not_imported += 1;
+            fidelity
+                .passkeys
+                .record(FieldDisposition::IntentionallyOmitted);
+        }
         if item.name.is_empty() && login.username.is_empty() && login.password.is_empty() {
             continue;
         }
@@ -339,6 +354,8 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         secure_notes,
         cards,
         identities,
+        ssh_keys,
+        passkeys_not_imported,
         intentionally_omitted_items,
         fidelity,
     })
@@ -385,6 +402,43 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
         notes,
         tags: Vec::new(),
         legacy_fields,
+        created_at: now,
+        updated_at: now,
+        revision: 1,
+    }
+}
+
+fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> SshKey {
+    let key = item.ssh_key.unwrap_or_default();
+    for value in [&key.private_key, &key.public_key] {
+        if !value.trim().is_empty() {
+            fidelity.record(FieldDisposition::Imported);
+        }
+    }
+    // Bitwarden stores no key type of its own; the public key names its algorithm.
+    let key_type = key
+        .public_key
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if !item.notes.is_empty() {
+        fidelity.record(FieldDisposition::Imported);
+    }
+    // The fingerprint has no Sesame field and is derivable from the public key.
+    if !key.key_fingerprint.trim().is_empty() {
+        fidelity.record(FieldDisposition::IntentionallyOmitted);
+    }
+    let now = unix_timestamp();
+    SshKey {
+        id: random_id(),
+        title: non_empty(item.name).unwrap_or_else(|| "Imported SSH key".to_string()),
+        key_type,
+        private_key: key.private_key.trim().to_string(),
+        public_key: key.public_key.trim().to_string(),
+        passphrase: String::new(),
+        notes: item.notes,
+        tags: Vec::new(),
         created_at: now,
         updated_at: now,
         revision: 1,
