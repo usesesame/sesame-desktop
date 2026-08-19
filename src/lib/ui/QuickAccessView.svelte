@@ -2,6 +2,8 @@
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
+  import WebsiteIcon from './WebsiteIcon.svelte'
+  import { readSiteIcons } from '../preferences'
   import { copyToClipboard, getQuickAccessSecret, getQuickAccessStatus, previewMode, searchQuickAccessEntries } from '../vault'
   import type { QuickAccessEntry } from '../types'
 
@@ -16,6 +18,7 @@
   let copiedField: 'password' | 'totp' | '' = ''
   let searchInput: HTMLInputElement | undefined
   let searchSequence = 0
+  let siteIconsEnabled = readSiteIcons()
 
   $: if (selectedIndex >= entries.length) selectedIndex = Math.max(0, entries.length - 1)
 
@@ -44,6 +47,7 @@
   }
 
   async function refresh() {
+    siteIconsEnabled = readSiteIcons()
     try {
       const status = await getQuickAccessStatus()
       if (!status.exists) {
@@ -142,7 +146,7 @@
         {#each entries as entry, index (entry.id)}
           <li class="quick-access-result-row">
             <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => copyEntry(entry)} disabled={Boolean(copyingId) && copyingId !== entry.id}>
-              <span class="entry-avatar" aria-hidden="true">{entry.initials}</span>
+              <span class="entry-avatar" aria-hidden="true"><WebsiteIcon site={entry.site} initials={entry.initials} enabled={siteIconsEnabled} /></span>
               <span class="quick-access-result-copy"><strong>{entry.title}</strong><small>{entry.site}</small></span>
               <span class="quick-access-result-state">{copiedId === entry.id ? (copiedField === 'totp' ? 'Code copied' : 'Copied') : copyingId === entry.id ? 'Copying…' : 'Copy password'}</span>
             </button>
