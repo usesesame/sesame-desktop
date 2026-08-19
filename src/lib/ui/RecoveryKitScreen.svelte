@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
+  import SetupProgress from './SetupProgress.svelte'
 
   export let recoveryKit = ''
   export let recoveryConfirmed = false
@@ -104,7 +105,7 @@
 
 <main class="recovery-shell">
   <section class="recovery-card" aria-labelledby="recovery-kit-heading" aria-describedby="recovery-kit-description">
-    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" /><span>Sesame</span></div>
+    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" /><span>Sesame</span><span class="brand-progress"><SetupProgress step={2} /></span></div>
     <p class="eyebrow">Recovery kit</p>
     <h1 bind:this={heading} id="recovery-kit-heading" tabindex="-1">
       {verifyMode ? 'Verify your kit' : 'Write this down.'}
@@ -188,12 +189,12 @@
     font-weight: 700;
   }
   .sesame-mark { width: 28px; height: 28px; }
+  .brand-progress { margin-left: auto; }
   .eyebrow {
     margin: 0 0 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: var(--type-1);
+    font-weight: 700;
+    color: var(--eyebrow);
   }
   h1 {
     margin: 0 0 10px;

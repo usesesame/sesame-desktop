@@ -731,6 +731,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .cleanup-loading { display: grid; min-height: 0; flex: 1; place-content: center; justify-items: center; gap: var(--space-3); color: var(--text-muted); font-size: var(--type-2); }
 .cleanup-confirm-backdrop { z-index: 45; }
 .cleanup-confirm-modal { width: min(100%, 470px); }
+.setup-head { display: flex; align-items: center; justify-content: space-between; }
 .confirm-icon { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: var(--space-4); border-radius: var(--radius-md); color: var(--chip-icon); background: var(--chip-bg); }
 .confirm-icon.danger { color: var(--danger); background: var(--danger-tint); }
 .cleanup-confirm-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.03em; }
