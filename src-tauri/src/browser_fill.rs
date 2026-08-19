@@ -29,6 +29,8 @@ use crate::browser_host::HOST_FILE_NAME;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
 const APPROVAL_POLL: Duration = Duration::from_millis(200);
 const REPLAY_CACHE_SIZE: usize = 128;
+/// How long an explicit "allow this site" choice lasts. Memory only, and never written to disk.
+const FILL_GRANT_DURATION: Duration = Duration::from_secs(15 * 60);
 const MAX_MATCHING_CANDIDATES: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -325,6 +327,16 @@ struct FillInner {
     pending_save: Option<PendingSave>,
     pending_identity: Option<PendingIdentityApproval>,
     recent_request_ids: VecDeque<String>,
+    grants: Vec<FillGrant>,
+}
+
+/// One approval the user chose to extend to a single origin and login for a short window.
+/// Bound to the session epoch, so locking or changing the vault discards it.
+struct FillGrant {
+    origin: String,
+    login_id: String,
+    session_epoch: u64,
+    expires: Instant,
 }
 
 #[derive(Default)]
@@ -344,7 +356,28 @@ impl BrowserFillState {
             if let Some(pending) = inner.pending_identity.take() {
                 let _ = pending.sender.send(IdentityDecision::Denied);
             }
+            inner.grants.clear();
         }
+    }
+
+    /// An unexpired grant for this exact origin and epoch whose login is still offered.
+    fn granted_login(
+        &self,
+        origin: &NormalizedOrigin,
+        session_epoch: u64,
+        candidate_ids: &HashSet<String>,
+    ) -> Option<String> {
+        let mut inner = self.inner.lock().ok()?;
+        let now = Instant::now();
+        inner
+            .grants
+            .retain(|grant| grant.expires > now && grant.session_epoch == session_epoch);
+        let canonical = origin.canonical();
+        inner
+            .grants
+            .iter()
+            .find(|grant| grant.origin == canonical && candidate_ids.contains(&grant.login_id))
+            .map(|grant| grant.login_id.clone())
     }
 
     fn note_request_id(inner: &mut FillInner, request_id: &str) -> Result<(), &'static str> {
@@ -672,7 +705,12 @@ impl BrowserFillState {
         })
     }
 
-    fn decide(&self, approval_id: &str, login_id: Option<String>) -> Result<bool, &'static str> {
+    fn decide(
+        &self,
+        approval_id: &str,
+        login_id: Option<String>,
+        remember: bool,
+    ) -> Result<bool, &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let pending = inner.pending.as_ref().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -690,6 +728,15 @@ impl BrowserFillState {
             return Err("loginNotOffered");
         }
         let denied = login_id.is_none();
+        let grant = match (&login_id, remember) {
+            (Some(login_id), true) => Some(FillGrant {
+                origin: pending.origin.canonical(),
+                login_id: login_id.clone(),
+                session_epoch: pending.session_epoch,
+                expires: Instant::now() + FILL_GRANT_DURATION,
+            }),
+            _ => None,
+        };
         let decision = login_id
             .map(ApprovalDecision::Login)
             .unwrap_or(ApprovalDecision::Denied);
@@ -698,6 +745,12 @@ impl BrowserFillState {
             .send(decision)
             .map_err(|_| "approvalExpired")?;
         inner.pending = None;
+        if let Some(grant) = grant {
+            inner
+                .grants
+                .retain(|held| held.origin != grant.origin || held.login_id != grant.login_id);
+            inner.grants.push(grant);
+        }
         Ok(denied)
     }
 
@@ -821,11 +874,12 @@ pub fn resolve(
     state: State<'_, BrowserFillState>,
     approval_id: String,
     login_id: Option<String>,
+    remember: bool,
 ) -> Result<(), String> {
     if approval_id.is_empty() || approval_id.len() > 64 {
         return Err("That browser approval is no longer available.".into());
     }
-    match state.decide(&approval_id, login_id) {
+    match state.decide(&approval_id, login_id, remember) {
         Ok(denied) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -958,36 +1012,50 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         return BrowserResponse::unavailable(&request.request_id, "multipleMatches");
     }
 
-    let candidate_ids = candidates
+    let candidate_ids: HashSet<String> = candidates
         .iter()
         .map(|candidate| candidate.id.clone())
         .collect();
     let fill_state = app.state::<BrowserFillState>();
+    let granted = fill_state.granted_login(&origin, epoch, &candidate_ids);
     let (approval_id, deadline, receiver) =
         match fill_state.begin(&request.request_id, origin.clone(), epoch, candidate_ids) {
             Ok(value) => value,
             Err(reason) => return BrowserResponse::unavailable(&request.request_id, reason),
         };
 
-    let event = BrowserFillRequestEvent {
-        approval_id: approval_id.clone(),
-        origin: origin.canonical(),
-        hostname: origin.hostname.clone(),
-        candidates,
-        expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
-        expires_at_unix_ms: approval_expires_at_unix_ms(),
-    };
-    if fill_state
-        .publish_request(&approval_id, event.clone())
-        .is_err()
-    {
-        fill_state.revoke(&approval_id);
-        return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+    // A live grant resolves the approval without prompting. Every check after the
+    // decision still runs, so the vault, origin, and peer are revalidated as usual.
+    if let Some(login_id) = granted {
+        if fill_state
+            .decide(&approval_id, Some(login_id), false)
+            .is_err()
+        {
+            fill_state.revoke(&approval_id);
+            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+        }
+        diagnostics::record_browser_host_registration(app, "fill_auto_approved");
+    } else {
+        let event = BrowserFillRequestEvent {
+            approval_id: approval_id.clone(),
+            origin: origin.canonical(),
+            hostname: origin.hostname.clone(),
+            candidates,
+            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+            expires_at_unix_ms: approval_expires_at_unix_ms(),
+        };
+        if fill_state
+            .publish_request(&approval_id, event.clone())
+            .is_err()
+        {
+            fill_state.revoke(&approval_id);
+            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+        }
+        // Publish before focus change: Chromium closes the popup when Sesame comes forward.
+        bring_to_foreground(app);
+        // The webview also polls the durable request so a listener race cannot hide the prompt.
+        let _ = app.emit("browser-fill-request", event);
     }
-    // Publish before focus change: Chromium closes the popup when Sesame comes forward.
-    bring_to_foreground(app);
-    // The webview also polls the durable request so a listener race cannot hide the prompt.
-    let _ = app.emit("browser-fill-request", event);
 
     let decision = match wait_for_decision(
         app,
@@ -1323,5 +1391,100 @@ fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
         )
     } else {
         bytes
+    }
+}
+
+#[cfg(test)]
+mod grant_tests {
+    use super::*;
+
+    fn origin(value: &str) -> NormalizedOrigin {
+        NormalizedOrigin::from_request(value).expect("origin")
+    }
+
+    fn ids(values: &[&str]) -> HashSet<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    /// Approve once with remember, and the next request for the same origin and login needs no prompt.
+    fn approve(state: &BrowserFillState, request_id: &str, epoch: u64, remember: bool) {
+        let (approval_id, _, _receiver) = state
+            .begin(
+                request_id,
+                origin("https://example.test"),
+                epoch,
+                ids(&["login-a"]),
+            )
+            .expect("begin");
+        state
+            .decide(&approval_id, Some("login-a".to_string()), remember)
+            .expect("decide");
+    }
+
+    #[test]
+    fn a_remembered_approval_answers_the_next_request_for_the_same_login() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, true);
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 7, &ids(&["login-a"])),
+            Some("login-a".to_string())
+        );
+    }
+
+    #[test]
+    fn an_approval_without_remember_grants_nothing() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, false);
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 7, &ids(&["login-a"])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_grant_does_not_cross_to_another_origin() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, true);
+        assert_eq!(
+            state.granted_login(&origin("https://other.test"), 7, &ids(&["login-a"])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_grant_does_not_cover_a_login_it_was_not_given_for() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, true);
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 7, &ids(&["login-b"])),
+            None
+        );
+    }
+
+    /// Locking the vault advances the session epoch, so a grant cannot survive it.
+    #[test]
+    fn a_grant_dies_when_the_session_epoch_moves() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, true);
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 8, &ids(&["login-a"])),
+            None
+        );
+        // The stale grant is pruned rather than left waiting for the epoch to come back.
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 7, &ids(&["login-a"])),
+            None
+        );
+    }
+
+    #[test]
+    fn cancelling_pending_approvals_clears_every_grant() {
+        let state = BrowserFillState::default();
+        approve(&state, "req-1", 7, true);
+        state.cancel_pending();
+        assert_eq!(
+            state.granted_login(&origin("https://example.test"), 7, &ids(&["login-a"])),
+            None
+        );
     }
 }

@@ -1261,9 +1261,9 @@ export async function repairBrowserIntegration(): Promise<BrowserIntegrationStat
   return invoke<BrowserIntegrationStatus>('repair_browser_integration')
 }
 
-export async function resolveBrowserFill(approvalId: string, loginId: string | null): Promise<void> {
+export async function resolveBrowserFill(approvalId: string, loginId: string | null, remember = false): Promise<void> {
   if (previewMode) return
-  await invoke('resolve_browser_fill', { approvalId, loginId })
+  await invoke('resolve_browser_fill', { approvalId, loginId, remember })
 }
 
 export async function getPendingBrowserFill(): Promise<BrowserFillRequest | null> {

@@ -37,6 +37,7 @@ export interface ImportStoreState {
 export interface BrowserFillStoreState {
   request: BrowserFillRequest | null
   selectedId: string
+  remember: boolean
   working: boolean
   syncWorking: boolean
   syncFailed: boolean
@@ -321,7 +322,7 @@ export function createAppStores() {
     passphrase: createPassphraseStore(),
     recentGenerations: createRecentGenerationsStore(),
     imports: patchable<ImportStoreState>({ importing: false, source: 'bitwarden-csv', sourceMenuOpen: false, preview: null, importId: '', fileName: '', skipExactDuplicates: true }),
-    browserFill: patchable<BrowserFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    browserFill: patchable<BrowserFillStoreState>({ request: null, selectedId: '', remember: false, working: false, syncWorking: false, syncFailed: false }),
     browserIdentityFill: patchable<BrowserIdentityFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserSave: patchable<BrowserSaveStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     settings: patchable<SettingsStoreState>({ theme: 'auto', siteIconsEnabled: false, autoLockMinutes: 5, clipboardClearSeconds: 30, keepInTray: true, quickAccessShortcut: 'Ctrl+Alt+S' }),
