@@ -125,6 +125,7 @@
   })
   const onboardingState = onboardingController.state
   let setupWelcomeSeen = false
+  let authenticatorReloadToken = 0
   onPinSetupFinished = () => {
     if (onboardingState.value().step === 'pin-choice') onboardingController.advance()
   }
@@ -288,6 +289,9 @@
         settingsController.refreshWebsiteIconCache(),
       ])
     }
+    if (selection.value().activeView === 'authenticator') {
+      authenticatorReloadToken += 1
+    }
     if (selection.value().activeView === 'backups') {
       await backupController.refreshHealth()
     }
@@ -433,7 +437,7 @@
       onSaveToFile={$onboardingState.step === 'recovery-verify' ? undefined : (kit) => exportRecoveryKit(kit)}
     />
   {/key}
-{:else if !$vault.status.unlocked && !$vault.status.exists && !setupWelcomeSeen}
+{:else if !$vault.status.unlocked && !$vault.status.exists && !setupWelcomeSeen && !$unlockState.restoreMessage}
   <WelcomeScreen onStart={() => (setupWelcomeSeen = true)} />
 {:else if !$vault.status.unlocked}
   <UnlockScreen
@@ -536,7 +540,7 @@
         onShowSecurityFilter={cleanupController.showSecurityFilter}
       />
     {:else if $selection.activeView === 'authenticator'}
-      <AuthenticatorView onOpenImport={importController.open} />
+      <AuthenticatorView onOpenImport={importController.open} reloadToken={authenticatorReloadToken} />
     {:else if $selection.activeView === 'tools'}
       <ToolsView onCopy={loginController.copy} onUseInLogin={(password) => loginController.openNew(password)} />
     {:else if $selection.activeView === 'items'}

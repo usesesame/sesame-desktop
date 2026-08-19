@@ -501,13 +501,18 @@ pub fn issue_kinds_for(
             .into_iter()
             .map(|issue| issue.kind),
     );
-    if entry.url.is_empty() {
+    // A code-only entry holds a 2FA secret and no password. A missing website or
+    // missing recovery detail describes a login, so neither is a finding here.
+    let code_only =
+        entry.password.is_empty() && !entry.totp.as_deref().unwrap_or_default().is_empty();
+    if entry.url.is_empty() && !code_only {
         issues.push("url");
     }
     if entry.totp.as_deref().unwrap_or_default().is_empty() {
         issues.push("totp");
     }
-    if !entry.recovery_not_applicable
+    if !code_only
+        && !entry.recovery_not_applicable
         && entry.backup_codes.is_empty()
         && entry
             .recovery_email

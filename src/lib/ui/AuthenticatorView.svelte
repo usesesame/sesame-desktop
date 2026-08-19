@@ -5,6 +5,9 @@
   import type { TotpCodeEntry } from '../types'
 
   export let onOpenImport: () => void
+  export let reloadToken = 0
+
+  $: void reloadFor(reloadToken)
 
   let codes: TotpCodeEntry[] = []
   let query = ''
@@ -16,6 +19,7 @@
   let refreshing = false
   let failures = 0
   let retryAt = 0
+  let copyFailed = false
 
   $: filtered = filterCodes(codes, query)
 
@@ -60,10 +64,24 @@
   }
 
   async function copy(code: TotpCodeEntry) {
-    await copyToClipboard(code.code)
+    try {
+      await copyToClipboard(code.code)
+    } catch {
+      copyFailed = true
+      return
+    }
+    copyFailed = false
     copiedId = code.id
     if (copiedTimer) window.clearTimeout(copiedTimer)
     copiedTimer = window.setTimeout(() => (copiedId = ''), 1_500)
+  }
+
+  // Re-read on demand, so the toolbar Refresh reaches this view too.
+  let lastReloadToken = -1
+  async function reloadFor(token: number) {
+    if (token === lastReloadToken) return
+    lastReloadToken = token
+    if (token > 0) await load()
   }
 
   onMount(() => {
@@ -100,6 +118,9 @@
     <input type="search" bind:value={query} placeholder="Search codes" autocomplete="off" spellcheck="false" />
   </label>
 
+  {#if copyFailed}
+    <p class="authenticator-status" role="alert">Sesame could not copy that code to the clipboard. Try again.</p>
+  {/if}
   {#if !filtered.length}
     <p class="authenticator-status">No code matches that search.</p>
   {:else}
