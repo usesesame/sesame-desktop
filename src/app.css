@@ -765,6 +765,11 @@ button.no-totp:hover { filter: brightness(.97); }
 .browser-fill-modal { width: min(100%, 540px); }
 .browser-fill-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.03em; }
 .browser-fill-modal > p:not(.eyebrow) { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
+.browser-fill-remember { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: start; gap: var(--space-3); margin-top: var(--space-4); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); cursor: pointer; }
+.browser-fill-remember input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+.browser-fill-remember span { display: grid; gap: 3px; }
+.browser-fill-remember strong { color: var(--text); font-size: var(--type-2); }
+.browser-fill-remember small { color: var(--text-muted); font-size: var(--type-1); line-height: 1.45; }
 .confirm-icon.browser { color: var(--accent-link); background: var(--tint); }
 .browser-fill-origin { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: var(--space-2); margin-top: var(--space-4); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--ok-text); background: var(--ok-bg); font-size: var(--type-1); }
 .browser-fill-origin span { font-weight: 700; }
