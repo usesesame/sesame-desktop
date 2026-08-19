@@ -129,8 +129,6 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     try {
       const updateStatus = await checkDesktopUpdate()
       state.patch({ updateStatus })
-      // Silence reads as a broken button to someone who just pressed it, so a
-      // check nobody asked for stays quiet and a check someone did gets an answer.
       if (userInitiated && !updateStatus.available) {
         feedback.showNotice('No update available', 'You are running the latest version of Sesame.')
       }

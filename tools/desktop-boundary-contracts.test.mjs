@@ -35,8 +35,7 @@ test('the desktop repository owns a closed standalone command surface', () => {
 
   const pkg = JSON.parse(read('package.json'))
   assert.equal(pkg.scripts['desktop:version:check'], 'node tools/version-contract.mjs check')
-  // The glob has to stay flat. tools/cross-repo/ holds suites that read former
-  // sibling products, and a recursive glob would drag them back into this gate.
+  // Flat glob: tools/cross-repo/ suites read former sibling products.
   assert.equal(pkg.scripts['desktop:contracts'], 'npm run contracts')
   assert.match(pkg.scripts.contracts, /node --test "tools\/\*-contracts\.test\.mjs"/)
   assert.doesNotMatch(pkg.scripts.contracts, /tools\/\*\*/)

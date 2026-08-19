@@ -3,10 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
-// This repository publishes the browser protocol; the extension vendors it and
-// checks its own copy against the published bytes from its own side. So what
-// belongs here is the half only this side can see: that the Rust implementation
-// still agrees with the contract it hands out.
+// The extension checks its vendored copy from its own side; this asserts the
+// half only this repository can see.
 const root = process.cwd()
 const canonical = join(root, 'src-tauri', 'contracts', 'browser', 'v1')
 

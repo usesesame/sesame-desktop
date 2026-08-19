@@ -16,8 +16,6 @@ export const appVersion = readable(hasTauriInternals ? '' : embeddedVersion, (se
   if (hasTauriInternals) void resolveAppVersion().then(set)
 })
 
-// The channel is read off the version rather than pinned to a literal, so a
-// build cannot ship claiming a maturity it left behind two releases ago.
 export function channelForVersion(version: string): string {
   const prerelease = /^\d+\.\d+\.\d+-([0-9A-Za-z.-]+)$/.exec(version)?.[1]
   if (prerelease) {
