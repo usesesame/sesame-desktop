@@ -251,15 +251,29 @@ jobs:
             echo "Every file here was built in public CI from tag $GITHUB_REF_NAME and signed"
             echo "keylessly with Sigstore, binding it to this repository and that commit."
             echo
-            echo "Verify it before running. Download every file on this release into one"
-            echo "folder, install Cosign (winget install sigstore.cosign), then in that folder:"
+            echo "Verify it before running. The script needs every file on this release, so"
+            echo "fetch the whole set into an empty folder rather than picking files by hand:"
+            echo
+            echo "    gh release create --help >NUL 2>&1 || winget install GitHub.cli"
+            echo "    gh release download $GITHUB_REF_NAME --repo $GITHUB_REPOSITORY"
+            echo "    winget install sigstore.cosign"
+            echo
+            echo "Cosign ships as cosign-windows-amd64.exe and may not land on PATH. The script"
+            echo "looks for a command named cosign, so if it cannot find one, put a copy beside"
+            echo "the installer and add it for this window only:"
+            echo
+            echo '    curl.exe -L -o cosign.exe https://github.com/sigstore/cosign/releases/latest/download/cosign-windows-amd64.exe'
+            echo '    $env:Path = "$PWD;$env:Path"'
+            echo
+            echo "Then, in that folder:"
             echo
             echo '    Unblock-File .\verify-sesame-release.ps1'
             echo '    .\verify-sesame-release.ps1 -Installer .\'"$installer"' -EvidenceDirectory .'
             echo
-            echo "Both parameters are required. Without Cosign the script stops rather than"
-            echo "skipping the publisher check; add -HashOnly to check the hash alone, which"
-            echo "proves the file is intact but not who published it."
+            echo "Both parameters are required. A pass ends with the workflow-verified line."
+            echo "Without Cosign the script stops rather than skipping the publisher check; add"
+            echo "-HashOnly to check the hash alone, which proves the file is intact but not"
+            echo "who published it."
             echo
             echo "SHA-256 of $installer"
             echo "    $sha256"
