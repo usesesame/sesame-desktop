@@ -16,6 +16,17 @@ release cannot be published without saying what changed in it.
   appeared as a separate site from the same one saved in lower case.
 - Checking for updates says so when you are already up to date, instead of
   looking like a button that does nothing.
+- A new unlock PIN cannot be one repeated digit or six digits in a row. A PIN
+  you already use keeps working, so nothing you have set will stop unlocking.
+- A backup file is now checked more completely before Sesame acts on it. PIN
+  unlock material inside it is validated like every other wrapped key, so a
+  damaged backup is refused when you open it rather than failing later with a
+  message about Windows.
+- Filling in the browser finds the username box on far more sites. It reads
+  the placeholder, the accessible label, and the field's own label, instead of
+  only its name, and it no longer offers a credential to a search box or a
+  one-time-code field. Sign-up forms that hide a decoy field to catch bots are
+  left alone.
 
 ## 0.1.1
 
