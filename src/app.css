@@ -1330,6 +1330,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .history-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .history-row { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); background: var(--surface); box-shadow: var(--shadow-panel); }
 .history-row-detail { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.history-change { color: var(--text); font-size: var(--type-2); }
 .history-row-detail strong { color: var(--text); font-size: var(--type-2); }
 .history-row-detail small { color: var(--text-muted); font-size: var(--type-1); }
 .history-row-actions { display: flex; gap: var(--space-1); }

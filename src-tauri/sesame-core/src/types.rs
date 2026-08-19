@@ -776,6 +776,8 @@ pub struct HistorySummary {
     pub kind: String,
     pub captured_at: u64,
     pub operation: HistoryOperation,
+    /// Field names that differ from whatever replaced this version. Names only.
+    pub changed: Vec<String>,
 }
 
 #[derive(Serialize)]

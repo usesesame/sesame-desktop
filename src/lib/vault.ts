@@ -159,7 +159,7 @@ const previewHistoryRecords: Record<string, { kind: string; title: string; itemI
 function captureHistoryPreview(kind: string, itemId: string, title: string, record: unknown) {
   const historyId = `preview-history-${crypto.randomUUID()}`
   previewHistoryRecords[historyId] = { kind, title, itemId, record }
-  previewSnapshot.history.push({ id: historyId, itemId, kind, capturedAt: Math.floor(Date.now() / 1000) })
+  previewSnapshot.history.push({ id: historyId, itemId, kind, capturedAt: Math.floor(Date.now() / 1000), changed: ['password'] })
 }
 
 const previewIdentities: Record<string, Identity> = {}

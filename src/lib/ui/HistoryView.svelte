@@ -18,14 +18,38 @@
     versions: HistorySummary[]
   }
 
-  let collapsed: Record<string, boolean> = {}
+  // Closed by default: a long history is a wall of rows when every item is open.
+  let expanded: Record<string, boolean> = {}
 
   function toggle(itemId: string) {
-    collapsed = { ...collapsed, [itemId]: !collapsed[itemId] }
+    expanded = { ...expanded, [itemId]: !expanded[itemId] }
   }
 
   function formatWhen(capturedAt: number): string {
     return new Date(capturedAt * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  }
+
+  function relativeWhen(capturedAt: number): string {
+    const seconds = Math.max(0, Math.floor(Date.now() / 1_000) - capturedAt)
+    if (seconds < 60) return 'just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+    const days = Math.floor(hours / 24)
+    return `${days} ${days === 1 ? 'day' : 'days'} ago`
+  }
+
+  // Reads as a sentence, so a row says what it was rather than only when it was.
+  function changeSummary(changed: string[]): string {
+    if (!changed.length) return 'No field changed'
+    if (changed.length === 1) return `${changed[0]} changed`
+    if (changed.length === 2) return `${changed[0]} and ${changed[1]} changed`
+    return `${changed.slice(0, 2).join(', ')} and ${changed.length - 2} more changed`
+  }
+
+  function kindLabel(kind: string): string {
+    return kind.replaceAll('_', ' ')
   }
 
   $: groups = items.reduce<HistoryGroup[]>((groups, item) => {
@@ -54,19 +78,19 @@
           <button
             type="button"
             class="history-group-header"
-            aria-expanded={!collapsed[group.itemId]}
+            aria-expanded={expanded[group.itemId] === true}
             on:click={() => toggle(group.itemId)}
           >
             <span class="entry-avatar"><Icon name="refresh" size={15} /></span>
             <div class="history-row-detail">
               <strong>{titleFor(group.kind, group.itemId) ?? `Removed ${group.kind.replaceAll('_', ' ')}`}</strong>
-              <small>{group.versions.length} saved {group.versions.length === 1 ? 'version' : 'versions'}</small>
+              <small>{kindLabel(group.kind)} · {group.versions.length} saved {group.versions.length === 1 ? 'version' : 'versions'} · last {relativeWhen(group.versions[0].capturedAt)}</small>
             </div>
-            <span class="history-group-chevron" class:expanded={!collapsed[group.itemId]}>
+            <span class="history-group-chevron" class:expanded={expanded[group.itemId] === true}>
               <Icon name="chevron-right" size={15} />
             </span>
           </button>
-          {#if !collapsed[group.itemId]}
+          {#if expanded[group.itemId]}
             <ul class="history-list">
               {#each group.versions as item (item.id)}
                 <li class="history-row">
@@ -88,7 +112,8 @@
                     </div>
                   {:else}
                     <div class="history-row-detail">
-                      <small>Saved {formatWhen(item.capturedAt)}</small>
+                      <strong class="history-change">{changeSummary(item.changed)}</strong>
+                      <small title={formatWhen(item.capturedAt)}>{relativeWhen(item.capturedAt)} · {formatWhen(item.capturedAt)}</small>
                     </div>
                     <div class="history-row-actions">
                       <button
