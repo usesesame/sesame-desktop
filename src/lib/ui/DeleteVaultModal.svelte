@@ -2,7 +2,8 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
-  export let deleteVaultText = ''
+  export let deleteVaultPassword = ''
+  export let errorMessage = ''
   export let dataActionWorking = false
   export let onCancel: () => void
   export let onConfirm: () => void
@@ -23,7 +24,23 @@
 >
   <span class="confirm-icon danger"><Icon name="alert" size={20} /></span>
   <h2 id="delete-vault-heading">Remove the local vault?</h2>
-  <p id="delete-vault-description">This cannot be undone from Sesame. Type <code>DELETE</code> to confirm.</p>
-  <label class="delete-vault-input">Confirmation<input bind:value={deleteVaultText} autocomplete="off" spellcheck="false" placeholder="DELETE" /></label>
-  <div class="confirm-actions"><button type="button" class="secondary-button" disabled={dataActionWorking} on:click={cancel}>Cancel</button><button type="button" class="danger-button" disabled={deleteVaultText !== 'DELETE' || dataActionWorking} on:click={onConfirm}>{dataActionWorking ? 'Removing…' : 'Remove vault'}</button></div>
+  <p id="delete-vault-description">This removes the vault and the Sesame backups on this device, and it cannot be undone from Sesame. Enter your master password to confirm.</p>
+  <form novalidate on:submit|preventDefault={onConfirm}>
+    <label class="delete-vault-input" for="delete-vault-password">Master password</label>
+    <input
+      id="delete-vault-password"
+      type="password"
+      bind:value={deleteVaultPassword}
+      autocomplete="current-password"
+      spellcheck="false"
+      disabled={dataActionWorking}
+      aria-invalid={Boolean(errorMessage)}
+      aria-describedby={errorMessage ? 'delete-vault-error' : undefined}
+    />
+    {#if errorMessage}<p id="delete-vault-error" class="form-error" role="alert">{errorMessage}</p>{/if}
+    <div class="confirm-actions">
+      <button type="button" class="secondary-button" disabled={dataActionWorking} on:click={cancel}>Cancel</button>
+      <button type="submit" class="danger-button" disabled={!deleteVaultPassword || dataActionWorking}>{dataActionWorking ? 'Removing…' : 'Remove vault'}</button>
+    </div>
+  </form>
 </ModalShell>

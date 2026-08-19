@@ -1121,12 +1121,12 @@ export async function exportVaultCsv(): Promise<string[] | null> {
   return invoke<string[]>('export_vault_csv', { destination })
 }
 
-export async function deleteLocalVault(): Promise<void> {
+export async function deleteLocalVault(masterPassword: string): Promise<void> {
   if (previewMode) {
     previewUnlocked = false
     return
   }
-  await invoke('delete_local_vault', { confirmation: 'DELETE' })
+  await invoke('delete_local_vault', { masterPassword })
 }
 
 export async function chooseBackupForRestore(): Promise<BackupSelection | null> {

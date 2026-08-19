@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, State};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::lifecycle::{discard_pin_throttle_state, establish_pin_throttle_state};
 use crate::vault::backup::{
@@ -10,11 +10,11 @@ use crate::vault::backup::{
 };
 use crate::vault::platform::securely_delete;
 use crate::vault::recovery_health;
-use crate::vault::storage::{vault_path, write_export_file};
+use crate::vault::storage::{check_supported_vault_format, vault_path, write_export_file};
 use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
 use crate::vault::{
-    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultResult,
-    VaultState,
+    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultFile,
+    VaultResult, VaultState, MAX_VAULT_FILE_BYTES,
 };
 
 #[tauri::command]
@@ -175,13 +175,28 @@ pub fn export_recovery_kit(
 #[tauri::command]
 pub fn delete_local_vault(
     app: AppHandle,
-    confirmation: String,
+    master_password: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<()> {
-    if confirmation.trim() != "DELETE" {
-        return Err("Type DELETE to remove the local vault.".into());
-    }
     let vault = vault_path(&app)?;
+    // Re-authenticate against the vault file rather than the open session, so an
+    // unattended unlocked window cannot destroy the vault and its backups, and so
+    // a locked window cannot either.
+    let master_password = Zeroizing::new(master_password);
+    let bytes = crate::vault::util::require_file_with_limit(
+        &vault,
+        MAX_VAULT_FILE_BYTES,
+        "Sesame could not find a local vault to remove.",
+    )?;
+    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
+        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
+    })?;
+    check_supported_vault_format(&file)?;
+    let mut key =
+        sesame_core::api::unwrap_key_with_password(&file, &master_password).map_err(|_| {
+            "That master password is not correct. The vault was not removed.".to_string()
+        })?;
+    key.zeroize();
     let parent = vault
         .parent()
         .ok_or("Sesame could not find the vault folder.")?;

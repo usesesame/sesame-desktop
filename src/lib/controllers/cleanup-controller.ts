@@ -41,7 +41,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
     mergeComparison: null as MergeComparison | null,
     mergeChoices: {} as MergeChoices,
     readableExportConfirmed: false,
-    deleteVaultText: '',
+    deleteVaultPassword: '',
     dataActionWorking: false,
   })
 
@@ -195,14 +195,14 @@ export function createCleanupController(options: CleanupControllerOptions) {
     setReadableExportConfirmed(readableExportConfirmed: boolean) { state.patch({ readableExportConfirmed }) },
     openDeleteVault() {
       modal.close('data-controls')
-      state.patch({ deleteVaultText: '' })
+      state.patch({ deleteVaultPassword: '' })
       modal.open({ kind: 'delete-vault' })
     },
     closeDeleteVault() {
       modal.close('delete-vault')
-      state.patch({ deleteVaultText: '' })
+      state.patch({ deleteVaultPassword: '' })
     },
-    setDeleteVaultText(deleteVaultText: string) { state.patch({ deleteVaultText }) },
+    setDeleteVaultPassword(deleteVaultPassword: string) { state.patch({ deleteVaultPassword }) },
     async exportReadableVault() {
       if (!state.value().readableExportConfirmed) return
       state.patch({ dataActionWorking: true })
@@ -224,14 +224,15 @@ export function createCleanupController(options: CleanupControllerOptions) {
       }
     },
     async confirmDeleteVault() {
-      if (state.value().deleteVaultText !== 'DELETE') return
+      const masterPassword = state.value().deleteVaultPassword
+      if (!masterPassword) return
       state.patch({ dataActionWorking: true })
       feedback.clearError()
       try {
-        await deleteLocalVault()
+        await deleteLocalVault(masterPassword)
         options.clearLoginSelection()
         state.patch({
-          duplicateReviewOpen: false, duplicateGroups: [], deleteVaultText: '',
+          duplicateReviewOpen: false, duplicateGroups: [], deleteVaultPassword: '',
         })
         options.onVaultDeleted('The local vault and Sesame backups were removed from this device.')
       } catch (error) {
@@ -246,7 +247,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
         duplicateReviewOpen: false, duplicateGroups: [], duplicateGroupId: undefined, duplicateSelectedIds: [],
         duplicateReviewLoading: false, cleanupWorking: false, deleteCandidate: null, deleteBatch: [], mergeCandidate: null,
         mergeKeepId: '', mergeComparison: null, mergeChoices: {}, readableExportConfirmed: false,
-        deleteVaultText: '', dataActionWorking: false,
+        deleteVaultPassword: '', dataActionWorking: false,
       })
     },
   }
