@@ -33,6 +33,34 @@
   function focusInitial() {
     titleInput?.focus()
   }
+
+  // A public key names its own algorithm in the first field, so nobody should
+  // have to retype it. Private keys do not, except for the older PEM headers.
+  const keyTypes: Array<{ prefix: string; name: string }> = [
+    { prefix: 'sk-ssh-ed25519@openssh.com', name: 'ed25519-sk' },
+    { prefix: 'sk-ecdsa-sha2-nistp256@openssh.com', name: 'ecdsa-sk' },
+    { prefix: 'ssh-ed25519', name: 'ed25519' },
+    { prefix: 'ecdsa-sha2-', name: 'ecdsa' },
+    { prefix: 'ssh-rsa', name: 'rsa' },
+    { prefix: 'ssh-dss', name: 'dsa' },
+  ]
+
+  function keyTypeOf(publicKey: string, privateKey: string): string {
+    const first = publicKey.trim().split(/\s+/)[0] ?? ''
+    const match = keyTypes.find((entry) => first.startsWith(entry.prefix))
+    if (match) return match.name
+    if (/BEGIN RSA PRIVATE KEY/.test(privateKey)) return 'rsa'
+    if (/BEGIN EC PRIVATE KEY/.test(privateKey)) return 'ecdsa'
+    if (/BEGIN DSA PRIVATE KEY/.test(privateKey)) return 'dsa'
+    return ''
+  }
+
+  // Fills a blank only, so a type set by hand survives a later paste.
+  function fillKeyType() {
+    if (keyDraft.keyType.trim()) return
+    const detected = keyTypeOf(keyDraft.publicKey, keyDraft.privateKey)
+    if (detected) keyDraft = { ...keyDraft, keyType: detected }
+  }
 </script>
 
 <ModalShell
@@ -52,9 +80,9 @@
 
   <div class="editor-fields">
     <label>Name <span class="field-hint">How this key appears in your list, e.g. "Deploy key"</span><input bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key" autocomplete="off" /></label>
-    <label>Key type <span class="field-hint">Optional, e.g. ed25519</span><input bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" /></label>
-    <label>Private key<textarea bind:value={keyDraft.privateKey} rows="6" maxlength="16000" class="monospace-field"></textarea></label>
-    <label>Public key<textarea bind:value={keyDraft.publicKey} rows="3" maxlength="4000" class="monospace-field"></textarea></label>
+    <label>Key type <span class="field-hint">Read from the key you paste</span><input bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" placeholder="e.g. ed25519" /></label>
+    <label>Private key<textarea bind:value={keyDraft.privateKey} on:input={fillKeyType} rows="6" maxlength="16000" class="monospace-field"></textarea></label>
+    <label>Public key<textarea bind:value={keyDraft.publicKey} on:input={fillKeyType} rows="3" maxlength="4000" class="monospace-field"></textarea></label>
     <label>Passphrase<input bind:value={keyDraft.passphrase} maxlength="256" autocomplete="off" /></label>
     <label>Notes<textarea bind:value={keyDraft.notes} rows="4" maxlength="4000"></textarea></label>
     <label>Tags <span class="field-hint">Comma separated, optional</span><input value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy" /></label>

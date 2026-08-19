@@ -651,6 +651,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .recovery-empty > .text-button { flex: none; }
 .recovery-empty-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 .field-hint { margin-left: var(--space-1); color: var(--text-faint); font-size: var(--type-1); font-weight: 500; }
+.field-warning { display: block; margin-top: 5px; color: var(--warn-text); font-size: var(--type-1); font-weight: 600; line-height: 1.4; }
 .notes-section { margin-top: var(--space-4); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface-inset); }
 .notes-section p:last-child { margin: 0; color: var(--text-muted); font-size: var(--type-1); line-height: 1.5; }
 .select-entry { display: grid; place-content: center; min-height: 100%; text-align: center; }
