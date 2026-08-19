@@ -261,6 +261,8 @@ pub struct TotpCodeEntry {
     pub initials: String,
     pub code: String,
     pub remaining: u64,
+    /// The full window, so the interface can draw how much of it is left.
+    pub period: u64,
 }
 
 #[derive(Serialize)]

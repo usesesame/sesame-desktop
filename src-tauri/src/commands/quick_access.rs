@@ -136,6 +136,7 @@ fn quick_access_secret(entry: &VaultEntry) -> QuickAccessSecret {
             .totp
             .as_deref()
             .and_then(current_totp)
+            .map(|(code, remaining, _)| (code, remaining))
             .map(|(code, _)| code),
     }
 }
