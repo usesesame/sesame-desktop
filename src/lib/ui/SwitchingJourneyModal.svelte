@@ -2,6 +2,7 @@
   import Icon from '../Icon.svelte'
   import type { BrowserIntegrationStatus, RecoveryHealth } from '../types'
   import ModalShell from './ModalShell.svelte'
+  import { readSwitchingChecklist, storeSwitchingChecklist } from '../preferences'
 
   export let health: RecoveryHealth | null = null
   export let currentRevision = 0
@@ -13,12 +14,9 @@
 
   $: backupReady = health?.lastExportedRevision === currentRevision || health?.lastVerifiedRevision === currentRevision
   $: browserReady = browserIntegration?.ready === true
-  const checklist = {
-    regularSites: false,
-    recoveryDetails: false,
-    browserFill: false,
-    dualRun: false,
-  }
+  const checklist = readSwitchingChecklist()
+
+  $: storeSwitchingChecklist(checklist)
 
   function openBackups() {
     onClose()
