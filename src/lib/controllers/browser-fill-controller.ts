@@ -38,7 +38,7 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
     const current = browserFill.value().request
     if (current?.approvalId === request.approvalId) return
     if (current) void resolveBrowserFillRequest(current.approvalId, null)
-    browserFill.patch({ request, selectedId: request.candidates.length === 1 ? request.candidates[0].id : '', working: false })
+    browserFill.patch({ request, selectedId: request.candidates.length === 1 ? request.candidates[0].id : '', remember: false, working: false })
   }
 
   async function syncPending() {

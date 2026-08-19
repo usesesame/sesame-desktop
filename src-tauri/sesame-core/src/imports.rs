@@ -1200,8 +1200,10 @@ fn totp_entry(
         fidelity.record(FieldDisposition::Malformed);
         return None;
     }
+    // A link may carry no label at all. The secret is the valuable part and the
+    // name can be edited, so name it rather than dropping it in silence.
     let title = match (issuer.trim(), account.trim()) {
-        ("", "") => return None,
+        ("", "") => "Imported code".to_string(),
         ("", account) => account.to_string(),
         (issuer, _) => issuer.to_string(),
     };
