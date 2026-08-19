@@ -119,7 +119,7 @@
     </p>
 
     {#if !verifyMode}
-      <code class="recovery-code">{recoveryKit}</code>
+      <code class="recovery-code">{#each groups as group, index (index)}<span>{group}{index < groups.length - 1 ? '-' : ''}</span>{/each}</code>
       {#if onSaveToFile}
         <button type="button" class="text-button save-file-button" on:click={handleSaveToFile} disabled={savingToFile}>
           {savingToFile ? 'Saving…' : 'Save to a file'}
@@ -205,18 +205,25 @@
     margin: 0 0 18px;
     color: var(--text-muted);
   }
+  /* Each group is its own box, so a line can only ever break between groups. */
   .recovery-code {
-    display: block;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-2) 0;
     width: 100%;
-    padding: 14px;
-    margin-bottom: 14px;
-    border-radius: 10px;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+    border-radius: var(--radius-md);
     background: var(--surface-inset);
     border: 1px solid var(--border-soft);
-    font-size: 18px;
-    text-align: center;
-    word-break: break-all;
     user-select: all;
+  }
+  .recovery-code span {
+    color: var(--accent-link);
+    font-size: var(--type-4);
+    font-weight: 700;
+    letter-spacing: .1em;
   }
   .recovery-confirm {
     display: flex;
@@ -254,14 +261,18 @@
     font-size: 13px;
   }
   .text-button {
-    margin-bottom: 12px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    text-decoration: underline;
+    justify-self: start;
+    margin-bottom: var(--space-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-inset);
+    color: var(--accent-link);
+    font-size: var(--type-2);
+    font-weight: 600;
     cursor: pointer;
   }
+  .text-button:hover:not(:disabled) { background: var(--tint); }
   .text-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;

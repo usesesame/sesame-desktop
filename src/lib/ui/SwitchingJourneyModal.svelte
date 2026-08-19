@@ -75,16 +75,39 @@
 
 <style>
   .switching-journey-icon { display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: 50%; color: var(--accent-link); background: var(--tint); }
-  .switching-steps { display: grid; gap: 0.75rem; margin: 1.25rem 0; padding: 0; list-style: none; counter-reset: step; }
-  .switching-steps li { display: grid; gap: 0.35rem; padding: 0.9rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--surface-2); }
-  .switching-steps li::before { counter-increment: step; content: counter(step); width: 1.45rem; height: 1.45rem; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); font-size: 0.8rem; font-weight: 700; }
+  .switching-steps { display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: 0; list-style: none; counter-reset: step; }
+  /* The marker is a real column, so the title no longer needs pulling up over it. */
+  .switching-steps li {
+    display: grid;
+    grid-template-columns: 1.5rem minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    background: var(--surface-2);
+  }
+  .switching-steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    display: grid;
+    grid-column: 1;
+    width: 1.5rem;
+    height: 1.5rem;
+    place-items: center;
+    border-radius: var(--radius-pill);
+    background: var(--surface-3);
+    color: var(--text-2);
+    font-size: var(--type-1);
+    font-weight: 700;
+  }
   .switching-steps li.complete::before { content: '✓'; background: var(--ok-bg); color: var(--ok-text); }
-  .switching-steps strong { margin-top: -1.75rem; margin-left: 2rem; }
-  .switching-steps span { color: var(--text-muted); }
-  .switching-steps button { justify-self: start; margin-top: 0.2rem; }
-  .dual-run-checklist { display: grid; gap: 0.4rem; margin-top: 0.2rem; }
-  .dual-run-checklist label { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--text); }
-  .dual-run-checklist input { margin-top: 0.2rem; accent-color: var(--accent); }
-  .switching-note { color: var(--text-muted); font-size: 0.9rem; }
-  .switching-actions { display: flex; justify-content: flex-end; margin-top: 1.25rem; }
+  .switching-steps strong { grid-column: 2; color: var(--text-heading); font-size: var(--type-2); }
+  .switching-steps span { grid-column: 2; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .switching-steps button { grid-column: 2; justify-self: start; margin-top: var(--space-1); }
+  .dual-run-checklist { display: grid; grid-column: 2; gap: var(--space-2); margin-top: var(--space-1); }
+  .dual-run-checklist label { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text); font-size: var(--type-2); }
+  .dual-run-checklist input { width: 16px; height: 16px; flex: none; margin-top: 2px; accent-color: var(--accent); }
+  .switching-note { color: var(--text-muted); font-size: var(--type-1); line-height: 1.55; }
+  .switching-actions { display: flex; justify-content: flex-end; margin-top: var(--space-5); }
 </style>

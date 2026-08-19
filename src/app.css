@@ -946,6 +946,9 @@ button.no-totp:hover { filter: brightness(.97); }
 .restore-facts p.warning { color: var(--warn-text); }
 .restore-warning { margin: var(--space-5) 0 var(--space-4); color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
 .restore-confirm { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text); font-size: var(--type-2); line-height: 1.4; }
+.restore-modal label[for="restore-secret"] { display: block; margin: var(--space-5) 0 var(--space-2); color: var(--text); font-size: var(--type-1); font-weight: 700; }
+.restore-modal input#restore-secret { width: 100%; border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface); font-size: var(--type-3); }
+.restore-modal input#restore-secret:focus { box-shadow: var(--field-ring); outline: none; }
 .restore-confirm input { width: 17px; height: 17px; flex: none; margin: 1px 0 0; accent-color: var(--danger); }
 .restore-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
 
@@ -1062,7 +1065,7 @@ button.no-totp:hover { filter: brightness(.97); }
 /* =========================================================================
    Feature: import
    ========================================================================= */
-.import-modal { width: min(100%, 440px); text-align: center; }
+.import-modal { width: min(100%, 440px); }
 .import-icon { display: grid; place-items: center; width: 47px; height: 47px; margin: 0 auto var(--space-4); border-radius: var(--radius-lg); color: var(--chip-icon); background: var(--chip-bg); line-height: 0; }
 .import-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); }
 .import-modal > p:not(.eyebrow):not(.tiny-note) { color: var(--text-muted); font-size: var(--type-1); line-height: 1.6; }
