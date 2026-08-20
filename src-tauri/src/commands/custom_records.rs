@@ -76,6 +76,9 @@ fn custom_record_from_input(input: CustomRecordInput) -> VaultResult<CustomRecor
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
             .collect(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -130,6 +133,9 @@ pub fn save_custom_record(
         let previous = existing.clone();
         record.created_at = existing.created_at;
         record.revision = existing.revision.saturating_add(1);
+        record.folder_id = existing.folder_id.clone();
+        record.favourite = existing.favourite;
+        record.last_used_at = existing.last_used_at;
         *existing = record;
         crate::vault::history::capture_history(
             &mut next_payload,

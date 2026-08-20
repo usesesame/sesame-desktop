@@ -1,17 +1,29 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte'
+  import { onDestroy, tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { issueChipLabel, issueChips, issueFilterLabel, issueKindLabels } from '../issue-kinds'
+  import type { ItemDetail as ItemDetailShape } from '../item-fields'
   import { useAppStores } from '../stores/app-stores'
-  import type { BreachCheckResult, IssueKind, VaultEntry } from '../types'
-  import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels } from '../vault-collections'
+  import type { BreachCheckResult, IssueKind, ItemKind } from '../types'
+  import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels, tagFilter, tagFromFilter } from '../vault-collections'
+  import { itemKindIcon, itemKindLabel, itemKindMeta, itemTags, type VaultItem } from '../vault-items'
+  import AddItemMenu from './AddItemMenu.svelte'
+  import ItemFilterMenu from './ItemFilterMenu.svelte'
+  import ItemDetail from './ItemDetail.svelte'
   import PanelResizer from './PanelResizer.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { PANEL_WIDTH_LIMITS, readPanelWidths, storePanelWidths } from '../preferences'
 
   const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
 
-  export let visibleEntries: VaultEntry[] = []
+  export let allItems: VaultItem[] = []
+  export let visibleItems: VaultItem[] = []
+  export let recentItems: VaultItem[] = []
+  export let itemDetail: ItemDetailShape | null = null
+  export let itemLoading = false
+  export let addMenuOpen = false
+  export let filterMenuOpen = false
+  export let focusSearchToken = 0
   export let passwordVisible = false
   export let siteIconsEnabled = false
   export let totpRemaining = 0
@@ -21,17 +33,25 @@
   export let selectedIds: string[] = []
   export let bulkFolderId = ''
   export let recoveryActionWorking = false
-  export let onSelectEntry: (id: string) => void
+  export let onSelectItem: (id: string, kind: ItemKind) => void
+  export let onAddItem: (kind: ItemKind) => void
+  export let onToggleAddMenu: (open?: boolean) => void
+  export let onToggleFilterMenu: (open?: boolean) => void
   export let onOpenNewLogin: (password?: string) => void
   export let onImport: () => void
   export let onClearSearch: () => void
   export let onSearch: (query: string) => void
   export let onSetSortMode: (mode: string) => void
   export let onClearSecurityFilter: () => void
-  export let onShowFolder: (folderId: string | null) => void
+  export let onSetCategory: (kind: ItemKind | null) => void
+  export let onShowCollection: (filter: string | null) => void
   export let onOrganizeFolders: () => void
   export let onOpenContextMenu: (position: { x: number; y: number }, id: string) => void
   export let onOpenLoginEditor: () => void
+  export let onOpenItemEditor: () => void
+  export let onDeleteItem: () => void
+  export let onMoveItem: (folderId?: string) => void
+  export let onItemCopy: (value: string, label: string) => void
   export let onOpenRecoveryNotApplicable: () => void
   export let onFixWeakPassword: () => void
   export let breachCheckOpen = false
@@ -63,23 +83,31 @@
   const { selection, vault } = useAppStores()
   $: snapshotEntries = $vault.snapshot?.entries ?? []
   $: folders = $vault.snapshot?.folders ?? []
-  $: selectedEntry = snapshotEntries.find((entry) => entry.id === $selection.activeEntryId) ?? null
+  $: selectedEntry = snapshotEntries.find((entry) => entry.id === $selection.activeItemId) ?? null
   $: selectedSet = new Set(selectedIds)
-  $: allVisibleSelected = visibleEntries.length > 0 && visibleEntries.every((entry) => selectedSet.has(entry.id))
-  $: allSelectedFavourite = selectedIds.length > 0 && snapshotEntries.filter((entry) => selectedSet.has(entry.id)).every((entry) => entry.favourite)
-  $: favouriteCount = snapshotEntries.filter((entry) => entry.favourite).length
-  $: recentCount = snapshotEntries.filter((entry) => entry.lastUsedAt).length
-  $: unfiledCount = snapshotEntries.filter((entry) => !entry.folderId).length
-  $: activeFolder = folders.find((folder) => folder.id === $selection.folderFilter)
-  $: folderHeading = $selection.folderFilter === null
-    ? 'All logins'
-    : $selection.folderFilter === FAVOURITES_FILTER
+  $: allVisibleSelected = visibleItems.length > 0 && visibleItems.every((item) => selectedSet.has(item.id))
+  $: selectedItems = allItems.filter((item) => selectedSet.has(item.id))
+  $: allSelectedFavourite = selectedItems.length > 0 && selectedItems.every((item) => item.favourite)
+  $: allSelectedLogins = selectedItems.length > 0 && selectedItems.every((item) => item.kind === 'login')
+  $: tags = itemTags(allItems)
+  $: activeFolder = folders.find((folder) => folder.id === $selection.collectionFilter)
+  $: activeTag = tagFromFilter($selection.collectionFilter)
+  $: collectionHeading = $selection.collectionFilter === null
+    ? 'All items'
+    : $selection.collectionFilter === FAVOURITES_FILTER
       ? 'Favourites'
-      : $selection.folderFilter === RECENT_FILTER
+      : $selection.collectionFilter === RECENT_FILTER
         ? 'Recently used'
-        : $selection.folderFilter === ''
-          ? 'Unfiled'
-          : activeFolder?.name ?? 'Folder'
+        : activeTag !== null
+          ? activeTag
+          : $selection.collectionFilter === ''
+            ? 'Unfiled'
+            : activeFolder?.name ?? 'Collection'
+  $: listHeading = $selection.securityFilter
+    ? 'Security review'
+    : $selection.categoryFilter && $selection.collectionFilter === null
+      ? itemKindMeta($selection.categoryFilter).plural
+      : collectionHeading
   $: activeIssue = $selection.securityFilter
   $: activePasswordIssues = selectedEntry?.passwordIssues.filter((issue) => issue.kind === activeIssue) ?? []
 
@@ -90,11 +118,6 @@
   let panelWidths = readPanelWidths()
   const commitPanelWidths = () => storePanelWidths(panelWidths)
 
-  $: recentEntries = $selection.recentEntryIds
-    .map((id) => snapshotEntries.find((entry) => entry.id === id))
-    .filter((entry): entry is VaultEntry => Boolean(entry) && entry!.id !== $selection.activeEntryId)
-
-  let folderStrip: HTMLElement
   let searchInput: HTMLInputElement
   let passwordRevealTimer: ReturnType<typeof setTimeout> | null = null
   let sortMenuOpen = false
@@ -164,40 +187,35 @@
     }, PASSWORD_REVEAL_TIMEOUT_MS)
   }
 
-  $: if ($selection.folderFilter === RECENT_FILTER) sortMenuOpen = false
-  $: if ($selection.activeEntryId) clearPasswordRevealTimer()
+  $: if ($selection.collectionFilter === RECENT_FILTER) sortMenuOpen = false
+  $: if ($selection.activeItemId) clearPasswordRevealTimer()
   onDestroy(clearPasswordRevealTimer)
 
-  function folderCount(folderId: string) {
-    return snapshotEntries.filter((entry) => entry.folderId === folderId).length
-  }
-
-  function keyboardContextMenu(event: KeyboardEvent, id: string) {
+  function keyboardContextMenu(event: KeyboardEvent, item: VaultItem) {
+    if (item.kind !== 'login') return
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
     event.preventDefault()
     const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    onOpenContextMenu({ x: bounds.left + 24, y: bounds.top + 24 }, id)
+    onOpenContextMenu({ x: bounds.left + 24, y: bounds.top + 24 }, item.id)
   }
 
-  function scrollFolders(direction: -1 | 1) {
-    folderStrip?.scrollBy({ left: Math.max(120, folderStrip.clientWidth * 0.8) * direction, behavior: 'smooth' })
+  function activateRow(item: VaultItem) {
+    if (multiSelect) onToggleMultiSelect(item.id, !selectedSet.has(item.id))
+    else onSelectItem(item.id, item.kind)
   }
 
-  function activateRow(entry: VaultEntry) {
-    if (multiSelect) onToggleMultiSelect(entry.id, !selectedSet.has(entry.id))
-    else onSelectEntry(entry.id)
+  let lastFocusSearchToken = 0
+  $: if (focusSearchToken !== lastFocusSearchToken) {
+    lastFocusSearchToken = focusSearchToken
+    void tick().then(() => {
+      searchInput?.focus()
+      searchInput?.select()
+    })
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null
     if (target?.closest('[role="dialog"]')) return
-    const editing = target?.matches('input, textarea, select, [contenteditable="true"]')
-    if (!editing && (event.key === '/' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k'))) {
-      event.preventDefault()
-      searchInput?.focus()
-      searchInput?.select()
-      return
-    }
     if (target === searchInput && event.key === 'Escape' && $selection.searchQuery) {
       event.preventDefault()
       onClearSearch()
@@ -208,29 +226,30 @@
       onCancelAutoType()
       return
     }
+    const editing = target?.matches('input, textarea, select, [contenteditable="true"]')
     if (!multiSelect || editing) return
     if (event.key === 'Escape') {
       event.preventDefault()
       onCancelMultiSelect()
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault()
-      onSelectVisible(allVisibleSelected ? [] : visibleEntries.map((entry) => entry.id))
+      onSelectVisible(allVisibleSelected ? [] : visibleItems.map((item) => item.id))
     }
   }
 
   function clearEmptyStateFilters() {
     onClearSearch()
     onClearSecurityFilter()
-    if ($selection.folderFilter !== null) onShowFolder(null)
+    onSetCategory(null)
+    if ($selection.collectionFilter !== null) onShowCollection(null)
   }
 </script>
 
 <svelte:window on:keydown={handleWindowKeydown} on:mousedown={handleSortOutside} />
 
-{#if !snapshotEntries.length}
+{#if !allItems.length}
   <section class="empty-workspace">
     <img class="empty-brand size-md" src="/favicon.svg" alt="" />
-    <p class="eyebrow">Start here</p>
     <h2>Bring in your logins.</h2>
     <p>Import an export from another password manager. Sesame reads it on this device.</p>
     <button class="primary-button" on:click={onImport}>Choose export file</button>
@@ -238,39 +257,35 @@
   </section>
 {:else}
   <div class="vault-layout" style="--vault-list-width: {panelWidths.list}px; --vault-rail-width: {panelWidths.rail}px;">
-    <section class="entry-list-panel" aria-label="Saved logins">
+    <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
         <div>
-          <h2>{$selection.securityFilter ? 'Security review' : folderHeading}</h2>
-          <p>{visibleEntries.length} {visibleEntries.length === 1 ? 'login' : 'logins'}</p>
+          <h2>{listHeading}</h2>
+          <p>{visibleItems.length} {visibleItems.length === 1 ? 'item' : 'items'}</p>
         </div>
         <div class="panel-heading-actions">
           <button type="button" class="select-logins-button" class:active={multiSelect} on:click={() => multiSelect ? onCancelMultiSelect() : onStartMultiSelect()}>{multiSelect ? 'Done' : 'Select'}</button>
-          <button type="button" class="add-login-button" on:click={() => onOpenNewLogin()} aria-label="Add a login"><Icon name="plus" size={15} strokeWidth={2.2} /><span>Add</span></button>
+          <AddItemMenu open={addMenuOpen} onToggle={onToggleAddMenu} onAdd={onAddItem} {onImport} />
         </div>
       </div>
 
-      <div class="folder-navigation">
-        <button type="button" class="folder-scroll-control" aria-label="Previous collections" title="Previous collections" on:click={() => scrollFolders(-1)}><Icon name="chevron-left" size={15} /></button>
-        <nav bind:this={folderStrip} class="folder-strip" aria-label="Vault collections">
-          <button type="button" class:active={$selection.folderFilter === null} aria-pressed={$selection.folderFilter === null} on:click={() => onShowFolder(null)}><Icon name="folder" size={14} /><span>All</span><small>{snapshotEntries.length}</small></button>
-          <button type="button" class:active={$selection.folderFilter === FAVOURITES_FILTER} aria-pressed={$selection.folderFilter === FAVOURITES_FILTER} on:click={() => onShowFolder(FAVOURITES_FILTER)}><span class="collection-star" aria-hidden="true">★</span><span>Favourites</span><small>{favouriteCount}</small></button>
-          <button type="button" class:active={$selection.folderFilter === RECENT_FILTER} aria-pressed={$selection.folderFilter === RECENT_FILTER} on:click={() => onShowFolder(RECENT_FILTER)}><Icon name="refresh" size={14} /><span>Recent</span><small>{recentCount}</small></button>
-          {#each folders as folder (folder.id)}
-            <button type="button" class:active={$selection.folderFilter === folder.id} aria-pressed={$selection.folderFilter === folder.id} on:click={() => onShowFolder(folder.id)}><Icon name="folder" size={14} /><span>{folder.name}</span><small>{folderCount(folder.id)}</small></button>
-          {/each}
-          <button type="button" class:active={$selection.folderFilter === ''} aria-pressed={$selection.folderFilter === ''} on:click={() => onShowFolder('')}><Icon name="folder" size={14} /><span>Unfiled</span><small>{unfiledCount}</small></button>
-        </nav>
-        <button type="button" class="folder-scroll-control" aria-label="Next collections" title="Next collections" on:click={() => scrollFolders(1)}><Icon name="chevron-right" size={15} /></button>
-        <button type="button" class="organize-folders" aria-label="Organize folders" title="Organize folders" on:click={onOrganizeFolders}><Icon name="settings" size={14} /></button>
-      </div>
-
-      {#if activeIssue}<button class="active-filter" on:click={onClearSecurityFilter}>Showing {issueFilterLabel(activeIssue)} <span aria-hidden="true">×</span></button>{/if}
+      <label class="search-box"><Icon name="search" size={15} /><input bind:this={searchInput} value={$selection.searchQuery} on:input={(event) => onSearch(event.currentTarget.value)} placeholder="Search every item" aria-label="Search every saved item" aria-keyshortcuts="Control+K Meta+K /" />{#if !$selection.searchQuery}<kbd aria-hidden="true">/</kbd>{:else}<button type="button" aria-label="Clear search" on:click={onClearSearch}>×</button>{/if}</label>
 
       <div class="vault-list-tools">
-        <label class="search-box"><Icon name="search" size={15} /><input bind:this={searchInput} value={$selection.searchQuery} on:input={(event) => onSearch(event.currentTarget.value)} placeholder="Search" aria-label="Search logins" aria-keyshortcuts="Control+K Meta+K /" />{#if !$selection.searchQuery}<kbd aria-hidden="true">/</kbd>{:else}<button type="button" aria-label="Clear search" on:click={onClearSearch}>×</button>{/if}</label>
+        <ItemFilterMenu
+          open={filterMenuOpen}
+          items={allItems}
+          {folders}
+          {tags}
+          categoryFilter={$selection.categoryFilter}
+          collectionFilter={$selection.collectionFilter}
+          onToggle={onToggleFilterMenu}
+          {onSetCategory}
+          {onShowCollection}
+          {onOrganizeFolders}
+        />
         <div class="sort-control" bind:this={sortContainer}>
-          <span id="sort-control-label" class="sr-only">Sort logins</span>
+          <span id="sort-control-label" class="sr-only">Sort items</span>
           <button
             bind:this={sortButton}
             type="button"
@@ -279,7 +294,7 @@
             aria-labelledby="sort-control-label"
             aria-controls="sort-control-options"
             aria-expanded={sortMenuOpen}
-            disabled={$selection.folderFilter === RECENT_FILTER}
+            disabled={$selection.collectionFilter === RECENT_FILTER}
             on:click={() => (sortMenuOpen = !sortMenuOpen)}
             on:keydown={handleSortTriggerKeydown}
           >
@@ -294,43 +309,56 @@
             </div>
           {/if}
         </div>
-        <button type="button" class="import-button" on:click={onImport}><Icon name="archive" size={14} /><span>Import</span></button>
       </div>
 
-      {#if multiSelect}
-        <div class="bulk-toolbar" role="region" aria-label="Bulk login actions">
-          <label class="bulk-select-all"><input type="checkbox" checked={allVisibleSelected} aria-label="Select all visible logins" on:change={() => onSelectVisible(allVisibleSelected ? [] : visibleEntries.map((entry) => entry.id))} /><span>{selectedIds.length} selected</span></label>
-          <select value={bulkFolderId} aria-label="Destination folder" on:change={(event) => onSetBulkFolderId(event.currentTarget.value)}>
-            <option value="">Unfiled</option>
-            {#each folders as folder (folder.id)}<option value={folder.id}>{folder.name}</option>{/each}
-          </select>
-          <button type="button" class="secondary-button bulk-move-button" disabled={!selectedIds.length} on:click={onBulkMove}>Move</button>
-          <button type="button" class="secondary-button" disabled={!selectedIds.length} on:click={onBulkFavourite}>{allSelectedFavourite ? 'Unfavourite' : 'Favourite'}</button>
-          <button type="button" class="editor-delete" disabled={!selectedIds.length} on:click={onBulkDelete}>Delete</button>
+      {#if activeIssue || $selection.categoryFilter || $selection.collectionFilter !== null}
+        <div class="active-filters">
+          {#if activeIssue}<button type="button" class="active-filter" on:click={onClearSecurityFilter}>{issueFilterLabel(activeIssue)} <span aria-hidden="true">×</span></button>{/if}
+          {#if $selection.categoryFilter}<button type="button" class="active-filter" on:click={() => onSetCategory(null)}>{itemKindMeta($selection.categoryFilter).plural} <span aria-hidden="true">×</span></button>{/if}
+          {#if $selection.collectionFilter !== null}<button type="button" class="active-filter" on:click={() => onShowCollection(null)}>{collectionHeading} <span aria-hidden="true">×</span></button>{/if}
         </div>
       {/if}
 
-      {#if visibleEntries.length}
-        <div class="entry-list" role="list" aria-label={multiSelect ? 'Select logins' : 'Logins'}>
-          {#each visibleEntries as entry (entry.id)}
-            <div class="entry-row" class:selected={$selection.activeEntryId === entry.id && !multiSelect} class:multi-selected={selectedSet.has(entry.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, entry.id)}>
-              {#if multiSelect}<input class="entry-select-box" type="checkbox" checked={selectedSet.has(entry.id)} aria-label={`Select ${entry.title}`} on:change={(event) => onToggleMultiSelect(entry.id, event.currentTarget.checked)} />{/if}
-              <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeEntryId === entry.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(entry.id) : undefined} on:click={() => activateRow(entry)} on:keydown={(event) => !multiSelect && keyboardContextMenu(event, entry.id)}>
-                <span class="entry-avatar"><WebsiteIcon site={entry.site} initials={entry.initials} enabled={siteIconsEnabled} /></span>
-                <span class="entry-title"><strong>{entry.title}</strong><small>{entry.site}{#if entry.folder}<span class="entry-folder">{entry.folder}</span>{/if}</small></span>
-                {#if entry.securityLevel !== 'good'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
+      {#if multiSelect}
+        <div class="bulk-toolbar" role="region" aria-label="Bulk item actions">
+          <label class="bulk-select-all"><input type="checkbox" checked={allVisibleSelected} aria-label="Select all visible items" on:change={() => onSelectVisible(allVisibleSelected ? [] : visibleItems.map((item) => item.id))} /><span>{selectedIds.length} selected</span></label>
+          <div class="bulk-destination">
+            <select value={bulkFolderId} aria-label="Destination collection" on:change={(event) => onSetBulkFolderId(event.currentTarget.value)}>
+              <option value="">Unfiled</option>
+              {#each folders as folder (folder.id)}<option value={folder.id}>{folder.name}</option>{/each}
+            </select>
+            <button type="button" class="secondary-button bulk-move-button" disabled={!selectedIds.length} on:click={onBulkMove}>Move</button>
+          </div>
+          <div class="bulk-toolbar-actions">
+            <button type="button" class="secondary-button" disabled={!selectedIds.length} on:click={onBulkFavourite}>{allSelectedFavourite ? 'Unfavourite' : 'Favourite'}</button>
+            <button type="button" class="editor-delete" disabled={!allSelectedLogins} title={allSelectedLogins ? 'Delete the selected logins' : 'Deleting in bulk covers logins only'} on:click={onBulkDelete}>Delete</button>
+          </div>
+        </div>
+      {/if}
+
+      {#if visibleItems.length}
+        <div class="entry-list" role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
+          {#each visibleItems as item (item.id)}
+            <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && item.kind === 'login' && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
+              {#if multiSelect}<input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />{/if}
+              <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => !multiSelect && keyboardContextMenu(event, item)}>
+                <span class="entry-avatar">
+                  {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
+                </span>
+                <span class="entry-title"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
+                {#if item.securityLevel === 'needs-work'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
               </button>
-              {#if !multiSelect}<button type="button" class="entry-favourite" class:active={entry.favourite} aria-label={entry.favourite ? `Remove ${entry.title} from favourites` : `Add ${entry.title} to favourites`} aria-pressed={entry.favourite} on:click={() => onToggleFavourite(entry.id, !entry.favourite)}>{entry.favourite ? '★' : '☆'}</button>{/if}
+              {#if !multiSelect}<button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}>{item.favourite ? '★' : '☆'}</button>{/if}
             </div>
           {/each}
         </div>
       {:else}
-        <div class="empty-vault"><Icon name="search" size={24} /><h3>No matching logins.</h3><p>Try another search or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show all logins</button></div>
+        <div class="empty-vault"><Icon name="search" size={24} /><h3>No matching items.</h3><p>Try another search, category, or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show everything</button></div>
       {/if}
     </section>
 
     <PanelResizer
-      label="Resize the login list"
+      label="Resize the item list"
       value={panelWidths.list}
       min={PANEL_WIDTH_LIMITS.list.min}
       max={PANEL_WIDTH_LIMITS.list.max}
@@ -340,22 +368,38 @@
     />
 
     <section class="login-card-area">
-      {#if recentEntries.length}
-        <nav class="recent-strip" aria-label="Recently viewed logins">
+      {#if recentItems.length}
+        <nav class="recent-strip" aria-label="Recently viewed items">
           <span class="recent-strip-label">Recent</span>
-          {#each recentEntries as entry (entry.id)}
-            <button type="button" class="recent-chip" on:click={() => onSelectEntry(entry.id)} title={entry.title}>
-              {entry.title}
+          {#each recentItems as item (item.id)}
+            <button type="button" class="recent-chip" on:click={() => onSelectItem(item.id, item.kind)} title={item.title}>
+              {item.title}
             </button>
           {/each}
         </nav>
       {/if}
 
-      {#if $vault.loginCard}
+      {#if $selection.activeItemKind && $selection.activeItemKind !== 'login'}
+        {#if itemDetail}
+          <ItemDetail
+            kind={$selection.activeItemKind}
+            detail={itemDetail}
+            {folders}
+            onCopy={onItemCopy}
+            onToggleFavourite={(favourite) => $selection.activeItemId && onToggleFavourite($selection.activeItemId, favourite)}
+            onEdit={onOpenItemEditor}
+            onDelete={onDeleteItem}
+            onMove={onMoveItem}
+            onShowTag={(tag) => onShowCollection(tagFilter(tag))}
+          />
+        {:else}
+          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" /><h2>{itemLoading ? 'Opening…' : 'Select an item.'}</h2><p>Its details will appear here.</p></div>
+        {/if}
+      {:else if $vault.loginCard}
         {@const loginCard = $vault.loginCard}
         <div class="login-title-row">
           <div class="entry-avatar large-entry"><WebsiteIcon site={loginCard.site} initials={loginCard.initials} enabled={siteIconsEnabled} /></div>
-          <div><p class="eyebrow">Login</p><h2>{loginCard.title}</h2><div class="login-meta">{#if loginCard.url}<a href={loginCard.url} target="_blank" rel="noreferrer noopener">{loginCard.site}</a>{:else}<span class="site-missing">Website not saved</span>{/if}{#if loginCard.folderId}<button type="button" class="folder-badge" on:click={() => onShowFolder(loginCard.folderId ?? '')}><Icon name="folder" size={12} />{loginCard.folder}</button>{/if}</div>{#if selectedEntry?.issueKinds.length}<div class="issue-chips">{#each issueChips(selectedEntry.issueKinds).shown as issue (issue)}<span class="issue-chip"><Icon name="alert" size={11} />{issueChipLabel(issue)}</span>{/each}{#if issueChips(selectedEntry.issueKinds).extra}<span class="issue-chip issue-chip-more">+{issueChips(selectedEntry.issueKinds).extra} more</span>{/if}</div>{/if}</div>
+          <div><h2>{loginCard.title}</h2><div class="login-meta">{#if loginCard.url}<a href={loginCard.url} target="_blank" rel="noreferrer noopener">{loginCard.site}</a>{:else}<span class="site-missing">Website not saved</span>{/if}{#if loginCard.folderId}<button type="button" class="folder-badge" on:click={() => onShowCollection(loginCard.folderId ?? '')}><Icon name="folder" size={12} />{loginCard.folder}</button>{/if}</div>{#if selectedEntry?.issueKinds.length}<div class="issue-chips">{#each issueChips(selectedEntry.issueKinds).shown as issue (issue)}<span class="issue-chip"><Icon name="alert" size={11} />{issueChipLabel(issue)}</span>{/each}{#if issueChips(selectedEntry.issueKinds).extra}<span class="issue-chip issue-chip-more">+{issueChips(selectedEntry.issueKinds).extra} more</span>{/if}</div>{/if}</div>
           <div class="login-title-actions">
             <button type="button" class="card-favourite" class:active={loginCard.favourite} aria-label={loginCard.favourite ? 'Remove from favourites' : 'Add to favourites'} aria-pressed={loginCard.favourite} on:click={() => onToggleFavourite(loginCard.id, !loginCard.favourite)}>{loginCard.favourite ? '★' : '☆'}</button>
             <button class="more-button" aria-label="Edit login" on:click={onOpenLoginEditor}><Icon name="more" size={19} /></button>
@@ -401,7 +445,10 @@
         {/if}
 
         {#if loginCard.tags?.length}
-          <section class="notes-section"><p class="eyebrow">Tags</p><p>{loginCard.tags.join(', ')}</p></section>
+          <section class="details-section">
+            <div class="section-heading"><h3>Tags</h3></div>
+            <div class="issue-chips">{#each loginCard.tags as tag (tag)}<button type="button" class="tag-chip" on:click={() => onShowCollection(tagFilter(tag))}>{tag}</button>{/each}</div>
+          </section>
         {/if}
 
         <div class="login-actions">
@@ -424,15 +471,24 @@
             <div class="recovery-empty"><span class="recovery-icon"><Icon name="file-key" size={16} /></span><div><strong>Recovery not reviewed</strong><p>Save an option if this site provides one, or mark that it does not.</p></div><div class="recovery-empty-actions"><button class="text-button" on:click={onOpenLoginEditor}>Add recovery info</button><button class="text-button muted" disabled={recoveryActionWorking} on:click={onOpenRecoveryNotApplicable}>{recoveryActionWorking ? 'Marking…' : 'No recovery options'}</button></div></div>
           {/if}
         </section>
-        <section class="notes-section"><p class="eyebrow">Notes</p><p>{loginCard.notes || 'No notes saved for this account.'}</p></section>
+        <section class="details-section">
+          <div class="section-heading"><h3>Notes</h3></div>
+          <p class="item-notes">{loginCard.notes || 'No notes saved for this account.'}</p>
+        </section>
         {#if loginCard.urls && loginCard.urls.length > 1}
-          <section class="notes-section"><p class="eyebrow">Additional websites</p>{#each loginCard.urls.slice(1) as url (url)}<p><a href={url} target="_blank" rel="noreferrer noopener">{url}</a></p>{/each}</section>
+          <section class="details-section">
+            <div class="section-heading"><h3>Additional websites</h3></div>
+            {#each loginCard.urls.slice(1) as url (url)}<p><a href={url} target="_blank" rel="noreferrer noopener">{url}</a></p>{/each}
+          </section>
         {/if}
         {#if loginCard.legacyFields?.length}
-          <section class="notes-section"><p class="eyebrow">Legacy data</p>{#each loginCard.legacyFields as field, index (index)}<p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button class="text-button" on:click={() => onCopy(field.value, field.label)}>Copy</button></p>{/each}</section>
+          <section class="details-section">
+            <div class="section-heading"><h3>Legacy data</h3></div>
+            {#each loginCard.legacyFields as field, index (index)}<p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button class="text-button" on:click={() => onCopy(field.value, field.label)}>Copy</button></p>{/each}
+          </section>
         {/if}
       {:else}
-        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" /><h2>Select a login.</h2><p>Its sign-in details will appear here.</p></div>
+        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" /><h2>Select an item.</h2><p>Its details will appear here.</p></div>
       {/if}
     </section>
 
@@ -448,7 +504,7 @@
     />
 
     <aside class="security-rail">
-      <p class="eyebrow">Security status</p>
+      <h3 class="rail-title">Security status</h3>
       <div class="score-ring" data-tier={healthTier} style={`--p: ${Math.max(healthPercent, 4)}%`} role="img" aria-label={`Vault health ${healthPercent} percent. ${securityGood} of ${snapshotEntries.length} accounts ready.`}><div class="score-ring-inner"><strong>{healthPercent}<span class="score-unit">%</span></strong></div></div>
       <h3>{($vault.snapshot?.security.needsAttention ?? 0) > 0 ? 'Review needed.' : 'All clear.'}</h3>
       <p>{($vault.snapshot?.security.needsAttention ?? 0) > 0 ? `${securityGood} of ${snapshotEntries.length} accounts are ready. Choose a check to work through the rest.` : 'Every saved account is in good shape.'}</p>

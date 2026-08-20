@@ -6,6 +6,21 @@ release cannot be published without saying what changed in it.
 
 ## 0.1.2
 
+- The vault is one list. Logins, cards, notes, identities, Wi-Fi networks, SSH
+  keys, licences, documents, and custom records now share a single screen with
+  one search, category filters, collections, tags, favourites, and recently
+  used items. The separate Items screen and its tab strip are gone; Trash and
+  History moved to the sidebar.
+- Search covers every kind of saved item, not only logins. Press / or Ctrl+K
+  anywhere in Sesame to open it.
+- Quick access finds every kind of item and offers only the actions that suit
+  it: a password, username, or 2FA code for a login; the number, expiry, or
+  security code for a card; the password for a Wi-Fi network; a licence key; a
+  chosen identity field; and an SSH public key, with the private key needing a
+  second, deliberate confirmation. A note, document, or custom record opens in
+  Sesame rather than showing its contents in the search window.
+- Favourites, collections, and recently used now work for every kind of item,
+  not just logins.
 - Importing no longer changes your passwords. Every CSV import trimmed spaces
   off each field, so a password saved with a leading or trailing space arrived
   in your vault without it and no longer opened the account. If you imported

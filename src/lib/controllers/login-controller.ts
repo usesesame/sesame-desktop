@@ -11,15 +11,14 @@ import {
   deleteFolder,
   getLoginCard,
   openWebsite,
-  recordLoginUse,
   recordDiagnostic,
   renameFolder,
+  recordItemUse,
   saveLogin,
-  searchEntries,
-  setLoginFavourite,
+  setItemFavourite,
 } from '../vault'
-import { entryMatchesCollection, FAVOURITES_FILTER, RECENT_FILTER, rememberRecent, sortCollectionEntries, type SortMode } from '../vault-collections'
-import { storeSortMode } from '../preferences'
+import { FAVOURITES_FILTER, RECENT_FILTER, rememberRecent } from '../vault-collections'
+import { vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
@@ -69,40 +68,25 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     multiSelect: false,
     selectedIds: [] as string[],
     bulkFolderId: '',
-    // Ids only; the matched username never crosses back.
-    searchMatchIds: new Set<string>(),
   })
   let selectionRequestToken = 0
-  let searchRequestToken = 0
   let autoTypeTimer: ReturnType<typeof setTimeout> | null = null
 
   function stopAutoTypeCountdown() {
     if (autoTypeTimer) clearTimeout(autoTypeTimer)
     autoTypeTimer = null
   }
-  const visibleEntries = derived([vault, selection, state], ([$vault, $selection, $state]) => {
-    const query = $selection.searchQuery.trim().toLowerCase()
-    const searchIds = $state.searchMatchIds
-    const entries = ($vault.snapshot?.entries ?? []).filter((entry) => {
-      const filter = $selection.securityFilter
-      const matchesSecurity = !filter || entry.issueKinds.includes(filter)
-      const matchesLocally = `${entry.title} ${entry.site} ${entry.folder}`.toLowerCase().includes(query)
-      return (!query || matchesLocally || searchIds.has(entry.id))
-        && matchesSecurity
-        && entryMatchesCollection(entry, $selection.folderFilter)
-    })
-    return sortCollectionEntries(entries, $selection.folderFilter, $selection.sortMode)
-  })
   const folderOptions = derived(vault, ($vault) => [...($vault.snapshot?.folders ?? [])].sort((left, right) => left.name.localeCompare(right.name)))
   const contextEntry = derived([state, vault], ([$state, $vault]) => $state.entryMenu
     ? $vault.snapshot?.entries.find((entry) => entry.id === $state.entryMenu?.id) ?? null
     : null)
+  const loginIds = derived(vault, ($vault) => new Set(($vault.snapshot?.entries ?? []).map((entry) => entry.id)))
 
   async function selectEntry(id: string) {
     selectionRequestToken += 1
     const requestToken = selectionRequestToken
     totp.stop()
-    selection.patch({ activeEntryId: id })
+    selection.patch({ activeItemId: id, activeItemKind: 'login' })
     feedback.clearError()
     if (state.value().breachCheckEntryId !== id) {
       state.patch({ breachCheckEntryId: id, breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '' })
@@ -113,27 +97,27 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     }
     try {
       const card = await getLoginCard(id)
-      if (requestToken !== selectionRequestToken || selection.value().activeEntryId !== id || !vault.value().status.unlocked) return
+      if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !vault.value().status.unlocked) return
       vault.patch({ loginCard: card })
-      selection.patch({ recentEntryIds: rememberRecent(selection.value().recentEntryIds, id) })
+      selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
       state.patch({ passwordVisible: false })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
-        if (requestToken !== selectionRequestToken || selection.value().activeEntryId !== id || !current) return
+        if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !current) return
         vault.patch({ loginCard: { ...current, totpCode: refresh.totpCode ?? undefined, totpRemaining: refresh.totpRemaining ?? undefined } })
       }, () => {
         void recordDiagnostic('totp_refresh', 'failed')
         void refreshDiagnostics()
       })
     } catch (error) {
-      if (requestToken === selectionRequestToken && selection.value().activeEntryId === id) feedback.setError(error)
+      if (requestToken === selectionRequestToken && selection.value().activeItemId === id) feedback.setError(error)
     }
   }
 
   async function copy(value: string, label: string) {
     try {
       await copyToClipboard(value)
-      const activeId = selection.value().activeEntryId
+      const activeId = selection.value().activeItemId
       if (activeId && ['Username', 'Email', 'Password', '2FA code', 'Backup codes'].includes(label)) void markUsed(activeId)
       const clearSeconds = settings.value().clipboardClearSeconds
       feedback.showNotice(`${label} copied`, `Clears after ${clearSeconds} seconds if the clipboard has not changed.`)
@@ -146,7 +130,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
 
   async function markUsed(id: string) {
     try {
-      const snapshot = await recordLoginUse(id)
+      const snapshot = await recordItemUse(id)
       vault.patch({ snapshot })
       const card = vault.value().loginCard
       const entry = snapshot.entries.find((candidate) => candidate.id === id)
@@ -158,7 +142,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
 
   async function changeFavourite(id: string, favourite: boolean) {
     try {
-      const snapshot = await setLoginFavourite(id, favourite)
+      const snapshot = await setItemFavourite(id, favourite)
       vault.patch({ snapshot })
       const card = vault.value().loginCard
       if (card?.id === id) vault.patch({ loginCard: { ...card, favourite } })
@@ -235,7 +219,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     const moved = await assignFolder(
       current.selectedIds,
       folderId,
-      folder ? `${count} ${count === 1 ? 'login' : 'logins'} moved to ${folder.name}.` : `${count} ${count === 1 ? 'login' : 'logins'} moved to Unfiled.`,
+      folder ? `${count} ${count === 1 ? 'item' : 'items'} moved to ${folder.name}.` : `${count} ${count === 1 ? 'item' : 'items'} moved to Unfiled.`,
     )
     if (moved) clearMultiSelect()
   }
@@ -243,7 +227,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   async function bulkFavouriteSelected() {
     const current = state.value()
     if (!current.selectedIds.length || current.folderWorking) return
-    const entries = (vault.value().snapshot?.entries ?? []).filter((entry) => current.selectedIds.includes(entry.id))
+    const entries = vaultItems(vault.value().snapshot).filter((item) => current.selectedIds.includes(item.id))
     if (!entries.length) return
     const favourite = !entries.every((entry) => entry.favourite)
     state.patch({ folderWorking: true })
@@ -252,7 +236,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       let snapshot = vault.value().snapshot
       for (const entry of entries) {
         if (entry.favourite === favourite) continue
-        snapshot = await setLoginFavourite(entry.id, favourite)
+        snapshot = await setItemFavourite(entry.id, favourite)
       }
       if (snapshot) vault.patch({ snapshot })
       const card = vault.value().loginCard
@@ -260,7 +244,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       const count = entries.length
       feedback.showNotice(
         favourite ? 'Added to favourites' : 'Removed from favourites',
-        `${count} ${count === 1 ? 'login' : 'logins'} updated.`,
+        `${count} ${count === 1 ? 'item' : 'items'} updated.`,
       )
       clearMultiSelect()
     } catch (error) {
@@ -282,9 +266,9 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
 
   return {
     state,
-    visibleEntries,
     folderOptions,
     contextEntry,
+    loginIds,
     selectEntry,
     copy,
     openNew(password = '') {
@@ -390,7 +374,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         const result = await saveLogin({ ...draft, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
         vault.patch({ snapshot: result.snapshot })
         const savedEntry = result.snapshot.entries.find((entry) => entry.id === result.id)
-        selection.patch({ folderFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
+        selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
         modal.close('login-editor')
         state.patch({ loginDraft: emptyLoginDraft() })
         await selectEntry(result.id)
@@ -401,44 +385,9 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         state.patch({ savingLogin: false })
       }
     },
-    async runSearch(query: string) {
-      selection.patch({ searchQuery: query })
-      searchRequestToken += 1
-      const requestToken = searchRequestToken
-      if (!query.trim()) {
-        state.patch({ searchMatchIds: new Set() })
-        return
-      }
-      try {
-        const ids = await searchEntries(query)
-        if (requestToken !== searchRequestToken) return
-        state.patch({ searchMatchIds: new Set(ids) })
-      } catch {
-        // A failed search narrows the results rather than emptying them.
-        if (requestToken === searchRequestToken) state.patch({ searchMatchIds: new Set() })
-      }
-    },
-    setSortMode(mode: SortMode) {
-      selection.patch({ sortMode: mode })
-      storeSortMode(mode)
-    },
-    clearSearch() {
-      searchRequestToken += 1
-      selection.patch({ searchQuery: '' })
-      state.patch({ searchMatchIds: new Set() })
-    },
-    async showFolder(folderFilter: string | null) {
-      clearMultiSelect()
-      selection.patch({ folderFilter, securityFilter: null, searchQuery: '' })
-      const first = sortCollectionEntries(
-        (vault.value().snapshot?.entries ?? []).filter((entry) => entryMatchesCollection(entry, folderFilter)),
-        folderFilter,
-      )[0]
-      if (first) await selectEntry(first.id)
-    },
     openEntryMenu(position: { x: number; y: number }, id: string) {
       state.patch({ entryMenu: { id, ...position } })
-      if (selection.value().activeEntryId !== id) void selectEntry(id)
+      if (selection.value().activeItemId !== id) void selectEntry(id)
     },
     closeEntryMenu() { state.patch({ entryMenu: null }) },
     openFolderManager() {
@@ -455,7 +404,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     },
     async openCurrentWebsite(url: string) {
       await openWebsite(url)
-      const id = selection.value().activeEntryId
+      const id = selection.value().activeItemId
       if (id) void markUsed(id)
     },
     async copySelectedField(field: 'username' | 'email' | 'password') {
@@ -487,7 +436,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       const folder = vault.value().snapshot?.folders.find((candidate) => candidate.id === folderId)
       if (!await assignFolder([id], folderId, folder ? `Login moved to ${folder.name}.` : 'Login moved to Unfiled.')) return
       state.patch({ entryMenu: null })
-      if (selection.value().folderFilter !== null && ![FAVOURITES_FILTER, RECENT_FILTER].includes(selection.value().folderFilter ?? '')) selection.patch({ folderFilter: folderId ?? '' })
+      if (selection.value().collectionFilter !== null && ![FAVOURITES_FILTER, RECENT_FILTER].includes(selection.value().collectionFilter ?? '')) selection.patch({ collectionFilter: folderId ?? '' })
     },
     async bulkMove(ids: string[], folderId?: string) {
       const folder = vault.value().snapshot?.folders.find((candidate) => candidate.id === folderId)
@@ -533,7 +482,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         const count = (vault.value().snapshot?.entries ?? []).filter((entry) => entry.folderId === folder.id).length
         const snapshot = await deleteFolder(folder.id)
         vault.patch({ snapshot })
-        if (selection.value().folderFilter === folder.id) selection.patch({ folderFilter: '' })
+        if (selection.value().collectionFilter === folder.id) selection.patch({ collectionFilter: '' })
         const card = vault.value().loginCard
         if (card?.folderId === folder.id) vault.patch({ loginCard: { ...card, folderId: undefined, folder: '' } })
         feedback.showNotice('Folder removed', `${count} ${count === 1 ? 'login was' : 'logins were'} moved to Unfiled.`)
@@ -575,7 +524,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
           if (!folder) throw new Error('Sesame created the folder but could not select it.')
           snapshot = await bulkAssignFolder(action.ids, folder.id)
           vault.patch({ snapshot })
-          if (selection.value().folderFilter !== null) selection.patch({ folderFilter: folder.id })
+          if (selection.value().collectionFilter !== null) selection.patch({ collectionFilter: folder.id })
           feedback.showNotice('Folder created', `Login moved to ${folder.name}.`)
         }
         modal.close('folder-name')
@@ -590,12 +539,9 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       selectionRequestToken += 1
       totp.stop()
       vault.patch({ loginCard: null })
-      selection.patch({ activeEntryId: null })
     },
     clearSecrets() {
       selectionRequestToken += 1
-      // An in-flight search must not land after a lock and repopulate the ids.
-      searchRequestToken += 1
       totp.stop()
       modal.closeAll()
       // A countdown in flight must not fire after the lock it was racing against.
@@ -607,11 +553,11 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         breachCheckEntryId: '', breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '',
         autoTypeEntryId: '', autoTypeCountdown: 0,
         multiSelect: false, selectedIds: [], bulkFolderId: '',
-        // Which entries matched a search is a trace of what someone looked for.
-        searchMatchIds: new Set(),
       })
       vault.patch({ loginCard: null })
-      selection.patch({ activeEntryId: null, recentEntryIds: [] })
+      selection.patch({ activeItemId: null, activeItemKind: null, recentItemIds: [] })
     },
   }
 }
+
+export type LoginController = ReturnType<typeof createLoginController>

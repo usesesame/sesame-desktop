@@ -33,6 +33,11 @@ fn identity_from_input(input: IdentityInput) -> VaultResult<Identity> {
             return Err(message.into());
         }
     }
+    for tag in &input.tags {
+        if tag.chars().count() > 64 {
+            return Err("A tag is too long.".into());
+        }
+    }
     let now = unix_timestamp();
     Ok(Identity {
         id: input
@@ -49,7 +54,16 @@ fn identity_from_input(input: IdentityInput) -> VaultResult<Identity> {
         region: input.region.trim().to_string(),
         postal_code: input.postal_code.trim().to_string(),
         country: input.country.trim().to_string(),
+        tags: input
+            .tags
+            .into_iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect(),
         legacy_fields: Vec::new(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -104,6 +118,9 @@ pub fn save_identity(
         let previous = existing.clone();
         identity.created_at = existing.created_at;
         identity.revision = existing.revision.saturating_add(1);
+        identity.folder_id = existing.folder_id.clone();
+        identity.favourite = existing.favourite;
+        identity.last_used_at = existing.last_used_at;
         identity.legacy_fields = existing.legacy_fields.clone();
         *existing = identity;
         crate::vault::history::capture_history(&mut next_payload, TaggedItem::Identity(previous));

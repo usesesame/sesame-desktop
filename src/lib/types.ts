@@ -14,17 +14,25 @@ export interface QuickAccessStatus {
   unlocked: boolean
 }
 
-export interface QuickAccessEntry {
-  id: string
-  title: string
-  site: string
-  initials: string
-  hasTotp: boolean
+/** One copyable field quick access offers for a given item kind. */
+export interface QuickAccessAction {
+  field: string
+  label: string
+  /** Needs a second, deliberate confirmation before the value is produced. */
+  guarded: boolean
 }
 
-export interface QuickAccessSecret {
-  password: string
-  totpCode?: string
+export interface QuickAccessItem {
+  id: string
+  kind: ItemKind
+  title: string
+  subtitle: string
+  initials: string
+  actions: QuickAccessAction[]
+}
+
+export interface QuickAccessValue {
+  value: string
 }
 
 export type IssueKind = 'duplicate' | 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern' | 'old-password' | 'url' | 'totp' | 'recovery'
@@ -62,6 +70,34 @@ export interface VaultEntry {
   passwordIssues: PasswordIssue[]
   securityLevel: 'good' | 'needs-work'
   issueKinds: IssueKind[]
+  tags: string[]
+  updatedAt: number
+}
+
+export type ItemKind =
+  | 'login'
+  | 'identity'
+  | 'secure_note'
+  | 'card'
+  | 'wifi_network'
+  | 'ssh_key'
+  | 'software_license'
+  | 'document'
+  | 'custom_record'
+
+/** One list row for a saved record other than a login. Non-secret metadata only. */
+export interface VaultItemSummary {
+  id: string
+  kind: ItemKind
+  title: string
+  subtitle: string
+  initials: string
+  folderId?: string
+  folder: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
+  tags: string[]
 }
 
 export interface SecuritySummary {
@@ -85,14 +121,7 @@ export interface VaultSnapshot {
   revision: number
   folders: Folder[]
   entries: VaultEntry[]
-  identities: IdentitySummary[]
-  secureNotes: SecureNoteSummary[]
-  cards: CardSummary[]
-  wifiNetworks: WifiNetworkSummary[]
-  sshKeys: SshKeySummary[]
-  softwareLicenses: SoftwareLicenseSummary[]
-  documents: DocumentMetadataSummary[]
-  customRecords: CustomRecordSummary[]
+  items: VaultItemSummary[]
   trash: TrashSummary[]
   history: HistorySummary[]
   security: SecuritySummary
@@ -131,14 +160,10 @@ export interface RestoreHistoryVersionResult {
   snapshot: VaultSnapshot
 }
 
-export interface IdentitySummary {
-  id: string
-  label: string
-}
-
 export interface Identity {
   id: string
   label: string
+  tags: string[]
   fullName: string
   email: string
   phone: string
@@ -149,11 +174,16 @@ export interface Identity {
   postalCode: string
   country: string
   legacyFields?: LegacyField[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface IdentityInput {
   id?: string
   label: string
+  tags: string[]
   fullName: string
   email: string
   phone: string
@@ -175,18 +205,16 @@ export interface DeleteIdentityResult {
   snapshot: VaultSnapshot
 }
 
-export interface SecureNoteSummary {
-  id: string
-  title: string
-  updatedAt: number
-}
-
 export interface SecureNote {
   id: string
   title: string
   content: string
   tags: string[]
   legacyFields?: LegacyField[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface SecureNoteInput {
@@ -206,11 +234,6 @@ export interface DeleteSecureNoteResult {
   snapshot: VaultSnapshot
 }
 
-export interface CardSummary {
-  id: string
-  title: string
-}
-
 export interface Card {
   id: string
   title: string
@@ -223,6 +246,10 @@ export interface Card {
   notes: string
   tags: string[]
   legacyFields?: LegacyField[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface CardInput {
@@ -248,11 +275,6 @@ export interface DeleteCardResult {
   snapshot: VaultSnapshot
 }
 
-export interface WifiNetworkSummary {
-  id: string
-  title: string
-}
-
 export interface WifiNetwork {
   id: string
   title: string
@@ -261,6 +283,10 @@ export interface WifiNetwork {
   securityType: string
   notes: string
   tags: string[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface WifiNetworkInput {
@@ -283,11 +309,6 @@ export interface DeleteWifiNetworkResult {
   snapshot: VaultSnapshot
 }
 
-export interface SshKeySummary {
-  id: string
-  title: string
-}
-
 export interface SshKey {
   id: string
   title: string
@@ -297,6 +318,10 @@ export interface SshKey {
   passphrase: string
   notes: string
   tags: string[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface SshKeyInput {
@@ -320,11 +345,6 @@ export interface DeleteSshKeyResult {
   snapshot: VaultSnapshot
 }
 
-export interface SoftwareLicenseSummary {
-  id: string
-  title: string
-}
-
 export interface SoftwareLicense {
   id: string
   title: string
@@ -334,6 +354,10 @@ export interface SoftwareLicense {
   purchaseDate: string
   notes: string
   tags: string[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface SoftwareLicenseInput {
@@ -357,12 +381,6 @@ export interface DeleteSoftwareLicenseResult {
   snapshot: VaultSnapshot
 }
 
-export interface DocumentMetadataSummary {
-  id: string
-  title: string
-  attachmentCount: number
-}
-
 export interface Attachment {
   id: string
   filename: string
@@ -382,6 +400,10 @@ export interface DocumentMetadata {
   notes: string
   tags: string[]
   attachments: Attachment[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface DocumentMetadataInput {
@@ -412,17 +434,16 @@ export interface CustomFieldEntry {
   kind: string
 }
 
-export interface CustomRecordSummary {
-  id: string
-  title: string
-}
-
 export interface CustomRecord {
   id: string
   title: string
   fields: CustomFieldEntry[]
   notes: string
   tags: string[]
+  folderId?: string
+  favourite: boolean
+  lastUsedAt?: number
+  updatedAt: number
 }
 
 export interface CustomRecordInput {
@@ -764,6 +785,30 @@ export interface BrowserIdentityFillCancelled {
   reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
 }
 
+export type CardFieldKey = 'cardholderName' | 'number' | 'expiryMonth' | 'expiryYear' | 'securityCode'
+
+export interface BrowserCardFillCandidate {
+  id: string
+  title: string
+  brand: string
+  lastFour: string
+}
+
+export interface BrowserCardFillRequest {
+  approvalId: string
+  origin: string
+  hostname: string
+  requestedFields: CardFieldKey[]
+  candidates: BrowserCardFillCandidate[]
+  expiresInSeconds: number
+  expiresAtUnixMs: number
+}
+
+export interface BrowserCardFillCancelled {
+  approvalId: string
+  reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
+}
+
 // No password field: it never leaves the Rust broker until the save is approved.
 export interface BrowserSaveRequest {
   approvalId: string
@@ -818,7 +863,7 @@ export type ImportSource =
   | 'aegis-json'
   | '2fas-json'
 
-export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'items' | 'backups' | 'settings'
+export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'trash' | 'history' | 'backups' | 'settings'
 
 export interface TotpCodeEntry {
   id: string

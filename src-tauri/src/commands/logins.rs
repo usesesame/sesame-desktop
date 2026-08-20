@@ -4,12 +4,10 @@ use tauri::State;
 
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::entry_from_input;
-use crate::vault::snapshot::{
-    current_totp, folder_name_for, login_card_for, login_summary_for, snapshot_for,
-};
+use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for, snapshot_for};
 use crate::vault::storage::{
-    commit_payload_change, materialize_entry_folder, payload_with_favourite,
-    payload_with_login_folder_id, payload_with_recorded_use, payload_without_login,
+    commit_payload_change, materialize_entry_folder, payload_with_item_favourite,
+    payload_with_item_folder_id, payload_with_recorded_item_use, payload_without_login,
 };
 use crate::vault::trash::trash_item;
 use crate::vault::{
@@ -26,27 +24,6 @@ pub fn get_vault_snapshot(state: State<'_, VaultState>) -> VaultResult<VaultSnap
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
     Ok(snapshot_for(&session.payload))
-}
-
-/// Matched in Rust because the snapshot deliberately omits usernames; only ids cross back.
-#[tauri::command]
-pub fn search_entries(query: String, state: State<'_, VaultState>) -> VaultResult<Vec<String>> {
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return Ok(Vec::new());
-    }
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let payload = &session.payload;
-    Ok(payload
-        .entries
-        .iter()
-        .filter(|entry| entry_matches_search(payload, entry, &needle))
-        .map(|entry| entry.id.clone())
-        .collect())
 }
 
 /// Small on purpose: a shortcut for retyping an address, not a directory.
@@ -97,24 +74,6 @@ fn suggested_values(payload: &VaultPayload, field: &str) -> Vec<String> {
         }
     }
     suggestions
-}
-
-fn entry_matches_search(
-    payload: &VaultPayload,
-    entry: &crate::vault::VaultEntry,
-    needle: &str,
-) -> bool {
-    [
-        entry.title.as_str(),
-        entry.username.as_str(),
-        entry.email.as_str(),
-        entry.url.as_str(),
-    ]
-    .iter()
-    .any(|field| field.to_lowercase().contains(needle))
-        || folder_name_for(payload, entry)
-            .to_lowercase()
-            .contains(needle)
 }
 
 #[tauri::command]
@@ -284,7 +243,7 @@ pub fn set_login_folders(
     folder: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<VaultSnapshot> {
-    let ids = checked_login_ids(ids)?;
+    let ids = checked_item_ids(ids)?;
     let mut session = state
         .session
         .lock()
@@ -305,15 +264,15 @@ pub fn bulk_assign_folder(
     folder_id: Option<String>,
     state: State<'_, VaultState>,
 ) -> VaultResult<VaultSnapshot> {
-    let ids = checked_login_ids(ids)?;
+    let ids = checked_item_ids(ids)?;
     let mut session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session
         .as_mut()
-        .ok_or("Unlock your vault before organizing logins.")?;
-    let next_payload = payload_with_login_folder_id(&session.payload, &ids, folder_id.as_deref())?;
+        .ok_or("Unlock your vault before organizing items.")?;
+    let next_payload = payload_with_item_folder_id(&session.payload, &ids, folder_id.as_deref())?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(snapshot_for(&session.payload))
@@ -364,22 +323,22 @@ fn change_folders(
     Ok(snapshot_for(&session.payload))
 }
 
-fn checked_login_ids(ids: Vec<String>) -> VaultResult<HashSet<String>> {
+fn checked_item_ids(ids: Vec<String>) -> VaultResult<HashSet<String>> {
     if ids.is_empty() || ids.len() > 100_000 {
-        return Err("Choose at least one saved login to organize.".into());
+        return Err("Choose at least one saved item to organize.".into());
     }
     let ids = ids
         .into_iter()
         .map(|id| id.trim().to_string())
         .collect::<HashSet<_>>();
     if ids.iter().any(String::is_empty) {
-        return Err("One of the selected logins is invalid.".into());
+        return Err("One of the selected items is invalid.".into());
     }
     Ok(ids)
 }
 
 #[tauri::command]
-pub fn set_login_favourite(
+pub fn set_item_favourite(
     id: String,
     favourite: bool,
     state: State<'_, VaultState>,
@@ -391,22 +350,22 @@ pub fn set_login_favourite(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before changing a favourite.")?;
-    let next_payload = payload_with_favourite(&session.payload, id.trim(), favourite)?;
+    let next_payload = payload_with_item_favourite(&session.payload, id.trim(), favourite)?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(snapshot_for(&session.payload))
 }
 
 #[tauri::command]
-pub fn record_login_use(id: String, state: State<'_, VaultState>) -> VaultResult<VaultSnapshot> {
+pub fn record_item_use(id: String, state: State<'_, VaultState>) -> VaultResult<VaultSnapshot> {
     let mut session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session
         .as_mut()
-        .ok_or("Unlock your vault before recording login use.")?;
-    let next_payload = payload_with_recorded_use(&session.payload, id.trim())?;
+        .ok_or("Unlock your vault before recording item use.")?;
+    let next_payload = payload_with_recorded_item_use(&session.payload, id.trim())?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(snapshot_for(&session.payload))

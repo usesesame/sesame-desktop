@@ -67,6 +67,9 @@ fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMeta
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
             .collect(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -122,6 +125,9 @@ pub fn save_document(
         let previous = existing.clone();
         document.created_at = existing.created_at;
         document.revision = existing.revision.saturating_add(1);
+        document.folder_id = existing.folder_id.clone();
+        document.favourite = existing.favourite;
+        document.last_used_at = existing.last_used_at;
         // Attachments change only through the dedicated add/remove commands.
         document.attachments = existing.attachments.clone();
         *existing = document;

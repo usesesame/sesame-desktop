@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, QuickAccessEntry, QuickAccessSecret, QuickAccessStatus, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -42,6 +42,11 @@ export async function onIdleWarning(handler: (secondsLeft: number) => void): Pro
 export async function onIdleWarningCleared(handler: () => void): Promise<UnlistenFn> {
   if (previewMode) return () => {}
   return listen('vault-idle-warning-cleared', handler)
+}
+
+export async function onQuickAccessOpenItem(handler: (id: string) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<string>('quick-access-open-item', ({ payload }) => handler(payload))
 }
 
 export async function onDesktopUpdateProgress(handler: (progress: DesktopUpdateProgress) => void): Promise<UnlistenFn> {
@@ -99,6 +104,28 @@ export async function subscribeBrowserIdentityFill(handlers: {
   }
 }
 
+async function onBrowserCardFillRequest(handler: (payload: BrowserCardFillRequest) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserCardFillRequest>('browser-card-request', ({ payload }) => handler(payload))
+}
+
+async function onBrowserCardFillCancelled(handler: (payload: BrowserCardFillCancelled) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserCardFillCancelled>('browser-card-cancelled', ({ payload }) => handler(payload))
+}
+
+export async function subscribeBrowserCardFill(handlers: {
+  request: (payload: BrowserCardFillRequest) => void
+  cancelled: (payload: BrowserCardFillCancelled) => void
+}): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  const [stopRequests, stopCancellations] = await Promise.all([
+    onBrowserCardFillRequest(handlers.request),
+    onBrowserCardFillCancelled(handlers.cancelled),
+  ])
+  return () => { stopRequests(); stopCancellations() }
+}
+
 async function onBrowserSaveRequest(handler: (payload: BrowserSaveRequest) => void): Promise<UnlistenFn> {
   if (previewMode) return () => {}
   return listen<BrowserSaveRequest>('browser-save-request', ({ payload }) => handler(payload))
@@ -130,21 +157,30 @@ const previewSnapshot: VaultSnapshot = {
   revision: 1,
   folders: [{ id: 'personal', name: 'Personal' }, { id: 'work', name: 'Work' }],
   entries: [
-    { id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, passwordScore: 4, passwordIssues: [], securityLevel: 'good', issueKinds: [] },
-    { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', folderId: 'work', folder: 'Work', favourite: false, passwordScore: 4, passwordIssues: [], securityLevel: 'needs-work', issueKinds: ['totp', 'recovery'] },
-    { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', folderId: 'work', folder: 'Work', favourite: false, passwordScore: 2, passwordIssues: [{ kind: 'weak-password', explanation: 'This password is short or has too little character variety.' }], securityLevel: 'needs-work', issueKinds: ['weak-password'] },
+    { id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, passwordScore: 4, passwordIssues: [], securityLevel: 'good', issueKinds: [], tags: ['email'], updatedAt: 1_784_025_600 },
+    { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', folderId: 'work', folder: 'Work', favourite: false, passwordScore: 4, passwordIssues: [], securityLevel: 'needs-work', issueKinds: ['totp', 'recovery'], tags: ['dev'], updatedAt: 1_784_025_600 },
+    { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', folderId: 'work', folder: 'Work', favourite: false, passwordScore: 2, passwordIssues: [{ kind: 'weak-password', explanation: 'This password is short or has too little character variety.' }], securityLevel: 'needs-work', issueKinds: ['weak-password'], tags: [], updatedAt: 1_784_025_600 },
   ],
-  identities: [],
-  secureNotes: [],
-  cards: [],
-  wifiNetworks: [],
-  sshKeys: [],
-  softwareLicenses: [],
-  documents: [],
-  customRecords: [],
+  items: [],
   trash: [],
   history: [],
   security: { good: 1, needsAttention: 3, duplicateCandidates: 0, weakOrReused: 1, weakPasswords: 1, commonPasswords: 0, reusedPasswords: 0, compromisedPatterns: 0, oldPasswords: 0, missingUrls: 0, noTotp: 2, missingRecovery: 1 },
+}
+
+function upsertPreviewItem(kind: ItemKind, id: string, title: string, subtitle: string, tags: string[]): void {
+  const updatedAt = Math.floor(Date.now() / 1000)
+  const existing = previewSnapshot.items.find((item) => item.id === id)
+  if (existing) {
+    Object.assign(existing, { title, subtitle, tags, updatedAt })
+    return
+  }
+  const summary: VaultItemSummary = { id, kind, title, subtitle, initials: previewInitials(title), folder: '', favourite: false, updatedAt, tags }
+  previewSnapshot.items.push(summary)
+}
+
+function removePreviewItem(id: string): void {
+  const index = previewSnapshot.items.findIndex((item) => item.id === id)
+  if (index >= 0) previewSnapshot.items.splice(index, 1)
 }
 
 const previewTrashRecords: Record<string, { kind: string; title: string; record: unknown }> = {}
@@ -170,6 +206,78 @@ const previewSshKeys: Record<string, SshKey> = {}
 const previewSoftwareLicenses: Record<string, SoftwareLicense> = {}
 const previewDocuments: Record<string, DocumentMetadata> = {}
 const previewCustomRecords: Record<string, CustomRecord> = {}
+
+type PreviewRecord = { title?: string; label?: string }
+
+const previewRecordStores: Record<string, Record<string, PreviewRecord>> = {
+  identity: previewIdentities,
+  secure_note: previewSecureNotes,
+  card: previewPaymentCards,
+  wifi_network: previewWifiNetworks,
+  ssh_key: previewSshKeys,
+  software_license: previewSoftwareLicenses,
+  document: previewDocuments,
+  custom_record: previewCustomRecords,
+}
+
+function previewRecordTitle(kind: string, id: string): string | null {
+  const record: PreviewRecord | undefined = kind === 'login' ? previewCards[id] : previewRecordStores[kind]?.[id]
+  if (!record) return null
+  return record.label ?? record.title ?? ''
+}
+
+function adoptPreviewRecord(kind: string, id: string, record: unknown): void {
+  switch (kind) {
+    case 'identity': {
+      const identity = record as Identity
+      previewIdentities[id] = identity
+      upsertPreviewItem('identity', id, identity.label, identity.fullName || identity.email, identity.tags ?? [])
+      break
+    }
+    case 'secure_note': {
+      const note = record as SecureNote
+      previewSecureNotes[id] = note
+      upsertPreviewItem('secure_note', id, note.title, '', note.tags ?? [])
+      break
+    }
+    case 'card': {
+      const card = record as Card
+      previewPaymentCards[id] = card
+      upsertPreviewItem('card', id, card.title, card.brand, card.tags ?? [])
+      break
+    }
+    case 'wifi_network': {
+      const network = record as WifiNetwork
+      previewWifiNetworks[id] = network
+      upsertPreviewItem('wifi_network', id, network.title, network.ssid, network.tags ?? [])
+      break
+    }
+    case 'ssh_key': {
+      const key = record as SshKey
+      previewSshKeys[id] = key
+      upsertPreviewItem('ssh_key', id, key.title, key.keyType, key.tags ?? [])
+      break
+    }
+    case 'software_license': {
+      const license = record as SoftwareLicense
+      previewSoftwareLicenses[id] = license
+      upsertPreviewItem('software_license', id, license.title, license.productName, license.tags ?? [])
+      break
+    }
+    case 'document': {
+      const document = record as DocumentMetadata
+      previewDocuments[id] = document
+      upsertPreviewItem('document', id, document.title, document.documentType, document.tags ?? [])
+      break
+    }
+    case 'custom_record': {
+      const customRecord = record as CustomRecord
+      previewCustomRecords[id] = customRecord
+      upsertPreviewItem('custom_record', id, customRecord.title, '', customRecord.tags ?? [])
+      break
+    }
+  }
+}
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
@@ -314,35 +422,44 @@ export async function getQuickAccessStatus(): Promise<QuickAccessStatus> {
   return invoke<QuickAccessStatus>('get_quick_access_status')
 }
 
-export async function searchQuickAccessEntries(query: string): Promise<QuickAccessEntry[]> {
+export async function searchQuickAccessItems(query: string): Promise<QuickAccessItem[]> {
   if (previewMode) {
     const needle = query.trim().toLowerCase()
     return previewSnapshot.entries
       .filter((entry) => !needle || `${entry.title} ${entry.site}`.toLowerCase().includes(needle))
-      .slice(0, 6)
+      .slice(0, 8)
       .map((entry) => ({
         id: entry.id,
+        kind: 'login' as const,
         title: entry.title,
-        site: entry.site,
+        subtitle: entry.site,
         initials: entry.initials,
-        hasTotp: Boolean(previewCards[entry.id]?.totpCode),
+        actions: [
+          { field: 'password', label: 'Copy password', guarded: false },
+          ...(previewCards[entry.id]?.totpCode ? [{ field: 'totp', label: 'Copy 2FA code', guarded: false }] : []),
+        ],
       }))
   }
-  return invoke<QuickAccessEntry[]>('search_quick_access_entries', { query })
+  return invoke<QuickAccessItem[]>('search_quick_access_items', { query })
 }
 
-export async function getQuickAccessSecret(id: string): Promise<QuickAccessSecret> {
+export async function getQuickAccessField(id: string, field: string, confirmed = false): Promise<QuickAccessValue> {
   if (previewMode) {
     const card = previewCards[id]
-    return { password: card?.password ?? '', totpCode: card?.totpCode }
+    return { value: (field === 'totp' ? card?.totpCode : card?.password) ?? '' }
   }
-  return invoke<QuickAccessSecret>('get_quick_access_secret', { id })
+  return invoke<QuickAccessValue>('get_quick_access_field', { id, field, confirmed })
 }
 
-/// Matched in Rust; usernames never ship into the webview for one filter.
-export async function searchEntries(query: string): Promise<string[]> {
+export async function openQuickAccessItem(id: string): Promise<void> {
+  if (previewMode) return
+  await invoke('open_quick_access_item', { id })
+}
+
+/// Matched in Rust; stored fields never ship into the webview for one filter.
+export async function searchItems(query: string): Promise<string[]> {
   if (previewMode) return []
-  return invoke<string[]>('search_entries', { query })
+  return invoke<string[]>('search_items', { query })
 }
 
 /// Bounded disclosure: a short list crosses on focus, never every stored address.
@@ -501,7 +618,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
     }
     if (input.id && previewCards[id]) captureHistoryPreview('login', id, previewCards[id].title, previewCards[id])
     previewCards[id] = card
-    const entry: VaultEntry = { id, title, site, initials, folderId: card.folderId, folder: card.folder, favourite: card.favourite, passwordScore: 2, passwordIssues: [{ kind: 'weak-password', explanation: 'This password is short or has too little character variety.' }], securityLevel: 'needs-work', issueKinds: ['weak-password', 'totp', 'recovery'] }
+    const entry: VaultEntry = { id, title, site, initials, folderId: card.folderId, folder: card.folder, favourite: card.favourite, passwordScore: 2, passwordIssues: [{ kind: 'weak-password', explanation: 'This password is short or has too little character variety.' }], securityLevel: 'needs-work', issueKinds: ['weak-password', 'totp', 'recovery'], tags: input.tags ?? [], updatedAt: Math.floor(Date.now() / 1000) }
     const existing = previewSnapshot.entries.findIndex((saved) => saved.id === id)
     if (existing >= 0) previewSnapshot.entries[existing] = entry
     else previewSnapshot.entries.push(entry)
@@ -529,8 +646,10 @@ export async function bulkAssignFolder(ids: string[], folderId?: string): Promis
     const folder = previewSnapshot.folders.find((candidate) => candidate.id === folderId)
     for (const id of ids) {
       const entry = previewSnapshot.entries.find((saved) => saved.id === id)
+      const item = previewSnapshot.items.find((saved) => saved.id === id)
       const card = previewCards[id]
       if (entry) { entry.folderId = folder?.id; entry.folder = folder?.name ?? '' }
+      if (item) { item.folderId = folder?.id; item.folder = folder?.name ?? '' }
       if (card) { card.folderId = folder?.id; card.folder = folder?.name ?? '' }
     }
     return previewSnapshot
@@ -563,25 +682,29 @@ export async function deleteFolder(folderId: string): Promise<VaultSnapshot> {
   return invoke<VaultSnapshot>('delete_folder', { folderId })
 }
 
-export async function setLoginFavourite(id: string, favourite: boolean): Promise<VaultSnapshot> {
+export async function setItemFavourite(id: string, favourite: boolean): Promise<VaultSnapshot> {
   if (previewMode) {
     const entry = previewSnapshot.entries.find((saved) => saved.id === id)
     if (entry) entry.favourite = favourite
+    const item = previewSnapshot.items.find((saved) => saved.id === id)
+    if (item) item.favourite = favourite
     if (previewCards[id]) previewCards[id].favourite = favourite
     return previewSnapshot
   }
-  return invoke<VaultSnapshot>('set_login_favourite', { id, favourite })
+  return invoke<VaultSnapshot>('set_item_favourite', { id, favourite })
 }
 
-export async function recordLoginUse(id: string): Promise<VaultSnapshot> {
+export async function recordItemUse(id: string): Promise<VaultSnapshot> {
   if (previewMode) {
     const lastUsedAt = Math.floor(Date.now() / 1000)
     const entry = previewSnapshot.entries.find((saved) => saved.id === id)
     if (entry) entry.lastUsedAt = lastUsedAt
+    const item = previewSnapshot.items.find((saved) => saved.id === id)
+    if (item) item.lastUsedAt = lastUsedAt
     if (previewCards[id]) previewCards[id].lastUsedAt = lastUsedAt
     return previewSnapshot
   }
-  return invoke<VaultSnapshot>('record_login_use', { id })
+  return invoke<VaultSnapshot>('record_item_use', { id })
 }
 
 export async function deleteLogin(id: string): Promise<DeleteLoginResult> {
@@ -608,12 +731,10 @@ export async function getIdentity(id: string): Promise<Identity> {
 export async function saveIdentity(input: IdentityInput): Promise<SaveIdentityResult> {
   if (previewMode) {
     const id = input.id || `preview-identity-${crypto.randomUUID()}`
-    const identity: Identity = { ...input, id, label: input.label.trim() }
+    const identity: Identity = { ...input, id, label: input.label.trim(), favourite: previewIdentities[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewIdentities[id]) captureHistoryPreview('identity', id, previewIdentities[id].label, previewIdentities[id])
     previewIdentities[id] = identity
-    const existing = previewSnapshot.identities.find((summary) => summary.id === id)
-    if (existing) existing.label = identity.label
-    else previewSnapshot.identities.push({ id, label: identity.label })
+    upsertPreviewItem('identity', id, identity.label, identity.fullName || identity.email, identity.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveIdentityResult>('save_identity', { input })
@@ -621,10 +742,9 @@ export async function saveIdentity(input: IdentityInput): Promise<SaveIdentityRe
 
 export async function deleteIdentity(id: string): Promise<DeleteIdentityResult> {
   if (previewMode) {
-    const index = previewSnapshot.identities.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved identity no longer exists.')
-    previewSnapshot.identities.splice(index, 1)
-    if (previewIdentities[id]) trashPreviewItem('identity', id, previewIdentities[id].label, previewIdentities[id])
+    if (!previewIdentities[id]) throw new Error('That saved identity no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('identity', id, previewIdentities[id].label, previewIdentities[id])
     delete previewIdentities[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -643,13 +763,10 @@ export async function getSecureNote(id: string): Promise<SecureNote> {
 export async function saveSecureNote(input: SecureNoteInput): Promise<SaveSecureNoteResult> {
   if (previewMode) {
     const id = input.id || `preview-note-${crypto.randomUUID()}`
-    const note: SecureNote = { ...input, id, title: input.title.trim() }
+    const note: SecureNote = { ...input, id, title: input.title.trim(), favourite: previewSecureNotes[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewSecureNotes[id]) captureHistoryPreview('secure_note', id, previewSecureNotes[id].title, previewSecureNotes[id])
     previewSecureNotes[id] = note
-    const summary = { id, title: note.title, updatedAt: Date.now() / 1000 }
-    const existing = previewSnapshot.secureNotes.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.secureNotes.push(summary)
+    upsertPreviewItem('secure_note', id, note.title, '', note.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveSecureNoteResult>('save_secure_note', { input })
@@ -657,10 +774,9 @@ export async function saveSecureNote(input: SecureNoteInput): Promise<SaveSecure
 
 export async function deleteSecureNote(id: string): Promise<DeleteSecureNoteResult> {
   if (previewMode) {
-    const index = previewSnapshot.secureNotes.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved note no longer exists.')
-    previewSnapshot.secureNotes.splice(index, 1)
-    if (previewSecureNotes[id]) trashPreviewItem('secure_note', id, previewSecureNotes[id].title, previewSecureNotes[id])
+    if (!previewSecureNotes[id]) throw new Error('That saved note no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('secure_note', id, previewSecureNotes[id].title, previewSecureNotes[id])
     delete previewSecureNotes[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -679,13 +795,10 @@ export async function getCard(id: string): Promise<Card> {
 export async function saveCard(input: CardInput): Promise<SaveCardResult> {
   if (previewMode) {
     const id = input.id || `preview-card-${crypto.randomUUID()}`
-    const card: Card = { ...input, id, title: input.title.trim() }
+    const card: Card = { ...input, id, title: input.title.trim(), favourite: previewPaymentCards[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewPaymentCards[id]) captureHistoryPreview('card', id, previewPaymentCards[id].title, previewPaymentCards[id])
     previewPaymentCards[id] = card
-    const summary = { id, title: card.title }
-    const existing = previewSnapshot.cards.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.cards.push(summary)
+    upsertPreviewItem('card', id, card.title, card.brand, card.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveCardResult>('save_card', { input })
@@ -693,10 +806,9 @@ export async function saveCard(input: CardInput): Promise<SaveCardResult> {
 
 export async function deleteCard(id: string): Promise<DeleteCardResult> {
   if (previewMode) {
-    const index = previewSnapshot.cards.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved card no longer exists.')
-    previewSnapshot.cards.splice(index, 1)
-    if (previewPaymentCards[id]) trashPreviewItem('card', id, previewPaymentCards[id].title, previewPaymentCards[id])
+    if (!previewPaymentCards[id]) throw new Error('That saved card no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('card', id, previewPaymentCards[id].title, previewPaymentCards[id])
     delete previewPaymentCards[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -715,13 +827,10 @@ export async function getWifiNetwork(id: string): Promise<WifiNetwork> {
 export async function saveWifiNetwork(input: WifiNetworkInput): Promise<SaveWifiNetworkResult> {
   if (previewMode) {
     const id = input.id || `preview-wifi-${crypto.randomUUID()}`
-    const network: WifiNetwork = { ...input, id, title: input.title.trim() }
+    const network: WifiNetwork = { ...input, id, title: input.title.trim(), favourite: previewWifiNetworks[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewWifiNetworks[id]) captureHistoryPreview('wifi_network', id, previewWifiNetworks[id].title, previewWifiNetworks[id])
     previewWifiNetworks[id] = network
-    const summary = { id, title: network.title }
-    const existing = previewSnapshot.wifiNetworks.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.wifiNetworks.push(summary)
+    upsertPreviewItem('wifi_network', id, network.title, network.ssid, network.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveWifiNetworkResult>('save_wifi_network', { input })
@@ -729,10 +838,9 @@ export async function saveWifiNetwork(input: WifiNetworkInput): Promise<SaveWifi
 
 export async function deleteWifiNetwork(id: string): Promise<DeleteWifiNetworkResult> {
   if (previewMode) {
-    const index = previewSnapshot.wifiNetworks.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved network no longer exists.')
-    previewSnapshot.wifiNetworks.splice(index, 1)
-    if (previewWifiNetworks[id]) trashPreviewItem('wifi_network', id, previewWifiNetworks[id].title, previewWifiNetworks[id])
+    if (!previewWifiNetworks[id]) throw new Error('That saved network no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('wifi_network', id, previewWifiNetworks[id].title, previewWifiNetworks[id])
     delete previewWifiNetworks[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -751,13 +859,10 @@ export async function getSshKey(id: string): Promise<SshKey> {
 export async function saveSshKey(input: SshKeyInput): Promise<SaveSshKeyResult> {
   if (previewMode) {
     const id = input.id || `preview-ssh-key-${crypto.randomUUID()}`
-    const key: SshKey = { ...input, id, title: input.title.trim() }
+    const key: SshKey = { ...input, id, title: input.title.trim(), favourite: previewSshKeys[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewSshKeys[id]) captureHistoryPreview('ssh_key', id, previewSshKeys[id].title, previewSshKeys[id])
     previewSshKeys[id] = key
-    const summary = { id, title: key.title }
-    const existing = previewSnapshot.sshKeys.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.sshKeys.push(summary)
+    upsertPreviewItem('ssh_key', id, key.title, key.keyType, key.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveSshKeyResult>('save_ssh_key', { input })
@@ -765,10 +870,9 @@ export async function saveSshKey(input: SshKeyInput): Promise<SaveSshKeyResult> 
 
 export async function deleteSshKey(id: string): Promise<DeleteSshKeyResult> {
   if (previewMode) {
-    const index = previewSnapshot.sshKeys.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved key no longer exists.')
-    previewSnapshot.sshKeys.splice(index, 1)
-    if (previewSshKeys[id]) trashPreviewItem('ssh_key', id, previewSshKeys[id].title, previewSshKeys[id])
+    if (!previewSshKeys[id]) throw new Error('That saved key no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('ssh_key', id, previewSshKeys[id].title, previewSshKeys[id])
     delete previewSshKeys[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -787,13 +891,10 @@ export async function getSoftwareLicense(id: string): Promise<SoftwareLicense> {
 export async function saveSoftwareLicense(input: SoftwareLicenseInput): Promise<SaveSoftwareLicenseResult> {
   if (previewMode) {
     const id = input.id || `preview-license-${crypto.randomUUID()}`
-    const license: SoftwareLicense = { ...input, id, title: input.title.trim() }
+    const license: SoftwareLicense = { ...input, id, title: input.title.trim(), favourite: previewSoftwareLicenses[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewSoftwareLicenses[id]) captureHistoryPreview('software_license', id, previewSoftwareLicenses[id].title, previewSoftwareLicenses[id])
     previewSoftwareLicenses[id] = license
-    const summary = { id, title: license.title }
-    const existing = previewSnapshot.softwareLicenses.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.softwareLicenses.push(summary)
+    upsertPreviewItem('software_license', id, license.title, license.productName, license.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveSoftwareLicenseResult>('save_software_license', { input })
@@ -801,10 +902,9 @@ export async function saveSoftwareLicense(input: SoftwareLicenseInput): Promise<
 
 export async function deleteSoftwareLicense(id: string): Promise<DeleteSoftwareLicenseResult> {
   if (previewMode) {
-    const index = previewSnapshot.softwareLicenses.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved licence no longer exists.')
-    previewSnapshot.softwareLicenses.splice(index, 1)
-    if (previewSoftwareLicenses[id]) trashPreviewItem('software_license', id, previewSoftwareLicenses[id].title, previewSoftwareLicenses[id])
+    if (!previewSoftwareLicenses[id]) throw new Error('That saved licence no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('software_license', id, previewSoftwareLicenses[id].title, previewSoftwareLicenses[id])
     delete previewSoftwareLicenses[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -824,13 +924,10 @@ export async function saveDocument(input: DocumentMetadataInput): Promise<SaveDo
   if (previewMode) {
     const id = input.id || `preview-document-${crypto.randomUUID()}`
     const attachments = previewDocuments[id]?.attachments ?? []
-    const document: DocumentMetadata = { ...input, id, title: input.title.trim(), attachments }
+    const document: DocumentMetadata = { ...input, id, title: input.title.trim(), attachments, favourite: previewDocuments[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewDocuments[id]) captureHistoryPreview('document', id, previewDocuments[id].title, previewDocuments[id])
     previewDocuments[id] = document
-    const summary = { id, title: document.title, attachmentCount: attachments.length }
-    const existing = previewSnapshot.documents.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.documents.push(summary)
+    upsertPreviewItem('document', id, document.title, document.documentType, document.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveDocumentMetadataResult>('save_document', { input })
@@ -857,8 +954,6 @@ export async function addDocumentAttachment(
       throw new Error(`Attachments are limited to ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`)
     }
     document.attachments.push({ id: `preview-attachment-${crypto.randomUUID()}`, filename: filename.trim(), contentType, size, data })
-    const summary = previewSnapshot.documents.find((entry) => entry.id === documentId)
-    if (summary) summary.attachmentCount = document.attachments.length
     return { id: documentId, snapshot: previewSnapshot }
   }
   return invoke<SaveDocumentMetadataResult>('add_document_attachment', { documentId, filename, contentType, data })
@@ -871,8 +966,6 @@ export async function removeDocumentAttachment(documentId: string, attachmentId:
     const before = document.attachments.length
     document.attachments = document.attachments.filter((attachment) => attachment.id !== attachmentId)
     if (document.attachments.length === before) throw new Error('That attachment no longer exists.')
-    const summary = previewSnapshot.documents.find((entry) => entry.id === documentId)
-    if (summary) summary.attachmentCount = document.attachments.length
     return { id: documentId, snapshot: previewSnapshot }
   }
   return invoke<SaveDocumentMetadataResult>('remove_document_attachment', { documentId, attachmentId })
@@ -880,10 +973,9 @@ export async function removeDocumentAttachment(documentId: string, attachmentId:
 
 export async function deleteDocument(id: string): Promise<DeleteDocumentMetadataResult> {
   if (previewMode) {
-    const index = previewSnapshot.documents.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved document no longer exists.')
-    previewSnapshot.documents.splice(index, 1)
-    if (previewDocuments[id]) trashPreviewItem('document', id, previewDocuments[id].title, previewDocuments[id])
+    if (!previewDocuments[id]) throw new Error('That saved document no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('document', id, previewDocuments[id].title, previewDocuments[id])
     delete previewDocuments[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -902,13 +994,10 @@ export async function getCustomRecord(id: string): Promise<CustomRecord> {
 export async function saveCustomRecord(input: CustomRecordInput): Promise<SaveCustomRecordResult> {
   if (previewMode) {
     const id = input.id || `preview-custom-record-${crypto.randomUUID()}`
-    const record: CustomRecord = { ...input, id, title: input.title.trim() }
+    const record: CustomRecord = { ...input, id, title: input.title.trim(), favourite: previewCustomRecords[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
     if (input.id && previewCustomRecords[id]) captureHistoryPreview('custom_record', id, previewCustomRecords[id].title, previewCustomRecords[id])
     previewCustomRecords[id] = record
-    const summary = { id, title: record.title }
-    const existing = previewSnapshot.customRecords.find((entry) => entry.id === id)
-    if (existing) Object.assign(existing, summary)
-    else previewSnapshot.customRecords.push(summary)
+    upsertPreviewItem('custom_record', id, record.title, '', record.tags)
     return { id, snapshot: previewSnapshot }
   }
   return invoke<SaveCustomRecordResult>('save_custom_record', { input })
@@ -916,10 +1005,9 @@ export async function saveCustomRecord(input: CustomRecordInput): Promise<SaveCu
 
 export async function deleteCustomRecord(id: string): Promise<DeleteCustomRecordResult> {
   if (previewMode) {
-    const index = previewSnapshot.customRecords.findIndex((summary) => summary.id === id)
-    if (index < 0) throw new Error('That saved record no longer exists.')
-    previewSnapshot.customRecords.splice(index, 1)
-    if (previewCustomRecords[id]) trashPreviewItem('custom_record', id, previewCustomRecords[id].title, previewCustomRecords[id])
+    if (!previewCustomRecords[id]) throw new Error('That saved record no longer exists.')
+    removePreviewItem(id)
+    trashPreviewItem('custom_record', id, previewCustomRecords[id].title, previewCustomRecords[id])
     delete previewCustomRecords[id]
     return { deletedId: id, snapshot: previewSnapshot }
   }
@@ -951,53 +1039,11 @@ export async function restoreTrashedItem(id: string): Promise<RestoreTrashedItem
     if (trashIndex < 0 || !trashed) throw new Error('That deleted item is no longer in trash.')
     previewSnapshot.trash.splice(trashIndex, 1)
     delete previewTrashRecords[id]
-    switch (trashed.kind) {
-      case 'login': {
-        previewCards[id] = trashed.record as LoginCard
-        previewSnapshot.entries.push(trashed.record as unknown as VaultEntry)
-        break
-      }
-      case 'identity': {
-        previewIdentities[id] = trashed.record as Identity
-        previewSnapshot.identities.push({ id, label: trashed.title })
-        break
-      }
-      case 'secure_note': {
-        previewSecureNotes[id] = trashed.record as SecureNote
-        previewSnapshot.secureNotes.push({ id, title: trashed.title, updatedAt: Math.floor(Date.now() / 1000) })
-        break
-      }
-      case 'card': {
-        previewPaymentCards[id] = trashed.record as Card
-        previewSnapshot.cards.push({ id, title: trashed.title })
-        break
-      }
-      case 'wifi_network': {
-        previewWifiNetworks[id] = trashed.record as WifiNetwork
-        previewSnapshot.wifiNetworks.push({ id, title: trashed.title })
-        break
-      }
-      case 'ssh_key': {
-        previewSshKeys[id] = trashed.record as SshKey
-        previewSnapshot.sshKeys.push({ id, title: trashed.title })
-        break
-      }
-      case 'software_license': {
-        previewSoftwareLicenses[id] = trashed.record as SoftwareLicense
-        previewSnapshot.softwareLicenses.push({ id, title: trashed.title })
-        break
-      }
-      case 'document': {
-        const restored = trashed.record as DocumentMetadata
-        previewDocuments[id] = restored
-        previewSnapshot.documents.push({ id, title: trashed.title, attachmentCount: restored.attachments.length })
-        break
-      }
-      case 'custom_record': {
-        previewCustomRecords[id] = trashed.record as CustomRecord
-        previewSnapshot.customRecords.push({ id, title: trashed.title })
-        break
-      }
+    if (trashed.kind === 'login') {
+      previewCards[id] = trashed.record as LoginCard
+      previewSnapshot.entries.push(trashed.record as unknown as VaultEntry)
+    } else {
+      adoptPreviewRecord(trashed.kind, id, trashed.record)
     }
     return { restoredId: id, snapshot: previewSnapshot }
   }
@@ -1009,89 +1055,16 @@ export async function restoreHistoryVersion(id: string): Promise<RestoreHistoryV
     const version = previewHistoryRecords[id]
     if (!version) throw new Error('That version is no longer available.')
     const itemId = version.itemId
-    switch (version.kind) {
-      case 'login': {
-        const current = previewCards[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('login', itemId, current.title, current)
-        previewCards[itemId] = version.record as LoginCard
-        const restoredCard = version.record as LoginCard
-        const entryIndex = previewSnapshot.entries.findIndex((entry) => entry.id === itemId)
-        if (entryIndex >= 0) previewSnapshot.entries[entryIndex] = { ...previewSnapshot.entries[entryIndex], title: restoredCard.title, site: restoredCard.site, initials: previewInitials(restoredCard.title) }
-        break
-      }
-      case 'identity': {
-        const current = previewIdentities[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('identity', itemId, current.label, current)
-        previewIdentities[itemId] = version.record as Identity
-        const summary = previewSnapshot.identities.find((entry) => entry.id === itemId)
-        if (summary) summary.label = (version.record as Identity).label
-        break
-      }
-      case 'secure_note': {
-        const current = previewSecureNotes[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('secure_note', itemId, current.title, current)
-        previewSecureNotes[itemId] = version.record as SecureNote
-        const summary = previewSnapshot.secureNotes.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as SecureNote).title
-        break
-      }
-      case 'card': {
-        const current = previewPaymentCards[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('card', itemId, current.title, current)
-        previewPaymentCards[itemId] = version.record as Card
-        const summary = previewSnapshot.cards.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as Card).title
-        break
-      }
-      case 'wifi_network': {
-        const current = previewWifiNetworks[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('wifi_network', itemId, current.title, current)
-        previewWifiNetworks[itemId] = version.record as WifiNetwork
-        const summary = previewSnapshot.wifiNetworks.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as WifiNetwork).title
-        break
-      }
-      case 'ssh_key': {
-        const current = previewSshKeys[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('ssh_key', itemId, current.title, current)
-        previewSshKeys[itemId] = version.record as SshKey
-        const summary = previewSnapshot.sshKeys.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as SshKey).title
-        break
-      }
-      case 'software_license': {
-        const current = previewSoftwareLicenses[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('software_license', itemId, current.title, current)
-        previewSoftwareLicenses[itemId] = version.record as SoftwareLicense
-        const summary = previewSnapshot.softwareLicenses.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as SoftwareLicense).title
-        break
-      }
-      case 'document': {
-        const current = previewDocuments[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('document', itemId, current.title, current)
-        previewDocuments[itemId] = version.record as DocumentMetadata
-        const summary = previewSnapshot.documents.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as DocumentMetadata).title
-        break
-      }
-      case 'custom_record': {
-        const current = previewCustomRecords[itemId]
-        if (!current) throw new Error('Restore the item from trash first, then choose a version to restore.')
-        captureHistoryPreview('custom_record', itemId, current.title, current)
-        previewCustomRecords[itemId] = version.record as CustomRecord
-        const summary = previewSnapshot.customRecords.find((entry) => entry.id === itemId)
-        if (summary) summary.title = (version.record as CustomRecord).title
-        break
-      }
+    const currentTitle = previewRecordTitle(version.kind, itemId)
+    if (currentTitle === null) throw new Error('Restore the item from trash first, then choose a version to restore.')
+    captureHistoryPreview(version.kind, itemId, currentTitle, version.kind === 'login' ? previewCards[itemId] : previewRecordStores[version.kind]?.[itemId])
+    if (version.kind === 'login') {
+      const restoredCard = version.record as LoginCard
+      previewCards[itemId] = restoredCard
+      const entryIndex = previewSnapshot.entries.findIndex((entry) => entry.id === itemId)
+      if (entryIndex >= 0) previewSnapshot.entries[entryIndex] = { ...previewSnapshot.entries[entryIndex], title: restoredCard.title, site: restoredCard.site, initials: previewInitials(restoredCard.title) }
+    } else {
+      adoptPreviewRecord(version.kind, itemId, version.record)
     }
     return { restoredId: itemId, snapshot: previewSnapshot }
   }
@@ -1301,6 +1274,16 @@ export async function resolveBrowserIdentityFill(approvalId: string, identityId:
 export async function getPendingBrowserIdentityFill(): Promise<BrowserIdentityFillRequest | null> {
   if (previewMode) return null
   return invoke<BrowserIdentityFillRequest | null>('get_pending_browser_identity_fill')
+}
+
+export async function resolveBrowserCardFill(approvalId: string, cardId: string | null): Promise<void> {
+  if (previewMode) return
+  await invoke('resolve_browser_card_fill', { approvalId, cardId })
+}
+
+export async function getPendingBrowserCardFill(): Promise<BrowserCardFillRequest | null> {
+  if (previewMode) return null
+  return invoke<BrowserCardFillRequest | null>('get_pending_browser_card_fill')
 }
 
 export async function resolveBrowserSave(

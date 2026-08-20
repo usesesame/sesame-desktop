@@ -3,7 +3,7 @@ import { get, writable } from 'svelte/store'
 import { generatorEntropy, makePassword, strengthLabel } from '../generator'
 import { makePassphrase, passphraseEntropy } from '../passphrase'
 import { DEFAULT_SORT_MODE, type SortMode } from '../vault-collections'
-import type { BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, GeneratorOption, ImportPreview, ImportSource, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
+import type { BrowserCardFillRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, GeneratorOption, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
 import { refreshTotp } from '../vault'
 
 export interface VaultStoreState {
@@ -14,13 +14,15 @@ export interface VaultStoreState {
 
 export interface SelectionStoreState {
   activeView: View
-  activeEntryId: string | null
+  activeItemId: string | null
+  activeItemKind: ItemKind | null
   searchQuery: string
   sortMode: SortMode
   securityFilter: SecurityFilter
-  folderFilter: string | null
+  categoryFilter: ItemKind | null
+  collectionFilter: string | null
   /** Ids only, never a second place vault data lives; cleared on lock. */
-  recentEntryIds: string[]
+  recentItemIds: string[]
 }
 
 export interface ImportStoreState {
@@ -45,6 +47,14 @@ export interface BrowserFillStoreState {
 
 export interface BrowserIdentityFillStoreState {
   request: BrowserIdentityFillRequest | null
+  selectedId: string
+  working: boolean
+  syncWorking: boolean
+  syncFailed: boolean
+}
+
+export interface BrowserCardFillStoreState {
+  request: BrowserCardFillRequest | null
   selectedId: string
   working: boolean
   syncWorking: boolean
@@ -316,7 +326,7 @@ function patchable<T>(initial: T) {
 export function createAppStores() {
   return {
     vault: patchable<VaultStoreState>({ status: { exists: false, unlocked: false, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 }, snapshot: null, loginCard: null }),
-    selection: patchable<SelectionStoreState>({ activeView: 'vault', activeEntryId: null, searchQuery: '', sortMode: DEFAULT_SORT_MODE, securityFilter: null, folderFilter: null, recentEntryIds: [] }),
+    selection: patchable<SelectionStoreState>({ activeView: 'vault', activeItemId: null, activeItemKind: null, searchQuery: '', sortMode: DEFAULT_SORT_MODE, securityFilter: null, categoryFilter: null, collectionFilter: null, recentItemIds: [] }),
     totp: createTotpStore(),
     generator: createGeneratorStore(),
     passphrase: createPassphraseStore(),
@@ -324,6 +334,7 @@ export function createAppStores() {
     imports: patchable<ImportStoreState>({ importing: false, source: 'bitwarden-csv', sourceMenuOpen: false, preview: null, importId: '', fileName: '', skipExactDuplicates: true }),
     browserFill: patchable<BrowserFillStoreState>({ request: null, selectedId: '', remember: false, working: false, syncWorking: false, syncFailed: false }),
     browserIdentityFill: patchable<BrowserIdentityFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    browserCardFill: patchable<BrowserCardFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserSave: patchable<BrowserSaveStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     settings: patchable<SettingsStoreState>({ theme: 'auto', siteIconsEnabled: false, autoLockMinutes: 5, clipboardClearSeconds: 30, keepInTray: true, quickAccessShortcut: 'Ctrl+Alt+S' }),
   }

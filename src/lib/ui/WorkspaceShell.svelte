@@ -21,24 +21,34 @@
   export let onCopyPassword: () => void = () => {}
   export let onCopyUsername: () => void = () => {}
   export let onEditSelected: () => void = () => {}
+  export let onOpenSearch: () => void = () => {}
 
   const { selection, settings, vault } = useAppStores()
 
   function handleShortcut(event: KeyboardEvent) {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return
     const target = event.target as HTMLElement | null
     if (target?.closest('[role="dialog"]')) return
     const typing = target?.matches('input, textarea, select, [contenteditable="true"]')
     // Without the activeView guard, Ctrl+C anywhere would overwrite the clipboard with the last open login.
     const key = event.key.toLowerCase()
-    if (key === 'l') {
+    const chord = (event.ctrlKey || event.metaKey) && !event.altKey
+    if (chord && key === 'l') {
       event.preventDefault()
       onLock()
       return
     }
     if (typing) return
     if (!$vault.status.unlocked) return
-    if (key === 'n') {
+    if (!chord && !event.altKey && event.key === '/') {
+      event.preventDefault()
+      onOpenSearch()
+      return
+    }
+    if (!chord) return
+    if (key === 'k') {
+      event.preventDefault()
+      onOpenSearch()
+    } else if (key === 'n') {
       event.preventDefault()
       onNewLogin()
     } else if (key === 'c' && $selection.activeView === 'vault' && $vault.loginCard) {
@@ -50,8 +60,17 @@
       onEditSelected()
     }
   }
-  $: eyebrow = $selection.activeView === 'vault' ? 'Vault' : $selection.activeView === 'authenticator' ? 'Vault' : $selection.activeView === 'security' ? 'Security' : $selection.activeView === 'tools' ? 'Tools' : $selection.activeView === 'items' ? 'Tools' : $selection.activeView === 'backups' ? 'Data' : 'Preferences'
-  $: title = $selection.activeView === 'vault' ? 'Your logins' : $selection.activeView === 'authenticator' ? 'Authenticator' : $selection.activeView === 'security' ? (duplicateReviewOpen ? 'Duplicate review' : 'Checkup') : $selection.activeView === 'tools' ? 'Password tools' : $selection.activeView === 'items' ? 'Items' : $selection.activeView === 'backups' ? 'Backups' : 'Settings'
+  const viewTitles: Record<View, string> = {
+    vault: 'Your vault',
+    authenticator: 'Authenticator',
+    security: 'Checkup',
+    tools: 'Password tools',
+    trash: 'Trash',
+    history: 'History',
+    backups: 'Backups',
+    settings: 'Settings',
+  }
+  $: title = $selection.activeView === 'security' && duplicateReviewOpen ? 'Duplicate review' : viewTitles[$selection.activeView]
   const themeIcon = { auto: 'monitor', light: 'sun', dark: 'moon' } as const
 </script>
 
@@ -62,7 +81,7 @@
 
   <section class="workspace" class:vault-workspace={$selection.activeView === 'vault'} class:cleanup-workspace={$selection.activeView === 'security' && duplicateReviewOpen} aria-labelledby="workspace-heading">
     <header class="topbar">
-      <div><p class="eyebrow">{eyebrow}</p><h1 id="workspace-heading">{title}</h1></div>
+      <div><h1 id="workspace-heading">{title}</h1></div>
       <div class="topbar-actions">
         <button type="button" class="icon-button" aria-label="Change theme (currently {$settings.theme})" title="Theme: {$settings.theme}" on:click={onCycleTheme}><Icon name={themeIcon[$settings.theme]} size={15} /></button>
         <button type="button" class="icon-button" aria-label={refreshing ? 'Refreshing vault view' : 'Refresh vault view'} title={refreshing ? 'Refreshing…' : 'Refresh'} aria-busy={refreshing} disabled={refreshing} on:click={onRefresh}>{#if refreshing}<span class="refresh-spinner" aria-hidden="true"></span>{:else}<Icon name="refresh" size={14} />{/if}</button>

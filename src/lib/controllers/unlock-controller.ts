@@ -1,5 +1,5 @@
 import type { AppStores } from '../stores/app-stores'
-import type { VaultSnapshot } from '../types'
+import type { ItemKind, VaultSnapshot } from '../types'
 import {
   completeRecoverySetup,
   createVault,
@@ -11,6 +11,7 @@ import {
   unlockWithRecovery,
   unlockWithWindowsHello,
 } from '../vault'
+import { vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
@@ -19,8 +20,8 @@ import type { OnboardingController } from './onboarding-controller'
 interface UnlockControllerOptions {
   stores: AppStores
   feedback: FeedbackController
-  selectEntry: (id: string) => Promise<void>
-  clearLoginSelection: () => void
+  selectItem: (id: string, kind: ItemKind) => Promise<void>
+  clearSelection: () => void
   clearSessionState: () => void
   rejectBrowserFill: () => Promise<void>
   refreshActiveView: () => Promise<void>
@@ -47,8 +48,9 @@ export function createUnlockController(options: UnlockControllerOptions) {
   })
 
   async function openFirst(snapshot: VaultSnapshot) {
-    if (snapshot.entries[0]) await options.selectEntry(snapshot.entries[0].id)
-    else options.clearLoginSelection()
+    const first = vaultItems(snapshot)[0]
+    if (first) await options.selectItem(first.id, first.kind)
+    else options.clearSelection()
   }
 
   async function installExistingUnlock(snapshot: VaultSnapshot): Promise<boolean> {
@@ -88,7 +90,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
     modal.lockCleared()
     onboarding.lockCleared()
     vault.patch({ snapshot: null, loginCard: null, status: { ...vault.value().status, unlocked: false } })
-    selection.patch({ activeEntryId: null, activeView: 'vault', folderFilter: null })
+    selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault', collectionFilter: null, categoryFilter: null })
     feedback.showNotice('Vault locked', message)
   }
 
@@ -121,11 +123,12 @@ export function createUnlockController(options: UnlockControllerOptions) {
       if (state.value().refreshingVault || !vault.value().status.unlocked) return
       state.patch({ refreshingVault: true })
       feedback.clearError()
-      const selectedId = selection.value().activeEntryId
+      const selectedId = selection.value().activeItemId
       try {
         const snapshot = await unlockVault({ masterPassword: '' }, true)
         vault.patch({ snapshot })
-        if (selectedId && snapshot.entries.some((entry) => entry.id === selectedId)) await options.selectEntry(selectedId)
+        const selected = selectedId ? vaultItems(snapshot).find((item) => item.id === selectedId) : undefined
+        if (selected) await options.selectItem(selected.id, selected.kind)
         else await openFirst(snapshot)
         await options.refreshActiveView()
         feedback.showNotice('Vault view refreshed', 'The current view is up to date.')
@@ -220,8 +223,8 @@ export function createUnlockController(options: UnlockControllerOptions) {
         vault.patch({ status })
         state.patch({ recoveryKit: '', recoveryConfirmed: false })
         feedback.showNotice('Vault set up', 'Create a backup before importing anything important.')
-        const first = vault.value().snapshot?.entries[0]
-        if (first) await options.selectEntry(first.id)
+        const first = vaultItems(vault.value().snapshot)[0]
+        if (first) await options.selectItem(first.id, first.kind)
         onboarding.advance()
       } catch (error) {
         feedback.setError(error)
@@ -240,7 +243,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       clearUnlockSecrets()
       onboarding.resetAfterVaultDeletion()
       vault.patch({ snapshot: null, loginCard: null, status: { exists: false, unlocked: false, preview: vault.value().status.preview, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 } })
-      selection.patch({ activeEntryId: null, activeView: 'vault' })
+      selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault' })
       state.patch({ restoreMessage: message })
     },
     markRestored(message: string) {

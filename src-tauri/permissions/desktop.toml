@@ -26,7 +26,7 @@ description = "Redacted vault snapshots and explicit item reads for the main win
 commands.allow = [
   "get_vault_snapshot",
   "get_login_card",
-  "search_entries",
+  "search_items",
   "suggest_field_values",
   "get_login_summary",
   "get_duplicate_groups",
@@ -55,8 +55,8 @@ commands.allow = [
   "create_folder",
   "rename_folder",
   "delete_folder",
-  "set_login_favourite",
-  "record_login_use",
+  "set_item_favourite",
+  "record_item_use",
   "delete_login",
   "save_identity",
   "delete_identity",
@@ -187,8 +187,9 @@ identifier = "quick-access"
 description = "The quick-access window's redacted status/search, selected secret fetch, and guarded copy lifecycle."
 commands.allow = [
   "get_quick_access_status",
-  "search_quick_access_entries",
-  "get_quick_access_secret",
+  "search_quick_access_items",
+  "get_quick_access_field",
+  "open_quick_access_item",
   "arm_clipboard_clear",
   "clear_clipboard_if_unchanged",
 ]

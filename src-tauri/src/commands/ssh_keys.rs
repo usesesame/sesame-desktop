@@ -48,6 +48,9 @@ fn ssh_key_from_input(input: SshKeyInput) -> VaultResult<SshKey> {
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
             .collect(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -102,6 +105,9 @@ pub fn save_ssh_key(
         let previous = existing.clone();
         key.created_at = existing.created_at;
         key.revision = existing.revision.saturating_add(1);
+        key.folder_id = existing.folder_id.clone();
+        key.favourite = existing.favourite;
+        key.last_used_at = existing.last_used_at;
         *existing = key;
         crate::vault::history::capture_history(&mut next_payload, TaggedItem::SshKey(previous));
     } else {
