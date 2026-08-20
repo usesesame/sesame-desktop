@@ -11,6 +11,7 @@ regexTarget = "line"
 paths = [
   '''src-tauri/src/commands/ssh_keys\.rs$''',
   '''src/lib/controllers/ssh-key-controller\.test\.ts$''',
+  '''src-tauri/sesame-core/tests/imports\.rs$''',
 ]
 regexes = ['''-----BEGIN OPENSSH PRIVATE KEY----- fictional''']
 

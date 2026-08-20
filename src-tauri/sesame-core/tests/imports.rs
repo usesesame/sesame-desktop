@@ -101,7 +101,7 @@ const BITWARDEN_SSH_AND_PASSKEY: &str = r#"{
       "name": "Deploy key",
       "notes": "build server",
       "sshKey": {
-        "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+        "privateKey": "-----BEGIN OPENSSH PRIVATE KEY----- fictional",
         "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build",
         "keyFingerprint": "SHA256:zzz"
       }
@@ -130,7 +130,7 @@ fn a_bitwarden_ssh_key_becomes_an_ssh_key_item() {
     let key = &parsed.ssh_keys[0];
     assert_eq!(key.title, "Deploy key");
     assert_eq!(key.key_type, "ssh-ed25519");
-    assert!(key.private_key.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+    assert!(key.private_key.contains("fictional"));
     assert_eq!(key.public_key, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build");
     assert_eq!(key.notes, "build server");
 }
