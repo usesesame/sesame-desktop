@@ -678,7 +678,7 @@ button.no-totp:hover { filter: brightness(.97); }
 /* =========================================================================
    Feature: security checkup
    ========================================================================= */
-.checkup-view, .backups-view, .settings-view, .tools-view { max-width: 1040px; padding-top: var(--space-2); animation: view-enter .28s cubic-bezier(.2,.7,.2,1) both; }
+.checkup-view, .backups-view, .settings-view, .tools-view, .authenticator-view { max-width: 1040px; padding-top: var(--space-2); animation: view-enter .28s cubic-bezier(.2,.7,.2,1) both; }
 /* Generator, passphrase, and strength checker only ever render inside the
    Tools tab panel, so they inherit the view spacing above and must not add a
    second view-level top padding of their own. */
@@ -961,7 +961,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-tabs button { display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-md); padding: 8px 15px; color: var(--text-2); background: transparent; font-size: var(--type-1); font-weight: 600; cursor: pointer; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
 .settings-tabs button:hover { color: var(--text); background: var(--control-hover); }
 .settings-tabs button.active { color: var(--text-heading); background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
-.items-view { min-width: 0; }
+.items-view { min-width: 0; animation: view-enter .28s cubic-bezier(.2,.7,.2,1) both; }
 .items-tab-navigation { display: grid; width: 100%; min-width: 0; grid-template-columns: 32px minmax(0, 1fr) 32px; align-items: stretch; gap: var(--space-2); margin-bottom: var(--space-5); }
 .items-tab-scroll { display: grid; width: 32px; min-height: 38px; place-items: center; border: 0; border-radius: var(--radius-md); color: var(--text-muted); background: var(--surface-3); cursor: pointer; }
 .items-tab-scroll:hover:not(:disabled) { color: var(--accent-link); background: var(--tint); }
