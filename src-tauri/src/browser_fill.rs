@@ -17,11 +17,11 @@ use zeroize::Zeroize;
 use crate::{
     browser_pipe::PipePeer,
     browser_protocol::{
-        parse_identity_fields, BrowserRequest, BrowserResponse, IdentityFillFields,
-        MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
+        parse_card_fields, parse_identity_fields, BrowserRequest, BrowserResponse, CardFillFields,
+        IdentityFillFields, MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
-    vault::{random_id, Identity, VaultEntry, VaultState},
+    vault::{random_id, Card, Identity, VaultEntry, VaultState},
 };
 
 use crate::browser_host::HOST_FILE_NAME;
@@ -247,6 +247,34 @@ struct BrowserIdentityCancelledEvent {
     reason: &'static str,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardFillCandidate {
+    id: String,
+    title: String,
+    brand: String,
+    last_four: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserCardRequestEvent {
+    approval_id: String,
+    origin: String,
+    hostname: String,
+    requested_fields: Vec<String>,
+    candidates: Vec<CardFillCandidate>,
+    expires_in_seconds: u64,
+    expires_at_unix_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserCardCancelledEvent {
+    approval_id: String,
+    reason: &'static str,
+}
+
 enum ApprovalDecision {
     Denied,
     InvalidSelection,
@@ -262,6 +290,12 @@ enum IdentityDecision {
     Denied,
     InvalidSelection,
     Identity(String),
+}
+
+enum CardDecision {
+    Denied,
+    InvalidSelection,
+    Card(String),
 }
 
 struct PendingApproval {
@@ -321,11 +355,23 @@ struct PendingIdentityApproval {
     sender: SyncSender<IdentityDecision>,
 }
 
+struct PendingCardApproval {
+    approval_id: String,
+    request_id: String,
+    origin: NormalizedOrigin,
+    session_epoch: u64,
+    candidate_ids: HashSet<String>,
+    request_event: Option<BrowserCardRequestEvent>,
+    deadline: Instant,
+    sender: SyncSender<CardDecision>,
+}
+
 #[derive(Default)]
 struct FillInner {
     pending: Option<PendingApproval>,
     pending_save: Option<PendingSave>,
     pending_identity: Option<PendingIdentityApproval>,
+    pending_card: Option<PendingCardApproval>,
     recent_request_ids: VecDeque<String>,
     grants: Vec<FillGrant>,
 }
@@ -355,6 +401,9 @@ impl BrowserFillState {
             }
             if let Some(pending) = inner.pending_identity.take() {
                 let _ = pending.sender.send(IdentityDecision::Denied);
+            }
+            if let Some(pending) = inner.pending_card.take() {
+                let _ = pending.sender.send(CardDecision::Denied);
             }
             inner.grants.clear();
         }
@@ -407,6 +456,7 @@ impl BrowserFillState {
         if inner.pending.is_some()
             || inner.pending_save.is_some()
             || inner.pending_identity.is_some()
+            || inner.pending_card.is_some()
         {
             return Err("approvalUnavailable");
         }
@@ -443,6 +493,7 @@ impl BrowserFillState {
         if inner.pending.is_some()
             || inner.pending_save.is_some()
             || inner.pending_identity.is_some()
+            || inner.pending_card.is_some()
         {
             return Err("approvalUnavailable");
         }
@@ -479,6 +530,7 @@ impl BrowserFillState {
         if inner.pending.is_some()
             || inner.pending_save.is_some()
             || inner.pending_identity.is_some()
+            || inner.pending_card.is_some()
         {
             return Err("approvalUnavailable");
         }
@@ -579,6 +631,128 @@ impl BrowserFillState {
             .ok()
             .and_then(|inner| {
                 inner.pending_identity.as_ref().map(|pending| {
+                    pending.approval_id == approval_id
+                        && pending.request_id == request_id
+                        && pending.origin == *origin
+                        && pending.session_epoch == session_epoch
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    fn begin_card(
+        &self,
+        request_id: &str,
+        origin: NormalizedOrigin,
+        session_epoch: u64,
+        candidate_ids: HashSet<String>,
+    ) -> Result<(String, Instant, Receiver<CardDecision>), &'static str> {
+        let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
+        Self::note_request_id(&mut inner, request_id)?;
+        if inner.pending.is_some()
+            || inner.pending_save.is_some()
+            || inner.pending_identity.is_some()
+            || inner.pending_card.is_some()
+        {
+            return Err("approvalUnavailable");
+        }
+        let approval_id = random_id();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let deadline = Instant::now() + APPROVAL_TIMEOUT;
+        inner.pending_card = Some(PendingCardApproval {
+            approval_id: approval_id.clone(),
+            request_id: request_id.to_string(),
+            origin,
+            session_epoch,
+            candidate_ids,
+            request_event: None,
+            deadline,
+            sender,
+        });
+        Ok((approval_id, deadline, receiver))
+    }
+
+    fn publish_card(
+        &self,
+        approval_id: &str,
+        request_event: BrowserCardRequestEvent,
+    ) -> Result<(), &'static str> {
+        let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
+        let pending = inner.pending_card.as_mut().ok_or("approvalExpired")?;
+        if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
+            return Err("approvalExpired");
+        }
+        pending.request_event = Some(request_event);
+        Ok(())
+    }
+
+    fn pending_card_request(&self) -> Option<BrowserCardRequestEvent> {
+        self.inner.lock().ok().and_then(|inner| {
+            let pending = inner.pending_card.as_ref()?;
+            (pending.deadline > Instant::now())
+                .then(|| pending.request_event.clone())
+                .flatten()
+        })
+    }
+
+    fn decide_card(
+        &self,
+        approval_id: &str,
+        card_id: Option<String>,
+    ) -> Result<bool, &'static str> {
+        let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
+        let pending = inner.pending_card.as_ref().ok_or("approvalExpired")?;
+        if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
+            return Err("approvalExpired");
+        }
+        if card_id
+            .as_deref()
+            .is_some_and(|card_id| !pending.candidate_ids.contains(card_id))
+        {
+            pending
+                .sender
+                .send(CardDecision::InvalidSelection)
+                .map_err(|_| "approvalExpired")?;
+            inner.pending_card = None;
+            return Err("cardNotOffered");
+        }
+        let denied = card_id.is_none();
+        pending
+            .sender
+            .send(
+                card_id
+                    .map(CardDecision::Card)
+                    .unwrap_or(CardDecision::Denied),
+            )
+            .map_err(|_| "approvalExpired")?;
+        inner.pending_card = None;
+        Ok(denied)
+    }
+
+    fn revoke_card(&self, approval_id: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if inner
+                .pending_card
+                .as_ref()
+                .is_some_and(|pending| pending.approval_id == approval_id)
+            {
+                inner.pending_card = None;
+            }
+        }
+    }
+
+    fn is_card_bound(
+        &self,
+        approval_id: &str,
+        request_id: &str,
+        origin: &NormalizedOrigin,
+        session_epoch: u64,
+    ) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|inner| {
+                inner.pending_card.as_ref().map(|pending| {
                     pending.approval_id == approval_id
                         && pending.request_id == request_id
                         && pending.origin == *origin
@@ -909,6 +1083,10 @@ pub fn pending_identity(state: State<'_, BrowserFillState>) -> Option<BrowserIde
     state.pending_identity_request()
 }
 
+pub fn pending_card(state: State<'_, BrowserFillState>) -> Option<BrowserCardRequestEvent> {
+    state.pending_card_request()
+}
+
 pub fn resolve_identity(
     app: &AppHandle,
     state: State<'_, BrowserFillState>,
@@ -940,6 +1118,37 @@ pub fn resolve_identity(
     }
 }
 
+pub fn resolve_card(
+    app: &AppHandle,
+    state: State<'_, BrowserFillState>,
+    approval_id: String,
+    card_id: Option<String>,
+) -> Result<(), String> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err("That browser approval is no longer available.".into());
+    }
+    match state.decide_card(&approval_id, card_id) {
+        Ok(denied) => {
+            diagnostics::record_browser_host_registration(
+                app,
+                if denied {
+                    "card_denied"
+                } else {
+                    "card_approved"
+                },
+            );
+            if denied {
+                emit_card_cancelled(app, &approval_id, "denied");
+            }
+            Ok(())
+        }
+        Err(_) => {
+            emit_card_cancelled(app, &approval_id, "expired");
+            Err("That browser approval expired or is no longer available.".into())
+        }
+    }
+}
+
 fn handle_pipe_payload(
     app: &AppHandle,
     payload: Vec<u8>,
@@ -960,6 +1169,7 @@ fn handle_pipe_payload(
         "fill" => fill_response(app, &request, peer),
         "save" => save_response(app, &mut request, peer),
         "identity" => identity_response(app, &request, peer),
+        "card" => card_response(app, &request, peer),
         _ => BrowserResponse::error(&request.request_id, "Unsupported browser request."),
     };
     response_bytes(response)
@@ -1304,7 +1514,245 @@ fn emit_save_cancelled(app: &AppHandle, approval_id: &str, reason: &'static str)
     );
 }
 
-// Identity fill lives here: it has an independent approval lifecycle.
+fn card_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> BrowserResponse {
+    diagnostics::record_browser_host_registration(app, "card_requested");
+    let Some(origin) = request
+        .origin
+        .as_deref()
+        .and_then(NormalizedOrigin::from_request)
+    else {
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    };
+    let Some(requested_fields) = request.fields.as_deref().and_then(parse_card_fields) else {
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    };
+    let vault = app.state::<VaultState>();
+    let (epoch, candidates) = {
+        let session = match vault.session.lock() {
+            Ok(session) => session,
+            Err(_) => {
+                return BrowserResponse::card_unavailable(
+                    &request.request_id,
+                    "approvalUnavailable",
+                )
+            }
+        };
+        let Some(session) = session.as_ref() else {
+            diagnostics::record_browser_host_registration(app, "card_locked");
+            return BrowserResponse::card_unavailable(&request.request_id, "locked");
+        };
+        let candidates = session
+            .payload
+            .cards
+            .iter()
+            .filter(|card| card_supports_fields(card, &requested_fields))
+            .take(MAX_MATCHING_CANDIDATES)
+            .map(card_candidate)
+            .collect::<Vec<_>>();
+        (vault.session_epoch(), candidates)
+    };
+    if candidates.is_empty() {
+        diagnostics::record_browser_host_registration(app, "card_no_match");
+        return BrowserResponse::card_unavailable(&request.request_id, "noMatch");
+    }
+    let candidate_ids = candidates
+        .iter()
+        .map(|candidate| candidate.id.clone())
+        .collect();
+    let fill_state = app.state::<BrowserFillState>();
+    let (approval_id, deadline, receiver) =
+        match fill_state.begin_card(&request.request_id, origin.clone(), epoch, candidate_ids) {
+            Ok(value) => value,
+            Err(reason) => return BrowserResponse::card_unavailable(&request.request_id, reason),
+        };
+    let event = BrowserCardRequestEvent {
+        approval_id: approval_id.clone(),
+        origin: origin.canonical(),
+        hostname: origin.hostname.clone(),
+        requested_fields: requested_fields.clone(),
+        candidates,
+        expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+        expires_at_unix_ms: approval_expires_at_unix_ms(),
+    };
+    if fill_state
+        .publish_card(&approval_id, event.clone())
+        .is_err()
+    {
+        fill_state.revoke_card(&approval_id);
+        return BrowserResponse::card_unavailable(&request.request_id, "approvalUnavailable");
+    }
+    bring_to_foreground(app);
+    let _ = app.emit("browser-card-request", event);
+    let decision = match wait_for_card_decision(
+        app,
+        &fill_state,
+        &vault,
+        &approval_id,
+        &request.request_id,
+        &origin,
+        epoch,
+        deadline,
+        receiver,
+        peer,
+    ) {
+        Ok(decision) => decision,
+        Err(reason) => return BrowserResponse::card_unavailable(&request.request_id, reason),
+    };
+    let card_id = match decision {
+        CardDecision::Card(card_id) => card_id,
+        CardDecision::Denied => {
+            return BrowserResponse::card_unavailable(&request.request_id, "approvalDeclined")
+        }
+        CardDecision::InvalidSelection => {
+            return BrowserResponse::card_unavailable(&request.request_id, "invalidSelection")
+        }
+    };
+    if !peer.is_connected() {
+        emit_card_cancelled(app, &approval_id, "connectionClosed");
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    }
+    let session = match vault.session.lock() {
+        Ok(session) => session,
+        Err(_) => {
+            return BrowserResponse::card_unavailable(&request.request_id, "approvalUnavailable")
+        }
+    };
+    if vault.session_epoch() != epoch {
+        emit_card_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    }
+    let Some(session) = session.as_ref() else {
+        emit_card_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::card_unavailable(&request.request_id, "locked");
+    };
+    let Some(card) = session
+        .payload
+        .cards
+        .iter()
+        .find(|card| card.id == card_id && card_supports_fields(card, &requested_fields))
+    else {
+        emit_card_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    };
+    BrowserResponse::card_for(request, selected_card_fields(card, &requested_fields))
+}
+
+fn card_candidate(card: &Card) -> CardFillCandidate {
+    let digits = card
+        .number
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+    let last_four = digits
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    CardFillCandidate {
+        id: card.id.clone(),
+        title: bounded_display(&card.title, 128),
+        brand: bounded_display(&card.brand, 64),
+        last_four,
+    }
+}
+
+fn card_supports_fields(card: &Card, requested: &[String]) -> bool {
+    requested.iter().all(|field| match field.as_str() {
+        "cardholderName" => {
+            !card.cardholder_name.is_empty()
+                && card.cardholder_name.len() <= MAX_CREDENTIAL_FIELD_BYTES
+        }
+        "number" => !card.number.is_empty() && card.number.len() <= MAX_CREDENTIAL_FIELD_BYTES,
+        "expiryMonth" => {
+            !card.expiry_month.is_empty() && card.expiry_month.len() <= MAX_CREDENTIAL_FIELD_BYTES
+        }
+        "expiryYear" => {
+            !card.expiry_year.is_empty() && card.expiry_year.len() <= MAX_CREDENTIAL_FIELD_BYTES
+        }
+        "securityCode" => {
+            !card.security_code.is_empty() && card.security_code.len() <= MAX_CREDENTIAL_FIELD_BYTES
+        }
+        _ => false,
+    })
+}
+
+fn selected_card_fields(card: &Card, requested: &[String]) -> CardFillFields {
+    let mut fields = CardFillFields::default();
+    for key in requested {
+        match key.as_str() {
+            "cardholderName" => fields.cardholder_name = Some(card.cardholder_name.clone()),
+            "number" => fields.number = Some(card.number.clone()),
+            "expiryMonth" => fields.expiry_month = Some(card.expiry_month.clone()),
+            "expiryYear" => fields.expiry_year = Some(card.expiry_year.clone()),
+            "securityCode" => fields.security_code = Some(card.security_code.clone()),
+            _ => {}
+        }
+    }
+    fields
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wait_for_card_decision(
+    app: &AppHandle,
+    fill_state: &BrowserFillState,
+    vault: &VaultState,
+    approval_id: &str,
+    request_id: &str,
+    origin: &NormalizedOrigin,
+    epoch: u64,
+    deadline: Instant,
+    receiver: Receiver<CardDecision>,
+    peer: &PipePeer,
+) -> Result<CardDecision, &'static str> {
+    loop {
+        match receiver.try_recv() {
+            Ok(decision) => return Ok(decision),
+            Err(TryRecvError::Disconnected) => return Err("approvalUnavailable"),
+            Err(TryRecvError::Empty) => {}
+        }
+        if !peer.is_connected() {
+            fill_state.revoke_card(approval_id);
+            emit_card_cancelled(app, approval_id, "connectionClosed");
+            diagnostics::record_browser_host_registration(app, "card_connection_closed");
+            return Err("staleRequest");
+        }
+        if Instant::now() >= deadline {
+            fill_state.revoke_card(approval_id);
+            emit_card_cancelled(app, approval_id, "expired");
+            diagnostics::record_browser_host_registration(app, "card_timeout");
+            return Err("approvalTimeout");
+        }
+        if !fill_state.is_card_bound(approval_id, request_id, origin, epoch) {
+            if let Ok(decision) = receiver.try_recv() {
+                return Ok(decision);
+            }
+            fill_state.revoke_card(approval_id);
+            emit_card_cancelled(app, approval_id, "expired");
+            return Err("approvalUnavailable");
+        }
+        if vault.session_epoch() != epoch {
+            fill_state.revoke_card(approval_id);
+            emit_card_cancelled(app, approval_id, "vaultChanged");
+            diagnostics::record_browser_host_registration(app, "card_vault_changed");
+            return Err("staleRequest");
+        }
+        thread::sleep(APPROVAL_POLL.min(deadline.saturating_duration_since(Instant::now())));
+    }
+}
+
+fn emit_card_cancelled(app: &AppHandle, approval_id: &str, reason: &'static str) {
+    let _ = app.emit(
+        "browser-card-cancelled",
+        BrowserCardCancelledEvent {
+            approval_id: approval_id.to_string(),
+            reason,
+        },
+    );
+}
+
 include!("browser_fill_identity_approval.rs");
 
 fn approval_expires_at_unix_ms() -> u64 {
@@ -1486,5 +1934,56 @@ mod grant_tests {
             state.granted_login(&origin("https://example.test"), 7, &ids(&["login-a"])),
             None
         );
+    }
+
+    #[test]
+    fn a_card_approval_is_consumed_and_cannot_be_replayed() {
+        let state = BrowserFillState::default();
+        let (approval_id, _, receiver) = state
+            .begin_card(
+                "card-request-1",
+                origin("https://checkout.example.test"),
+                7,
+                ids(&["card-a"]),
+            )
+            .expect("begin card");
+
+        assert!(!state
+            .decide_card(&approval_id, Some("card-a".to_string()))
+            .expect("approve card"));
+        assert!(matches!(receiver.recv(), Ok(CardDecision::Card(card_id)) if card_id == "card-a"));
+        assert!(state.pending_card_request().is_none());
+        assert!(matches!(
+            state.begin_card(
+                "card-request-1",
+                origin("https://checkout.example.test"),
+                7,
+                ids(&["card-a"]),
+            ),
+            Err("staleRequest")
+        ));
+    }
+
+    #[test]
+    fn a_card_not_offered_for_approval_is_never_released() {
+        let state = BrowserFillState::default();
+        let (approval_id, _, receiver) = state
+            .begin_card(
+                "card-request-2",
+                origin("https://checkout.example.test"),
+                7,
+                ids(&["card-a"]),
+            )
+            .expect("begin card");
+
+        assert_eq!(
+            state.decide_card(&approval_id, Some("card-b".to_string())),
+            Err("cardNotOffered")
+        );
+        assert!(matches!(
+            receiver.recv(),
+            Ok(CardDecision::InvalidSelection)
+        ));
+        assert!(state.pending_card_request().is_none());
     }
 }

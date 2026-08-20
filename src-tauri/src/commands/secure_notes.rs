@@ -39,6 +39,9 @@ fn secure_note_from_input(input: SecureNoteInput) -> VaultResult<SecureNote> {
             .filter(|tag| !tag.is_empty())
             .collect(),
         legacy_fields: Vec::new(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -88,6 +91,9 @@ pub fn save_secure_note(
         };
         note.created_at = existing.created_at;
         note.revision = existing.revision.saturating_add(1);
+        note.folder_id = existing.folder_id.clone();
+        note.favourite = existing.favourite;
+        note.last_used_at = existing.last_used_at;
         note.legacy_fields = existing.legacy_fields.clone();
         crate::vault::history::capture_history(&mut next_payload, TaggedItem::SecureNote(existing));
     }

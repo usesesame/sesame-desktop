@@ -2,14 +2,17 @@
   import { onMount } from 'svelte'
   import { autoLockOptions, clipboardClearOptions } from './lib/preferences'
   import { isSortMode } from './lib/vault-collections'
+  import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
-  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
+  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
   import type { ImportSource, View } from './lib/types'
+  import { storeSortMode } from './lib/preferences'
   import { createFeedbackController } from './lib/controllers/feedback-controller'
   import { createLoginController } from './lib/controllers/login-controller'
   import { createImportController } from './lib/controllers/import-controller'
   import { createBrowserFillController } from './lib/controllers/browser-fill-controller'
   import { createIdentityFillController } from './lib/controllers/identity-fill-controller'
+  import { createCardFillController } from './lib/controllers/card-fill-controller'
   import { createBrowserSaveController } from './lib/controllers/browser-save-controller'
   import { createSettingsController } from './lib/controllers/settings-controller'
   import { createBackupController } from './lib/controllers/backup-controller'
@@ -23,6 +26,7 @@
   import { createSoftwareLicenseController } from './lib/controllers/software-license-controller'
   import { createDocumentController } from './lib/controllers/document-controller'
   import { createCustomRecordController } from './lib/controllers/custom-record-controller'
+  import { createItemController } from './lib/controllers/item-controller'
   import { createTrashController } from './lib/controllers/trash-controller'
   import { createHistoryController } from './lib/controllers/history-controller'
   import { createModalController } from './lib/controllers/modal-controller'
@@ -62,11 +66,13 @@
   import ToolsView from './lib/ui/ToolsView.svelte'
   import AuthenticatorView from './lib/ui/AuthenticatorView.svelte'
   import BackupsView from './lib/ui/BackupsView.svelte'
-  import ItemsView from './lib/ui/ItemsView.svelte'
+  import TrashView from './lib/ui/TrashView.svelte'
+  import HistoryView from './lib/ui/HistoryView.svelte'
   import SettingsView from './lib/ui/SettingsView.svelte'
   import BetaOnboarding from './lib/ui/BetaOnboarding.svelte'
   import BrowserFillApprovalModal from './lib/ui/BrowserFillApprovalModal.svelte'
   import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
+  import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
   import BrowserSaveApprovalModal from './lib/ui/BrowserSaveApprovalModal.svelte'
   import SwitchingJourneyModal from './lib/ui/SwitchingJourneyModal.svelte'
   import PinSetupModal from './lib/ui/PinSetupModal.svelte'
@@ -77,7 +83,7 @@
 
   const appStores = provideAppStores(createAppStores())
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the import flow reads the store through the controller.
-  const { browserFill, browserIdentityFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
+  const { browserFill, browserIdentityFill, browserCardFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
   vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, revision: 0 } })
 
   const feedbackController = createFeedbackController()
@@ -105,7 +111,6 @@
     requestBulkDelete: (entries) => requestBulkDelete(entries),
   })
   const loginState = loginController.state
-  const visibleEntries = loginController.visibleEntries
   const folderOptions = loginController.folderOptions
   const contextEntry = loginController.contextEntry
 
@@ -164,6 +169,14 @@
   })
 
   const identityFillController = createIdentityFillController({
+    stores: appStores,
+    feedback: feedbackController,
+    onVaultLocked: () => onNativeVaultLocked(),
+    modal: modalController,
+    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const cardFillController = createCardFillController({
     stores: appStores,
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
@@ -252,6 +265,39 @@
     stores: appStores,
     feedback: feedbackController,
   })
+  const trashState = trashController.state
+  const historyState = historyController.state
+
+  const itemController = createItemController({
+    stores: appStores,
+    feedback: feedbackController,
+    login: loginController,
+    editors: {
+      identity: identityController,
+      secure_note: secureNoteController,
+      card: cardController,
+      wifi_network: wifiNetworkController,
+      ssh_key: sshKeyController,
+      software_license: softwareLicenseController,
+      document: documentController,
+      custom_record: customRecordController,
+    },
+  })
+  const itemState = itemController.state
+  const visibleItems = itemController.visibleItems
+  const allItems = itemController.allItems
+  const recentItems = itemController.recentItems
+  let focusSearchToken = 0
+
+  // Universal search means every item, so it clears the filters first.
+  function openUniversalSearch() {
+    selection.patch({ activeView: 'vault', categoryFilter: null, collectionFilter: null, securityFilter: null })
+    focusSearchToken += 1
+  }
+
+  function historyItemTitle(_kind: string, itemId: string): string | null {
+    return vaultItems($vault.snapshot).find((item) => item.id === itemId)?.title ?? null
+  }
 
   function clearSessionState() {
     loginController.clearSecrets()
@@ -261,6 +307,7 @@
     settingsController.clearSecrets()
     browserFillController.clearSecrets()
     identityFillController.clearSecrets()
+    cardFillController.clearSecrets()
     browserSaveController.clearSecrets()
     identityController.clearSecrets()
     secureNoteController.clearSecrets()
@@ -272,6 +319,7 @@
     customRecordController.clearSecrets()
     trashController.clearSecrets()
     historyController.clearSecrets()
+    itemController.clearSecrets()
     generator.clear()
     passphrase.clear()
     recentGenerations.clear()
@@ -300,12 +348,13 @@
   const unlockController = createUnlockController({
     stores: appStores,
     feedback: feedbackController,
-    selectEntry: loginController.selectEntry,
-    clearLoginSelection: loginController.clearSelection,
+    selectItem: itemController.select,
+    clearSelection: itemController.clearSelection,
     clearSessionState,
     rejectBrowserFill: async () => {
       if (browserFill.value().request) await browserFillController.resolve(null)
       if (browserIdentityFill.value().request) await identityFillController.resolve(null)
+      if (browserCardFill.value().request) await cardFillController.resolve(null)
       if (browserSave.value().request) await browserSaveController.resolve(false)
     },
     refreshActiveView,
@@ -334,7 +383,8 @@
     { id: 'authenticator', label: 'Authenticator', icon: 'shield' },
     { id: 'security', label: 'Security checkup', icon: 'shield' },
     { id: 'tools', label: 'Tools', icon: 'key' },
-    { id: 'items', label: 'Items', icon: 'folder' },
+    { id: 'trash', label: 'Trash', icon: 'trash' },
+    { id: 'history', label: 'History', icon: 'refresh' },
     { id: 'backups', label: 'Backups', icon: 'archive' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
   ]
@@ -365,9 +415,21 @@
   }
 
   onMount(() => {
+    let stopQuickAccessOpen = () => {}
+    let quickAccessListenerDisposed = false
+    void onQuickAccessOpenItem((id) => {
+      if (quickAccessListenerDisposed) return
+      const item = vaultItems(appStores.vault.value().snapshot).find((candidate) => candidate.id === id)
+      if (!item) return
+      selection.patch({ activeView: 'vault' })
+      void itemController.select(item.id, item.kind)
+    })
+      .then((stop) => { if (quickAccessListenerDisposed) stop(); else stopQuickAccessOpen = stop })
+      .catch(() => void recordDiagnostic('renderer', 'quick_access_listener_failed'))
     const stopSettings = settingsController.start()
     const stopBrowserFill = browserFillController.start()
     const stopIdentityFill = identityFillController.start()
+    const stopCardFill = cardFillController.start()
     const stopBrowserSave = browserSaveController.start()
     void unlockController.loadStatus()
     const onRendererError = () => { void recordDiagnostic('renderer', 'unhandled_exception'); void settingsController.refreshDiagnosticStatus() }
@@ -388,8 +450,11 @@
       stopSettings()
       stopBrowserFill()
       stopIdentityFill()
+      stopCardFill()
       stopBrowserSave()
       idleListenersDisposed = true
+      quickAccessListenerDisposed = true
+      stopQuickAccessOpen()
       stopIdleWarning()
       stopIdleCleared()
       window.removeEventListener('error', onRendererError)
@@ -471,10 +536,18 @@
     onCopyPassword={() => void loginController.copySelectedField('password')}
     onCopyUsername={() => void loginController.copySelectedField('username')}
     onEditSelected={loginController.openEditor}
+    onOpenSearch={openUniversalSearch}
   >
     {#if $selection.activeView === 'vault'}
       <VaultView
-        visibleEntries={$visibleEntries}
+        allItems={$allItems}
+        visibleItems={$visibleItems}
+        recentItems={$recentItems}
+        itemDetail={$itemState.detail}
+        itemLoading={$itemState.loading}
+        addMenuOpen={$itemState.addMenuOpen}
+        filterMenuOpen={$itemState.filterMenuOpen}
+        {focusSearchToken}
         bind:passwordVisible={$loginState.passwordVisible}
         siteIconsEnabled={$settings.siteIconsEnabled}
         totpRemaining={$totp.remaining}
@@ -483,17 +556,25 @@
         multiSelect={$loginState.multiSelect}
         selectedIds={$loginState.selectedIds}
         bulkFolderId={$loginState.bulkFolderId}
-        onSelectEntry={loginController.selectEntry}
+        onSelectItem={(id, kind) => void itemController.select(id, kind)}
+        onAddItem={itemController.openNew}
+        onToggleAddMenu={itemController.toggleAddMenu}
+        onToggleFilterMenu={itemController.toggleFilterMenu}
         onOpenNewLogin={loginController.openNew}
         onImport={importController.open}
-        onClearSearch={loginController.clearSearch}
-        onSearch={(query) => void loginController.runSearch(query)}
-        onSetSortMode={(mode) => isSortMode(mode) && loginController.setSortMode(mode)}
+        onClearSearch={itemController.clearSearch}
+        onSearch={(query) => void itemController.runSearch(query)}
+        onSetSortMode={(mode) => { if (isSortMode(mode)) { selection.patch({ sortMode: mode }); storeSortMode(mode) } }}
         onClearSecurityFilter={cleanupController.clearSecurityFilter}
-        onShowFolder={loginController.showFolder}
+        onSetCategory={itemController.setCategory}
+        onShowCollection={itemController.showCollection}
         onOrganizeFolders={loginController.openFolderManager}
         onOpenContextMenu={loginController.openEntryMenu}
         onOpenLoginEditor={loginController.openEditor}
+        onOpenItemEditor={() => void itemController.openEditor()}
+        onDeleteItem={itemController.requestDelete}
+        onMoveItem={(folderId) => $selection.activeItemId && void itemController.moveToFolder($selection.activeItemId, folderId)}
+        onItemCopy={(value, label) => void itemController.copy(value, label)}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
         onFixWeakPassword={loginController.openEditorWithFreshPassword}
         recoveryActionWorking={$loginState.recoveryActionWorking}
@@ -513,7 +594,7 @@
         onShowSecurityFilter={cleanupController.showSecurityFilter}
         onAddWebsite={loginController.openEditorWebsite}
         onOpenDuplicateReview={cleanupController.openDuplicateReview}
-        onToggleFavourite={loginController.toggleFavourite}
+        onToggleFavourite={(id, favourite) => void itemController.toggleFavourite(id, favourite)}
         onStartMultiSelect={loginController.startMultiSelect}
         onToggleMultiSelect={loginController.toggleMultiSelect}
         onSelectVisible={loginController.selectVisible}
@@ -543,19 +624,28 @@
       <AuthenticatorView onOpenImport={importController.open} reloadToken={authenticatorReloadToken} />
     {:else if $selection.activeView === 'tools'}
       <ToolsView onCopy={loginController.copy} onUseInLogin={(password) => loginController.openNew(password)} />
-    {:else if $selection.activeView === 'items'}
-      <ItemsView
-        snapshot={$vault.snapshot}
-        {identityController}
-        {secureNoteController}
-        {cardController}
-        {wifiNetworkController}
-        {sshKeyController}
-        {softwareLicenseController}
-        {documentController}
-        {customRecordController}
-        {trashController}
-        {historyController}
+    {:else if $selection.activeView === 'trash'}
+      <TrashView
+        items={$vault.snapshot?.trash ?? []}
+        restoringId={$trashState.restoringId}
+        previewingId={$trashState.previewingId}
+        previewId={$trashState.previewId}
+        preview={$trashState.preview}
+        onPreview={(id) => void trashController.preview(id)}
+        onCancelPreview={trashController.cancelPreview}
+        onRestore={(id) => void trashController.restore(id)}
+      />
+    {:else if $selection.activeView === 'history'}
+      <HistoryView
+        items={$vault.snapshot?.history ?? []}
+        restoringId={$historyState.restoringId}
+        previewingId={$historyState.previewingId}
+        previewId={$historyState.previewId}
+        preview={$historyState.preview}
+        onPreview={(id) => void historyController.preview(id)}
+        onCancelPreview={historyController.cancelPreview}
+        onRestore={(id) => void historyController.restore(id)}
+        titleFor={historyItemTitle}
       />
     {:else if $selection.activeView === 'backups'}
       <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} onExportBackup={backupController.exportEncryptedBackup} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} onOpenSwitchingJourney={() => void openSwitchingJourney()} />
@@ -643,6 +733,8 @@
     <BrowserFillApprovalModal request={$browserFill.request} working={$browserFill.working} onCancel={() => void browserFillController.resolve(null)} onConfirm={() => void browserFillController.resolve($browserFill.selectedId, $browserFill.remember)} />
   {:else if $browserIdentityFill.request}
     <BrowserIdentityFillApprovalModal request={$browserIdentityFill.request} working={$browserIdentityFill.working} onCancel={() => void identityFillController.resolve(null)} onConfirm={() => void identityFillController.resolve($browserIdentityFill.selectedId)} />
+  {:else if $browserCardFill.request}
+    <BrowserCardFillApprovalModal request={$browserCardFill.request} working={$browserCardFill.working} onCancel={() => void cardFillController.resolve(null)} onConfirm={() => void cardFillController.resolve($browserCardFill.selectedId)} />
   {:else if $browserSave.request}
     <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} />
   {/if}

@@ -322,14 +322,14 @@ test('locking the vault clears the recently viewed trail', () => {
   const body = clearSecrets.slice(0, clearSecrets.indexOf('\n    },'))
   assert.match(
     body,
-    /recentEntryIds: \[\]/,
-    'clearSecrets must empty recentEntryIds so a lock leaves no trail of what was open',
+    /recentItemIds: \[\]/,
+    'clearSecrets must empty recentItemIds so a lock leaves no trail of what was open',
   )
 })
 
 test('the recently viewed strip stores ids, never vault content', () => {
   const stores = read(join(projectRoot, 'src', 'lib', 'stores', 'app-stores.ts'))
-  assert.match(stores, /recentEntryIds: string\[\]/, 'recentEntryIds must hold ids only')
+  assert.match(stores, /recentItemIds: string\[\]/, 'recentItemIds must hold ids only')
 })
 
 test('the vault grid has a track for every child it renders', () => {

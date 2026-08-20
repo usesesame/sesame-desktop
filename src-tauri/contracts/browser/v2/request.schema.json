@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v2/request.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "type", "requestId", "origin", "fields"],
+  "properties": {
+    "version": { "const": 2 }, "type": { "const": "card" },
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "origin": { "type": "string", "pattern": "^https://[^/]+$", "maxLength": 2048 },
+    "fields": { "type": "string", "pattern": "^(cardholderName|number|expiryMonth|expiryYear|securityCode)(,(cardholderName|number|expiryMonth|expiryYear|securityCode))*$" }
+  }
+}

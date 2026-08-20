@@ -7,14 +7,14 @@ import type { ModalController } from './modal-controller'
 
 function emptyIdentityDraft(): IdentityInput {
   return {
-    label: '', fullName: '', email: '', phone: '',
+    label: '', tags: [], fullName: '', email: '', phone: '',
     addressLine1: '', addressLine2: '', city: '', region: '', postalCode: '', country: '',
   }
 }
 
 function draftFrom(identity: Identity): IdentityInput {
-  const { id, label, fullName, email, phone, addressLine1, addressLine2, city, region, postalCode, country } = identity
-  return { id, label, fullName, email, phone, addressLine1, addressLine2, city, region, postalCode, country }
+  const { id, label, tags, fullName, email, phone, addressLine1, addressLine2, city, region, postalCode, country } = identity
+  return { id, label, tags: tags ?? [], fullName, email, phone, addressLine1, addressLine2, city, region, postalCode, country }
 }
 
 interface IdentityControllerOptions {

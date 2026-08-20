@@ -51,6 +51,9 @@ fn software_license_from_input(input: SoftwareLicenseInput) -> VaultResult<Softw
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
             .collect(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -112,6 +115,9 @@ pub fn save_software_license(
         let previous = existing.clone();
         license.created_at = existing.created_at;
         license.revision = existing.revision.saturating_add(1);
+        license.folder_id = existing.folder_id.clone();
+        license.favourite = existing.favourite;
+        license.last_used_at = existing.last_used_at;
         *existing = license;
         crate::vault::history::capture_history(
             &mut next_payload,

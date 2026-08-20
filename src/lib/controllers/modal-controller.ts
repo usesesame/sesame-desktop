@@ -53,6 +53,7 @@ export interface ModalController {
   lockCleared(): void
   browserFillMayShow(): boolean
   identityFillMayShow(): boolean
+  cardFillMayShow(): boolean
   browserSaveMayShow(): boolean
 }
 
@@ -61,7 +62,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
 
   function open(modal: ActiveModal): boolean {
     if (modal === null) return true
-    if (stores.browserFill.value().request || stores.browserIdentityFill.value().request || stores.browserSave.value().request) return false
+    if (stores.browserFill.value().request || stores.browserIdentityFill.value().request || stores.browserCardFill.value().request || stores.browserSave.value().request) return false
     const current = state.value().active
     if (current !== null && modalKindsConflict(current.kind, modal.kind)) {
       return false
@@ -92,20 +93,25 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
 
   function browserFillMayShow(): boolean {
     const current = state.value().active
-    if (current === null && !stores.browserIdentityFill.value().request && !stores.browserSave.value().request) return true
+    if (current === null && !stores.browserIdentityFill.value().request && !stores.browserCardFill.value().request && !stores.browserSave.value().request) return true
     // Only one browser-originated prompt at a time, matching Rust.
     return false
   }
 
   function identityFillMayShow(): boolean {
     const current = state.value().active
-    if (current === null && !stores.browserFill.value().request && !stores.browserSave.value().request) return true
+    if (current === null && !stores.browserFill.value().request && !stores.browserCardFill.value().request && !stores.browserSave.value().request) return true
     return false
+  }
+
+  function cardFillMayShow(): boolean {
+    const current = state.value().active
+    return current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request && !stores.browserSave.value().request
   }
 
   function browserSaveMayShow(): boolean {
     const current = state.value().active
-    if (current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request) return true
+    if (current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request && !stores.browserCardFill.value().request) return true
     return false
   }
 
@@ -117,6 +123,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
     lockCleared,
     browserFillMayShow,
     identityFillMayShow,
+    cardFillMayShow,
     browserSaveMayShow,
   }
 }

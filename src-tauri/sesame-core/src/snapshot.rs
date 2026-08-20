@@ -13,101 +13,39 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
     let duplicate_keys = duplicate_key_counts(payload);
     let password_counts = password_counts(payload);
     let mut entries = Vec::new();
-    let mut identities = Vec::new();
-    let mut secure_notes = Vec::new();
-    let mut cards = Vec::new();
-    let mut wifi_networks = Vec::new();
-    let mut ssh_keys = Vec::new();
-    let mut software_licenses = Vec::new();
-    let mut documents = Vec::new();
-    let mut custom_records = Vec::new();
+    let mut items = Vec::new();
     for item in payload.item_views() {
-        match item {
-            TaggedItem::Login(entry) => {
-                let reused = !entry.password.is_empty()
-                    && password_counts.get(&entry.password).copied().unwrap_or(0) > 1;
-                let password = analyse_password(&entry, reused);
-                let issue_kinds = issue_kinds_for(&entry, &duplicate_keys, &password_counts);
-                entries.push(VaultEntrySummary {
-                    id: entry.id.clone(),
-                    title: entry.title.clone(),
-                    site: domain_from_url(&entry.url),
-                    initials: initials_for(&entry.title),
-                    folder_id: entry.folder_id.clone(),
-                    folder: folder_name_for(payload, &entry),
-                    favourite: entry.favourite,
-                    last_used_at: entry.last_used_at,
-                    password_score: password.score,
-                    password_issues: password.issues,
-                    security_level: if issue_kinds.is_empty() {
-                        "good"
-                    } else {
-                        "needs-work"
-                    },
-                    issue_kinds,
-                });
-            }
-            TaggedItem::Identity(identity) => identities.push(IdentitySummary {
-                id: identity.id,
-                label: identity.label,
-            }),
-            TaggedItem::SecureNote(note) => secure_notes.push(SecureNoteSummary {
-                id: note.id,
-                title: note.title,
-                updated_at: note.updated_at,
-            }),
-            TaggedItem::Card(card) => cards.push(CardSummary {
-                id: card.id,
-                title: card.title,
-            }),
-            TaggedItem::WifiNetwork(network) => wifi_networks.push(WifiNetworkSummary {
-                id: network.id,
-                title: network.title,
-            }),
-            TaggedItem::SshKey(key) => ssh_keys.push(SshKeySummary {
-                id: key.id,
-                title: key.title,
-            }),
-            TaggedItem::SoftwareLicense(license) => {
-                software_licenses.push(SoftwareLicenseSummary {
-                    id: license.id,
-                    title: license.title,
-                })
-            }
-            TaggedItem::Document(document) => documents.push(DocumentMetadataSummary {
-                id: document.id,
-                title: document.title,
-                attachment_count: document.attachments.len(),
-            }),
-            TaggedItem::CustomRecord(record) => custom_records.push(CustomRecordSummary {
-                id: record.id,
-                title: record.title,
-            }),
+        if let TaggedItem::Login(entry) = &item {
+            let reused = !entry.password.is_empty()
+                && password_counts.get(&entry.password).copied().unwrap_or(0) > 1;
+            let password = analyse_password(entry, reused);
+            let issue_kinds = issue_kinds_for(entry, &duplicate_keys, &password_counts);
+            entries.push(VaultEntrySummary {
+                id: entry.id.clone(),
+                title: entry.title.clone(),
+                site: domain_from_url(&entry.url),
+                initials: initials_for(&entry.title),
+                folder_id: entry.folder_id.clone(),
+                folder: folder_name_for(payload, entry),
+                favourite: entry.favourite,
+                last_used_at: entry.last_used_at,
+                password_score: password.score,
+                password_issues: password.issues,
+                security_level: if issue_kinds.is_empty() {
+                    "good"
+                } else {
+                    "needs-work"
+                },
+                issue_kinds,
+                tags: entry.tags.clone(),
+                updated_at: entry.updated_at,
+            });
+            continue;
         }
+        items.push(item_summary_for(payload, &item));
     }
-    identities.sort_by(|left: &IdentitySummary, right| {
-        left.label.to_lowercase().cmp(&right.label.to_lowercase())
-    });
-    secure_notes.sort_by(|left: &SecureNoteSummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    cards.sort_by(|left: &CardSummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    wifi_networks.sort_by(|left: &WifiNetworkSummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    ssh_keys.sort_by(|left: &SshKeySummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    software_licenses.sort_by(|left: &SoftwareLicenseSummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    documents.sort_by(|left: &DocumentMetadataSummary, right| {
-        left.title.to_lowercase().cmp(&right.title.to_lowercase())
-    });
-    custom_records
-        .sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+    entries.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+    items.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
     let mut trash = crate::trash::trash_summaries(payload);
     trash.sort_by(|left, right| right.deleted_at.cmp(&left.deleted_at));
     let history = crate::history::history_summaries(payload);
@@ -117,17 +55,28 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
         revision: payload.revision,
         folders: payload.folders.clone(),
         entries,
-        identities,
-        secure_notes,
-        cards,
-        wifi_networks,
-        ssh_keys,
-        software_licenses,
-        documents,
-        custom_records,
+        items,
         trash,
         history,
         security,
+    }
+}
+
+fn item_summary_for(payload: &VaultPayload, item: &TaggedItem) -> VaultItemSummary {
+    let preview = item.preview();
+    let metadata = item.metadata();
+    VaultItemSummary {
+        id: item.id().to_string(),
+        kind: item.kind(),
+        initials: initials_for(&preview.title),
+        title: preview.title,
+        subtitle: preview.detail.unwrap_or_default(),
+        folder: folder_name(payload, metadata.item_folder_id()),
+        folder_id: metadata.item_folder_id().map(str::to_string),
+        favourite: metadata.item_favourite(),
+        last_used_at: metadata.item_last_used_at(),
+        updated_at: metadata.item_updated_at(),
+        tags: metadata.item_tags().to_vec(),
     }
 }
 
@@ -532,14 +481,20 @@ pub fn issue_kinds_for(
     issues
 }
 
-pub fn folder_name_for(payload: &VaultPayload, entry: &VaultEntry) -> String {
-    entry
-        .folder_id
-        .as_deref()
+pub fn folder_name(payload: &VaultPayload, folder_id: Option<&str>) -> String {
+    folder_id
         .and_then(|folder_id| payload.folders.iter().find(|folder| folder.id == folder_id))
         .map(|folder| folder.name.clone())
+        .unwrap_or_default()
+}
+
+pub fn folder_name_for(payload: &VaultPayload, entry: &VaultEntry) -> String {
+    let name = folder_name(payload, entry.folder_id.as_deref());
+    if name.is_empty() {
         // Only transient imports and pre-migration payloads have this value.
-        .unwrap_or_else(|| entry.folder.clone())
+        return entry.folder.clone();
+    }
+    name
 }
 
 pub fn duplicate_key(entry: &VaultEntry) -> String {

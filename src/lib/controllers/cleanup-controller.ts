@@ -181,7 +181,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
     },
     clearSecurityFilter() { selection.patch({ securityFilter: null }) },
     async showSecurityFilter(filter: Exclude<SecurityFilter, null>) {
-      selection.patch({ securityFilter: filter, folderFilter: null, searchQuery: '', activeView: 'vault' })
+      selection.patch({ securityFilter: filter, categoryFilter: 'login', collectionFilter: null, searchQuery: '', activeView: 'vault' })
       const first = (vault.value().snapshot?.entries ?? [])
         .filter((entry) => matchesFilter(entry.issueKinds, filter))
         .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: 'base' }))[0]

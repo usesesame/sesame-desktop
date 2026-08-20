@@ -139,7 +139,7 @@ export interface PanelWidths {
 }
 
 export const PANEL_WIDTH_LIMITS = {
-  list: { min: 200, max: 420, fallback: 248 },
+  list: { min: 220, max: 460, fallback: 300 },
   rail: { min: 200, max: 360, fallback: 236 },
 } as const
 

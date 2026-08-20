@@ -50,7 +50,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
 
   async function applyRestoredVault(message: string) {
     vault.patch({ snapshot: null, loginCard: null, status: { ...(await getVaultStatus()), unlocked: false } })
-    selection.patch({ activeEntryId: null, activeView: 'vault' })
+    selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault' })
     onRestored(message)
   }
 

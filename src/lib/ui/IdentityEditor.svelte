@@ -59,6 +59,7 @@
       <label>Email<input bind:value={identityDraft.email} maxlength="320" inputmode="email" autocomplete="email" /></label>
       <label>Phone<input bind:value={identityDraft.phone} maxlength="64" inputmode="tel" autocomplete="tel" /></label>
     </div>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={identityDraft.tags.join(', ')} on:input={(event) => (identityDraft.tags = event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean))} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel" /></label>
 
     <section class="editor-section">
       <div><h3>Address</h3><p>Optional. Filled into signup forms that ask for one.</p></div>

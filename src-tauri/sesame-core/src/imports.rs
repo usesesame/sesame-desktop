@@ -417,6 +417,9 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
         created_at: now,
         updated_at: now,
         revision: 1,
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
     }
 }
 
@@ -461,6 +464,9 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
         created_at: now,
         updated_at: now,
         revision: 1,
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
     }
 }
 
@@ -492,6 +498,9 @@ fn bitwarden_json_secure_note(
         created_at: now,
         updated_at: now,
         revision: 1,
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
     }
 }
 
@@ -573,6 +582,10 @@ fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCount
         created_at: now,
         updated_at: now,
         revision: 1,
+        tags: Vec::new(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
     }
 }
 

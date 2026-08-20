@@ -19,7 +19,7 @@ regexes = ['''-----BEGIN OPENSSH PRIVATE KEY----- fictional''']
 description = "Superseded Bitwarden import fixture; marked fictional from the next commit on"
 targetRules = ["private-key"]
 condition = "AND"
-commits = ["7557487da1777a655421420f7302ef73873d0c24"]
+commits = ["7557487da1777a655421420f7302ef73873d0c24", "c66669fa2ea6f8fa6867eda6999f04f692fa649b"]
 paths = ['''src-tauri/sesame-core/tests/imports\.rs$''']
 
 [[allowlists]]

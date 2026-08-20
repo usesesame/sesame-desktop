@@ -4,23 +4,25 @@
   import Icon from '../Icon.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { readSiteIcons } from '../preferences'
-  import { copyToClipboard, getQuickAccessSecret, getQuickAccessStatus, previewMode, searchQuickAccessEntries } from '../vault'
-  import type { QuickAccessEntry } from '../types'
+  import { copyToClipboard, getQuickAccessField, getQuickAccessStatus, openQuickAccessItem, previewMode, searchQuickAccessItems } from '../vault'
+  import type { QuickAccessAction, QuickAccessItem } from '../types'
+  import { itemKindIcon, itemKindLabel } from '../vault-items'
 
   type Stage = 'loading' | 'locked' | 'ready' | 'unavailable'
 
   let stage: Stage = 'loading'
-  let entries: QuickAccessEntry[] = []
+  let items: QuickAccessItem[] = []
   let query = ''
   let selectedIndex = 0
-  let copyingId = ''
-  let copiedId = ''
-  let copiedField: 'password' | 'totp' | '' = ''
+  let workingId = ''
+  let doneId = ''
+  let doneLabel = ''
+  let confirming: { id: string; field: string } | null = null
   let searchInput: HTMLInputElement | undefined
   let searchSequence = 0
   let siteIconsEnabled = readSiteIcons()
 
-  $: if (selectedIndex >= entries.length) selectedIndex = Math.max(0, entries.length - 1)
+  $: if (selectedIndex >= items.length) selectedIndex = Math.max(0, items.length - 1)
 
   function closeWindow() {
     if (!previewMode) void getCurrentWindow().hide()
@@ -29,18 +31,20 @@
   function resetTransientState() {
     query = ''
     selectedIndex = 0
-    copyingId = ''
-    copiedId = ''
-    copiedField = ''
+    workingId = ''
+    doneId = ''
+    doneLabel = ''
+    confirming = null
   }
 
   async function updateSearch() {
     const sequence = ++searchSequence
     try {
-      const next = await searchQuickAccessEntries(query)
+      const next = await searchQuickAccessItems(query)
       if (sequence !== searchSequence) return
-      entries = next
+      items = next
       selectedIndex = 0
+      confirming = null
     } catch {
       if (sequence === searchSequence) stage = 'locked'
     }
@@ -67,44 +71,65 @@
     }
   }
 
-  async function copyEntry(entry: QuickAccessEntry, field: 'password' | 'totp' = 'password') {
-    if (copyingId) return
-    copyingId = entry.id
+  async function runAction(item: QuickAccessItem, action: QuickAccessAction) {
+    if (workingId) return
+    if (action.field === 'open') {
+      workingId = item.id
+      try {
+        await openQuickAccessItem(item.id)
+      } catch {
+        workingId = ''
+      }
+      return
+    }
+    if (action.guarded && confirming?.field !== action.field) {
+      confirming = { id: item.id, field: action.field }
+      return
+    }
+    workingId = item.id
     try {
-      const secret = await getQuickAccessSecret(entry.id)
-      const value = field === 'totp' ? secret.totpCode : secret.password
+      const { value } = await getQuickAccessField(item.id, action.field, action.guarded)
       if (!value) {
-        copyingId = ''
+        workingId = ''
         return
       }
       await copyToClipboard(value)
-      copiedId = entry.id
-      copiedField = field
+      doneId = item.id
+      doneLabel = action.label.replace(/^Copy /, '')
+      confirming = null
       window.setTimeout(closeWindow, 550)
     } catch {
-      copyingId = ''
+      workingId = ''
     }
+  }
+
+  function primaryAction(item: QuickAccessItem): QuickAccessAction | undefined {
+    return item.actions.find((action) => !action.guarded) ?? item.actions[0]
   }
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault()
+      if (confirming) {
+        confirming = null
+        return
+      }
       closeWindow()
       return
     }
     if (stage !== 'ready') return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      selectedIndex = Math.min(entries.length - 1, selectedIndex + 1)
+      selectedIndex = Math.min(items.length - 1, selectedIndex + 1)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       selectedIndex = Math.max(0, selectedIndex - 1)
     } else if (event.key === 'Enter') {
       event.preventDefault()
-      const entry = entries[selectedIndex]
-      if (!entry) return
-      if (event.shiftKey && entry.hasTotp) void copyEntry(entry, 'totp')
-      else void copyEntry(entry)
+      const item = items[selectedIndex]
+      if (!item) return
+      const action = event.shiftKey ? item.actions[1] ?? primaryAction(item) : primaryAction(item)
+      if (action) void runAction(item, action)
     }
   }
 
@@ -141,33 +166,40 @@
       <Icon name="search" size={16} />
       <input bind:this={searchInput} bind:value={query} on:input={() => void updateSearch()} type="text" autocomplete="off" spellcheck="false" placeholder="Search Sesame" />
     </label>
-    {#if entries.length}
+    {#if items.length}
       <ul class="quick-access-results">
-        {#each entries as entry, index (entry.id)}
+        {#each items as item, index (item.id)}
           <li class="quick-access-result-row">
-            <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => copyEntry(entry)} disabled={Boolean(copyingId) && copyingId !== entry.id}>
-              <span class="entry-avatar" aria-hidden="true"><WebsiteIcon site={entry.site} initials={entry.initials} enabled={siteIconsEnabled} /></span>
-              <span class="quick-access-result-copy"><strong>{entry.title}</strong><small>{entry.site}</small></span>
-              <span class="quick-access-result-state">{copiedId === entry.id ? (copiedField === 'totp' ? 'Code copied' : 'Copied') : copyingId === entry.id ? 'Copying…' : 'Copy password'}</span>
+            <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
+              <span class="entry-avatar" aria-hidden="true">
+                {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
+              </span>
+              <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
+              <span class="quick-access-result-state">{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
             </button>
-            {#if entry.hasTotp}
+            {#each item.actions.slice(1) as action (action.field)}
               <button
                 type="button"
-                class="icon-button quick-access-totp-button"
-                aria-label={`Copy the current 2FA code for ${entry.title}`}
-                title="Copy 2FA code (Shift+Enter)"
-                disabled={Boolean(copyingId) && copyingId !== entry.id}
+                class="quick-access-action-button"
+                class:confirming={confirming?.id === item.id && confirming?.field === action.field}
+                aria-label={confirming?.id === item.id && confirming?.field === action.field ? `Confirm: ${action.label.toLowerCase()} for ${item.title}` : `${action.label} for ${item.title}`}
+                title={confirming?.id === item.id && confirming?.field === action.field ? 'Select again to confirm' : action.label}
+                disabled={Boolean(workingId) && workingId !== item.id}
                 on:mouseenter={() => (selectedIndex = index)}
-                on:click|stopPropagation={() => copyEntry(entry, 'totp')}
+                on:click|stopPropagation={() => void runAction(item, action)}
               >
-                <Icon name="shield" size={14} />
+                <Icon name={action.guarded ? 'shield-alert' : 'copy'} size={14} />
+                <span>{confirming?.id === item.id && confirming?.field === action.field ? 'Confirm' : action.label.replace(/^Copy /, '')}</span>
               </button>
-            {/if}
+            {/each}
           </li>
         {/each}
       </ul>
+      {#if confirming}
+        <p class="quick-access-confirm" role="status">Select that action again to copy the protected value.</p>
+      {/if}
     {:else}
-      <p class="quick-access-empty">{query.trim() ? 'No saved login matches.' : 'No logins saved yet.'}</p>
+      <p class="quick-access-empty">{query.trim() ? 'No saved item matches.' : 'Nothing saved yet.'}</p>
     {/if}
   {/if}
 </div>
@@ -180,14 +212,19 @@
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }
   .quick-access-search input:focus { box-shadow: none; }
   .quick-access-results { display: flex; flex-direction: column; gap: 2px; margin: var(--space-2) 0 0; padding: 0; list-style: none; overflow-y: auto; }
-  .quick-access-result-row { display: flex; align-items: center; gap: 2px; }
-  .quick-access-result-row > button:first-child { display: flex; width: 100%; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-sm); padding: var(--space-2); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+  .quick-access-result-row { display: flex; min-width: 0; align-items: center; gap: var(--space-1); }
+  .quick-access-result-row > button:first-child { display: flex; min-width: 0; flex: 1; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-sm); padding: var(--space-2); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
   .quick-access-result-row > button:first-child.active, .quick-access-result-row > button:first-child:hover:not(:disabled) { background: var(--tint); }
   .quick-access-result-row > button:first-child:disabled { cursor: default; opacity: .7; }
-  .quick-access-totp-button { flex: none; }
+  .quick-access-action-button { display: inline-flex; min-height: 32px; flex: none; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-1); font-weight: 650; white-space: nowrap; cursor: pointer; }
+  .quick-access-action-button:hover:not(:disabled) { background: var(--tint); }
+  .quick-access-action-button.confirming { color: var(--danger); background: var(--danger-bg); }
+  .quick-access-action-button:disabled { cursor: default; opacity: .6; }
   .quick-access-result-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .quick-access-result-copy strong { overflow: hidden; font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-result-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
-  .quick-access-result-state { flex: none; color: var(--text-faint); font-size: 11px; font-weight: 600; }
+  .quick-access-result-state { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--text-faint); font-size: 11px; font-weight: 600; }
   .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-1); text-align: center; }
+  .quick-access-confirm { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quick-access-confirm { color: var(--danger); }
 </style>

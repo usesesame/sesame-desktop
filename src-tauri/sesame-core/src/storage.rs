@@ -429,11 +429,18 @@ pub fn payload_with_login_folders(
 ) -> VaultResult<VaultPayload> {
     let mut next_payload = payload.clone();
     let folder_id = ensure_folder_named(&mut next_payload, folder)?;
-    assign_folder_to_logins(&mut next_payload, ids, folder_id.as_deref())?;
+    let now = unix_timestamp();
+    for id in ids {
+        let item = next_payload
+            .item_metadata_mut(id)
+            .ok_or("One of the selected items no longer exists.")?;
+        item.set_item_folder_id(folder_id.clone());
+        item.mark_item_changed(now);
+    }
     Ok(next_payload)
 }
 
-pub fn payload_with_login_folder_id(
+pub fn payload_with_item_folder_id(
     payload: &VaultPayload,
     ids: &HashSet<String>,
     folder_id: Option<&str>,
@@ -443,30 +450,15 @@ pub fn payload_with_login_folder_id(
     if folder_id.is_some_and(|id| !next_payload.folders.iter().any(|folder| folder.id == id)) {
         return Err("That folder no longer exists.".into());
     }
-    assign_folder_to_logins(&mut next_payload, ids, folder_id)?;
-    Ok(next_payload)
-}
-
-fn assign_folder_to_logins(
-    payload: &mut VaultPayload,
-    ids: &HashSet<String>,
-    folder_id: Option<&str>,
-) -> VaultResult<()> {
-    let mut changed = 0;
     let now = unix_timestamp();
-    for entry in &mut payload.entries {
-        if ids.contains(&entry.id) {
-            entry.folder_id = folder_id.map(str::to_string);
-            entry.folder.clear();
-            entry.updated_at = now;
-            entry.revision = entry.revision.saturating_add(1);
-            changed += 1;
-        }
+    for id in ids {
+        let item = next_payload
+            .item_metadata_mut(id)
+            .ok_or("One of the selected items no longer exists.")?;
+        item.set_item_folder_id(folder_id.map(str::to_string));
+        item.mark_item_changed(now);
     }
-    if changed != ids.len() {
-        return Err("One of the selected logins no longer exists.".into());
-    }
-    Ok(())
+    Ok(next_payload)
 }
 
 /// A supplied ID must already exist; callers never create arbitrary IDs.
@@ -565,44 +557,46 @@ pub fn delete_folder_from_payload(
     let mut next_payload = payload.clone();
     next_payload.folders.retain(|folder| folder.id != folder_id);
     let now = unix_timestamp();
-    for entry in &mut next_payload.entries {
-        if entry.folder_id.as_deref() == Some(folder_id) {
-            entry.folder_id = None;
-            entry.updated_at = now;
-            entry.revision = entry.revision.saturating_add(1);
+    let filed: Vec<String> = next_payload
+        .item_views()
+        .iter()
+        .filter(|item| item.metadata().item_folder_id() == Some(folder_id))
+        .map(|item| item.id().to_string())
+        .collect();
+    for id in filed {
+        if let Some(item) = next_payload.item_metadata_mut(&id) {
+            item.set_item_folder_id(None);
+            item.mark_item_changed(now);
         }
     }
     Ok(next_payload)
 }
 
-pub fn payload_with_favourite(
+pub fn payload_with_item_favourite(
     payload: &VaultPayload,
     id: &str,
     favourite: bool,
 ) -> VaultResult<VaultPayload> {
     let mut next_payload = payload.clone();
-    let entry = next_payload
-        .entries
-        .iter_mut()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
-    entry.favourite = favourite;
-    entry.updated_at = unix_timestamp();
-    entry.revision = entry.revision.saturating_add(1);
+    let item = next_payload
+        .item_metadata_mut(id)
+        .ok_or("That saved item no longer exists.")?;
+    item.set_item_favourite(favourite);
+    item.mark_item_changed(unix_timestamp());
     Ok(next_payload)
 }
 
-pub fn payload_with_recorded_use(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
+pub fn payload_with_recorded_item_use(
+    payload: &VaultPayload,
+    id: &str,
+) -> VaultResult<VaultPayload> {
     let mut next_payload = payload.clone();
-    let entry = next_payload
-        .entries
-        .iter_mut()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
     let now = unix_timestamp();
-    entry.last_used_at = Some(now);
-    entry.updated_at = now;
-    entry.revision = entry.revision.saturating_add(1);
+    let item = next_payload
+        .item_metadata_mut(id)
+        .ok_or("That saved item no longer exists.")?;
+    item.set_item_last_used_at(Some(now));
+    item.mark_item_changed(now);
     Ok(next_payload)
 }
 

@@ -116,14 +116,7 @@ pub struct VaultSnapshot {
     pub revision: u64,
     pub folders: Vec<Folder>,
     pub entries: Vec<VaultEntrySummary>,
-    pub identities: Vec<IdentitySummary>,
-    pub secure_notes: Vec<SecureNoteSummary>,
-    pub cards: Vec<CardSummary>,
-    pub wifi_networks: Vec<WifiNetworkSummary>,
-    pub ssh_keys: Vec<SshKeySummary>,
-    pub software_licenses: Vec<SoftwareLicenseSummary>,
-    pub documents: Vec<DocumentMetadataSummary>,
-    pub custom_records: Vec<CustomRecordSummary>,
+    pub items: Vec<VaultItemSummary>,
     pub trash: Vec<TrashSummary>,
     pub history: Vec<HistorySummary>,
     pub security: SecuritySummary,
@@ -153,6 +146,28 @@ pub struct VaultEntrySummary {
     pub password_issues: Vec<PasswordIssue>,
     pub security_level: &'static str,
     pub issue_kinds: Vec<&'static str>,
+    pub tags: Vec<String>,
+    pub updated_at: u64,
+}
+
+/// Non-secret metadata only; a login is summarised by VaultEntrySummary instead.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultItemSummary {
+    pub id: String,
+    pub kind: &'static str,
+    pub title: String,
+    /// Never a stored secret: a domain, an SSID, a card brand, a product name.
+    pub subtitle: String,
+    pub initials: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    pub folder: String,
+    pub favourite: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
+    pub updated_at: u64,
+    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -650,6 +665,20 @@ impl TaggedItem {
         }
     }
 
+    pub fn metadata(&self) -> &dyn ItemMetadata {
+        match self {
+            TaggedItem::Login(item) => item,
+            TaggedItem::Identity(item) => item,
+            TaggedItem::SecureNote(item) => item,
+            TaggedItem::Card(item) => item,
+            TaggedItem::WifiNetwork(item) => item,
+            TaggedItem::SshKey(item) => item,
+            TaggedItem::SoftwareLicense(item) => item,
+            TaggedItem::Document(item) => item,
+            TaggedItem::CustomRecord(item) => item,
+        }
+    }
+
     /// Non-secret preview; never embedded in a bulk snapshot.
     pub fn preview(&self) -> ItemPreview {
         let kind = self.kind().to_string();
@@ -701,6 +730,102 @@ impl TaggedItem {
                 detail: None,
             },
         }
+    }
+}
+
+pub trait ItemMetadata {
+    fn item_title(&self) -> &str;
+    fn item_tags(&self) -> &[String];
+    fn item_folder_id(&self) -> Option<&str>;
+    fn set_item_folder_id(&mut self, folder_id: Option<String>);
+    fn item_favourite(&self) -> bool;
+    fn set_item_favourite(&mut self, favourite: bool);
+    fn item_last_used_at(&self) -> Option<u64>;
+    fn set_item_last_used_at(&mut self, last_used_at: Option<u64>);
+    fn item_updated_at(&self) -> u64;
+    fn mark_item_changed(&mut self, now: u64);
+}
+
+macro_rules! impl_item_metadata {
+    ($item:ty, $title:ident) => {
+        impl ItemMetadata for $item {
+            fn item_title(&self) -> &str {
+                &self.$title
+            }
+            fn item_tags(&self) -> &[String] {
+                &self.tags
+            }
+            fn item_folder_id(&self) -> Option<&str> {
+                self.folder_id.as_deref()
+            }
+            fn set_item_folder_id(&mut self, folder_id: Option<String>) {
+                self.folder_id = folder_id;
+            }
+            fn item_favourite(&self) -> bool {
+                self.favourite
+            }
+            fn set_item_favourite(&mut self, favourite: bool) {
+                self.favourite = favourite;
+            }
+            fn item_last_used_at(&self) -> Option<u64> {
+                self.last_used_at
+            }
+            fn set_item_last_used_at(&mut self, last_used_at: Option<u64>) {
+                self.last_used_at = last_used_at;
+            }
+            fn item_updated_at(&self) -> u64 {
+                self.updated_at
+            }
+            fn mark_item_changed(&mut self, now: u64) {
+                self.updated_at = now;
+                self.revision = self.revision.saturating_add(1);
+            }
+        }
+    };
+}
+
+impl_item_metadata!(Identity, label);
+impl_item_metadata!(SecureNote, title);
+impl_item_metadata!(Card, title);
+impl_item_metadata!(WifiNetwork, title);
+impl_item_metadata!(SshKey, title);
+impl_item_metadata!(SoftwareLicense, title);
+impl_item_metadata!(DocumentMetadata, title);
+impl_item_metadata!(CustomRecord, title);
+
+impl ItemMetadata for VaultEntry {
+    fn item_title(&self) -> &str {
+        &self.title
+    }
+    fn item_tags(&self) -> &[String] {
+        &self.tags
+    }
+    fn item_folder_id(&self) -> Option<&str> {
+        self.folder_id.as_deref()
+    }
+    fn set_item_folder_id(&mut self, folder_id: Option<String>) {
+        self.folder_id = folder_id;
+        // Only transient imports and pre-migration payloads carry a folder name.
+        self.folder.clear();
+    }
+    fn item_favourite(&self) -> bool {
+        self.favourite
+    }
+    fn set_item_favourite(&mut self, favourite: bool) {
+        self.favourite = favourite;
+    }
+    fn item_last_used_at(&self) -> Option<u64> {
+        self.last_used_at
+    }
+    fn set_item_last_used_at(&mut self, last_used_at: Option<u64>) {
+        self.last_used_at = last_used_at;
+    }
+    fn item_updated_at(&self) -> u64 {
+        self.updated_at
+    }
+    fn mark_item_changed(&mut self, now: u64) {
+        self.updated_at = now;
+        self.revision = self.revision.saturating_add(1);
     }
 }
 
@@ -811,20 +936,21 @@ pub struct Identity {
     #[serde(default)]
     pub country: String,
     #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
     pub legacy_fields: Vec<LegacyField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IdentitySummary {
-    pub id: String,
-    pub label: String,
 }
 
 #[derive(Deserialize)]
@@ -851,6 +977,9 @@ pub struct IdentityInput {
     pub postal_code: String,
     #[serde(default)]
     pub country: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -878,20 +1007,18 @@ pub struct SecureNote {
     pub tags: Vec<String>,
     #[serde(default)]
     pub legacy_fields: Vec<LegacyField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SecureNoteSummary {
-    pub id: String,
-    pub title: String,
-    pub updated_at: u64,
 }
 
 #[derive(Deserialize)]
@@ -904,6 +1031,7 @@ pub struct SecureNoteInput {
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -943,19 +1071,18 @@ pub struct Card {
     pub tags: Vec<String>,
     #[serde(default)]
     pub legacy_fields: Vec<LegacyField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CardSummary {
-    pub id: String,
-    pub title: String,
 }
 
 #[derive(Deserialize)]
@@ -980,6 +1107,7 @@ pub struct CardInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1011,19 +1139,18 @@ pub struct WifiNetwork {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct WifiNetworkSummary {
-    pub id: String,
-    pub title: String,
 }
 
 #[derive(Deserialize)]
@@ -1042,6 +1169,7 @@ pub struct WifiNetworkInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1075,19 +1203,18 @@ pub struct SshKey {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SshKeySummary {
-    pub id: String,
-    pub title: String,
 }
 
 #[derive(Deserialize)]
@@ -1108,6 +1235,7 @@ pub struct SshKeyInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1141,19 +1269,18 @@ pub struct SoftwareLicense {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SoftwareLicenseSummary {
-    pub id: String,
-    pub title: String,
 }
 
 #[derive(Deserialize)]
@@ -1174,6 +1301,7 @@ pub struct SoftwareLicenseInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1209,6 +1337,12 @@ pub struct DocumentMetadata {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -1246,14 +1380,6 @@ mod attachment_data_base64 {
     }
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentMetadataSummary {
-    pub id: String,
-    pub title: String,
-    pub attachment_count: usize,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentMetadataInput {
@@ -1274,6 +1400,7 @@ pub struct DocumentMetadataInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1310,19 +1437,18 @@ pub struct CustomRecord {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub favourite: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<u64>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub revision: u32,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CustomRecordSummary {
-    pub id: String,
-    pub title: String,
 }
 
 #[derive(Deserialize)]
@@ -1337,6 +1463,7 @@ pub struct CustomRecordInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+
 }
 
 #[derive(Serialize)]
@@ -1489,6 +1616,26 @@ impl VaultPayload {
         append_item_views!(&self.documents, Document);
         append_item_views!(&self.custom_records, CustomRecord);
         items
+    }
+
+    pub fn item_metadata_mut(&mut self, id: &str) -> Option<&mut dyn ItemMetadata> {
+        macro_rules! find_item {
+            ($collection:expr) => {
+                if let Some(item) = $collection.iter_mut().find(|item| item.id == id) {
+                    return Some(item);
+                }
+            };
+        }
+        find_item!(self.entries);
+        find_item!(self.identities);
+        find_item!(self.secure_notes);
+        find_item!(self.cards);
+        find_item!(self.wifi_networks);
+        find_item!(self.ssh_keys);
+        find_item!(self.software_licenses);
+        find_item!(self.documents);
+        find_item!(self.custom_records);
+        None
     }
 
     pub fn active_item(&self, id: &str) -> Option<TaggedItem> {

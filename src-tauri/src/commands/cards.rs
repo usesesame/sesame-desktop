@@ -57,6 +57,9 @@ fn card_from_input(input: CardInput) -> VaultResult<Card> {
             .filter(|tag| !tag.is_empty())
             .collect(),
         legacy_fields: Vec::new(),
+        folder_id: None,
+        favourite: false,
+        last_used_at: None,
         created_at: now,
         updated_at: now,
         revision: 1,
@@ -103,6 +106,9 @@ pub fn save_card(input: CardInput, state: State<'_, VaultState>) -> VaultResult<
         };
         card.created_at = existing.created_at;
         card.revision = existing.revision.saturating_add(1);
+        card.folder_id = existing.folder_id.clone();
+        card.favourite = existing.favourite;
+        card.last_used_at = existing.last_used_at;
         card.legacy_fields = existing.legacy_fields.clone();
         crate::vault::history::capture_history(&mut next_payload, TaggedItem::Card(existing));
     }

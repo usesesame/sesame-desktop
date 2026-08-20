@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::Manager;
 
 use crate::browser_protocol::{
-    BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES, PROTOCOL_VERSION,
+    supported_protocol_version, BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES,
 };
 
 const HOST_NAME: &str = "app.usesesame.browser";
@@ -497,7 +497,7 @@ where
                 ));
             }
         };
-        if request.version != PROTOCOL_VERSION {
+        if !supported_protocol_version(request.version) {
             write_message(
                 output,
                 &BrowserResponse::error(&request.request_id, "Unsupported protocol version."),
@@ -548,7 +548,11 @@ fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
     } else if request.message_type == "activate" {
         BrowserResponse::activated(&request.request_id, launch_desktop_app())
     } else {
-        BrowserResponse::unavailable(&request.request_id, "desktopUnavailable")
+        if request.message_type == "card" {
+            BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable")
+        } else {
+            BrowserResponse::unavailable(&request.request_id, "desktopUnavailable")
+        }
     }
 }
 
