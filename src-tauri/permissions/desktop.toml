@@ -151,6 +151,8 @@ commands.allow = [
   "resolve_browser_save",
   "get_pending_browser_identity_fill",
   "resolve_browser_identity_fill",
+  "get_pending_browser_card_fill",
+  "resolve_browser_card_fill",
 ]
 
 [[permission]]

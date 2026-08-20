@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 pub const PROTOCOL_VERSION: u8 = 1;
+pub const CARD_PROTOCOL_VERSION: u8 = 2;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
 
@@ -18,6 +19,14 @@ pub const IDENTITY_FIELD_KEYS: [&str; 9] = [
     "country",
 ];
 
+pub const CARD_FIELD_KEYS: [&str; 5] = [
+    "cardholderName",
+    "number",
+    "expiryMonth",
+    "expiryYear",
+    "securityCode",
+];
+
 pub(crate) fn parse_identity_fields(value: &str) -> Option<Vec<String>> {
     let mut fields = Vec::new();
     for part in value.split(',') {
@@ -28,6 +37,21 @@ pub(crate) fn parse_identity_fields(value: &str) -> Option<Vec<String>> {
     }
     // An empty `fields` yields one empty part, which is never a valid key.
     Some(fields)
+}
+
+pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
+    let mut fields = Vec::new();
+    for part in value.split(',') {
+        if !CARD_FIELD_KEYS.contains(&part) || fields.iter().any(|seen| seen == part) {
+            return None;
+        }
+        fields.push(part.to_string());
+    }
+    Some(fields)
+}
+
+pub fn supported_protocol_version(version: u8) -> bool {
+    matches!(version, PROTOCOL_VERSION | CARD_PROTOCOL_VERSION)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,7 +87,12 @@ impl Drop for BrowserRequest {
 
 impl BrowserRequest {
     pub fn validate(&self) -> bool {
-        if self.version != PROTOCOL_VERSION || !valid_identifier(&self.request_id) {
+        if !supported_protocol_version(self.version) || !valid_identifier(&self.request_id) {
+            return false;
+        }
+        if (self.version == PROTOCOL_VERSION && self.message_type == "card")
+            || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
+        {
             return false;
         }
         let no_save_payload = self.username.is_none()
@@ -93,6 +122,19 @@ impl BrowserRequest {
                     .fields
                     .as_deref()
                     .is_some_and(|fields| parse_identity_fields(fields).is_some())
+                    && no_save_payload
+            }
+            "card" => {
+                self.version == CARD_PROTOCOL_VERSION
+                    && self.origin.as_deref().is_some_and(|origin| {
+                        origin.starts_with("https://")
+                            && origin.len() <= 2048
+                            && !origin.chars().any(char::is_control)
+                    })
+                    && self
+                        .fields
+                        .as_deref()
+                        .is_some_and(|fields| parse_card_fields(fields).is_some())
                     && no_save_payload
             }
             "save" => {
@@ -146,6 +188,44 @@ pub struct IdentityFillFields {
     pub postal_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Zeroize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CardFillFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardholder_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_month: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_year: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_code: Option<String>,
+}
+
+impl CardFillFields {
+    fn matches_requested(&self, requested: &[String]) -> bool {
+        let present: std::collections::HashSet<&str> =
+            requested.iter().map(String::as_str).collect();
+        let values_are_bounded = [
+            self.cardholder_name.as_deref(),
+            self.number.as_deref(),
+            self.expiry_month.as_deref(),
+            self.expiry_year.as_deref(),
+            self.security_code.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .all(|value| value.len() <= MAX_CREDENTIAL_FIELD_BYTES);
+        values_are_bounded
+            && (self.cardholder_name.is_some() == present.contains("cardholderName"))
+            && (self.number.is_some() == present.contains("number"))
+            && (self.expiry_month.is_some() == present.contains("expiryMonth"))
+            && (self.expiry_year.is_some() == present.contains("expiryYear"))
+            && (self.security_code.is_some() == present.contains("securityCode"))
+    }
 }
 
 impl IdentityFillFields {
@@ -209,6 +289,8 @@ pub struct BrowserResponse {
     pub saved: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<IdentityFillFields>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<CardFillFields>,
 }
 
 impl BrowserResponse {
@@ -228,6 +310,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -247,6 +330,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -267,6 +351,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -286,6 +371,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -305,6 +391,7 @@ impl BrowserResponse {
             message: Some(message.into()),
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -324,6 +411,7 @@ impl BrowserResponse {
             message: None,
             saved: Some(true),
             identity: None,
+            card: None,
         }
     }
 
@@ -343,6 +431,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
         }
     }
 
@@ -363,6 +452,7 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: Some(fields),
+            card: None,
         }
     }
 
@@ -382,11 +472,52 @@ impl BrowserResponse {
             message: None,
             saved: None,
             identity: None,
+            card: None,
+        }
+    }
+
+    pub fn card_for(request: &BrowserRequest, fields: CardFillFields) -> Self {
+        Self {
+            version: CARD_PROTOCOL_VERSION,
+            message_type: "card".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            reason: None,
+            message: None,
+            saved: None,
+            identity: None,
+            card: Some(fields),
+        }
+    }
+
+    pub fn card_unavailable(request_id: &str, reason: &'static str) -> Self {
+        Self {
+            version: CARD_PROTOCOL_VERSION,
+            message_type: "card-unavailable".into(),
+            request_id: request_id.into(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            reason: Some(reason.into()),
+            message: None,
+            saved: None,
+            identity: None,
+            card: None,
         }
     }
 
     pub fn validate_for(&self, request: &BrowserRequest) -> bool {
-        if self.version != PROTOCOL_VERSION
+        if self.version != request.version
             || self.request_id != request.request_id
             || !valid_identifier(&self.request_id)
         {
@@ -400,6 +531,10 @@ impl BrowserResponse {
         let no_credential = self.username.is_none() && self.password.is_none();
         let no_saved = self.saved.is_none();
         let no_identity = self.identity.is_none();
+        let no_card = self.card.is_none();
+        if request.message_type != "card" && !no_card {
+            return false;
+        }
         match (request.message_type.as_str(), self.message_type.as_str()) {
             ("capabilities", "capabilities") => {
                 self.installed == Some(true)
@@ -501,6 +636,31 @@ impl BrowserResponse {
                     && self.message.is_none()
                     && self.reason.as_deref().is_some_and(valid_reason)
             }
+            ("card", "card") => {
+                let requested = request.fields.as_deref().and_then(parse_card_fields);
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && self.reason.is_none()
+                    && self.message.is_none()
+                    && self.card.as_ref().is_some_and(|fields| {
+                        requested
+                            .as_deref()
+                            .is_some_and(|requested| fields.matches_requested(requested))
+                    })
+            }
+            ("card", "card-unavailable") => {
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && no_card
+                    && self.message.is_none()
+                    && self.reason.as_deref().is_some_and(valid_reason)
+            }
             (_, "error") => {
                 no_capability
                     && no_activation
@@ -527,6 +687,7 @@ impl Drop for BrowserResponse {
         self.reason.zeroize();
         self.message.zeroize();
         self.identity.zeroize();
+        self.card.zeroize();
     }
 }
 
@@ -560,4 +721,70 @@ fn valid_error_message(value: &str) -> bool {
             | "Unsupported browser request."
             | "Browser response unavailable."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(version: u8, message_type: &str) -> BrowserRequest {
+        BrowserRequest {
+            version,
+            message_type: message_type.to_string(),
+            request_id: "request-1".to_string(),
+            origin: Some("https://checkout.example.test".to_string()),
+            fields: Some("number,securityCode".to_string()),
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn card_requests_require_protocol_v2_and_https() {
+        assert!(request(CARD_PROTOCOL_VERSION, "card").validate());
+        assert!(!request(PROTOCOL_VERSION, "card").validate());
+
+        let mut insecure = request(CARD_PROTOCOL_VERSION, "card");
+        insecure.origin = Some("http://localhost:4173".to_string());
+        assert!(!insecure.validate());
+    }
+
+    #[test]
+    fn protocol_v2_does_not_accept_legacy_request_types() {
+        let mut capability = request(CARD_PROTOCOL_VERSION, "capabilities");
+        capability.origin = None;
+        capability.fields = None;
+        assert!(!capability.validate());
+
+        let mut fill = request(CARD_PROTOCOL_VERSION, "fill");
+        fill.fields = None;
+        assert!(!fill.validate());
+    }
+
+    #[test]
+    fn card_responses_bind_the_version_and_exact_field_set() {
+        let request = request(CARD_PROTOCOL_VERSION, "card");
+        let allowed = BrowserResponse::card_for(
+            &request,
+            CardFillFields {
+                number: Some("4111111111111111".to_string()),
+                security_code: Some("123".to_string()),
+                ..CardFillFields::default()
+            },
+        );
+        assert!(allowed.validate_for(&request));
+
+        let extra_field = BrowserResponse::card_for(
+            &request,
+            CardFillFields {
+                number: Some("4111111111111111".to_string()),
+                security_code: Some("123".to_string()),
+                expiry_month: Some("12".to_string()),
+                ..CardFillFields::default()
+            },
+        );
+        assert!(!extra_field.validate_for(&request));
+    }
 }

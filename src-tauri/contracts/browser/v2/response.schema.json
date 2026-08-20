@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v2/response.schema.json",
+  "oneOf": [
+    { "type": "object", "additionalProperties": false, "required": ["version", "type", "requestId", "card"], "properties": { "version": { "const": 2 }, "type": { "const": "card" }, "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }, "card": { "type": "object", "additionalProperties": false, "minProperties": 1, "properties": { "cardholderName": { "type": "string", "minLength": 1, "maxLength": 4096 }, "number": { "type": "string", "minLength": 1, "maxLength": 4096 }, "expiryMonth": { "type": "string", "minLength": 1, "maxLength": 4096 }, "expiryYear": { "type": "string", "minLength": 1, "maxLength": 4096 }, "securityCode": { "type": "string", "minLength": 1, "maxLength": 4096 } } } } },
+    { "type": "object", "additionalProperties": false, "required": ["version", "type", "requestId", "reason"], "properties": { "version": { "const": 2 }, "type": { "const": "card-unavailable" }, "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }, "reason": { "enum": ["desktopUnavailable", "locked", "noMatch", "approvalUnavailable", "approvalDeclined", "approvalTimeout", "staleRequest", "invalidSelection", "multipleMatches"] } } },
+    { "type": "object", "additionalProperties": false, "required": ["version", "type", "requestId", "message"], "properties": { "version": { "const": 2 }, "type": { "const": "error" }, "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }, "message": { "enum": ["Unsupported protocol version.", "Invalid browser request.", "Unsupported browser request.", "Browser response unavailable."] } } }
+  ]
+}

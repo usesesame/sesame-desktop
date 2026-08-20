@@ -232,3 +232,20 @@ pub fn get_pending_browser_identity_fill(
 ) -> Option<browser_fill::BrowserIdentityRequestEvent> {
     browser_fill::pending_identity(state)
 }
+
+#[tauri::command]
+pub fn resolve_browser_card_fill(
+    app: AppHandle,
+    state: State<'_, browser_fill::BrowserFillState>,
+    approval_id: String,
+    card_id: Option<String>,
+) -> VaultResult<()> {
+    browser_fill::resolve_card(&app, state, approval_id, card_id)
+}
+
+#[tauri::command]
+pub fn get_pending_browser_card_fill(
+    state: State<'_, browser_fill::BrowserFillState>,
+) -> Option<browser_fill::BrowserCardRequestEvent> {
+    browser_fill::pending_card(state)
+}

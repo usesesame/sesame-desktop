@@ -1,0 +1,11 @@
+{
+  "vectorSchemaVersion": 1, "protocolVersion": 2, "fictionalDataOnly": true,
+  "requestCases": [
+    { "name": "card request names detected fields", "valid": true, "message": { "version": 2, "type": "card", "requestId": "card-1", "origin": "https://checkout.example.test", "fields": "number,expiryMonth,expiryYear,securityCode" } },
+    { "name": "card request rejects repeated fields", "valid": false, "message": { "version": 2, "type": "card", "requestId": "card-2", "origin": "https://checkout.example.test", "fields": "number,number" } }
+  ],
+  "responseCases": [
+    { "name": "card response includes only requested card fields", "hostValid": true, "request": { "version": 2, "type": "card", "requestId": "card-1", "origin": "https://checkout.example.test", "fields": "number,securityCode" }, "message": { "version": 2, "type": "card", "requestId": "card-1", "card": { "number": "4111111111111111", "securityCode": "123" } } },
+    { "name": "card response rejects an extra field", "hostValid": false, "request": { "version": 2, "type": "card", "requestId": "card-3", "origin": "https://checkout.example.test", "fields": "number" }, "message": { "version": 2, "type": "card", "requestId": "card-3", "card": { "number": "4111111111111111", "securityCode": "123" } } }
+  ]
+}

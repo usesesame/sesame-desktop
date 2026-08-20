@@ -131,6 +131,8 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_browser_save,
             commands::get_pending_browser_identity_fill,
             commands::resolve_browser_identity_fill,
+            commands::get_pending_browser_card_fill,
+            commands::resolve_browser_card_fill,
             clipboard::arm_clipboard_clear,
             clipboard::clear_clipboard_if_unchanged,
             desktop_shell::set_tray_enabled,

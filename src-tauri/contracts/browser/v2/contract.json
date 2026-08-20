@@ -1,0 +1,16 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v2",
+  "protocolVersion": 2,
+  "compatibility": { "minimumHostProtocolVersion": 2, "currentHostProtocolVersion": 2, "minimumExtensionProtocolVersion": 2, "currentExtensionProtocolVersion": 2 },
+  "limits": { "nativeMessageBytes": 16384, "requestIdBytes": 64, "originBytes": 2048, "credentialFieldBytes": 4096, "approvalSeconds": 30 },
+  "requestTypes": ["card"],
+  "responseTypes": ["card", "card-unavailable", "error"],
+  "unavailableReasons": ["desktopUnavailable", "locked", "noMatch", "approvalUnavailable", "approvalDeclined", "approvalTimeout", "staleRequest", "invalidSelection", "multipleMatches"],
+  "errorMessages": ["Unsupported protocol version.", "Invalid browser request.", "Unsupported browser request.", "Browser response unavailable."],
+  "cardFieldKeys": ["cardholderName", "number", "expiryMonth", "expiryYear", "securityCode"],
+  "bindings": { "requestId": "Every response carries the initiating requestId.", "origin": "The card request carries one normalized HTTPS top-level page origin.", "documentToken": "The extension binds the operation to one prepared top-level document before writing.", "expiry": "The desktop owns the 30-second deadline and rechecks the pending request, connection, and vault session." },
+  "schemas": { "request": "request.schema.json", "response": "response.schema.json" },
+  "vectors": "vectors.json"
+}

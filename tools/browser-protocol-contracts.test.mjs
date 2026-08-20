@@ -7,6 +7,7 @@ import test from 'node:test'
 // half only this repository can see.
 const root = process.cwd()
 const canonical = join(root, 'src-tauri', 'contracts', 'browser', 'v1')
+const cardCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v2')
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -47,4 +48,40 @@ test('browser identity response contract is nested and regression-vectored', () 
       (entry) => entry.hostValid === false && entry.message.type === 'identity' && entry.message.email,
     ),
   )
+})
+
+test('card protocol v2 is HTTPS-only, card-only, and regression-vectored', () => {
+  const contract = json(join(cardCanonical, 'contract.json'))
+  const requestSchema = json(join(cardCanonical, 'request.schema.json'))
+  const responseSchema = json(join(cardCanonical, 'response.schema.json'))
+  const vectors = json(join(cardCanonical, 'vectors.json'))
+  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+
+  assert.equal(contract.protocolVersion, 2)
+  assert.deepEqual(contract.requestTypes, ['card'])
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 2)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 2)
+  assert.deepEqual(contract.cardFieldKeys, [
+    'cardholderName',
+    'number',
+    'expiryMonth',
+    'expiryYear',
+    'securityCode',
+  ])
+  assert.equal(requestSchema.properties.origin.pattern, '^https://[^/]+$')
+  assert.ok(contract.responseTypes.includes('error'))
+  assert.equal(vectors.protocolVersion, contract.protocolVersion)
+  assert.equal(vectors.fictionalDataOnly, true)
+  assert.ok(
+    vectors.requestCases.some(
+      (entry) => entry.valid === false && entry.name.includes('repeated fields'),
+    ),
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) => entry.hostValid === false && entry.name.includes('extra field'),
+    ),
+  )
+  assert.match(rust, /pub const CARD_PROTOCOL_VERSION: u8 = 2;/)
+  assert.match(rust, /origin\.starts_with\("https:\/\/"\)/)
 })
