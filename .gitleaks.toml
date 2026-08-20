@@ -16,6 +16,13 @@ paths = [
 regexes = ['''-----BEGIN OPENSSH PRIVATE KEY----- fictional''']
 
 [[allowlists]]
+description = "Superseded Bitwarden import fixture; marked fictional from the next commit on"
+targetRules = ["private-key"]
+condition = "AND"
+commits = ["7557487da1777a655421420f7302ef73873d0c24"]
+paths = ['''src-tauri/sesame-core/tests/imports\.rs$''']
+
+[[allowlists]]
 description = "Private-key header literals used by the support intake rejection filter"
 targetRules = ["private-key"]
 condition = "AND"
