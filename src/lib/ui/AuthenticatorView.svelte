@@ -105,6 +105,7 @@
   })
 </script>
 
+<section class="authenticator-view">
 {#if loading}
   <p class="authenticator-status" role="status">Reading your codes…</p>
 {:else if loadFailed}
@@ -157,6 +158,7 @@
     </ul>
   {/if}
 {/if}
+</section>
 
 <style>
   .authenticator-status { margin: var(--space-5) 0 0; color: var(--text-muted); font-size: var(--type-2); }
