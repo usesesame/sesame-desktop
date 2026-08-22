@@ -70,6 +70,12 @@ test('card protocol v2 is HTTPS-only, card-only, and regression-vectored', () =>
   ])
   assert.equal(requestSchema.properties.origin.pattern, '^https://[^/]+$')
   assert.ok(contract.responseTypes.includes('error'))
+
+  const cardResponse = responseSchema.oneOf.find((branch) => branch.properties.type.const === 'card')
+  assert.deepEqual(cardResponse.required, ['version', 'type', 'requestId', 'card'])
+  assert.equal(cardResponse.additionalProperties, false)
+  assert.equal(cardResponse.properties.card.additionalProperties, false)
+  assert.deepEqual(Object.keys(cardResponse.properties.card.properties), contract.cardFieldKeys)
   assert.equal(vectors.protocolVersion, contract.protocolVersion)
   assert.equal(vectors.fictionalDataOnly, true)
   assert.ok(

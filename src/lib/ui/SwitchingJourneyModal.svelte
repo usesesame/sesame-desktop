@@ -18,6 +18,8 @@
 
   $: storeSwitchingChecklist(checklist)
 
+  const focusDialog = (dialog: HTMLElement) => dialog.focus({ preventScroll: true })
+
   function openBackups() {
     onClose()
     onOpenBackups()
@@ -35,7 +37,7 @@
   }
 </script>
 
-<ModalShell onClose={onClose} labelledby="switching-journey-heading" describedby="switching-journey-description" tone="switching-journey">
+<ModalShell onClose={onClose} labelledby="switching-journey-heading" describedby="switching-journey-description" tone="switching-journey" initialFocus={focusDialog}>
   <span class="switching-journey-icon"><Icon name="archive" size={21} /></span>
   <p class="eyebrow">Switching guide</p>
   <h2 id="switching-journey-heading">Move to Sesame in small steps</h2>

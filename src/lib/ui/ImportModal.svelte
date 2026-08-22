@@ -6,6 +6,20 @@
   import ModalShell from './ModalShell.svelte'
 
   export let importSources: Array<{ value: ImportSource; label: string }>
+
+  let sourceMenu: HTMLElement | undefined
+
+  async function fitMenuInsideModal() {
+    await tick()
+    if (!sourceMenu || !sourceButton) return
+    const modal = sourceMenu.closest('.modal')
+    if (!modal) return
+    const room = modal.getBoundingClientRect().bottom - sourceButton.getBoundingClientRect().bottom
+    const available = Math.max(120, Math.round(room - 24))
+    sourceMenu.style.maxHeight = `${available}px`
+  }
+
+  $: if ($imports.sourceMenuOpen) void fitMenuInsideModal()
   export let onClose: () => void
   export let onChooseSource: (source: ImportSource) => void
   export let onHandleImport: () => void
@@ -104,7 +118,7 @@
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
     </button>
     {#if $imports.sourceMenuOpen}
-      <div id="import-source-options" class="source-menu" role="listbox" aria-labelledby="import-source-label">
+      <div bind:this={sourceMenu} id="import-source-options" class="source-menu" role="listbox" aria-labelledby="import-source-label">
         {#each importSources as source (source.value)}
           <button id={`import-source-${source.value}`} type="button" class:selected={source.value === $imports.source} role="option" aria-selected={source.value === $imports.source} tabindex="-1" on:click={() => chooseSource(source.value)} on:keydown={handleOptionKeydown}>{source.label}</button>
         {/each}

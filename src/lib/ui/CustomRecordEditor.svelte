@@ -1,5 +1,6 @@
 <script lang="ts">
   import ModalShell from './ModalShell.svelte'
+  import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
   import type { CustomFieldEntry, CustomRecordInput } from '../types'
 
@@ -82,11 +83,12 @@
             type={field.kind === 'secret' ? 'password' : 'text'}
             class="custom-field-value"
           />
-          <select value={field.kind} on:change={(event) => updateField(index, { kind: event.currentTarget.value })} class="custom-field-kind">
-            <option value="text">Text</option>
-            <option value="secret">Secret</option>
-            <option value="date">Date</option>
-          </select>
+          <SelectMenu
+            label={`Field ${index + 1} kind`}
+            value={field.kind}
+            options={[{ value: 'text', label: 'Text' }, { value: 'secret', label: 'Secret' }, { value: 'date', label: 'Date' }]}
+            onChange={(kind) => updateField(index, { kind })}
+          />
           <button type="button" class="icon-button" aria-label={`Remove field ${index + 1}`} title="Remove field" on:click={() => removeField(index)}><Icon name="trash" size={14} /></button>
         </div>
       {/each}

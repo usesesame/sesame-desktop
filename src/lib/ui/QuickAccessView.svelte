@@ -169,7 +169,7 @@
     {#if items.length}
       <ul class="quick-access-results">
         {#each items as item, index (item.id)}
-          <li class="quick-access-result-row">
+          <li class="quick-access-result-row" class:active={index === selectedIndex}>
             <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
               <span class="entry-avatar" aria-hidden="true">
                 {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
@@ -177,6 +177,7 @@
               <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
               <span class="quick-access-result-state">{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
             </button>
+            <span class="quick-access-actions">
             {#each item.actions.slice(1) as action (action.field)}
               <button
                 type="button"
@@ -192,6 +193,7 @@
                 <span>{confirming?.id === item.id && confirming?.field === action.field ? 'Confirm' : action.label.replace(/^Copy /, '')}</span>
               </button>
             {/each}
+            </span>
           </li>
         {/each}
       </ul>
@@ -206,14 +208,17 @@
 
 <style>
   :global(body) { min-width: 0; background: transparent; }
-  .quick-access { display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise), var(--shadow-panel); overflow: hidden; }
+  .quick-access { animation: view-enter .16s cubic-bezier(.2, .7, .2, 1) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise), var(--shadow-panel); overflow: hidden; }
   .quick-access-status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; color: var(--text-muted); font-size: var(--type-2); text-align: center; }
   .quick-access-search { display: flex; align-items: center; gap: var(--space-2); flex: none; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); }
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }
   .quick-access-search input:focus { box-shadow: none; }
-  .quick-access-results { display: flex; flex-direction: column; gap: 2px; margin: var(--space-2) 0 0; padding: 0; list-style: none; overflow-y: auto; }
-  .quick-access-result-row { display: flex; min-width: 0; align-items: center; gap: var(--space-1); }
-  .quick-access-result-row > button:first-child { display: flex; min-width: 0; flex: 1; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-sm); padding: var(--space-2); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+  .quick-access-results { display: flex; flex-direction: column; gap: 2px; margin: var(--space-2) 0 0; padding: 0 var(--space-1) 0 0; list-style: none; overflow-y: auto; scrollbar-gutter: stable; }
+  .quick-access-result-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; align-items: center; gap: var(--space-1); }
+  .quick-access-result-row > button:first-child { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; min-width: 0; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-sm); padding: var(--space-2); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+  .quick-access-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); }
+  .quick-access-result-row:not(.active) .quick-access-actions,
+  .quick-access-result-row:not(.active) .quick-access-result-state { display: none; }
   .quick-access-result-row > button:first-child.active, .quick-access-result-row > button:first-child:hover:not(:disabled) { background: var(--tint); }
   .quick-access-result-row > button:first-child:disabled { cursor: default; opacity: .7; }
   .quick-access-action-button { display: inline-flex; min-height: 32px; flex: none; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-1); font-weight: 650; white-space: nowrap; cursor: pointer; }
@@ -223,7 +228,7 @@
   .quick-access-result-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .quick-access-result-copy strong { overflow: hidden; font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-result-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
-  .quick-access-result-state { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--text-faint); font-size: 11px; font-weight: 600; }
+  .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: 11px; font-weight: 600; white-space: nowrap; }
   .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-1); text-align: center; }
   .quick-access-confirm { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-confirm { color: var(--danger); }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import ModalShell from './ModalShell.svelte'
+  import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
   import { generatorLabels, generatorOptionKeys } from '../generator'
   import { useAppStores } from '../stores/app-stores'
@@ -87,8 +88,7 @@
     }
   }
 
-  function setFolder(event: Event) {
-    const folderId = (event.currentTarget as HTMLSelectElement).value
+  function setFolder(folderId: string) {
     const folder = folderOptions.find((candidate) => candidate.id === folderId)
     loginDraft = { ...loginDraft, folderId: folder?.id, folder: folder?.name ?? '' }
   }
@@ -114,7 +114,14 @@
     <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input bind:this={urlInput} bind:value={loginDraft.url} maxlength="2048" placeholder="e.g. github.com" inputmode="url" autocomplete="url" /></label>
     <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login"></textarea></label>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="10000" autocomplete="off" /></label>
-    <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span><select value={loginDraft.folderId ?? ''} on:change={setFolder}><option value="">Unfiled</option>{#each folderOptions as folder (folder.id)}<option value={folder.id}>{folder.name}</option>{/each}</select></label>
+    <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
+      <SelectMenu
+        label="Folder"
+        value={loginDraft.folderId ?? ''}
+        options={[{ value: '', label: 'Unfiled' }, ...folderOptions.map((folder) => ({ value: folder.id, label: folder.name }))]}
+        onChange={setFolder}
+      />
+    </label>
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input bind:value={loginDraft.username} maxlength="2048" autocomplete="username" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
       <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input bind:value={loginDraft.email} maxlength="2048" inputmode="email" autocomplete="email" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
