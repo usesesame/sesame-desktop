@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import Icon from '../Icon.svelte'
+  import SelectMenu from './SelectMenu.svelte'
   import type { ItemDetail } from '../item-fields'
   import type { Folder, ItemKind } from '../types'
   import { itemKindIcon, itemKindLabel } from '../vault-items'
@@ -125,11 +126,13 @@
 <section class="details-section">
   <div class="section-heading"><h3>Collection</h3></div>
   <div class="item-collection-row">
-    <label class="sr-only" for="item-collection-select">Collection</label>
-    <select id="item-collection-select" value={detail.folderId ?? ''} on:change={(event) => onMove(event.currentTarget.value || undefined)}>
-      <option value="">Unfiled</option>
-      {#each folders as folder (folder.id)}<option value={folder.id}>{folder.name}</option>{/each}
-    </select>
+    <SelectMenu
+      id="item-collection-select"
+      label="Collection"
+      value={detail.folderId ?? ''}
+      options={[{ value: '', label: 'Unfiled' }, ...folders.map((folder) => ({ value: folder.id, label: folder.name }))]}
+      onChange={(next) => onMove(next || undefined)}
+    />
     <button type="button" class="editor-delete" on:click={onDelete}>Delete</button>
   </div>
 </section>

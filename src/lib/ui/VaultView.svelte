@@ -123,6 +123,9 @@
   let sortMenuOpen = false
   let sortContainer: HTMLElement
   let sortButton: HTMLButtonElement
+  let folderMenuOpen = false
+  let folderContainer: HTMLElement
+  let folderButton: HTMLButtonElement
 
   function sortOptionButtons() {
     return [...(sortContainer?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
@@ -172,6 +175,59 @@
     }
     if (event.key === 'Tab') closeSortMenu(false)
   }
+
+  function folderOptionButtons() {
+    return [...(folderContainer?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
+  }
+
+  function closeFolderMenu(returnFocus: boolean) {
+    folderMenuOpen = false
+    if (returnFocus) folderButton?.focus()
+  }
+
+  function chooseBulkFolder(id: string) {
+    onSetBulkFolderId(id)
+    closeFolderMenu(true)
+  }
+
+  function handleFolderOutside(event: MouseEvent) {
+    if (folderMenuOpen && folderContainer && !folderContainer.contains(event.target as Node)) closeFolderMenu(false)
+  }
+
+  function handleFolderTriggerKeydown(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      folderMenuOpen = true
+      const options = folderOptionButtons()
+      const selected = options.find((option) => option.getAttribute('aria-selected') === 'true')
+      ;(selected ?? options[0])?.focus()
+    }
+  }
+
+  function handleFolderOptionKeydown(event: KeyboardEvent) {
+    const options = folderOptionButtons()
+    const current = Math.max(0, options.indexOf(event.currentTarget as HTMLButtonElement))
+    let next: number | null = null
+    if (event.key === 'ArrowDown') next = (current + 1) % options.length
+    if (event.key === 'ArrowUp') next = (current - 1 + options.length) % options.length
+    if (event.key === 'Home') next = 0
+    if (event.key === 'End') next = options.length - 1
+    if (next !== null) {
+      event.preventDefault()
+      options[next]?.focus()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeFolderMenu(true)
+      return
+    }
+    if (event.key === 'Tab') closeFolderMenu(false)
+  }
+
+  $: bulkFolderLabel = bulkFolderId
+    ? folders.find((folder) => folder.id === bulkFolderId)?.name ?? 'Unfiled'
+    : 'Unfiled'
 
   function clearPasswordRevealTimer() {
     if (passwordRevealTimer) clearTimeout(passwordRevealTimer)
@@ -245,7 +301,7 @@
   }
 </script>
 
-<svelte:window on:keydown={handleWindowKeydown} on:mousedown={handleSortOutside} />
+<svelte:window on:keydown={handleWindowKeydown} on:mousedown={handleSortOutside} on:mousedown={handleFolderOutside} />
 
 {#if !allItems.length}
   <section class="empty-workspace">
@@ -323,10 +379,29 @@
         <div class="bulk-toolbar" role="region" aria-label="Bulk item actions">
           <label class="bulk-select-all"><input type="checkbox" checked={allVisibleSelected} aria-label="Select all visible items" on:change={() => onSelectVisible(allVisibleSelected ? [] : visibleItems.map((item) => item.id))} /><span>{selectedIds.length} selected</span></label>
           <div class="bulk-destination">
-            <select value={bulkFolderId} aria-label="Destination collection" on:change={(event) => onSetBulkFolderId(event.currentTarget.value)}>
-              <option value="">Unfiled</option>
-              {#each folders as folder (folder.id)}<option value={folder.id}>{folder.name}</option>{/each}
-            </select>
+            <div class="sort-control" bind:this={folderContainer}>
+              <button
+                bind:this={folderButton}
+                type="button"
+                class="sort-select-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={folderMenuOpen}
+                aria-label="Destination collection"
+                on:click={() => (folderMenuOpen = !folderMenuOpen)}
+                on:keydown={handleFolderTriggerKeydown}
+              >
+                <span>{bulkFolderLabel}</span>
+                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+              </button>
+              {#if folderMenuOpen}
+                <div class="sort-menu" role="listbox" aria-label="Destination collection">
+                  <button type="button" class:selected={!bulkFolderId} role="option" aria-selected={!bulkFolderId} tabindex="-1" on:click={() => chooseBulkFolder('')} on:keydown={handleFolderOptionKeydown}>Unfiled</button>
+                  {#each folders as folder (folder.id)}
+                    <button type="button" class:selected={bulkFolderId === folder.id} role="option" aria-selected={bulkFolderId === folder.id} tabindex="-1" on:click={() => chooseBulkFolder(folder.id)} on:keydown={handleFolderOptionKeydown}>{folder.name}</button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
             <button type="button" class="secondary-button bulk-move-button" disabled={!selectedIds.length} on:click={onBulkMove}>Move</button>
           </div>
           <div class="bulk-toolbar-actions">

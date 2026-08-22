@@ -152,6 +152,38 @@
     tabButtons[nextIndex]?.focus()
   }
 
+
+  function slidingSelection(node: HTMLElement) {
+    const marker = document.createElement('span')
+    marker.className = 'segment-marker'
+    marker.setAttribute('aria-hidden', 'true')
+    node.prepend(marker)
+
+    function place() {
+      const active = node.querySelector<HTMLElement>('button.active')
+      if (!active) {
+        delete marker.dataset.placed
+        return
+      }
+      marker.style.width = `${active.offsetWidth}px`
+      marker.style.height = `${active.offsetHeight}px`
+      marker.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`
+      if (!marker.dataset.placed) requestAnimationFrame(() => (marker.dataset.placed = 'true'))
+    }
+
+    place()
+    const selection = new MutationObserver(place)
+    selection.observe(node, { attributes: true, attributeFilter: ['class'], subtree: true })
+    const resize = new ResizeObserver(place)
+    resize.observe(node)
+    return {
+      destroy() {
+        selection.disconnect()
+        resize.disconnect()
+        marker.remove()
+      },
+    }
+  }
 </script>
 
 <svelte:window on:keydown={handleShortcutKeydown} />
@@ -186,7 +218,7 @@
             <article>
               <span class="settings-icon"><Icon name="monitor" size={17} /></span>
               <div class="setting-copy"><strong>Theme</strong><p>Match your system, or force light or dark.</p></div>
-              <div class="theme-toggle" role="group" aria-label="Theme"><button type="button" class:active={theme === 'light'} aria-pressed={theme === 'light'} aria-label="Light" on:click={() => onSetTheme('light')}><Icon name="sun" size={15} /></button><button type="button" class:active={theme === 'auto'} aria-pressed={theme === 'auto'} aria-label="System" on:click={() => onSetTheme('auto')}><Icon name="monitor" size={15} /></button><button type="button" class:active={theme === 'dark'} aria-pressed={theme === 'dark'} aria-label="Dark" on:click={() => onSetTheme('dark')}><Icon name="moon" size={15} /></button></div>
+              <div class="theme-toggle" role="group" aria-label="Theme" use:slidingSelection><button type="button" class:active={theme === 'light'} aria-pressed={theme === 'light'} aria-label="Light" on:click={() => onSetTheme('light')}><Icon name="sun" size={15} /></button><button type="button" class:active={theme === 'auto'} aria-pressed={theme === 'auto'} aria-label="System" on:click={() => onSetTheme('auto')}><Icon name="monitor" size={15} /></button><button type="button" class:active={theme === 'dark'} aria-pressed={theme === 'dark'} aria-label="Dark" on:click={() => onSetTheme('dark')}><Icon name="moon" size={15} /></button></div>
             </article>
             <article>
               <span class="settings-icon"><Icon name="globe" size={17} /></span>
@@ -243,7 +275,7 @@
             <article>
               <span class="settings-icon"><Icon name="lock" size={16} /></span>
               <div class="setting-copy"><strong>Automatic lock</strong><p>Lock the vault after a period without keyboard or pointer activity.</p></div>
-              <div class="auto-lock-options" role="group" aria-label="Automatic lock delay">{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
+              <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
             </article>
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
@@ -258,7 +290,7 @@
             <article>
               <span class="settings-icon"><Icon name="copy" size={16} /></span>
               <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>
-              <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay">{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
+              <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay" use:slidingSelection>{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
             </article>
           </div>
         </section>
