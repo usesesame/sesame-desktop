@@ -57,7 +57,7 @@
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^24.13.2",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.8.0",
+    "eslint": "^10.8.1",
     "eslint-plugin-svelte": "^3.22.0",
     "globals": "^17.8.0",
     "jsdom": "^29.1.1",
