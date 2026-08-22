@@ -79,7 +79,7 @@ minisign-verify = "0.2.5"
 totp-rs = { version = "5", features = ["otpauth"] }
 url = "2.5"
 zeroize = "1.8"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+x25519-dalek = { version = "3", features = ["static_secrets"] }
 hkdf = "0.12"
 
 [target.'cfg(windows)'.dependencies]
