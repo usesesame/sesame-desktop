@@ -967,6 +967,10 @@ pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
 }
 
 pub fn start(app: AppHandle) -> io::Result<()> {
+    // browser_host::register already reports the unsupported platform at startup.
+    if !crate::browser_pipe::is_supported() {
+        return Ok(());
+    }
     let expected_client = std::env::current_exe()?.with_file_name(HOST_FILE_NAME);
     thread::Builder::new()
         .name("sesame-browser-broker".into())

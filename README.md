@@ -46,13 +46,23 @@ rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Run it
 
-Requirements: Node.js 24.13, Rust 1.93.1, Go 1.25 or newer, and Windows
-WebView2. Docker is needed only for the optional API stack.
+Requirements: Node.js 24.13 and Rust 1.93.1. Windows also needs WebView2.
+Linux needs WebKitGTK 4.1 and the tray and packaging libraries:
 
-```powershell
-npm.cmd ci
-npm.cmd run tauri dev
+```sh
+sudo apt-get install --no-install-recommends \
+  libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+  libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+  libdbus-1-dev patchelf xdg-utils rpm
 ```
+
+```sh
+npm ci
+npm run tauri dev
+```
+
+`npm run release:bundle:windows:unsigned` builds the NSIS installer.
+`npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage.
 
 Optional surfaces run separately:
 
@@ -72,6 +82,35 @@ npm.cmd run ci:all
 ```
 
 The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Platforms
+
+| Capability | Windows | Linux |
+| --- | --- | --- |
+| Local vault: create, unlock, search, import, back up, export | Yes | Yes |
+| Tray, quick access, global shortcut, start at sign-in | Yes | Yes |
+| Browser extension connection | Yes | Yes |
+| Automatic lock on screen lock | Yes | Yes |
+| Automatic lock on inactivity | Yes | GNOME and KDE |
+| Unlock with PIN | Yes | No |
+| Unlock with Windows Hello | Yes | No |
+| Auto-type | Yes | No |
+| Account linking | Yes | No |
+
+Linux reads the screen lock from systemd-logind, falling back to the desktop's
+own screensaver interface. Inactivity has no shared Linux interface, so it is
+read from GNOME's or KDE's idle monitor and the automatic lock delay is hidden
+on desktops that publish neither.
+
+The remaining gaps are the integrations built on a Windows facility with no
+equivalent wired up yet: DPAPI for the PIN pepper and the account token, CNG
+for Windows Hello, and SendInput for auto-type. The app reports these as
+unavailable on Linux instead of offering a control that fails.
+
+The browser connection uses a socket in the per-user runtime directory rather
+than a named pipe. Both ends check the peer's user id and executable path
+before any vault data moves, and the peer's process start time is recorded so a
+reused process id cannot inherit an approved connection.
 
 ## Licence and trademarks
 

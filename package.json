@@ -34,6 +34,7 @@
     "release:check": "npm run desktop:ci && npm run desktop:host:stage",
     "release:build": "npm run release:check && tauri build --no-bundle",
     "release:bundle:windows:unsigned": "tauri build --bundles nsis",
+    "release:bundle:linux:unsigned": "tauri build --bundles deb,rpm,appimage",
     "installer:evidence:collect": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/collect-installer-lifecycle-evidence.ps1",
     "installer:evidence:compare": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/compare-installer-lifecycle-evidence.ps1",
     "installer:lab:prepare": "node tools/prepare-installer-vm-pair.mjs",

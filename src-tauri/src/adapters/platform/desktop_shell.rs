@@ -96,7 +96,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
 pub fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
-        .map_err(|_| "Sesame could not read the Windows startup setting.".to_string())
+        .map_err(|_| "Sesame could not read the startup setting.".to_string())
 }
 
 #[tauri::command]
@@ -107,7 +107,7 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
     } else {
         autostart.disable()
     }
-    .map_err(|_| "Sesame could not update the Windows startup setting.".to_string())
+    .map_err(|_| "Sesame could not update the startup setting.".to_string())
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {

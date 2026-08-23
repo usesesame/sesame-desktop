@@ -10,6 +10,7 @@ pub struct HelloWrapMaterial {
 }
 
 /// Domain separation, the same role the `*_AAD` constants play for the other wraps.
+#[cfg(windows)]
 const HELLO_OAEP_LABEL: &[u8] = b"sesame:hello-wrapped-vault-key:v1";
 
 #[cfg(windows)]

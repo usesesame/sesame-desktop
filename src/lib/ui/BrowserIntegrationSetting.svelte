@@ -12,20 +12,21 @@
   $: canRepair = desktopAvailable && (status?.code === 'manifestMissing' || status?.code === 'registrationMissing')
   $: statusLabel = !desktopAvailable
     ? 'Desktop only'
-    : status?.code === 'hostMissing'
-      ? 'Installation incomplete'
-      : working && !status
-      ? 'Checking…'
-      : ready
-        ? 'No repair needed'
-        : status
-          ? 'Needs repair'
-          : 'Not checked'
+    : status?.code === 'unsupported'
+      ? 'Not on this system'
+      : status?.code === 'hostMissing'
+        ? 'Installation incomplete'
+        : working && !status
+          ? 'Checking…'
+          : ready
+            ? 'No repair needed'
+            : status
+              ? 'Needs repair'
+              : 'Not checked'
 
   function description() {
-    if (!desktopAvailable || status?.code === 'unsupported') {
-      return 'Browser connection is available from the installed Windows app.'
-    }
+    if (!desktopAvailable) return 'Browser connection is available from the installed desktop app.'
+    if (status?.code === 'unsupported') return 'Browser connection is not available on this operating system yet. Copy and paste still works.'
     if (!status) return 'Checking the local browser connection.'
     if (status.ready) return 'The native connection is registered for Chrome and Edge. This does not confirm that the browser extension is installed.'
     if (status.code === 'hostMissing') return 'This Sesame installation is missing its browser connection component. Reinstall or repair the desktop app.'

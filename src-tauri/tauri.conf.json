@@ -48,7 +48,9 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "deb", "rpm", "appimage"],
+    "category": "Utility",
+    "shortDescription": "A calm, local-first password and recovery vault",
     "externalBin": ["binaries/sesame-browser-host"],
     "windows": {
       "allowDowngrades": false,
@@ -62,7 +64,7 @@
         "installerHooks": "nsis/native-host-uninstall.nsh"
       }
     },
-    "icon": ["icons/icon.ico", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
+    "icon": ["icons/icon.ico", "icons/32x32.png", "icons/64x64.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"]
   },
   "plugins": {
     "updater": {

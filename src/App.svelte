@@ -5,6 +5,7 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
+  import { loadPlatformCapabilities } from './lib/platform'
   import type { ImportSource, View } from './lib/types'
   import { storeSortMode } from './lib/preferences'
   import { createFeedbackController } from './lib/controllers/feedback-controller'
@@ -431,6 +432,7 @@
     const stopIdentityFill = identityFillController.start()
     const stopCardFill = cardFillController.start()
     const stopBrowserSave = browserSaveController.start()
+    void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
     void unlockController.loadStatus()
     const onRendererError = () => { void recordDiagnostic('renderer', 'unhandled_exception'); void settingsController.refreshDiagnosticStatus() }
     const onUnhandledRejection = () => { void recordDiagnostic('renderer', 'unhandled_rejection'); void settingsController.refreshDiagnosticStatus() }

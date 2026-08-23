@@ -3972,6 +3972,7 @@ dependencies = [
  "csv",
  "ed25519-dalek",
  "hkdf",
+ "libc",
  "minisign-verify",
  "rand 0.9.4",
  "reqwest 0.12.28",
@@ -3994,6 +3995,7 @@ dependencies = [
  "webview2-com 0.39.1",
  "windows-sys 0.61.2",
  "x25519-dalek",
+ "zbus",
  "zeroize",
 ]
 

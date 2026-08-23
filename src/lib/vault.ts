@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -287,6 +287,13 @@ const previewCards: Record<string, LoginCard> = {
   notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: true },
 }
 
+const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, accountLinking: true }
+
+export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
+  if (previewMode) return previewCapabilities
+  return invoke<PlatformCapabilities>('get_platform_capabilities')
+}
+
 export async function getVaultStatus(): Promise<VaultStatus> {
   if (previewMode) return { exists: false, unlocked: previewUnlocked, preview: true, pinUnlockAvailable: previewPinUnlockAvailable, helloUnlockAvailable: previewHelloUnlockAvailable, onboardingRequired: false, revision: 1 }
   return invoke<VaultStatus>('get_vault_status')
@@ -507,7 +514,7 @@ export async function checkPasswordBreach(password: string): Promise<BreachCheck
 
 // Purely local keyboard synthesis, no network. Callers give the target window focus first.
 export async function autoType(id: string): Promise<void> {
-  if (previewMode) throw new Error('Auto-type is not available in the browser preview. Use the installed Windows app.')
+  if (previewMode) throw new Error('Auto-type is not available in the browser preview. Use the installed desktop app.')
   return invoke('auto_type', { id })
 }
 
@@ -1216,7 +1223,7 @@ export async function getServiceConnectionStatus(): Promise<ServiceConnectionSta
 }
 
 export async function linkDesktopService(code: string): Promise<ServiceConnectionStatus> {
-  if (previewMode) throw new Error('Account linking is available in the installed Windows app, not preview mode.')
+  if (previewMode) throw new Error('Account linking is available in the installed desktop app, not preview mode.')
   return invoke<ServiceConnectionStatus>('link_desktop_service', { code })
 }
 
@@ -1252,7 +1259,7 @@ export async function getBrowserIntegrationStatus(): Promise<BrowserIntegrationS
 }
 
 export async function repairBrowserIntegration(): Promise<BrowserIntegrationStatus> {
-  if (previewMode) throw new Error('Browser integration is available in the installed Windows app, not preview mode.')
+  if (previewMode) throw new Error('Browser integration is available in the installed desktop app, not preview mode.')
   return invoke<BrowserIntegrationStatus>('repair_browser_integration')
 }
 

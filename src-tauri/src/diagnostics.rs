@@ -491,6 +491,7 @@ fn allowed_code(value: &str) -> bool {
             | "identity_fill_listener_failed"
             | "vault_lock_listener_failed"
             | "idle_warning_listener_failed"
+            | "platform_capabilities_failed"
     )
 }
 

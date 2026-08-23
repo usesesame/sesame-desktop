@@ -9,6 +9,16 @@ export interface VaultStatus {
   revision: number
 }
 
+export interface PlatformCapabilities {
+  os: string
+  pinUnlock: boolean
+  biometricUnlock: boolean
+  autoType: boolean
+  browserIntegration: boolean
+  sessionAutoLock: boolean
+  accountLinking: boolean
+}
+
 export interface QuickAccessStatus {
   exists: boolean
   unlocked: boolean

@@ -1,17 +1,22 @@
-use std::{
-    io::{self, ErrorKind, Read, Write},
-    path::{Path, PathBuf},
-};
+use std::io::{self, ErrorKind, Read, Write};
+#[cfg(any(windows, target_os = "linux"))]
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+#[cfg(windows)]
 use tauri::Manager;
 
 use crate::browser_protocol::{
     supported_protocol_version, BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES,
 };
 
+#[cfg(any(windows, target_os = "linux"))]
 const HOST_NAME: &str = "app.usesesame.browser";
+#[cfg(windows)]
 pub const HOST_FILE_NAME: &str = "sesame-browser-host.exe";
+#[cfg(not(windows))]
+pub const HOST_FILE_NAME: &str = "sesame-browser-host";
+#[cfg(any(windows, target_os = "linux"))]
 const PINNED_CHROMIUM_EXTENSION_ID: &str = "idbkfhhjnniibleeanchljhakfhecnlg";
 const PINNED_CHROMIUM_LAUNCHER_ORIGIN: &str = "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg";
 const PINNED_FIREFOX_EXTENSION_ID: &str = "sesame@usesesame.app";
@@ -52,6 +57,7 @@ impl RegistrationError {
     }
 }
 
+#[cfg(windows)]
 struct IntegrationPaths {
     host: PathBuf,
     manifest: PathBuf,
@@ -172,7 +178,121 @@ pub fn register(app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, Regi
     Ok(status)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+struct LinuxManifests {
+    host: PathBuf,
+    chrome: Vec<PathBuf>,
+    edge: Vec<PathBuf>,
+    firefox: Vec<PathBuf>,
+}
+
+#[cfg(target_os = "linux")]
+fn linux_manifests() -> Result<LinuxManifests, RegistrationError> {
+    let host = std::env::current_exe()
+        .map(|executable| executable.with_file_name(HOST_FILE_NAME))
+        .map_err(|_| {
+            RegistrationError::new(
+                "registration_host_missing",
+                "Sesame could not locate its browser helper.",
+            )
+        })?;
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not locate your home directory.",
+        )
+    })?;
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let file = format!("{HOST_NAME}.json");
+    let chromium = |vendor: &str| config.join(vendor).join("NativeMessagingHosts").join(&file);
+    Ok(LinuxManifests {
+        host,
+        chrome: vec![chromium("google-chrome"), chromium("chromium")],
+        edge: vec![chromium("microsoft-edge")],
+        firefox: vec![home
+            .join(".mozilla")
+            .join("native-messaging-hosts")
+            .join(&file)],
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn register(app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, RegistrationError> {
+    let manifests = linux_manifests()?;
+    if !manifests.host.is_file() {
+        return Err(RegistrationError::new(
+            "registration_host_missing",
+            "Sesame's browser helper is missing from this build.",
+        ));
+    }
+
+    fn failed<E>(_: E) -> RegistrationError {
+        RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not save its browser connection.",
+        )
+    }
+    let chromium_bytes = manifest_bytes(&manifests.host).map_err(failed)?;
+    let firefox_bytes = firefox_manifest_bytes(&manifests.host).map_err(failed)?;
+
+    for (targets, bytes) in [
+        (&manifests.chrome, &chromium_bytes),
+        (&manifests.edge, &chromium_bytes),
+        (&manifests.firefox, &firefox_bytes),
+    ] {
+        for target in targets {
+            let folder = target.parent().ok_or_else(|| {
+                RegistrationError::new(
+                    "registration_manifest_failed",
+                    "Sesame could not prepare its browser connection.",
+                )
+            })?;
+            std::fs::create_dir_all(folder).map_err(failed)?;
+            std::fs::write(target, bytes).map_err(failed)?;
+        }
+    }
+
+    let status = status(app);
+    if !status.ready {
+        return Err(RegistrationError::new(
+            "registration_manifest_failed",
+            "Sesame could not verify its browser connection.",
+        ));
+    }
+    Ok(status)
+}
+
+#[cfg(target_os = "linux")]
+pub fn status(_app: &tauri::AppHandle) -> BrowserIntegrationStatus {
+    let Ok(manifests) = linux_manifests() else {
+        return browser_status(true, false, false, false, false, false);
+    };
+    let host_available = manifests.host.is_file();
+    let chrome = manifests
+        .chrome
+        .iter()
+        .all(|target| manifest_matches(target, &manifests.host));
+    let edge = manifests
+        .edge
+        .iter()
+        .all(|target| manifest_matches(target, &manifests.host));
+    let firefox = manifests
+        .firefox
+        .iter()
+        .all(|target| firefox_manifest_matches(target, &manifests.host));
+    browser_status(
+        true,
+        host_available,
+        chrome && edge && firefox,
+        chrome,
+        edge,
+        firefox,
+    )
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn register(_app: &tauri::AppHandle) -> Result<BrowserIntegrationStatus, RegistrationError> {
     Err(RegistrationError::new(
         "registration_unsupported",
@@ -202,7 +322,7 @@ pub fn status(app: &tauri::AppHandle) -> BrowserIntegrationStatus {
     )
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn status(_app: &tauri::AppHandle) -> BrowserIntegrationStatus {
     browser_status(false, false, false, false, false, false)
 }
@@ -244,6 +364,7 @@ fn browser_status(
     }
 }
 
+#[cfg(windows)]
 fn integration_paths(app: &tauri::AppHandle) -> Result<IntegrationPaths, RegistrationError> {
     let app_executable = std::env::current_exe().map_err(|_| {
         RegistrationError::new(
@@ -268,6 +389,7 @@ fn integration_paths(app: &tauri::AppHandle) -> Result<IntegrationPaths, Registr
     })
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec_pretty(&serde_json::json!({
         "name": HOST_NAME,
@@ -280,6 +402,7 @@ fn manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
     }))
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn firefox_manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec_pretty(&serde_json::json!({
         "name": HOST_NAME,
@@ -290,6 +413,7 @@ fn firefox_manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
     }))
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn firefox_manifest_matches(manifest_path: &Path, host: &Path) -> bool {
     let Ok(bytes) = std::fs::read(manifest_path) else {
         return false;
@@ -305,6 +429,7 @@ fn firefox_manifest_matches(manifest_path: &Path, host: &Path) -> bool {
     actual == expected
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn manifest_matches(manifest_path: &Path, host: &Path) -> bool {
     let Ok(bytes) = std::fs::read(manifest_path) else {
         return false;
@@ -565,17 +690,23 @@ fn launch_desktop_app() -> bool {
     app_executable.is_file() && std::process::Command::new(app_executable).spawn().is_ok()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn launch_desktop_app() -> bool {
+    let Ok(host_executable) = std::env::current_exe() else {
+        return false;
+    };
+    let app_executable = host_executable.with_file_name("sesame");
+    app_executable.is_file() && std::process::Command::new(app_executable).spawn().is_ok()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn launch_desktop_app() -> bool {
     false
 }
 
+#[cfg(windows)]
 fn desktop_executable_for(host_executable: &Path) -> PathBuf {
-    host_executable.with_file_name(if cfg!(windows) {
-        "sesame.exe"
-    } else {
-        "sesame"
-    })
+    host_executable.with_file_name("sesame.exe")
 }
 
 fn write_message<W: Write>(output: &mut W, response: &BrowserResponse) -> io::Result<()> {

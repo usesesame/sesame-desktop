@@ -13,8 +13,8 @@ mod vault;
 
 pub(crate) use adapters::network::website_icons;
 pub(crate) use adapters::platform::{
-    app_identity, browser_host, browser_pipe, clipboard, crash_protection, desktop_shell,
-    dll_search, session_guard,
+    app_identity, browser_host, browser_pipe, capabilities, clipboard, crash_protection,
+    desktop_shell, dll_search, session_guard,
 };
 
 #[allow(unused_imports)]
@@ -134,6 +134,7 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_browser_identity_fill,
             commands::get_pending_browser_card_fill,
             commands::resolve_browser_card_fill,
+            capabilities::get_platform_capabilities,
             clipboard::arm_clipboard_clear,
             clipboard::clear_clipboard_if_unchanged,
             desktop_shell::set_tray_enabled,

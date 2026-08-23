@@ -163,6 +163,7 @@ commands.allow = [
   "set_quick_access_shortcut",
   "get_autostart_enabled",
   "set_autostart_enabled",
+  "get_platform_capabilities",
 ]
 
 [[permission]]
