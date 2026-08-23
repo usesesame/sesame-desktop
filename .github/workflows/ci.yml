@@ -212,15 +212,7 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Audit Rust dependencies
-        # Both advisories affect quick-xml's namespace reader. The only locked
-        # quick-xml 0.39 dependency is a Linux-only Wayland build tool; it is
-        # absent from Sesame's Windows dependency graph and no patched
-        # wayland-scanner release exists yet. Keep these explicit, reviewable
-        # exceptions until upstream can move to quick-xml >= 0.41.
-        run: >-
-          cargo audit --file src-tauri/Cargo.lock
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
+        run: cargo audit --file src-tauri/Cargo.lock
 
       - name: Scan for secrets
         # The hosted action requires a commercial licence for organization
