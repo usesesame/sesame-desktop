@@ -31,7 +31,9 @@
     "vitest.config.ts",
     ".github/workflows/ci.yml",
     "tools/desktop-boundary-contracts.test.mjs",
-    "tools/stage-browser-host.ps1",
-    "tools/version-contract.mjs"
+    "tools/version-contract.mjs",
+    "tools/browser-host.mjs",
+    "tools/build-browser-host.mjs",
+    "tools/stage-browser-host.mjs"
   ]
 }
