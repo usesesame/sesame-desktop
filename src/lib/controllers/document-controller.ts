@@ -1,9 +1,7 @@
-import type { AppStores } from '../stores/app-stores'
 import type { Attachment, DocumentMetadata, DocumentMetadataInput } from '../types'
-import { addDocumentAttachment, deleteDocument, getDocument, recordDiagnostic, removeDocumentAttachment, saveDocument } from '../vault'
+import { addDocumentAttachment, deleteDocument, getDocument, removeDocumentAttachment, saveDocument } from '../vault'
 import { controllerStore } from './controller-store'
-import type { FeedbackController } from './feedback-controller'
-import type { ModalController } from './modal-controller'
+import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyDocumentDraft(): DocumentMetadataInput {
   return { title: '', documentType: '', documentNumber: '', issuingAuthority: '', issueDate: '', expiryDate: '', notes: '', tags: [] }
@@ -47,150 +45,85 @@ async function fileToBase64(file: File): Promise<string> {
   return bytesToBase64Url(bytes)
 }
 
-interface DocumentControllerOptions {
-  stores: AppStores
-  feedback: FeedbackController
-  modal: ModalController
-}
-
-/// Full records fetch one at a time; the draft must not survive a lock.
-export function createDocumentController({ stores, feedback, modal }: DocumentControllerOptions) {
-  const { vault } = stores
-  const state = controllerStore({
-    documentDraft: emptyDocumentDraft(),
-    editorTitle: 'Add a document',
-    savingDocument: false,
-    loadingDocument: false,
+/// Attachments live outside RecordConfig's shape: they need their own store and
+/// a fetch that runs as a side effect of the base controller's own get, so a
+/// single load populates both the draft and the attachment list.
+export function createDocumentController(options: RecordControllerOptions) {
+  const { stores, modal } = options
+  const attachmentState = controllerStore({
     documentAttachments: [] as Attachment[],
     uploadingAttachment: false,
     attachmentError: '',
     removingAttachmentId: null as string | null,
-    deleteCandidate: null as { id: string; title: string } | null,
-    deleteWorking: false,
   })
 
-  function closeEditor() {
-    modal.close('document-editor')
-    state.patch({ documentDraft: emptyDocumentDraft(), documentAttachments: [], attachmentError: '' })
+  async function fetchDocument(id: string): Promise<DocumentMetadata> {
+    const document = await getDocument(id)
+    attachmentState.patch({ documentAttachments: document.attachments ?? [] })
+    return document
   }
 
-  /// Snapshot never carries attachment bytes; refetch the full record instead.
-  async function refreshAttachments(id: string) {
-    const document = await getDocument(id)
-    state.patch({ documentAttachments: document.attachments ?? [] })
-  }
+  const base = createRecordController<DocumentMetadata, DocumentMetadataInput>(options, {
+    editorModal: { kind: 'document-editor' },
+    deleteModalKind: 'delete-document',
+    deleteModal: (id) => ({ kind: 'delete-document', documentId: id }),
+    emptyDraft: emptyDocumentDraft,
+    draftFrom,
+    draftTitle: (draft) => draft.title.trim(),
+    api: { get: fetchDocument, save: saveDocument, delete: deleteDocument },
+    copy: {
+      addTitle: 'Add a document',
+      editTitle: 'Edit document',
+      savedNotice: (isNew, title) => ({ title: isNew ? 'Document saved' : 'Document updated', body: `${title} is stored in your vault.` }),
+      deletedNotice: (title) => ({ title: 'Document deleted', body: `${title} was removed from your vault.` }),
+    },
+  })
 
   return {
-    state,
+    ...base,
+    attachmentState,
     openNew() {
-      const opened = modal.open({ kind: 'document-editor' })
-      if (!opened) return
-      state.patch({ documentDraft: emptyDocumentDraft(), documentAttachments: [], editorTitle: 'Add a document' })
-      feedback.clearError()
-    },
-    async openEditor(id: string) {
-      const opened = modal.open({ kind: 'document-editor' })
-      if (!opened) return
-      state.patch({ loadingDocument: true })
-      feedback.clearError()
-      try {
-        const document = await getDocument(id)
-        state.patch({ documentDraft: draftFrom(document), documentAttachments: document.attachments ?? [], editorTitle: 'Edit document' })
-      } catch (error) {
-        modal.close('document-editor')
-        feedback.setError(error)
-      } finally {
-        state.patch({ loadingDocument: false })
+      base.openNew()
+      if (modal.state.value().active?.kind === 'document-editor') {
+        attachmentState.patch({ documentAttachments: [], attachmentError: '' })
       }
     },
-    closeEditor,
-    setDraft(documentDraft: DocumentMetadataInput) {
-      state.patch({ documentDraft })
-    },
-    async save() {
-      const draft = state.value().documentDraft
-      state.patch({ savingDocument: true })
-      feedback.clearError()
-      try {
-        const result = await saveDocument(draft)
-        vault.patch({ snapshot: result.snapshot })
-        closeEditor()
-        feedback.showNotice(draft.id ? 'Document updated' : 'Document saved', `${draft.title.trim()} is stored in your vault.`)
-      } catch (error) {
-        feedback.setError(error)
-      } finally {
-        state.patch({ savingDocument: false })
-      }
+    closeEditor() {
+      base.closeEditor()
+      attachmentState.patch({ documentAttachments: [], attachmentError: '' })
     },
     async addAttachment(file: File) {
-      const documentId = state.value().documentDraft.id
+      const documentId = base.state.value().draft.id
       if (!documentId) return
-      state.patch({ uploadingAttachment: true, attachmentError: '' })
+      attachmentState.patch({ uploadingAttachment: true, attachmentError: '' })
       try {
         const data = await fileToBase64(file)
         const result = await addDocumentAttachment(documentId, file.name, file.type, data)
-        vault.patch({ snapshot: result.snapshot })
-        await refreshAttachments(documentId)
+        stores.vault.patch({ snapshot: result.snapshot })
+        await fetchDocument(documentId)
       } catch (error) {
-        state.patch({ attachmentError: error instanceof Error ? error.message : 'That file could not be attached.' })
+        attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That file could not be attached.' })
       } finally {
-        state.patch({ uploadingAttachment: false })
+        attachmentState.patch({ uploadingAttachment: false })
       }
     },
     async removeAttachment(attachmentId: string) {
-      const documentId = state.value().documentDraft.id
+      const documentId = base.state.value().draft.id
       if (!documentId) return
-      state.patch({ removingAttachmentId: attachmentId, attachmentError: '' })
+      attachmentState.patch({ removingAttachmentId: attachmentId, attachmentError: '' })
       try {
         const result = await removeDocumentAttachment(documentId, attachmentId)
-        vault.patch({ snapshot: result.snapshot })
-        await refreshAttachments(documentId)
+        stores.vault.patch({ snapshot: result.snapshot })
+        await fetchDocument(documentId)
       } catch (error) {
-        state.patch({ attachmentError: error instanceof Error ? error.message : 'That attachment could not be removed.' })
+        attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That attachment could not be removed.' })
       } finally {
-        state.patch({ removingAttachmentId: null })
-      }
-    },
-    requestDelete(id: string, title: string) {
-      const opened = modal.open({ kind: 'delete-document', documentId: id })
-      if (opened) state.patch({ deleteCandidate: { id, title } })
-    },
-    cancelDelete() {
-      modal.close('delete-document')
-      state.patch({ deleteCandidate: null })
-    },
-    async confirmDelete() {
-      const candidate = state.value().deleteCandidate
-      if (!candidate) return
-      state.patch({ deleteWorking: true })
-      feedback.clearError()
-      try {
-        const result = await deleteDocument(candidate.id)
-        vault.patch({ snapshot: result.snapshot })
-        modal.close('delete-document')
-        state.patch({ deleteCandidate: null })
-        feedback.showNotice('Document deleted', `${candidate.title} was removed from your vault.`)
-      } catch (error) {
-        void recordDiagnostic('vault_save', 'failed')
-        feedback.setError(error)
-      } finally {
-        state.patch({ deleteWorking: false })
+        attachmentState.patch({ removingAttachmentId: null })
       }
     },
     clearSecrets() {
-      modal.closeAll()
-      state.set({
-        documentDraft: emptyDocumentDraft(),
-        editorTitle: 'Add a document',
-        savingDocument: false,
-        loadingDocument: false,
-        documentAttachments: [],
-        uploadingAttachment: false,
-        attachmentError: '',
-        removingAttachmentId: null,
-        deleteCandidate: null,
-        deleteWorking: false,
-      })
+      base.clearSecrets()
+      attachmentState.set({ documentAttachments: [], uploadingAttachment: false, attachmentError: '', removingAttachmentId: null })
     },
   }
 }

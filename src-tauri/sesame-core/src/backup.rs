@@ -5,7 +5,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{decrypt_bytes, derive_key};
-use crate::platform::unprotect_for_windows_profile;
+use crate::platform::unprotect_for_device;
 use crate::storage::write_vault_file;
 use crate::{
     payload_aad_for_file, VaultFile, VaultPayload, VaultResult, MAX_BACKUP_BYTES,
@@ -97,7 +97,7 @@ fn usable_on_this_profile(protected: &str) -> bool {
     let Ok(bytes) = URL_SAFE_NO_PAD.decode(protected) else {
         return false;
     };
-    match unprotect_for_windows_profile(&bytes) {
+    match unprotect_for_device(&bytes) {
         Ok(mut plain) => {
             plain.zeroize();
             true

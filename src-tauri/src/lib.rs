@@ -135,7 +135,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_pending_browser_card_fill,
             commands::resolve_browser_card_fill,
             capabilities::get_platform_capabilities,
-            clipboard::arm_clipboard_clear,
+            clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
             desktop_shell::set_tray_enabled,
             desktop_shell::set_quick_access_shortcut,
@@ -246,6 +246,9 @@ pub fn run() {
     }
     prepare_release_webview_environment();
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            desktop_shell::show_main_window(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![desktop_shell::MINIMIZED_LAUNCH_ARG]),
@@ -289,7 +292,7 @@ pub fn run() {
             }
             diagnostics::install_panic_hook(app.handle().clone());
             desktop_shell::setup(app)?;
-            {
+            if desktop_shell::global_shortcut_available() {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 let _ = app
                     .global_shortcut()
@@ -324,6 +327,10 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 desktop_shell::lock_vault_if_unlocked(app);
                 browser_fill::cancel_pending_approvals(app);
+            }
+            if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                clipboard::release(&app.state::<clipboard::ClipboardGuard>());
             }
         });
 }

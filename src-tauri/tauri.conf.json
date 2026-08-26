@@ -16,8 +16,8 @@
         "title": "Sesame",
         "width": 1360,
         "height": 860,
-        "minWidth": 1000,
-        "minHeight": 700,
+        "minWidth": 860,
+        "minHeight": 600,
         "resizable": true,
         "decorations": false,
         "visible": false

@@ -152,11 +152,24 @@ jobs:
             libdbus-1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libsecret-tools \
             patchelf \
             xdg-utils \
             rpm
 
       - run: npm ci
+
+      - name: Check generated TypeScript bindings are current
+        run: |
+          npm run types:generate
+          if [ -n "$(git status --porcelain -- src/lib/generated)" ]; then
+            echo "src/lib/generated is out of date. Run 'npm run types:generate' and commit the result." >&2
+            git status --porcelain -- src/lib/generated >&2
+            exit 1
+          fi
+
+      - name: Check Linux desktop prerequisites
+        run: npm run desktop:linux:bundle-prerequisites
 
       - name: Build the frontend
         run: npm run desktop:build
@@ -165,6 +178,7 @@ jobs:
         run: |
           npm run desktop:lint:rust
           cargo test --manifest-path src-tauri/Cargo.toml
+          cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview
 
       - name: Build the Linux bundles
         run: >-

@@ -180,7 +180,7 @@ const ordinaryModals = [
   'BackupDrillModal',
   'LoginEditor',
   'IdentityEditor',
-  'ConfirmDeleteIdentityModal',
+  'ConfirmDeleteRecordModal',
   'ImportModal',
   'FolderManagerModal',
   'FolderNameModal',

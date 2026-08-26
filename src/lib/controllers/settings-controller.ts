@@ -167,7 +167,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
   function browserIntegrationMessage(result: BrowserIntegrationStatus) {
     if (result.code === 'hostMissing') return 'This Sesame installation is missing its browser connection component. Reinstall or repair the desktop app.'
     if (result.code === 'manifestMissing') return 'Sesame could not create the browser connection files.'
-    if (result.code === 'registrationMissing') return 'Sesame could not register the browser connection for this Windows profile.'
+    if (result.code === 'registrationMissing') return 'Sesame could not register the browser connection.'
     return 'Browser connection is not supported on this device.'
   }
 

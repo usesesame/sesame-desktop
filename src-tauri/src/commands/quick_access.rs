@@ -14,14 +14,16 @@ use crate::vault::{Identity, TaggedItem, VaultPayload, VaultResult, VaultState};
 const QUICK_ACCESS_WINDOW: &str = "quick-access";
 const QUICK_ACCESS_RESULT_LIMIT: usize = 8;
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickAccessStatus {
     exists: bool,
     unlocked: bool,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickAccessAction {
     field: &'static str,
@@ -30,10 +32,14 @@ pub struct QuickAccessAction {
     guarded: bool,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickAccessItem {
     id: String,
+    #[ts(
+        type = "'login' | 'identity' | 'secure_note' | 'card' | 'wifi_network' | 'ssh_key' | 'software_license' | 'document' | 'custom_record'"
+    )]
     kind: &'static str,
     title: String,
     /// Never a stored secret: a domain, an SSID, a card brand, a product name.
@@ -42,7 +48,8 @@ pub struct QuickAccessItem {
     actions: Vec<QuickAccessAction>,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickAccessValue {
     value: String,

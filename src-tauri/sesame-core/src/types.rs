@@ -3,7 +3,8 @@ use zeroize::Zeroize;
 
 use crate::util::domain_from_url;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MasterPasswordRequest {
     pub master_password: String,
@@ -16,13 +17,15 @@ pub struct ChangeMasterPasswordRequest {
     pub new_password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeMasterPasswordResult {
     pub recovery_kit: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultStatus {
     pub exists: bool,
@@ -79,9 +82,15 @@ pub struct DesktopServiceStatusResponse {
     pub browser_helper_available: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceConnectionStatus {
+    // Rust leaves this a plain `String`; override to keep the frontend's
+    // closed literal union instead of widening to `string`.
+    #[ts(
+        type = "'disconnected' | 'connected' | 'suspended' | 'revoked' | 'offline' | 'rateLimited' | 'serviceUnavailable' | 'needsAttention'"
+    )]
     pub state: String,
     pub connected: bool,
     pub online: bool,
@@ -100,14 +109,16 @@ pub struct ServiceConnectionFile {
     pub device_name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultSetup {
     pub snapshot: VaultSnapshot,
     pub recovery_kit: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultSnapshot {
     pub vault_name: String,
@@ -122,14 +133,21 @@ pub struct VaultSnapshot {
     pub security: SecuritySummary,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Folder {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Serialize)]
+// Exported to the frontend as `VaultEntry` (see src/lib/types.ts), not under
+// this Rust name: the frontend's `VaultEntry` name is already taken by the
+// full secret-bearing login record (this file's other `VaultEntry` struct,
+// never exposed to the frontend under that shape). Do not derive TS on that
+// other struct.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultEntrySummary {
     pub id: String,
@@ -144,17 +162,30 @@ pub struct VaultEntrySummary {
     pub last_used_at: Option<u64>,
     pub password_score: u8,
     pub password_issues: Vec<PasswordIssue>,
+    // Rust leaves this a plain `&'static str`; override to keep the frontend's
+    // closed literal union instead of widening to `string`.
+    #[ts(type = "'good' | 'needs-work'")]
     pub security_level: &'static str,
+    #[ts(
+        type = "Array<'duplicate' | 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern' | 'old-password' | 'url' | 'totp' | 'recovery'>"
+    )]
     pub issue_kinds: Vec<&'static str>,
     pub tags: Vec<String>,
     pub updated_at: u64,
 }
 
 /// Non-secret metadata only; a login is summarised by VaultEntrySummary instead.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultItemSummary {
     pub id: String,
+    // Rust leaves this a plain `&'static str`; override to keep the frontend's
+    // closed `ItemKind` union (kept in sync by hand, ts-rs cannot import a
+    // type from the hand-written barrel file into a generated one).
+    #[ts(
+        type = "'login' | 'identity' | 'secure_note' | 'card' | 'wifi_network' | 'ssh_key' | 'software_license' | 'document' | 'custom_record'"
+    )]
     pub kind: &'static str,
     pub title: String,
     /// Never a stored secret: a domain, an SSID, a card brand, a product name.
@@ -170,14 +201,20 @@ pub struct VaultItemSummary {
     pub tags: Vec<String>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct PasswordIssue {
+    // Rust leaves this a plain `&'static str` (not an enum), but the frontend
+    // relies on the closed literal union for exhaustiveness checks. Override
+    // rather than widen to `string` and silently drop that guard.
+    #[ts(type = "'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern'")]
     pub kind: &'static str,
     pub explanation: &'static str,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SecuritySummary {
     pub good: usize,
@@ -194,7 +231,8 @@ pub struct SecuritySummary {
     pub missing_recovery: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginCard {
     pub id: String,
@@ -235,7 +273,8 @@ pub struct LoginCard {
     pub legacy_fields: Vec<LegacyField>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginSummary {
     pub id: String,
@@ -246,7 +285,8 @@ pub struct LoginSummary {
     pub duplicate_key: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupEntry {
     pub id: String,
@@ -257,7 +297,8 @@ pub struct CleanupEntry {
     pub reason: &'static str,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicateGroup {
     pub id: String,
@@ -267,7 +308,8 @@ pub struct DuplicateGroup {
 }
 
 /// Codes for the authenticator view. Derived values only: the seed stays in Rust.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TotpCodeEntry {
     pub id: String,
@@ -280,14 +322,19 @@ pub struct TotpCodeEntry {
     pub period: u64,
 }
 
-#[derive(Serialize)]
+// No `optional_fields`: these two fields carry no `skip_serializing_if`, so
+// Rust always serializes the key and sends `null` for None. That is a real
+// `T | null`, not an omittable `T | undefined`; keep it that way.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct TotpRefresh {
     pub totp_code: Option<String>,
     pub totp_remaining: Option<u64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginInput {
     #[serde(default)]
@@ -323,20 +370,25 @@ pub struct LoginInput {
     pub notes: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveLoginResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteLoginResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
+// Not ts-rs derived: the frontend needs a string index signature here (an
+// arbitrary field name chosen at render time), not this struct's fixed
+// field names. See src/lib/types.ts's hand-written `MergeChoices`.
 #[derive(Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeChoices {
@@ -371,7 +423,8 @@ pub struct MergeDuplicateLoginsRequest {
     pub choices: MergeChoices,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeCandidate {
     pub id: String,
@@ -382,7 +435,8 @@ pub struct MergeCandidate {
     pub revision: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeFieldOption {
     pub entry_id: String,
@@ -390,7 +444,8 @@ pub struct MergeFieldOption {
     pub present: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeField {
     pub field: String,
@@ -400,14 +455,16 @@ pub struct MergeField {
     pub options: Vec<MergeFieldOption>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeComparison {
     pub entries: Vec<MergeCandidate>,
     pub fields: Vec<MergeField>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeDuplicateLoginsResult {
     pub id: String,
@@ -415,7 +472,8 @@ pub struct MergeDuplicateLoginsResult {
     pub revision_backup_name: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
     pub total_entries: usize,
@@ -447,7 +505,8 @@ pub enum FieldDisposition {
     IntentionallyOmitted,
 }
 
-#[derive(Default, Clone, Copy, Debug, Serialize)]
+#[derive(Default, Clone, Copy, Debug, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct FidelityCounts {
     pub imported: usize,
@@ -469,7 +528,8 @@ impl FidelityCounts {
     }
 }
 
-#[derive(Default, Clone, Serialize)]
+#[derive(Default, Clone, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFidelity {
     pub logins: FidelityCounts,
@@ -482,14 +542,16 @@ pub struct ImportFidelity {
 }
 
 /// Only counts and an opaque id cross to the interface; entries stay in Rust until commit.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreviewResult {
     pub import_id: String,
     pub preview: ImportPreview,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub snapshot: VaultSnapshot,
@@ -509,14 +571,16 @@ pub enum ExistingImportRelation {
     AccountConflict,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInspection {
     pub file_name: String,
     pub format_version: u8,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreBackupResult {
     pub safety_backup_name: Option<String>,
@@ -525,7 +589,8 @@ pub struct RestoreBackupResult {
 }
 
 /// Proves the encrypted payload opens; never replaces the active vault.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupVerification {
     pub file_name: String,
@@ -845,7 +910,8 @@ fn card_preview_detail(card: &Card) -> Option<String> {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemPreview {
     pub kind: String,
@@ -860,7 +926,8 @@ pub struct TrashedItem {
     pub deleted_at: u64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashSummary {
     pub id: String,
@@ -868,7 +935,8 @@ pub struct TrashSummary {
     pub deleted_at: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreTrashedItemResult {
     pub restored_id: String,
@@ -885,7 +953,8 @@ pub struct HistoryEntry {
     pub operation: HistoryOperation,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub enum HistoryOperation {
     #[default]
@@ -893,7 +962,8 @@ pub enum HistoryOperation {
     Restore,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct HistorySummary {
     pub id: String,
@@ -905,15 +975,17 @@ pub struct HistorySummary {
     pub changed: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreHistoryVersionResult {
     pub restored_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export, optional_fields)]
 pub struct Identity {
     pub id: String,
     pub label: String,
@@ -953,7 +1025,8 @@ pub struct Identity {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct IdentityInput {
     #[serde(default)]
@@ -982,21 +1055,24 @@ pub struct IdentityInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveIdentityResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteIdentityResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecureNote {
     pub id: String,
@@ -1021,7 +1097,8 @@ pub struct SecureNote {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SecureNoteInput {
     #[serde(default)]
@@ -1034,21 +1111,24 @@ pub struct SecureNoteInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveSecureNoteResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSecureNoteResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Card {
     pub id: String,
@@ -1085,7 +1165,8 @@ pub struct Card {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CardInput {
     #[serde(default)]
@@ -1110,21 +1191,24 @@ pub struct CardInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveCardResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCardResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WifiNetwork {
     pub id: String,
@@ -1153,7 +1237,8 @@ pub struct WifiNetwork {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiNetworkInput {
     #[serde(default)]
@@ -1172,21 +1257,24 @@ pub struct WifiNetworkInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveWifiNetworkResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteWifiNetworkResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SshKey {
     pub id: String,
@@ -1217,7 +1305,8 @@ pub struct SshKey {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SshKeyInput {
     #[serde(default)]
@@ -1238,21 +1327,24 @@ pub struct SshKeyInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveSshKeyResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSshKeyResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SoftwareLicense {
     pub id: String,
@@ -1283,7 +1375,8 @@ pub struct SoftwareLicense {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SoftwareLicenseInput {
     #[serde(default)]
@@ -1304,21 +1397,24 @@ pub struct SoftwareLicenseInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveSoftwareLicenseResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSoftwareLicenseResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DocumentMetadata {
     pub id: String,
@@ -1353,7 +1449,8 @@ pub struct DocumentMetadata {
     pub attachments: Vec<Attachment>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Attachment {
     pub id: String,
@@ -1361,6 +1458,7 @@ pub struct Attachment {
     pub content_type: String,
     pub size: u64,
     #[serde(with = "attachment_data_base64")]
+    #[ts(type = "string")]
     pub data: Vec<u8>,
 }
 
@@ -1380,7 +1478,8 @@ mod attachment_data_base64 {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentMetadataInput {
     #[serde(default)]
@@ -1403,21 +1502,24 @@ pub struct DocumentMetadataInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveDocumentMetadataResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteDocumentMetadataResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CustomFieldEntry {
     pub label: String,
@@ -1426,7 +1528,8 @@ pub struct CustomFieldEntry {
     pub kind: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CustomRecord {
     pub id: String,
@@ -1451,7 +1554,8 @@ pub struct CustomRecord {
     pub revision: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomRecordInput {
     #[serde(default)]
@@ -1466,20 +1570,25 @@ pub struct CustomRecordInput {
 
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveCustomRecordResult {
     pub id: String,
     pub snapshot: VaultSnapshot,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCustomRecordResult {
     pub deleted_id: String,
     pub snapshot: VaultSnapshot,
 }
 
+// Deliberately not ts-rs derived: this is the full secret-bearing login
+// record (password, totp, backup codes, recovery contacts). The frontend
+// name `VaultEntry` refers to `VaultEntrySummary` instead, see there.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VaultEntry {
@@ -1529,8 +1638,9 @@ pub struct VaultEntry {
 }
 
 /// Unknown import values default to `secret`, so the UI never reveals them unprompted.
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
 pub struct LegacyField {
     pub label: String,
     pub value: String,

@@ -27,7 +27,8 @@ pub struct DiagnosticInput {
     code: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticStatus {
     exists: bool,
@@ -40,7 +41,8 @@ pub struct DiagnosticStatus {
     recent: Vec<RecentEvent>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationCount {
     operation: String,
@@ -48,7 +50,8 @@ pub struct OperationCount {
     error_count: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeCount {
     code: String,
@@ -56,7 +59,8 @@ pub struct CodeCount {
     level: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentEvent {
     timestamp: u64,

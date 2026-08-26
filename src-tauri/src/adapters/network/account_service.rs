@@ -6,7 +6,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::{AppHandle, Manager};
 use zeroize::Zeroize;
 
-use crate::vault::platform::unprotect_for_windows_profile;
+use crate::vault::platform::unprotect_for_device;
 use crate::vault::types::ServiceConnectionFile;
 use crate::vault::{VaultResult, SERVICE_CONNECTION_FORMAT_VERSION};
 
@@ -100,7 +100,7 @@ pub fn read_service_token(connection: &ServiceConnectionFile) -> VaultResult<Str
     let protected = URL_SAFE_NO_PAD
         .decode(&connection.protected_token)
         .map_err(|_| "The desktop account connection is invalid.".to_string())?;
-    let mut token = unprotect_for_windows_profile(&protected)?;
+    let mut token = unprotect_for_device(&protected)?;
     let result = std::str::from_utf8(&token)
         .map(str::to_owned)
         .map_err(|_| "The desktop account connection is invalid.".to_string());

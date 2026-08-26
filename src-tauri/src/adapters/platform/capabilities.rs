@@ -3,7 +3,8 @@
 
 use serde::Serialize;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct PlatformCapabilities {
     os: &'static str,
@@ -12,18 +13,24 @@ pub struct PlatformCapabilities {
     auto_type: bool,
     browser_integration: bool,
     session_auto_lock: bool,
+    quick_access_shortcut: bool,
     account_linking: bool,
+    desktop_updates: bool,
+    window_controls: bool,
 }
 
 #[tauri::command]
 pub fn get_platform_capabilities() -> PlatformCapabilities {
     PlatformCapabilities {
         os: std::env::consts::OS,
-        pin_unlock: cfg!(windows),
+        pin_unlock: crate::vault::platform::device_protection_available(),
         biometric_unlock: cfg!(windows),
         auto_type: cfg!(windows),
-        browser_integration: crate::browser_pipe::is_supported(),
+        browser_integration: crate::browser_host::is_supported(),
         session_auto_lock: crate::session_guard::idle_auto_lock_available(),
+        quick_access_shortcut: crate::desktop_shell::global_shortcut_available(),
         account_linking: cfg!(windows),
+        desktop_updates: cfg!(windows),
+        window_controls: cfg!(windows),
     }
 }

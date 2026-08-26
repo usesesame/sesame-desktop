@@ -48,6 +48,12 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(pkg.scripts['desktop:ci'], /cargo test --manifest-path src-tauri\/Cargo\.toml/)
   assert.match(pkg.scripts['desktop:ci'], /--features sync-preview/)
   assert.doesNotMatch(pkg.scripts['desktop:ci'], /website|admin|backend|extension:/)
+  assert.match(pkg.scripts['release:bundle:linux:unsigned'], /^npm run desktop:linux:bundle-prerequisites/)
+  assert.match(pkg.scripts['release:bundle:linux:unsigned'], /createUpdaterArtifacts":false/)
+  assert.equal(pkg.scripts['desktop:linux:prerequisites'], 'node tools/check-linux-prerequisites.mjs')
+  assert.equal(pkg.scripts['desktop:linux:bundle-prerequisites'], 'node tools/check-linux-prerequisites.mjs --bundle')
+  assert.equal(pkg.scripts['desktop:linux:dev'], 'npm run desktop:linux:prerequisites && npm run tauri:dev:browser')
+  assert.equal(pkg.scripts['tauri:dev:browser'], 'npm run desktop:host:stage && tauri dev')
 
   const workflowPath = boundary.files.find((file) => file.startsWith('.github/workflows/'))
   assert.ok(workflowPath, 'the boundary manifest declares no owned workflow')

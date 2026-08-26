@@ -47,22 +47,36 @@ rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Run it
 
 Requirements: Node.js 24.13 and Rust 1.93.1. Windows also needs WebView2.
-Linux needs WebKitGTK 4.1 and the tray and packaging libraries:
+Linux needs WebKitGTK 4.1 and the tray libraries:
+
+Debian and Ubuntu:
 
 ```sh
 sudo apt-get install --no-install-recommends \
   libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
   libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
-  libdbus-1-dev patchelf xdg-utils rpm
+  libdbus-1-dev libsecret-tools build-essential curl wget file pkg-config xdg-utils
+```
+
+Arch Linux:
+
+```sh
+sudo pacman -Syu
+sudo pacman -S --needed \
+  webkit2gtk-4.1 base-devel curl wget file openssl \
+  libayatana-appindicator librsvg libsecret xdg-utils
 ```
 
 ```sh
 npm ci
-npm run tauri dev
+npm run desktop:linux:dev
 ```
 
 `npm run release:bundle:windows:unsigned` builds the NSIS installer.
 `npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage.
+Linux packaging also requires `patchelf`, `dpkg-deb`, and `rpmbuild`. On Arch,
+install them with `sudo pacman -S --needed patchelf dpkg rpm-tools`. The Linux
+bundle command checks these tools before building.
 
 Optional surfaces run separately:
 
@@ -88,29 +102,44 @@ The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
 | Capability | Windows | Linux |
 | --- | --- | --- |
 | Local vault: create, unlock, search, import, back up, export | Yes | Yes |
-| Tray, quick access, global shortcut, start at sign-in | Yes | Yes |
-| Browser extension connection | Yes | Yes |
-| Automatic lock on screen lock | Yes | Yes |
-| Automatic lock on inactivity | Yes | GNOME and KDE |
-| Unlock with PIN | Yes | No |
+| Tray, quick access, start at sign-in | Yes | Yes |
+| Global quick access shortcut | Yes | X11 sessions only |
+| Browser extension connection | Yes | DEB and RPM builds, validation pending |
+| Automatic lock on screen lock | Yes | Built, validation pending |
+| Automatic lock on inactivity | Yes | GNOME and KDE, validation pending |
+| Unlock with PIN | Yes | Secret Service wallet, validation pending |
 | Unlock with Windows Hello | Yes | No |
 | Auto-type | Yes | No |
 | Account linking | Yes | No |
+| Signed desktop updates | Yes | No |
 
 Linux reads the screen lock from systemd-logind, falling back to the desktop's
 own screensaver interface. Inactivity has no shared Linux interface, so it is
 read from GNOME's or KDE's idle monitor and the automatic lock delay is hidden
 on desktops that publish neither.
 
-The remaining gaps are the integrations built on a Windows facility with no
-equivalent wired up yet: DPAPI for the PIN pepper and the account token, CNG
-for Windows Hello, and SendInput for auto-type. The app reports these as
-unavailable on Linux instead of offering a control that fails.
+Wayland publishes no protocol for global hotkeys, so the quick access shortcut
+is registered only in an X11 session and the setting is hidden elsewhere. Open
+quick access from the tray icon there, or start Sesame with `GDK_BACKEND=x11`.
+
+Linux keeps Sesame's random device-protection key in the desktop Secret Service
+wallet. PIN peppers and local attempt-throttle state are authenticated and
+encrypted with that key. Windows uses DPAPI for the same boundary. Windows
+Hello and auto-type remain unavailable on Linux.
+
+PIN unlock requires a Secret Service wallet provider. GNOME Keyring supplies
+one on GNOME. KWallet supplies `ksecretd`, which Sesame starts when needed on
+other desktops such as Hyprland. On Arch, install either `kwallet` or
+`gnome-keyring` if the desktop does not already provide one.
 
 The browser connection uses a socket in the per-user runtime directory rather
 than a named pipe. Both ends check the peer's user id and executable path
 before any vault data moves, and the peer's process start time is recorded so a
 reused process id cannot inherit an approved connection.
+
+Browser registration requires a stable native-host path, so it is disabled in
+the AppImage build. The DEB and RPM paths are built but remain beta until the
+extension's clean-profile verification passes on Linux.
 
 ## Licence and trademarks
 

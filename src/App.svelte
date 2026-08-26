@@ -46,21 +46,14 @@
   import DataControlsModal from './lib/ui/DataControlsModal.svelte'
   import DeleteVaultModal from './lib/ui/DeleteVaultModal.svelte'
   import ConfirmDeleteModal from './lib/ui/ConfirmDeleteModal.svelte'
-  import ConfirmDeleteIdentityModal from './lib/ui/ConfirmDeleteIdentityModal.svelte'
   import SecureNoteEditor from './lib/ui/SecureNoteEditor.svelte'
-  import ConfirmDeleteSecureNoteModal from './lib/ui/ConfirmDeleteSecureNoteModal.svelte'
   import CardEditor from './lib/ui/CardEditor.svelte'
-  import ConfirmDeleteCardModal from './lib/ui/ConfirmDeleteCardModal.svelte'
+  import ConfirmDeleteRecordModal from './lib/ui/ConfirmDeleteRecordModal.svelte'
   import WifiNetworkEditor from './lib/ui/WifiNetworkEditor.svelte'
-  import ConfirmDeleteWifiNetworkModal from './lib/ui/ConfirmDeleteWifiNetworkModal.svelte'
   import SshKeyEditor from './lib/ui/SshKeyEditor.svelte'
-  import ConfirmDeleteSshKeyModal from './lib/ui/ConfirmDeleteSshKeyModal.svelte'
   import SoftwareLicenseEditor from './lib/ui/SoftwareLicenseEditor.svelte'
-  import ConfirmDeleteSoftwareLicenseModal from './lib/ui/ConfirmDeleteSoftwareLicenseModal.svelte'
   import DocumentEditor from './lib/ui/DocumentEditor.svelte'
-  import ConfirmDeleteDocumentModal from './lib/ui/ConfirmDeleteDocumentModal.svelte'
   import CustomRecordEditor from './lib/ui/CustomRecordEditor.svelte'
-  import ConfirmDeleteCustomRecordModal from './lib/ui/ConfirmDeleteCustomRecordModal.svelte'
   import ConfirmMergeModal from './lib/ui/ConfirmMergeModal.svelte'
   import VaultView from './lib/ui/VaultView.svelte'
   import CheckupView from './lib/ui/CheckupView.svelte'
@@ -85,7 +78,7 @@
   const appStores = provideAppStores(createAppStores())
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the import flow reads the store through the controller.
   const { browserFill, browserIdentityFill, browserCardFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
-  vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, revision: 0 } })
+  vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 } })
 
   const feedbackController = createFeedbackController()
   const feedbackState = feedbackController.state
@@ -249,6 +242,7 @@
     modal: modalController,
   })
   const documentState = documentController.state
+  const documentAttachmentState = documentController.attachmentState
 
   const customRecordController = createCustomRecordController({
     stores: appStores,
@@ -835,102 +829,166 @@
       />
     {:else if active?.kind === 'identity-editor'}
       <IdentityEditor
-        bind:identityDraft={$identityState.identityDraft}
+        bind:identityDraft={$identityState.draft}
         editorTitle={$identityState.editorTitle}
-        savingIdentity={$identityState.savingIdentity}
-        loadingIdentity={$identityState.loadingIdentity}
+        savingIdentity={$identityState.saving}
+        loadingIdentity={$identityState.loading}
         legacyFields={$identityState.legacyFields}
         onSubmit={identityController.save}
         onClose={identityController.closeEditor}
       />
     {:else if active?.kind === 'delete-identity'}
-      <ConfirmDeleteIdentityModal deleteCandidate={$identityState.deleteCandidate} deleteWorking={$identityState.deleteWorking} onCancel={identityController.cancelDelete} onConfirm={identityController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="identity"
+        noun="identity"
+        description="This removes the name, email, phone, and address stored for this identity. It does not touch any saved login."
+        deleteCandidate={$identityState.deleteCandidate}
+        deleteWorking={$identityState.deleteWorking}
+        onCancel={identityController.cancelDelete}
+        onConfirm={identityController.confirmDelete}
+      />
     {:else if active?.kind === 'secure-note-editor'}
       <SecureNoteEditor
-        noteDraft={$secureNoteState.noteDraft}
+        noteDraft={$secureNoteState.draft}
         editorTitle={$secureNoteState.editorTitle}
-        savingNote={$secureNoteState.savingNote}
-        loadingNote={$secureNoteState.loadingNote}
+        savingNote={$secureNoteState.saving}
+        loadingNote={$secureNoteState.loading}
         legacyFields={$secureNoteState.legacyFields}
         onDraftChange={secureNoteController.setDraft}
         onSubmit={secureNoteController.save}
         onClose={secureNoteController.closeEditor}
       />
     {:else if active?.kind === 'delete-secure-note'}
-      <ConfirmDeleteSecureNoteModal deleteCandidate={$secureNoteState.deleteCandidate} deleteWorking={$secureNoteState.deleteWorking} onCancel={secureNoteController.cancelDelete} onConfirm={secureNoteController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="secure-note"
+        noun="note"
+        description="This removes the note and its content from your vault. It does not touch any saved login or identity."
+        deleteCandidate={$secureNoteState.deleteCandidate}
+        deleteWorking={$secureNoteState.deleteWorking}
+        onCancel={secureNoteController.cancelDelete}
+        onConfirm={secureNoteController.confirmDelete}
+      />
     {:else if active?.kind === 'card-editor'}
       <CardEditor
-        bind:cardDraft={$cardState.cardDraft}
+        bind:cardDraft={$cardState.draft}
         editorTitle={$cardState.editorTitle}
-        savingCard={$cardState.savingCard}
-        loadingCard={$cardState.loadingCard}
+        savingCard={$cardState.saving}
+        loadingCard={$cardState.loading}
         legacyFields={$cardState.legacyFields}
         onSubmit={cardController.save}
         onClose={cardController.closeEditor}
       />
     {:else if active?.kind === 'delete-card'}
-      <ConfirmDeleteCardModal deleteCandidate={$cardState.deleteCandidate} deleteWorking={$cardState.deleteWorking} onCancel={cardController.cancelDelete} onConfirm={cardController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="card"
+        noun="card"
+        description="This removes the card number, expiry, and security code stored for this card. It does not touch any saved login."
+        deleteCandidate={$cardState.deleteCandidate}
+        deleteWorking={$cardState.deleteWorking}
+        onCancel={cardController.cancelDelete}
+        onConfirm={cardController.confirmDelete}
+      />
     {:else if active?.kind === 'wifi-network-editor'}
       <WifiNetworkEditor
-        bind:networkDraft={$wifiNetworkState.networkDraft}
+        bind:networkDraft={$wifiNetworkState.draft}
         editorTitle={$wifiNetworkState.editorTitle}
-        savingNetwork={$wifiNetworkState.savingNetwork}
-        loadingNetwork={$wifiNetworkState.loadingNetwork}
+        savingNetwork={$wifiNetworkState.saving}
+        loadingNetwork={$wifiNetworkState.loading}
         onSubmit={wifiNetworkController.save}
         onClose={wifiNetworkController.closeEditor}
       />
     {:else if active?.kind === 'delete-wifi-network'}
-      <ConfirmDeleteWifiNetworkModal deleteCandidate={$wifiNetworkState.deleteCandidate} deleteWorking={$wifiNetworkState.deleteWorking} onCancel={wifiNetworkController.cancelDelete} onConfirm={wifiNetworkController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="wifi-network"
+        noun="network"
+        description="This removes the network name and password stored for this network. It does not touch any saved login."
+        deleteCandidate={$wifiNetworkState.deleteCandidate}
+        deleteWorking={$wifiNetworkState.deleteWorking}
+        onCancel={wifiNetworkController.cancelDelete}
+        onConfirm={wifiNetworkController.confirmDelete}
+      />
     {:else if active?.kind === 'ssh-key-editor'}
       <SshKeyEditor
-        bind:keyDraft={$sshKeyState.keyDraft}
+        bind:keyDraft={$sshKeyState.draft}
         editorTitle={$sshKeyState.editorTitle}
-        savingKey={$sshKeyState.savingKey}
-        loadingKey={$sshKeyState.loadingKey}
+        savingKey={$sshKeyState.saving}
+        loadingKey={$sshKeyState.loading}
         onSubmit={sshKeyController.save}
         onClose={sshKeyController.closeEditor}
       />
     {:else if active?.kind === 'delete-ssh-key'}
-      <ConfirmDeleteSshKeyModal deleteCandidate={$sshKeyState.deleteCandidate} deleteWorking={$sshKeyState.deleteWorking} onCancel={sshKeyController.cancelDelete} onConfirm={sshKeyController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="ssh-key"
+        noun="key"
+        description="This removes the private key, public key, and passphrase stored for this key. It does not touch any saved login."
+        deleteCandidate={$sshKeyState.deleteCandidate}
+        deleteWorking={$sshKeyState.deleteWorking}
+        onCancel={sshKeyController.cancelDelete}
+        onConfirm={sshKeyController.confirmDelete}
+      />
     {:else if active?.kind === 'software-license-editor'}
       <SoftwareLicenseEditor
-        bind:licenseDraft={$softwareLicenseState.licenseDraft}
+        bind:licenseDraft={$softwareLicenseState.draft}
         editorTitle={$softwareLicenseState.editorTitle}
-        savingLicense={$softwareLicenseState.savingLicense}
-        loadingLicense={$softwareLicenseState.loadingLicense}
+        savingLicense={$softwareLicenseState.saving}
+        loadingLicense={$softwareLicenseState.loading}
         onSubmit={softwareLicenseController.save}
         onClose={softwareLicenseController.closeEditor}
       />
     {:else if active?.kind === 'delete-software-license'}
-      <ConfirmDeleteSoftwareLicenseModal deleteCandidate={$softwareLicenseState.deleteCandidate} deleteWorking={$softwareLicenseState.deleteWorking} onCancel={softwareLicenseController.cancelDelete} onConfirm={softwareLicenseController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="software-license"
+        noun="licence"
+        description="This removes the licence key stored for this licence. It does not touch any saved login."
+        deleteCandidate={$softwareLicenseState.deleteCandidate}
+        deleteWorking={$softwareLicenseState.deleteWorking}
+        onCancel={softwareLicenseController.cancelDelete}
+        onConfirm={softwareLicenseController.confirmDelete}
+      />
     {:else if active?.kind === 'document-editor'}
       <DocumentEditor
-        bind:documentDraft={$documentState.documentDraft}
+        bind:documentDraft={$documentState.draft}
         editorTitle={$documentState.editorTitle}
-        savingDocument={$documentState.savingDocument}
-        loadingDocument={$documentState.loadingDocument}
-        attachments={$documentState.documentAttachments}
-        uploadingAttachment={$documentState.uploadingAttachment}
-        removingAttachmentId={$documentState.removingAttachmentId}
-        attachmentError={$documentState.attachmentError}
+        savingDocument={$documentState.saving}
+        loadingDocument={$documentState.loading}
+        attachments={$documentAttachmentState.documentAttachments}
+        uploadingAttachment={$documentAttachmentState.uploadingAttachment}
+        removingAttachmentId={$documentAttachmentState.removingAttachmentId}
+        attachmentError={$documentAttachmentState.attachmentError}
         onSubmit={documentController.save}
         onClose={documentController.closeEditor}
         onAddAttachment={(file) => void documentController.addAttachment(file)}
         onRemoveAttachment={(attachmentId) => void documentController.removeAttachment(attachmentId)}
       />
     {:else if active?.kind === 'delete-document'}
-      <ConfirmDeleteDocumentModal deleteCandidate={$documentState.deleteCandidate} deleteWorking={$documentState.deleteWorking} onCancel={documentController.cancelDelete} onConfirm={documentController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="document"
+        noun="document"
+        description="This removes the document number and other details stored for this document. It does not touch any saved login."
+        deleteCandidate={$documentState.deleteCandidate}
+        deleteWorking={$documentState.deleteWorking}
+        onCancel={documentController.cancelDelete}
+        onConfirm={documentController.confirmDelete}
+      />
     {:else if active?.kind === 'custom-record-editor'}
       <CustomRecordEditor
-        bind:recordDraft={$customRecordState.recordDraft}
+        bind:recordDraft={$customRecordState.draft}
         editorTitle={$customRecordState.editorTitle}
-        savingRecord={$customRecordState.savingRecord}
-        loadingRecord={$customRecordState.loadingRecord}
+        savingRecord={$customRecordState.saving}
+        loadingRecord={$customRecordState.loading}
         onSubmit={customRecordController.save}
         onClose={customRecordController.closeEditor}
       />
     {:else if active?.kind === 'delete-custom-record'}
-      <ConfirmDeleteCustomRecordModal deleteCandidate={$customRecordState.deleteCandidate} deleteWorking={$customRecordState.deleteWorking} onCancel={customRecordController.cancelDelete} onConfirm={customRecordController.confirmDelete} />
+      <ConfirmDeleteRecordModal
+        recordKind="custom-record"
+        noun="record"
+        description="This removes every field stored in this record. It does not touch any saved login."
+        deleteCandidate={$customRecordState.deleteCandidate}
+        deleteWorking={$customRecordState.deleteWorking}
+        onCancel={customRecordController.cancelDelete}
+        onConfirm={customRecordController.confirmDelete}
+      />
     {:else if active?.kind === 'folder-manager'}
       <FolderManagerModal folders={$folderOptions} entries={$vault.snapshot?.entries ?? []} working={$loginState.folderWorking} onClose={loginController.closeFolderManager} onRename={loginController.startRenameFolder} onUnfile={(folder) => void loginController.unfileFolder(folder)} />
     {:else if active?.kind === 'folder-name'}

@@ -1,88 +1,111 @@
-export interface VaultStatus {
-  exists: boolean
-  unlocked: boolean
-  preview: boolean
-  pinUnlockAvailable: boolean
-  helloUnlockAvailable: boolean
-  onboardingRequired?: boolean
-  vaultId?: string
-  revision: number
-}
+// Generated from src-tauri (see src/lib/generated/, built by `npm run
+// types:generate`) for every type whose Rust struct is a faithful source of
+// truth. A type stays hand-written here instead when it has no Rust struct at
+// all (a pure frontend concept, or a value Rust only guarantees as a loose
+// `&'static str`/`String` where the frontend wants a closed union), or when
+// its backing struct has a different name or shape than the frontend type.
+//
+// `export type { X } from './generated/X'` re-exports X for other modules but
+// does not bring it into scope here, so any generated type referenced by a
+// hand-written type below (PasswordIssue, BackupInspection, BrowserFillCandidate)
+// also needs a plain `import type`.
+import type { PasswordIssue } from './generated/PasswordIssue'
+import type { BackupInspection } from './generated/BackupInspection'
+import type { BrowserFillCandidate } from './generated/BrowserFillCandidate'
 
-export interface PlatformCapabilities {
-  os: string
-  pinUnlock: boolean
-  biometricUnlock: boolean
-  autoType: boolean
-  browserIntegration: boolean
-  sessionAutoLock: boolean
-  accountLinking: boolean
-}
+export type { LegacyField } from './generated/LegacyField'
+export type { Identity } from './generated/Identity'
+export type { IdentityInput } from './generated/IdentityInput'
+export type { SaveIdentityResult } from './generated/SaveIdentityResult'
+export type { DeleteIdentityResult } from './generated/DeleteIdentityResult'
+export type { SecureNote } from './generated/SecureNote'
+export type { SecureNoteInput } from './generated/SecureNoteInput'
+export type { SaveSecureNoteResult } from './generated/SaveSecureNoteResult'
+export type { DeleteSecureNoteResult } from './generated/DeleteSecureNoteResult'
+export type { Card } from './generated/Card'
+export type { CardInput } from './generated/CardInput'
+export type { SaveCardResult } from './generated/SaveCardResult'
+export type { DeleteCardResult } from './generated/DeleteCardResult'
+export type { WifiNetwork } from './generated/WifiNetwork'
+export type { WifiNetworkInput } from './generated/WifiNetworkInput'
+export type { SaveWifiNetworkResult } from './generated/SaveWifiNetworkResult'
+export type { DeleteWifiNetworkResult } from './generated/DeleteWifiNetworkResult'
+export type { SshKey } from './generated/SshKey'
+export type { SshKeyInput } from './generated/SshKeyInput'
+export type { SaveSshKeyResult } from './generated/SaveSshKeyResult'
+export type { DeleteSshKeyResult } from './generated/DeleteSshKeyResult'
+export type { SoftwareLicense } from './generated/SoftwareLicense'
+export type { SoftwareLicenseInput } from './generated/SoftwareLicenseInput'
+export type { SaveSoftwareLicenseResult } from './generated/SaveSoftwareLicenseResult'
+export type { DeleteSoftwareLicenseResult } from './generated/DeleteSoftwareLicenseResult'
+export type { Attachment } from './generated/Attachment'
+export type { DocumentMetadata } from './generated/DocumentMetadata'
+export type { DocumentMetadataInput } from './generated/DocumentMetadataInput'
+export type { SaveDocumentMetadataResult } from './generated/SaveDocumentMetadataResult'
+export type { DeleteDocumentMetadataResult } from './generated/DeleteDocumentMetadataResult'
+export type { CustomFieldEntry } from './generated/CustomFieldEntry'
+export type { CustomRecord } from './generated/CustomRecord'
+export type { CustomRecordInput } from './generated/CustomRecordInput'
+export type { SaveCustomRecordResult } from './generated/SaveCustomRecordResult'
+export type { DeleteCustomRecordResult } from './generated/DeleteCustomRecordResult'
+export type { VaultSetup } from './generated/VaultSetup'
+export type { ChangeMasterPasswordResult } from './generated/ChangeMasterPasswordResult'
+export type { LoginCard } from './generated/LoginCard'
+export type { LoginInput } from './generated/LoginInput'
+export type { LoginSummary } from './generated/LoginSummary'
+export type { TotpRefresh } from './generated/TotpRefresh'
+export type { SaveLoginResult } from './generated/SaveLoginResult'
+export type { DeleteLoginResult } from './generated/DeleteLoginResult'
+export type { FidelityCounts } from './generated/FidelityCounts'
+export type { ImportFidelity } from './generated/ImportFidelity'
+export type { ImportPreview } from './generated/ImportPreview'
+export type { ImportPreviewResult } from './generated/ImportPreviewResult'
+export type { ImportResult } from './generated/ImportResult'
+export type { MergeCandidate } from './generated/MergeCandidate'
+export type { MergeFieldOption } from './generated/MergeFieldOption'
+export type { MergeField } from './generated/MergeField'
+export type { MergeComparison } from './generated/MergeComparison'
+// Hand-written, not generated from Rust's `MergeChoices` (a fixed-field
+// struct): the merge modal indexes this by an arbitrary field name chosen at
+// render time, which needs a string index signature, not fixed field names.
+export type MergeChoices = Record<string, string | undefined>
+export type { MergeDuplicateLoginsResult } from './generated/MergeDuplicateLoginsResult'
+export type { MasterPasswordRequest } from './generated/MasterPasswordRequest'
+export type { TotpCodeEntry } from './generated/TotpCodeEntry'
+export type { CleanupEntry } from './generated/CleanupEntry'
+export type { DuplicateGroup } from './generated/DuplicateGroup'
+export type { BackupInspection } from './generated/BackupInspection'
+export type { BackupVerification } from './generated/BackupVerification'
+export type { RestoreBackupResult } from './generated/RestoreBackupResult'
+export type { PasswordIssue } from './generated/PasswordIssue'
+export type { Folder } from './generated/Folder'
+export type { VaultSnapshot } from './generated/VaultSnapshot'
+export type { TrashSummary } from './generated/TrashSummary'
+export type { RestoreTrashedItemResult } from './generated/RestoreTrashedItemResult'
+export type { ItemPreview } from './generated/ItemPreview'
+export type { HistorySummary } from './generated/HistorySummary'
+export type { HistoryOperation } from './generated/HistoryOperation'
+export type { RestoreHistoryVersionResult } from './generated/RestoreHistoryVersionResult'
+export type { VaultItemSummary } from './generated/VaultItemSummary'
+export type { SecuritySummary } from './generated/SecuritySummary'
+export type { ServiceConnectionStatus } from './generated/ServiceConnectionStatus'
+// Frontend name for backend's `VaultEntrySummary`: the frontend's own name
+// `VaultEntry` is not reused here on purpose, it would collide with the full
+// secret-bearing login record Rust also calls `VaultEntry` (password, TOTP,
+// backup codes, recovery contacts), which is never exposed to the frontend
+// under that shape and is deliberately not ts-rs derived.
+export type { VaultEntrySummary as VaultEntry } from './generated/VaultEntrySummary'
+export type { VaultStatus } from './generated/VaultStatus'
 
-export interface QuickAccessStatus {
-  exists: boolean
-  unlocked: boolean
-}
-
-/** One copyable field quick access offers for a given item kind. */
-export interface QuickAccessAction {
-  field: string
-  label: string
-  /** Needs a second, deliberate confirmation before the value is produced. */
-  guarded: boolean
-}
-
-export interface QuickAccessItem {
-  id: string
-  kind: ItemKind
-  title: string
-  subtitle: string
-  initials: string
-  actions: QuickAccessAction[]
-}
-
-export interface QuickAccessValue {
-  value: string
-}
+export type { PlatformCapabilities } from './generated/PlatformCapabilities'
+export type { QuickAccessStatus } from './generated/QuickAccessStatus'
+export type { QuickAccessAction } from './generated/QuickAccessAction'
+export type { QuickAccessItem } from './generated/QuickAccessItem'
+export type { QuickAccessValue } from './generated/QuickAccessValue'
 
 export type IssueKind = 'duplicate' | 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern' | 'old-password' | 'url' | 'totp' | 'recovery'
 
-export interface Folder {
-  id: string
-  name: string
-}
-
-export interface PasswordIssue {
-  kind: 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern'
-  explanation: string
-}
-
-export interface PasswordAnalysis {
-  score: number
-  issues: PasswordIssue[]
-}
-
-export interface BreachCheckResult {
-  breached: boolean
-  count: number
-}
-
-export interface VaultEntry {
-  id: string
-  title: string
-  site: string
-  initials: string
-  folderId?: string
-  folder: string
-  favourite: boolean
-  lastUsedAt?: number
-  passwordScore: number
-  passwordIssues: PasswordIssue[]
-  securityLevel: 'good' | 'needs-work'
-  issueKinds: IssueKind[]
-  tags: string[]
-  updatedAt: number
-}
+export type { BreachCheckResult } from './generated/BreachCheckResult'
 
 export type ItemKind =
   | 'login'
@@ -95,633 +118,26 @@ export type ItemKind =
   | 'document'
   | 'custom_record'
 
-/** One list row for a saved record other than a login. Non-secret metadata only. */
-export interface VaultItemSummary {
-  id: string
-  kind: ItemKind
-  title: string
-  subtitle: string
-  initials: string
-  folderId?: string
-  folder: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-  tags: string[]
+// Hand-written: backed by sesame-core/src/password_analysis.rs, a different
+// module than sesame-core/src/types.rs. `PasswordIssue.kind` there is also a
+// plain `&'static str`; the frontend keeps the closed union.
+export interface PasswordAnalysis {
+  score: number
+  issues: PasswordIssue[]
 }
 
-export interface SecuritySummary {
-  good: number
-  needsAttention: number
-  duplicateCandidates: number
-  weakOrReused: number
-  weakPasswords: number
-  commonPasswords: number
-  reusedPasswords: number
-  compromisedPatterns: number
-  oldPasswords: number
-  missingUrls: number
-  noTotp: number
-  missingRecovery: number
-}
+export type { RecoveryHealth } from './generated/RecoveryHealth'
+export type { DiagnosticStatus } from './generated/DiagnosticStatus'
+export type { WebsiteIconCacheStatus } from './generated/WebsiteIconCacheStatus'
 
-export interface VaultSnapshot {
-  vaultName: string
-  vaultId?: string
-  revision: number
-  folders: Folder[]
-  entries: VaultEntry[]
-  items: VaultItemSummary[]
-  trash: TrashSummary[]
-  history: HistorySummary[]
-  security: SecuritySummary
-}
-
-/** Metadata only; item titles stay in Rust until explicitly requested. */
-export interface TrashSummary {
-  id: string
-  kind: string
-  deletedAt: number
-}
-
-export interface RestoreTrashedItemResult {
-  restoredId: string
-  snapshot: VaultSnapshot
-}
-
-/** Non-secret preview for one explicitly chosen id; detail is never a password, key, or note content. */
-export interface ItemPreview {
-  kind: string
-  title: string
-  detail?: string
-}
-
-/** Metadata only; item titles stay in Rust until explicitly requested. */
-export interface HistorySummary {
-  id: string
-  itemId: string
-  kind: string
-  capturedAt: number
-  changed: string[]
-}
-
-export interface RestoreHistoryVersionResult {
-  restoredId: string
-  snapshot: VaultSnapshot
-}
-
-export interface Identity {
-  id: string
-  label: string
-  tags: string[]
-  fullName: string
-  email: string
-  phone: string
-  addressLine1: string
-  addressLine2: string
-  city: string
-  region: string
-  postalCode: string
-  country: string
-  legacyFields?: LegacyField[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface IdentityInput {
-  id?: string
-  label: string
-  tags: string[]
-  fullName: string
-  email: string
-  phone: string
-  addressLine1: string
-  addressLine2: string
-  city: string
-  region: string
-  postalCode: string
-  country: string
-}
-
-export interface SaveIdentityResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteIdentityResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface SecureNote {
-  id: string
-  title: string
-  content: string
-  tags: string[]
-  legacyFields?: LegacyField[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface SecureNoteInput {
-  id?: string
-  title: string
-  content: string
-  tags: string[]
-}
-
-export interface SaveSecureNoteResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteSecureNoteResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface Card {
-  id: string
-  title: string
-  cardholderName: string
-  number: string
-  expiryMonth: string
-  expiryYear: string
-  securityCode: string
-  brand: string
-  notes: string
-  tags: string[]
-  legacyFields?: LegacyField[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface CardInput {
-  id?: string
-  title: string
-  cardholderName: string
-  number: string
-  expiryMonth: string
-  expiryYear: string
-  securityCode: string
-  brand: string
-  notes: string
-  tags: string[]
-}
-
-export interface SaveCardResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteCardResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface WifiNetwork {
-  id: string
-  title: string
-  ssid: string
-  password: string
-  securityType: string
-  notes: string
-  tags: string[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface WifiNetworkInput {
-  id?: string
-  title: string
-  ssid: string
-  password: string
-  securityType: string
-  notes: string
-  tags: string[]
-}
-
-export interface SaveWifiNetworkResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteWifiNetworkResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface SshKey {
-  id: string
-  title: string
-  keyType: string
-  privateKey: string
-  publicKey: string
-  passphrase: string
-  notes: string
-  tags: string[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface SshKeyInput {
-  id?: string
-  title: string
-  keyType: string
-  privateKey: string
-  publicKey: string
-  passphrase: string
-  notes: string
-  tags: string[]
-}
-
-export interface SaveSshKeyResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteSshKeyResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface SoftwareLicense {
-  id: string
-  title: string
-  licenseKey: string
-  productName: string
-  purchasedFrom: string
-  purchaseDate: string
-  notes: string
-  tags: string[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface SoftwareLicenseInput {
-  id?: string
-  title: string
-  licenseKey: string
-  productName: string
-  purchasedFrom: string
-  purchaseDate: string
-  notes: string
-  tags: string[]
-}
-
-export interface SaveSoftwareLicenseResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteSoftwareLicenseResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface Attachment {
-  id: string
-  filename: string
-  contentType: string
-  size: number
-  data: string
-}
-
-export interface DocumentMetadata {
-  id: string
-  title: string
-  documentType: string
-  documentNumber: string
-  issuingAuthority: string
-  issueDate: string
-  expiryDate: string
-  notes: string
-  tags: string[]
-  attachments: Attachment[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface DocumentMetadataInput {
-  id?: string
-  title: string
-  documentType: string
-  documentNumber: string
-  issuingAuthority: string
-  issueDate: string
-  expiryDate: string
-  notes: string
-  tags: string[]
-}
-
-export interface SaveDocumentMetadataResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteDocumentMetadataResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface CustomFieldEntry {
-  label: string
-  value: string
-  kind: string
-}
-
-export interface CustomRecord {
-  id: string
-  title: string
-  fields: CustomFieldEntry[]
-  notes: string
-  tags: string[]
-  folderId?: string
-  favourite: boolean
-  lastUsedAt?: number
-  updatedAt: number
-}
-
-export interface CustomRecordInput {
-  id?: string
-  title: string
-  fields: CustomFieldEntry[]
-  notes: string
-  tags: string[]
-}
-
-export interface SaveCustomRecordResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-export interface DeleteCustomRecordResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface VaultSetup {
-  snapshot: VaultSnapshot
-  recoveryKit: string
-}
-
-export interface ChangeMasterPasswordResult {
-  recoveryKit: string
-}
-
-export interface LoginCard {
-  id: string
-  title: string
-  site: string
-  initials: string
-  url: string
-  urls?: string[]
-  tags?: string[]
-  username: string
-  email: string
-  password: string
-  folderId?: string
-  folder: string
-  favourite: boolean
-  lastUsedAt?: number
-  totp?: string
-  totpCode?: string
-  totpRemaining?: number
-  backupCodes?: string[]
-  recoveryEmail?: string
-  recoveryPhone?: string
-  recoveryNotApplicable: boolean
-  notes?: string
-  legacyFields?: LegacyField[]
-}
-
-export interface LegacyField {
-  label: string
-  value: string
-  secret: boolean
-}
-
-export interface LoginInput {
-  id?: string
-  title: string
-  url: string
-  urls?: string[]
-  tags?: string[]
-  username: string
-  email: string
-  password: string
-  folder: string
-  folderId?: string
-  totp: string
-  backupCodes: string[]
-  recoveryEmail: string
-  recoveryPhone: string
-  recoveryNotApplicable: boolean
-  notes: string
-}
-
-export interface LoginSummary {
-  id: string
-  title: string
-  site: string
-  username: string
-  initials: string
-  duplicateKey: string
-}
-
-export interface CleanupEntry {
-  id: string
-  title: string
-  site: string
-  username?: string
-  initials?: string
-  reason?: string
-}
-
-export interface DuplicateGroup {
-  id: string
-  label?: string
-  site?: string
-  entries: CleanupEntry[]
-}
-
-export interface TotpRefresh {
-  totpCode: string | null
-  totpRemaining: number | null
-}
-
-export interface SaveLoginResult {
-  id: string
-  snapshot: VaultSnapshot
-}
-
-/// Counts only; never carries a field value, label, or title.
-export interface FidelityCounts {
-  imported: number
-  transformed: number
-  legacy: number
-  malformed: number
-  intentionallyOmitted: number
-}
-
-export interface ImportFidelity {
-  logins: FidelityCounts
-  secureNotes: FidelityCounts
-  cards: FidelityCounts
-  identities: FidelityCounts
-  sshKeys: FidelityCounts
-  passkeys: FidelityCounts
-  unsupportedItems: FidelityCounts
-}
-
-export interface ImportPreview {
-  totalEntries: number
-  exactDuplicates: number
-  accountConflicts: number
-  duplicateEntries: number
-  missingUrls: number
-  invalidUrls: number
-  noTotp: number
-  invalidTotp: number
-  preservedLegacyFields: number
-  secureNotes: number
-  cards: number
-  identities: number
-  sshKeys: number
-  passkeysNotImported: number
-  intentionallyOmittedItems: number
-  fidelity: ImportFidelity
-}
-
-/// Rust keeps the parsed entries; the interface receives counts and an id.
-export interface ImportPreviewResult {
-  importId: string
-  preview: ImportPreview
-}
-
-export interface MergeCandidate {
-  id: string
-  title: string
-  site: string
-  username: string
-  updatedAt: number
-  revision: number
-}
-
-export interface MergeFieldOption {
-  entryId: string
-  value: string
-  present: boolean
-}
-
-export interface MergeField {
-  field: string
-  label: string
-  secret: boolean
-  differs: boolean
-  options: MergeFieldOption[]
-}
-
-export interface MergeComparison {
-  entries: MergeCandidate[]
-  fields: MergeField[]
-}
-
-export type MergeChoices = Record<string, string | undefined>
-
-export interface ImportResult {
-  snapshot: VaultSnapshot
-  importedEntries: number
-  importedSecureNotes: number
-  importedCards: number
-  importedIdentities: number
-  importedSshKeys: number
-  skippedExactDuplicates: number
-  revisionBackupName?: string
-}
-
-export interface BackupInspection {
-  fileName: string
-  formatVersion: number
-}
-
-export interface BackupVerification {
-  fileName: string
-  formatVersion: number
-  vaultName: string
-  entryCount: number
-  vaultId?: string
-  revision: number
-}
-
+// Hand-written: no dedicated Rust struct of this shape, a frontend-only
+// extension of the generated `BackupInspection` with the file's picked source.
 export interface BackupSelection extends BackupInspection {
   source: string
 }
 
-export interface RecoveryHealth {
-  vaultId: string
-  lastExportedRevision?: number
-  lastExportedAt?: string
-  lastVerifiedRevision?: number
-  lastVerifiedAt?: string
-}
-
-export interface RestoreBackupResult {
-  safetyBackupName?: string
-  pinUnlockAvailable: boolean
-  helloUnlockAvailable: boolean
-}
-
-export interface DiagnosticStatus {
-  exists: boolean
-  eventCount: number
-  errorCount: number
-  sizeBytes: number
-  localOnly: boolean
-  byOperation: { operation: string; count: number; errorCount: number }[]
-  byCode: { code: string; count: number; level: string }[]
-  recent: { timestamp: number; operation: string; code: string; level: string }[]
-}
-
-export interface WebsiteIconCacheStatus {
-  entryCount: number
-  iconCount: number
-  sizeBytes: number
-}
-
-export interface ServiceConnectionStatus {
-  state: 'disconnected' | 'connected' | 'suspended' | 'revoked' | 'offline' | 'rateLimited' | 'serviceUnavailable' | 'needsAttention'
-  connected: boolean
-  online: boolean
-  deviceName?: string
-  syncAvailable: boolean
-  browserHelperAvailable: boolean
-}
-
-export interface DesktopUpdateStatus {
-  available: boolean
-  version?: string
-  body?: string
-}
-
-export interface DesktopUpdateProgress {
-  downloadedBytes: number
-  totalBytes?: number
-}
+export type { DesktopUpdateStatus } from './generated/DesktopUpdateStatus'
+export type { DesktopUpdateProgress } from './generated/DesktopUpdateProgress'
 
 export type BrowserIntegrationCode =
   | 'ready'
@@ -730,25 +146,12 @@ export type BrowserIntegrationCode =
   | 'registrationMissing'
   | 'unsupported'
 
-export interface BrowserIntegrationStatus {
-  supported: boolean
-  hostAvailable: boolean
-  manifestReady: boolean
-  chromeRegistered: boolean
-  edgeRegistered: boolean
-  firefoxRegistered: boolean
-  ready: boolean
-  code: BrowserIntegrationCode
-}
+export type { BrowserIntegrationStatus } from './generated/BrowserIntegrationStatus'
 
-export interface BrowserFillCandidate {
-  id: string
-  title: string
-  username: string
-  email: string
-  savedOrigin: string
-  matchKind: 'exact' | 'wwwAlias'
-}
+// The other Browser*/*Fill*/*Cancelled types below have no Rust struct of the
+// same shape (the frontend types are a derived/flattened view of a
+// differently-named, differently-shaped Rust event type) and stay hand-written.
+export type { BrowserFillCandidate } from './generated/BrowserFillCandidate'
 
 export interface BrowserFillRequest {
   approvalId: string
@@ -838,21 +241,6 @@ export interface BrowserSaveCancelled {
   reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
 }
 
-export interface DeleteLoginResult {
-  deletedId: string
-  snapshot: VaultSnapshot
-}
-
-export interface MergeDuplicateLoginsResult {
-  id: string
-  snapshot: VaultSnapshot
-  revisionBackupName?: string
-}
-
-export interface MasterPasswordRequest {
-  masterPassword: string
-}
-
 export type ImportSource =
   | 'bitwarden-csv'
   | 'bitwarden-json'
@@ -874,16 +262,6 @@ export type ImportSource =
   | '2fas-json'
 
 export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'trash' | 'history' | 'backups' | 'settings'
-
-export interface TotpCodeEntry {
-  id: string
-  title: string
-  site: string
-  initials: string
-  code: string
-  remaining: number
-  period: number
-}
 
 export type Theme = 'auto' | 'light' | 'dark'
 

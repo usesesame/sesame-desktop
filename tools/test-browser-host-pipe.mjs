@@ -22,6 +22,33 @@ function run(command, args) {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed`)
 }
 
+async function probeDesktop() {
+  const host = spawn(hostExe, [pinnedOrigin], { stdio: ['pipe', 'pipe', 'pipe'] })
+  let stderr = ''
+  let timer
+  host.stderr.on('data', (chunk) => { stderr += chunk.toString() })
+  try {
+    return await new Promise((settle, fail) => {
+      let buffer = Buffer.alloc(0)
+      timer = setTimeout(() => fail(new Error(`native host did not respond over the pipe in time (stderr: ${stderr || '(none)'})`)), 10_000)
+      host.once('error', fail)
+      host.stdout.on('data', (chunk) => {
+        buffer = Buffer.concat([buffer, chunk])
+        if (buffer.length < 4) return
+        const size = buffer.readUInt32LE(0)
+        if (buffer.length < 4 + size) return
+        settle(JSON.parse(buffer.subarray(4, 4 + size).toString('utf8')))
+      })
+      host.once('exit', (code) => fail(new Error(`native host exited (code ${code}) before responding`)))
+      host.stdin.write(frame({ version: 1, type: 'capabilities', requestId: 'pipe-check-1' }))
+    })
+  } finally {
+    clearTimeout(timer)
+    host.stdin.end()
+    if (host.exitCode === null && !host.killed) host.kill()
+  }
+}
+
 async function main() {
   if (process.platform !== 'win32') {
     console.log('The browser native-host pipe is Windows-only. Skipping.')
@@ -41,37 +68,19 @@ async function main() {
   })
 
   try {
-    await new Promise((r) => setTimeout(r, 4_000))
+    let response
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      response = await probeDesktop()
+      if (response.type === 'capabilities' && response.desktopAvailable === true) break
+      await new Promise((resolveWait) => setTimeout(resolveWait, 500))
+    }
 
-    const host = spawn(hostExe, [pinnedOrigin], { stdio: ['pipe', 'pipe', 'pipe'] })
-    let stderr = ''
-    host.stderr.on('data', (chunk) => { stderr += chunk.toString() })
-    host.stdin.write(frame({ version: 1, type: 'capabilities', requestId: 'pipe-check-1' }))
-
-    const response = await new Promise((settle, fail) => {
-      let buffer = Buffer.alloc(0)
-      const timer = setTimeout(() => fail(new Error(`native host did not respond over the pipe in time (stderr: ${stderr || '(none)'})`)), 10_000)
-      host.stdout.on('data', (chunk) => {
-        buffer = Buffer.concat([buffer, chunk])
-        if (buffer.length < 4) return
-        const size = buffer.readUInt32LE(0)
-        if (buffer.length < 4 + size) return
-        clearTimeout(timer)
-        settle(JSON.parse(buffer.subarray(4, 4 + size).toString('utf8')))
-      })
-      host.on('exit', (code) => {
-        if (buffer.length === 0) { clearTimeout(timer); fail(new Error(`native host exited (code ${code}) before responding`)) }
-      })
-    })
-    host.stdin.end()
-    if (!host.killed) host.kill()
-
-    if (response.type !== 'capabilities' || response.desktopAvailable !== true) {
+    if (response?.type !== 'capabilities' || response.desktopAvailable !== true) {
       throw new Error(`unexpected response from the desktop broker: ${JSON.stringify(response)}`)
     }
     console.log('The browser native host completed an authenticated exchange with the live desktop broker:', response)
   } finally {
-    try { process.kill(desktop.pid) } catch { /* the desktop may have exited with the test */ }
+    try { process.kill(desktop.pid) } catch { void 0 }
     rmSync(testRoot, { recursive: true, force: true })
   }
 }

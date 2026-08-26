@@ -1,7 +1,6 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
@@ -195,7 +194,7 @@ const previewHistoryRecords: Record<string, { kind: string; title: string; itemI
 function captureHistoryPreview(kind: string, itemId: string, title: string, record: unknown) {
   const historyId = `preview-history-${crypto.randomUUID()}`
   previewHistoryRecords[historyId] = { kind, title, itemId, record }
-  previewSnapshot.history.push({ id: historyId, itemId, kind, capturedAt: Math.floor(Date.now() / 1000), changed: ['password'] })
+  previewSnapshot.history.push({ id: historyId, itemId, kind, capturedAt: Math.floor(Date.now() / 1000), operation: 'edit', changed: ['password'] })
 }
 
 const previewIdentities: Record<string, Identity> = {}
@@ -279,15 +278,221 @@ function adoptPreviewRecord(kind: string, id: string, record: unknown): void {
   }
 }
 
-const previewCards: Record<string, LoginCard> = {
-  gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', username: 'hello@example.test', email: '', password: 'preview-only-not-a-real-password', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.',
-  },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', username: 'sesame-preview', email: '', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.' },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: true },
+interface TaggedRecord {
+  id: string
+  tags: string[]
+  favourite: boolean
+  updatedAt: number
 }
 
-const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, accountLinking: true }
+interface PreviewRecordApiConfig<TItem extends TaggedRecord, TInput extends { id?: string }> {
+  kind: ItemKind
+  idPrefix: string
+  missingNoun: string
+  store: Record<string, TItem>
+  titleOf(item: TItem): string
+  subtitleOf(item: TItem): string
+  buildRecord(input: TInput, id: string, existing: TItem | undefined): TItem
+}
+
+/// One shape for every non-login item kind: preview reads/writes an in-memory
+/// store and mirrors the summary list; the real path is a single Tauri call.
+/// Login stays out, its preview save also rewrites `entries`, a different shape.
+function createPreviewRecordApi<TItem extends TaggedRecord, TInput extends { id?: string }>(
+  config: PreviewRecordApiConfig<TItem, TInput>,
+) {
+  return {
+    async get(id: string): Promise<TItem> {
+      if (previewMode) {
+        const item = config.store[id]
+        if (!item) throw new Error(`That saved ${config.missingNoun} no longer exists.`)
+        return item
+      }
+      return invoke<TItem>(`get_${config.kind}`, { id })
+    },
+    async save(input: TInput): Promise<{ id: string; snapshot: VaultSnapshot }> {
+      if (previewMode) {
+        const id = input.id || `${config.idPrefix}${crypto.randomUUID()}`
+        const existing = config.store[id]
+        const record = config.buildRecord(input, id, existing)
+        if (input.id && existing) captureHistoryPreview(config.kind, id, config.titleOf(existing), existing)
+        config.store[id] = record
+        upsertPreviewItem(config.kind, id, config.titleOf(record), config.subtitleOf(record), record.tags)
+        return { id, snapshot: previewSnapshot }
+      }
+      return invoke<{ id: string; snapshot: VaultSnapshot }>(`save_${config.kind}`, { input })
+    },
+    async delete(id: string): Promise<{ deletedId: string; snapshot: VaultSnapshot }> {
+      if (previewMode) {
+        const existing = config.store[id]
+        if (!existing) throw new Error(`That saved ${config.missingNoun} no longer exists.`)
+        removePreviewItem(id)
+        trashPreviewItem(config.kind, id, config.titleOf(existing), existing)
+        delete config.store[id]
+        return { deletedId: id, snapshot: previewSnapshot }
+      }
+      return invoke<{ deletedId: string; snapshot: VaultSnapshot }>(`delete_${config.kind}`, { id })
+    },
+  }
+}
+
+const identityApi = createPreviewRecordApi<Identity, IdentityInput>({
+  kind: 'identity',
+  idPrefix: 'preview-identity-',
+  missingNoun: 'identity',
+  store: previewIdentities,
+  titleOf: (item) => item.label,
+  subtitleOf: (item) => item.fullName || item.email,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    label: input.label.trim(),
+    legacyFields: existing?.legacyFields ?? [],
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const secureNoteApi = createPreviewRecordApi<SecureNote, SecureNoteInput>({
+  kind: 'secure_note',
+  idPrefix: 'preview-note-',
+  missingNoun: 'note',
+  store: previewSecureNotes,
+  titleOf: (item) => item.title,
+  subtitleOf: () => '',
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    legacyFields: existing?.legacyFields ?? [],
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const cardApi = createPreviewRecordApi<Card, CardInput>({
+  kind: 'card',
+  idPrefix: 'preview-card-',
+  missingNoun: 'card',
+  store: previewPaymentCards,
+  titleOf: (item) => item.title,
+  subtitleOf: (item) => item.brand,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    legacyFields: existing?.legacyFields ?? [],
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const wifiNetworkApi = createPreviewRecordApi<WifiNetwork, WifiNetworkInput>({
+  kind: 'wifi_network',
+  idPrefix: 'preview-wifi-',
+  missingNoun: 'network',
+  store: previewWifiNetworks,
+  titleOf: (item) => item.title,
+  subtitleOf: (item) => item.ssid,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const sshKeyApi = createPreviewRecordApi<SshKey, SshKeyInput>({
+  kind: 'ssh_key',
+  idPrefix: 'preview-ssh-key-',
+  missingNoun: 'key',
+  store: previewSshKeys,
+  titleOf: (item) => item.title,
+  subtitleOf: (item) => item.keyType,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const softwareLicenseApi = createPreviewRecordApi<SoftwareLicense, SoftwareLicenseInput>({
+  kind: 'software_license',
+  idPrefix: 'preview-license-',
+  missingNoun: 'licence',
+  store: previewSoftwareLicenses,
+  titleOf: (item) => item.title,
+  subtitleOf: (item) => item.productName,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const documentApi = createPreviewRecordApi<DocumentMetadata, DocumentMetadataInput>({
+  kind: 'document',
+  idPrefix: 'preview-document-',
+  missingNoun: 'document',
+  store: previewDocuments,
+  titleOf: (item) => item.title,
+  subtitleOf: (item) => item.documentType,
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    attachments: existing?.attachments ?? [],
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>({
+  kind: 'custom_record',
+  idPrefix: 'preview-custom-record-',
+  missingNoun: 'record',
+  store: previewCustomRecords,
+  titleOf: (item) => item.title,
+  subtitleOf: () => '',
+  buildRecord: (input, id, existing) => ({
+    ...input,
+    id,
+    title: input.title.trim(),
+    favourite: existing?.favourite ?? false,
+    createdAt: existing?.createdAt ?? Math.floor(Date.now() / 1000),
+    updatedAt: Math.floor(Date.now() / 1000),
+    revision: (existing?.revision ?? 0) + 1,
+  }),
+})
+
+const previewCards: Record<string, LoginCard> = {
+  gmail: {
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', password: 'preview-only-not-a-real-password', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
+  },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: true, legacyFields: [] },
+}
+
+const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
 
 export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
   if (previewMode) return previewCapabilities
@@ -611,6 +816,8 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       site,
       initials,
       url: previewUrl(input.url),
+      urls: input.urls ?? [],
+      tags: input.tags ?? [],
       username: input.username.trim(),
       email: input.email.trim(),
       password: input.password,
@@ -622,6 +829,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       recoveryPhone: input.recoveryPhone.trim() || undefined,
       recoveryNotApplicable: input.recoveryNotApplicable,
       notes: input.notes.trim() || undefined,
+      legacyFields: previewCards[id]?.legacyFields ?? [],
     }
     if (input.id && previewCards[id]) captureHistoryPreview('login', id, previewCards[id].title, previewCards[id])
     previewCards[id] = card
@@ -727,217 +935,83 @@ export async function deleteLogin(id: string): Promise<DeleteLoginResult> {
 }
 
 export async function getIdentity(id: string): Promise<Identity> {
-  if (previewMode) {
-    const identity = previewIdentities[id]
-    if (!identity) throw new Error('That saved identity no longer exists.')
-    return identity
-  }
-  return invoke<Identity>('get_identity', { id })
+  return identityApi.get(id)
 }
 
 export async function saveIdentity(input: IdentityInput): Promise<SaveIdentityResult> {
-  if (previewMode) {
-    const id = input.id || `preview-identity-${crypto.randomUUID()}`
-    const identity: Identity = { ...input, id, label: input.label.trim(), favourite: previewIdentities[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewIdentities[id]) captureHistoryPreview('identity', id, previewIdentities[id].label, previewIdentities[id])
-    previewIdentities[id] = identity
-    upsertPreviewItem('identity', id, identity.label, identity.fullName || identity.email, identity.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveIdentityResult>('save_identity', { input })
+  return identityApi.save(input)
 }
 
 export async function deleteIdentity(id: string): Promise<DeleteIdentityResult> {
-  if (previewMode) {
-    if (!previewIdentities[id]) throw new Error('That saved identity no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('identity', id, previewIdentities[id].label, previewIdentities[id])
-    delete previewIdentities[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteIdentityResult>('delete_identity', { id })
+  return identityApi.delete(id)
 }
 
 export async function getSecureNote(id: string): Promise<SecureNote> {
-  if (previewMode) {
-    const note = previewSecureNotes[id]
-    if (!note) throw new Error('That saved note no longer exists.')
-    return note
-  }
-  return invoke<SecureNote>('get_secure_note', { id })
+  return secureNoteApi.get(id)
 }
 
 export async function saveSecureNote(input: SecureNoteInput): Promise<SaveSecureNoteResult> {
-  if (previewMode) {
-    const id = input.id || `preview-note-${crypto.randomUUID()}`
-    const note: SecureNote = { ...input, id, title: input.title.trim(), favourite: previewSecureNotes[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewSecureNotes[id]) captureHistoryPreview('secure_note', id, previewSecureNotes[id].title, previewSecureNotes[id])
-    previewSecureNotes[id] = note
-    upsertPreviewItem('secure_note', id, note.title, '', note.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveSecureNoteResult>('save_secure_note', { input })
+  return secureNoteApi.save(input)
 }
 
 export async function deleteSecureNote(id: string): Promise<DeleteSecureNoteResult> {
-  if (previewMode) {
-    if (!previewSecureNotes[id]) throw new Error('That saved note no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('secure_note', id, previewSecureNotes[id].title, previewSecureNotes[id])
-    delete previewSecureNotes[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteSecureNoteResult>('delete_secure_note', { id })
+  return secureNoteApi.delete(id)
 }
 
 export async function getCard(id: string): Promise<Card> {
-  if (previewMode) {
-    const card = previewPaymentCards[id]
-    if (!card) throw new Error('That saved card no longer exists.')
-    return card
-  }
-  return invoke<Card>('get_card', { id })
+  return cardApi.get(id)
 }
 
 export async function saveCard(input: CardInput): Promise<SaveCardResult> {
-  if (previewMode) {
-    const id = input.id || `preview-card-${crypto.randomUUID()}`
-    const card: Card = { ...input, id, title: input.title.trim(), favourite: previewPaymentCards[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewPaymentCards[id]) captureHistoryPreview('card', id, previewPaymentCards[id].title, previewPaymentCards[id])
-    previewPaymentCards[id] = card
-    upsertPreviewItem('card', id, card.title, card.brand, card.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveCardResult>('save_card', { input })
+  return cardApi.save(input)
 }
 
 export async function deleteCard(id: string): Promise<DeleteCardResult> {
-  if (previewMode) {
-    if (!previewPaymentCards[id]) throw new Error('That saved card no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('card', id, previewPaymentCards[id].title, previewPaymentCards[id])
-    delete previewPaymentCards[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteCardResult>('delete_card', { id })
+  return cardApi.delete(id)
 }
 
 export async function getWifiNetwork(id: string): Promise<WifiNetwork> {
-  if (previewMode) {
-    const network = previewWifiNetworks[id]
-    if (!network) throw new Error('That saved network no longer exists.')
-    return network
-  }
-  return invoke<WifiNetwork>('get_wifi_network', { id })
+  return wifiNetworkApi.get(id)
 }
 
 export async function saveWifiNetwork(input: WifiNetworkInput): Promise<SaveWifiNetworkResult> {
-  if (previewMode) {
-    const id = input.id || `preview-wifi-${crypto.randomUUID()}`
-    const network: WifiNetwork = { ...input, id, title: input.title.trim(), favourite: previewWifiNetworks[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewWifiNetworks[id]) captureHistoryPreview('wifi_network', id, previewWifiNetworks[id].title, previewWifiNetworks[id])
-    previewWifiNetworks[id] = network
-    upsertPreviewItem('wifi_network', id, network.title, network.ssid, network.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveWifiNetworkResult>('save_wifi_network', { input })
+  return wifiNetworkApi.save(input)
 }
 
 export async function deleteWifiNetwork(id: string): Promise<DeleteWifiNetworkResult> {
-  if (previewMode) {
-    if (!previewWifiNetworks[id]) throw new Error('That saved network no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('wifi_network', id, previewWifiNetworks[id].title, previewWifiNetworks[id])
-    delete previewWifiNetworks[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteWifiNetworkResult>('delete_wifi_network', { id })
+  return wifiNetworkApi.delete(id)
 }
 
 export async function getSshKey(id: string): Promise<SshKey> {
-  if (previewMode) {
-    const key = previewSshKeys[id]
-    if (!key) throw new Error('That saved key no longer exists.')
-    return key
-  }
-  return invoke<SshKey>('get_ssh_key', { id })
+  return sshKeyApi.get(id)
 }
 
 export async function saveSshKey(input: SshKeyInput): Promise<SaveSshKeyResult> {
-  if (previewMode) {
-    const id = input.id || `preview-ssh-key-${crypto.randomUUID()}`
-    const key: SshKey = { ...input, id, title: input.title.trim(), favourite: previewSshKeys[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewSshKeys[id]) captureHistoryPreview('ssh_key', id, previewSshKeys[id].title, previewSshKeys[id])
-    previewSshKeys[id] = key
-    upsertPreviewItem('ssh_key', id, key.title, key.keyType, key.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveSshKeyResult>('save_ssh_key', { input })
+  return sshKeyApi.save(input)
 }
 
 export async function deleteSshKey(id: string): Promise<DeleteSshKeyResult> {
-  if (previewMode) {
-    if (!previewSshKeys[id]) throw new Error('That saved key no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('ssh_key', id, previewSshKeys[id].title, previewSshKeys[id])
-    delete previewSshKeys[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteSshKeyResult>('delete_ssh_key', { id })
+  return sshKeyApi.delete(id)
 }
 
 export async function getSoftwareLicense(id: string): Promise<SoftwareLicense> {
-  if (previewMode) {
-    const license = previewSoftwareLicenses[id]
-    if (!license) throw new Error('That saved licence no longer exists.')
-    return license
-  }
-  return invoke<SoftwareLicense>('get_software_license', { id })
+  return softwareLicenseApi.get(id)
 }
 
 export async function saveSoftwareLicense(input: SoftwareLicenseInput): Promise<SaveSoftwareLicenseResult> {
-  if (previewMode) {
-    const id = input.id || `preview-license-${crypto.randomUUID()}`
-    const license: SoftwareLicense = { ...input, id, title: input.title.trim(), favourite: previewSoftwareLicenses[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewSoftwareLicenses[id]) captureHistoryPreview('software_license', id, previewSoftwareLicenses[id].title, previewSoftwareLicenses[id])
-    previewSoftwareLicenses[id] = license
-    upsertPreviewItem('software_license', id, license.title, license.productName, license.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveSoftwareLicenseResult>('save_software_license', { input })
+  return softwareLicenseApi.save(input)
 }
 
 export async function deleteSoftwareLicense(id: string): Promise<DeleteSoftwareLicenseResult> {
-  if (previewMode) {
-    if (!previewSoftwareLicenses[id]) throw new Error('That saved licence no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('software_license', id, previewSoftwareLicenses[id].title, previewSoftwareLicenses[id])
-    delete previewSoftwareLicenses[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteSoftwareLicenseResult>('delete_software_license', { id })
+  return softwareLicenseApi.delete(id)
 }
 
 export async function getDocument(id: string): Promise<DocumentMetadata> {
-  if (previewMode) {
-    const document = previewDocuments[id]
-    if (!document) throw new Error('That saved document no longer exists.')
-    return document
-  }
-  return invoke<DocumentMetadata>('get_document', { id })
+  return documentApi.get(id)
 }
 
 export async function saveDocument(input: DocumentMetadataInput): Promise<SaveDocumentMetadataResult> {
-  if (previewMode) {
-    const id = input.id || `preview-document-${crypto.randomUUID()}`
-    const attachments = previewDocuments[id]?.attachments ?? []
-    const document: DocumentMetadata = { ...input, id, title: input.title.trim(), attachments, favourite: previewDocuments[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewDocuments[id]) captureHistoryPreview('document', id, previewDocuments[id].title, previewDocuments[id])
-    previewDocuments[id] = document
-    upsertPreviewItem('document', id, document.title, document.documentType, document.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveDocumentMetadataResult>('save_document', { input })
+  return documentApi.save(input)
 }
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
@@ -979,46 +1053,19 @@ export async function removeDocumentAttachment(documentId: string, attachmentId:
 }
 
 export async function deleteDocument(id: string): Promise<DeleteDocumentMetadataResult> {
-  if (previewMode) {
-    if (!previewDocuments[id]) throw new Error('That saved document no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('document', id, previewDocuments[id].title, previewDocuments[id])
-    delete previewDocuments[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteDocumentMetadataResult>('delete_document', { id })
+  return documentApi.delete(id)
 }
 
 export async function getCustomRecord(id: string): Promise<CustomRecord> {
-  if (previewMode) {
-    const record = previewCustomRecords[id]
-    if (!record) throw new Error('That saved record no longer exists.')
-    return record
-  }
-  return invoke<CustomRecord>('get_custom_record', { id })
+  return customRecordApi.get(id)
 }
 
 export async function saveCustomRecord(input: CustomRecordInput): Promise<SaveCustomRecordResult> {
-  if (previewMode) {
-    const id = input.id || `preview-custom-record-${crypto.randomUUID()}`
-    const record: CustomRecord = { ...input, id, title: input.title.trim(), favourite: previewCustomRecords[id]?.favourite ?? false, updatedAt: Math.floor(Date.now() / 1000) }
-    if (input.id && previewCustomRecords[id]) captureHistoryPreview('custom_record', id, previewCustomRecords[id].title, previewCustomRecords[id])
-    previewCustomRecords[id] = record
-    upsertPreviewItem('custom_record', id, record.title, '', record.tags)
-    return { id, snapshot: previewSnapshot }
-  }
-  return invoke<SaveCustomRecordResult>('save_custom_record', { input })
+  return customRecordApi.save(input)
 }
 
 export async function deleteCustomRecord(id: string): Promise<DeleteCustomRecordResult> {
-  if (previewMode) {
-    if (!previewCustomRecords[id]) throw new Error('That saved record no longer exists.')
-    removePreviewItem(id)
-    trashPreviewItem('custom_record', id, previewCustomRecords[id].title, previewCustomRecords[id])
-    delete previewCustomRecords[id]
-    return { deletedId: id, snapshot: previewSnapshot }
-  }
-  return invoke<DeleteCustomRecordResult>('delete_custom_record', { id })
+  return customRecordApi.delete(id)
 }
 
 export async function previewTrashedItem(id: string): Promise<ItemPreview> {
@@ -1316,9 +1363,9 @@ export async function copyToClipboard(value: string): Promise<void> {
     }, clipboardClearMs)
     return
   }
-  await writeText(value)
-  // Read-back and clear run in Rust so the webview never gains clipboard-read permission.
-  const epoch = await invoke<number>('arm_clipboard_clear', { value })
+  // The copy runs in Rust so the value crosses once and carries the secret hint
+  // that keeps clipboard managers from filing it in their history.
+  const epoch = await invoke<number>('copy_secret', { value })
   window.setTimeout(() => {
     void invoke('clear_clipboard_if_unchanged', { epoch }).catch(() => {})
   }, clipboardClearMs)

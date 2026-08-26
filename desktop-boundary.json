@@ -34,6 +34,7 @@
     "tools/version-contract.mjs",
     "tools/browser-host.mjs",
     "tools/build-browser-host.mjs",
+    "tools/check-linux-prerequisites.mjs",
     "tools/stage-browser-host.mjs"
   ]
 }

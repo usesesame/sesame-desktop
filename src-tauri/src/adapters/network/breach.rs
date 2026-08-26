@@ -12,7 +12,8 @@ use crate::vault::VaultResult;
 const HIBP_RANGE_URL: &str = "https://api.pwnedpasswords.com/range/";
 const HIBP_TIMEOUT_SECS: u64 = 10;
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BreachCheckResult {
     pub breached: bool,

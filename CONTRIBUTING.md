@@ -24,7 +24,9 @@ file from different directions.
 
 ## Getting set up
 
-You need Node.js 24.13, Rust 1.93.1, and the Windows WebView2 runtime.
+You need Node.js 24.13 and Rust 1.93.1. Windows also needs WebView2. Linux
+needs the WebKitGTK, tray, and packaging dependencies listed in
+[README.md](README.md).
 
 ```bash
 npm ci
@@ -37,9 +39,12 @@ not your change.
 
 To run the app while you work:
 
-```powershell
-npm.cmd run tauri dev
+```bash
+npm run tauri:dev:browser
 ```
+
+On Linux, `npm run desktop:linux:dev` checks the native dependencies before
+running the same workflow.
 
 `npm run desktop:dev` runs the same interface in a browser against an
 in-memory preview vault. It is quicker for interface work, but it never reaches

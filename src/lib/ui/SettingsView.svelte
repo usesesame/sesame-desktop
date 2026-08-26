@@ -3,7 +3,7 @@
   import Icon from '../Icon.svelte'
   import SyncPreviewHost from './SyncPreviewHost.svelte'
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
-  import { SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
+  import { appVersion, SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
@@ -241,6 +241,7 @@
               <div class="setting-copy"><strong>Start at sign-in</strong><p>Opens in the tray when you sign in. The vault stays locked until you unlock it.</p></div>
               <button type="button" class="switch" class:active={autostartEnabled} role="switch" aria-checked={autostartEnabled} aria-label="Start at sign-in" disabled={autostartWorking} on:click={onToggleAutostart}><span></span></button>
             </article>
+            {#if $platformCapabilities.quickAccessShortcut}
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Quick access shortcut</strong><p>Opens the quick access popup from anywhere, even while Sesame is in the tray.</p></div>
@@ -248,10 +249,15 @@
                 {recordingShortcut ? 'Press keys (Esc cancels)' : formatAccelerator(quickAccessShortcut)}
               </button>
             </article>
+            {/if}
             <article>
               <span class="settings-icon"><Icon name="archive" size={16} /></span>
-              <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '...'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
-              {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing...' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking...' : 'Check now'}</button>{/if}
+              {#if $platformCapabilities.desktopUpdates}
+                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '...'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
+                {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing...' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking...' : 'Check now'}</button>{/if}
+              {:else}
+                <div class="setting-copy"><strong>Desktop updates</strong><p>Sesame does not update itself on this system. You are running {$appVersion ? `version ${$appVersion}` : 'this build'}. Update it the way you installed it to get security fixes.</p></div>
+              {/if}
             </article>
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>

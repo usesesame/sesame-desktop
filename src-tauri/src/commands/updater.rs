@@ -4,7 +4,8 @@ use base64::Engine;
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use tauri::{process::restart, AppHandle, Emitter, Manager};
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopUpdateStatus {
     pub available: bool,
@@ -12,7 +13,8 @@ pub struct DesktopUpdateStatus {
     pub body: Option<String>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 struct DesktopUpdateProgress {
     downloaded_bytes: u64,
@@ -33,6 +35,9 @@ struct CandidateReceipt {
 }
 
 async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
+    if !cfg!(windows) {
+        return Err("Desktop updates are not available on this operating system.".into());
+    }
     if option_env!("SESAME_UPDATER_PUBLIC_KEY").is_none_or(|key| key.trim().is_empty()) {
         return Err("This Sesame build does not include an updater public key.".into());
     }
@@ -120,7 +125,7 @@ fn updater_architecture() -> VaultResult<&'static str> {
     match std::env::consts::ARCH {
         "x86_64" => Ok("x86_64"),
         "aarch64" => Ok("aarch64"),
-        _ => Err("This Windows architecture is not supported by the Sesame updater.".into()),
+        _ => Err("This architecture is not supported by the Sesame updater.".into()),
     }
 }
 
