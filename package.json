@@ -52,7 +52,7 @@
     "desktop:linux:prerequisites": "node tools/check-linux-prerequisites.mjs",
     "desktop:linux:bundle-prerequisites": "node tools/check-linux-prerequisites.mjs --bundle",
     "desktop:linux:dev": "npm run desktop:linux:prerequisites && npm run tauri:dev:browser",
-    "types:generate": "cargo test --manifest-path src-tauri/Cargo.toml --lib export_bindings"
+    "types:generate": "node tools/generate-types.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
