@@ -144,7 +144,8 @@ fn origin_match_kind(
     base.contains('.').then_some(OriginMatchKind::WwwAlias)
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserFillCandidate {
     pub(crate) id: String,
@@ -153,6 +154,7 @@ pub struct BrowserFillCandidate {
     /// Never crosses the pipe to the extension; only the desktop's own approval modal.
     email: String,
     saved_origin: String,
+    #[ts(type = "'exact' | 'wwwAlias'")]
     match_kind: &'static str,
 }
 
@@ -967,6 +969,10 @@ pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
 }
 
 pub fn start(app: AppHandle) -> io::Result<()> {
+    // browser_host::register already reports the unsupported platform at startup.
+    if !crate::browser_host::is_supported() {
+        return Ok(());
+    }
     let expected_client = std::env::current_exe()?.with_file_name(HOST_FILE_NAME);
     thread::Builder::new()
         .name("sesame-browser-broker".into())

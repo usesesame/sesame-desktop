@@ -1154,6 +1154,28 @@ button.no-totp:hover { filter: brightness(.97); }
   .panel-resizer { display: none; }
 }
 
+@media (max-width: 1100px), (max-height: 680px) {
+  .app-shell { grid-template-columns: 208px minmax(0, 1fr); }
+  .sidebar { padding: var(--space-4) 10px var(--space-3); }
+  .sidebar .brand { padding-inline: 8px; font-size: 18px; }
+  .sidebar .sesame-mark { width: 27px; height: 27px; }
+  .sidebar nav { margin-top: var(--space-5); }
+  .sidebar nav button { min-height: 36px; gap: 9px; padding-inline: 10px; }
+  .sidebar-bottom { padding-top: var(--space-2); }
+  .lock-button { min-height: 36px; gap: 9px; padding-inline: 10px; }
+  .sidebar-status { margin-top: var(--space-3); padding-inline: 10px; }
+  .sidebar-build { margin-top: var(--space-3); padding: var(--space-2) 10px 0; }
+  .workspace { padding: var(--space-4) var(--space-5) var(--space-5); }
+  .topbar { min-height: 54px; }
+  .vault-workspace .topbar, .cleanup-workspace .topbar { flex-basis: 54px; }
+  .settings-tabs { margin-bottom: var(--space-4); }
+  .settings-tabs button { padding: 7px 12px; }
+  .settings-groups { gap: var(--space-4); }
+  .settings-list { padding: var(--space-1) var(--space-4); }
+  .settings-view article { gap: var(--space-3); padding: var(--space-3) 0; }
+  .settings-icon { width: 32px; height: 32px; }
+}
+
 @media (max-width: 920px) {
   .vault-layout { grid-template-columns: 210px minmax(0, 1fr); gap: var(--space-3); }
   .workspace { padding-inline: var(--space-4); }

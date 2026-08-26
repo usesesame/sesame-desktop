@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import Icon from '../Icon.svelte'
+  import { platformCapabilities } from '../platform'
 
   export let onStart: () => void
 
@@ -20,7 +21,7 @@
     <ul class="welcome-steps">
       <li><span class="step-icon"><Icon name="vault" size={17} /></span><span>Create your vault with a master password.</span></li>
       <li><span class="step-icon"><Icon name="file-key" size={17} /></span><span>Write down a recovery kit that opens the vault if you forget that password.</span></li>
-      <li><span class="step-icon"><Icon name="key" size={17} /></span><span>Pick a PIN or Windows Hello for everyday unlock.</span></li>
+      {#if $platformCapabilities.pinUnlock || $platformCapabilities.biometricUnlock}<li><span class="step-icon"><Icon name="key" size={17} /></span><span>Pick a {$platformCapabilities.biometricUnlock ? 'PIN or Windows Hello' : 'PIN'} for everyday unlock.</span></li>{/if}
     </ul>
 
     <button type="button" class="start-button" on:click={onStart}>Start setup</button>

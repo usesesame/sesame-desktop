@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
+  import { SvelteSet } from 'svelte/reactivity'
   import SetupProgress from './SetupProgress.svelte'
 
   export let recoveryKit = ''
@@ -61,7 +62,7 @@
 
   function chooseGroups(total: number, count: number): number[] {
     if (total <= count) return Array.from({ length: total }, (_, i) => i)
-    const chosen = new Set<number>()
+    const chosen = new SvelteSet<number>()
     while (chosen.size < count) {
       chosen.add(Math.floor(Math.random() * total))
     }

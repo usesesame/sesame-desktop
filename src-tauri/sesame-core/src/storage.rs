@@ -9,7 +9,7 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::crypto::{
     decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
 };
-use crate::platform::{protect_for_windows_profile, replace_file, unprotect_for_windows_profile};
+use crate::platform::{protect_for_device, replace_file, unprotect_for_device};
 use crate::snapshot::duplicate_key;
 use crate::{
     payload_aad_for_file,
@@ -47,8 +47,8 @@ pub fn read_pin_throttle_state_at(path: &Path) -> VaultResult<Option<PersistedPi
         }
         Err(_) => return Err("Sesame could not read the PIN protection state.".into()),
     };
-    let mut plain = unprotect_for_windows_profile(&bytes).map_err(|_| {
-        "Windows could not open the PIN protection state. Use your master password instead."
+    let mut plain = unprotect_for_device(&bytes).map_err(|_| {
+        "This device could not open the PIN protection state. Use your master password instead."
             .to_string()
     })?;
     let state = serde_json::from_slice::<PersistedPinThrottle>(&plain).map_err(|_| {
@@ -62,7 +62,7 @@ pub fn write_pin_throttle_state_at(path: &Path, guard: &PinAttemptGuard) -> Vaul
     let state = guard.persisted();
     let mut plain = serde_json::to_vec(&state)
         .map_err(|_| "Sesame could not save the PIN protection state.".to_string())?;
-    let protected = protect_for_windows_profile(&plain)?;
+    let protected = protect_for_device(&plain)?;
     plain.zeroize();
     write_export_file(path, &protected)
 }
@@ -312,7 +312,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
     let mut pepper = [0_u8; 32];
     fill_random(&mut pepper);
-    let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_windows_profile(&pepper)?);
+    let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&pepper)?);
     let kdf = default_kdf_params();
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(pepper)));
     pepper.zeroize();
@@ -394,8 +394,9 @@ pub fn derive_pin_wrapping_key(pin: &str, pin_wrap: &PinWrap) -> VaultResult<[u8
     let protected_pepper = URL_SAFE_NO_PAD
         .decode(&pin_wrap.protected_pepper)
         .map_err(|_| "The PIN unlock data is invalid. Use another unlock method.".to_string())?;
-    let mut pepper = unprotect_for_windows_profile(&protected_pepper)
-        .map_err(|_| "Windows could not open the PIN unlock data for this profile.".to_string())?;
+    let mut pepper = unprotect_for_device(&protected_pepper).map_err(|error| {
+        format!("PIN unlock could not access this device's protected credential store: {error}")
+    })?;
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(&pepper)));
     pepper.zeroize();
     derive_key(secret.as_str(), &pin_wrap.kdf)

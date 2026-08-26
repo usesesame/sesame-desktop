@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { platformCapabilities } from '../platform'
   import { controlWindow } from '../vault'
 
   export let keepInTray = true
@@ -28,8 +29,10 @@
     <div class="chrome-drag-space" data-tauri-drag-region></div>
   {/if}
   <div class="window-controls" role="group" aria-label="Window controls">
-    <button type="button" class="window-control" aria-label="Minimize" on:click={() => controlWindow('minimize')}><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M2 5h6" /></svg></button>
-    <button type="button" class="window-control" aria-label="Maximize or restore" on:click={() => controlWindow('toggle-maximize')}><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect x="2.2" y="2.2" width="5.6" height="5.6" rx=".4" /></svg></button>
+    {#if $platformCapabilities.windowControls}
+      <button type="button" class="window-control" aria-label="Minimize" on:click={() => controlWindow('minimize')}><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M2 5h6" /></svg></button>
+      <button type="button" class="window-control" aria-label="Maximize or restore" on:click={() => controlWindow('toggle-maximize')}><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect x="2.2" y="2.2" width="5.6" height="5.6" rx=".4" /></svg></button>
+    {/if}
     <button type="button" class="window-control close" aria-label={keepInTray ? 'Hide Sesame to tray' : 'Close Sesame'} title={keepInTray ? 'Hide Sesame to tray' : 'Close Sesame'} on:click={() => controlWindow('close')}><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><path d="M2.2 2.2 7.8 7.8M7.8 2.2 2.2 7.8" /></svg></button>
   </div>
 </header>

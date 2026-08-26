@@ -1,5 +1,5 @@
 import type { AppStores } from '../stores/app-stores'
-import type { BreachCheckResult, CleanupEntry, Folder, LoginInput } from '../types'
+import type { BreachCheckResult, CleanupEntry, Folder, LoginInput, VaultEntry } from '../types'
 import { derived } from 'svelte/store'
 import { makePassword } from '../generator'
 import {
@@ -259,7 +259,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     if (!current.selectedIds.length) return
     const entries = (vault.value().snapshot?.entries ?? [])
       .filter((entry) => current.selectedIds.includes(entry.id))
-      .map((entry) => ({ id: entry.id, title: entry.title, site: entry.site, username: '', initials: entry.initials }))
+      .map((entry) => ({ id: entry.id, title: entry.title, site: entry.site, username: '', initials: entry.initials, reason: '' }))
     if (!entries.length) return
     requestBulkDelete(entries)
   }
@@ -345,7 +345,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       const card = vault.value().loginCard
       if (!card) return
       closeEditor()
-      requestDelete({ id: card.id, title: card.title, site: card.site, username: card.username, initials: card.initials })
+      requestDelete({ id: card.id, title: card.title, site: card.site, username: card.username, initials: card.initials, reason: '' })
     },
     async markRecoveryNotApplicable() {
       const card = vault.value().loginCard
@@ -426,9 +426,9 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       await selectEntry(id)
       openEditor()
     },
-    deleteContext(entry: CleanupEntry) {
+    deleteContext(entry: VaultEntry) {
       state.patch({ entryMenu: null })
-      requestDelete(entry)
+      requestDelete({ id: entry.id, title: entry.title, site: entry.site, username: '', initials: entry.initials, reason: '' })
     },
     async moveContext(folderId?: string) {
       const id = state.value().entryMenu?.id

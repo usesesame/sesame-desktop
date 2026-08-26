@@ -3,6 +3,7 @@
   import Icon from '../Icon.svelte'
   import SetupProgress from './SetupProgress.svelte'
   import type { VaultStatus } from '../types'
+  import { platformCapabilities } from '../platform'
 
   const PIN_LENGTH = 6
 
@@ -56,8 +57,8 @@
     else masterPasswordInput?.focus()
   }
 
-  $: showPin = status.exists && status.pinUnlockAvailable && !recoveryUnlockOpen
-  $: showHello = status.exists && status.helloUnlockAvailable && !recoveryUnlockOpen
+  $: showPin = status.exists && status.pinUnlockAvailable && $platformCapabilities.pinUnlock && !recoveryUnlockOpen
+  $: showHello = status.exists && status.helloUnlockAvailable && $platformCapabilities.biometricUnlock && !recoveryUnlockOpen
   $: if (unlockPin.length < PIN_LENGTH) pinSubmitted = false
   $: if (showPin && unlockPin.length === PIN_LENGTH && !isWorking && !pinSubmitted) {
     pinSubmitted = true

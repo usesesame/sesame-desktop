@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use crate::sync::keys::{EncryptionKeypair, X25519_KEY_BYTES};
-use crate::vault::platform::{protect_for_windows_profile, unprotect_for_windows_profile};
+use crate::vault::platform::{protect_for_device, unprotect_for_device};
 use crate::vault::VaultResult;
 
 pub const IDENTITY_FILE_NAME: &str = "sync-identity.sesame";
@@ -105,11 +105,11 @@ impl DeviceIdentity {
 
     pub fn save(&self, path: &Path) -> VaultResult<()> {
         let mut signing_seed = self.signing.to_bytes();
-        let protected_signing = protect_for_windows_profile(&signing_seed);
+        let protected_signing = protect_for_device(&signing_seed);
         signing_seed.zeroize();
 
         let mut encryption_secret = self.encryption.secret_bytes();
-        let protected_encryption = protect_for_windows_profile(&encryption_secret);
+        let protected_encryption = protect_for_device(&encryption_secret);
         encryption_secret.zeroize();
 
         let stored = StoredIdentity {
@@ -139,7 +139,7 @@ impl DeviceIdentity {
             return Err("These device keys were written by a newer Sesame.".to_string());
         }
 
-        let mut signing_seed = unprotect_for_windows_profile(
+        let mut signing_seed = unprotect_for_device(
             &URL_SAFE_NO_PAD
                 .decode(&stored.protected_signing_seed)
                 .map_err(|_| "Sesame could not read the device keys.".to_string())?,
@@ -151,7 +151,7 @@ impl DeviceIdentity {
         let signing = SigningKey::from_bytes(&signing_array);
         signing_seed.zeroize();
 
-        let mut encryption_secret = unprotect_for_windows_profile(
+        let mut encryption_secret = unprotect_for_device(
             &URL_SAFE_NO_PAD
                 .decode(&stored.protected_encryption_secret)
                 .map_err(|_| "Sesame could not read the device keys.".to_string())?,

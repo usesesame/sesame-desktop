@@ -1,12 +1,9 @@
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
+use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
-    DeleteSecureNoteResult, SaveSecureNoteResult, SecureNote, SecureNoteInput, TaggedItem,
+    DeleteSecureNoteResult, SaveSecureNoteResult, SecureNote, SecureNoteInput,
 };
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 fn secure_note_from_input(input: SecureNoteInput) -> VaultResult<SecureNote> {
     let title = input.title.trim();
@@ -48,90 +45,19 @@ fn secure_note_from_input(input: SecureNoteInput) -> VaultResult<SecureNote> {
     })
 }
 
-fn payload_without_secure_note(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    let mut next = payload.clone();
-    match next.take_active_item(id) {
-        Some(TaggedItem::SecureNote(_)) => {}
-        _ => return Err("That saved note no longer exists.".into()),
-    }
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_secure_note(id: String, state: State<'_, VaultState>) -> VaultResult<SecureNote> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    match session.payload.active_item(&id) {
-        Some(TaggedItem::SecureNote(note)) => Ok(note),
-        _ => Err("That saved note no longer exists.".into()),
-    }
-}
-
-#[tauri::command]
-pub fn save_secure_note(
+impl_record_commands! {
+    item: SecureNote,
     input: SecureNoteInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveSecureNoteResult> {
-    let mut note = secure_note_from_input(input)?;
-    let note_id = note.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a note.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(previous) = next_payload.take_active_item(&note_id) {
-        let TaggedItem::SecureNote(existing) = previous else {
-            return Err("That item id belongs to a different kind of saved item.".into());
-        };
-        note.created_at = existing.created_at;
-        note.revision = existing.revision.saturating_add(1);
-        note.folder_id = existing.folder_id.clone();
-        note.favourite = existing.favourite;
-        note.last_used_at = existing.last_used_at;
-        note.legacy_fields = existing.legacy_fields.clone();
-        crate::vault::history::capture_history(&mut next_payload, TaggedItem::SecureNote(existing));
-    }
-    next_payload.insert_active_item(TaggedItem::SecureNote(note))?;
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveSecureNoteResult {
-        id: note_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_secure_note(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<DeleteSecureNoteResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved note to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a note.")?;
-    let note = match session.payload.active_item(id) {
-        Some(TaggedItem::SecureNote(note)) => note,
-        _ => return Err("That saved note no longer exists.".into()),
-    };
-    let mut next_payload = payload_without_secure_note(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::SecureNote(note));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteSecureNoteResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: SecureNote,
+    save_result: SaveSecureNoteResult,
+    delete_result: DeleteSecureNoteResult,
+    from_input: secure_note_from_input,
+    get_fn: get_secure_note,
+    save_fn: save_secure_note,
+    delete_fn: delete_secure_note,
+    missing_noun: "note",
+    save_unlock_msg: "Unlock your vault before saving a note.",
+    delete_unlock_msg: "Unlock your vault before deleting a note.",
+    delete_empty_msg: "Choose a saved note to delete.",
+    extra_carry: |item, existing| item.legacy_fields = existing.legacy_fields.clone(),
 }

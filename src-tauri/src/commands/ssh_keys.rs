@@ -1,10 +1,7 @@
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
-use crate::vault::types::{DeleteSshKeyResult, SaveSshKeyResult, SshKey, SshKeyInput, TaggedItem};
+use crate::commands::record_commands::impl_record_commands;
+use crate::vault::types::{DeleteSshKeyResult, SaveSshKeyResult, SshKey, SshKeyInput};
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 fn ssh_key_from_input(input: SshKeyInput) -> VaultResult<SshKey> {
     let title = input.title.trim();
@@ -57,96 +54,18 @@ fn ssh_key_from_input(input: SshKeyInput) -> VaultResult<SshKey> {
     })
 }
 
-fn payload_without_ssh_key(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    if !payload.ssh_keys.iter().any(|key| key.id == id) {
-        return Err("That saved key no longer exists.".into());
-    }
-    let mut next = payload.clone();
-    next.ssh_keys.retain(|key| key.id != id);
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_ssh_key(id: String, state: State<'_, VaultState>) -> VaultResult<SshKey> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    session
-        .payload
-        .ssh_keys
-        .iter()
-        .find(|key| key.id == id)
-        .cloned()
-        .ok_or_else(|| "That saved key no longer exists.".to_string())
-}
-
-#[tauri::command]
-pub fn save_ssh_key(
+impl_record_commands! {
+    item: SshKey,
     input: SshKeyInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveSshKeyResult> {
-    let mut key = ssh_key_from_input(input)?;
-    let key_id = key.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a key.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(existing) = next_payload
-        .ssh_keys
-        .iter_mut()
-        .find(|saved| saved.id == key_id)
-    {
-        let previous = existing.clone();
-        key.created_at = existing.created_at;
-        key.revision = existing.revision.saturating_add(1);
-        key.folder_id = existing.folder_id.clone();
-        key.favourite = existing.favourite;
-        key.last_used_at = existing.last_used_at;
-        *existing = key;
-        crate::vault::history::capture_history(&mut next_payload, TaggedItem::SshKey(previous));
-    } else {
-        next_payload.ssh_keys.push(key);
-    }
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveSshKeyResult {
-        id: key_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_ssh_key(id: String, state: State<'_, VaultState>) -> VaultResult<DeleteSshKeyResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved key to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a key.")?;
-    let key = session
-        .payload
-        .ssh_keys
-        .iter()
-        .find(|key| key.id == id)
-        .cloned()
-        .ok_or("That saved key no longer exists.")?;
-    let mut next_payload = payload_without_ssh_key(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::SshKey(key));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteSshKeyResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: SshKey,
+    save_result: SaveSshKeyResult,
+    delete_result: DeleteSshKeyResult,
+    from_input: ssh_key_from_input,
+    get_fn: get_ssh_key,
+    save_fn: save_ssh_key,
+    delete_fn: delete_ssh_key,
+    missing_noun: "key",
+    save_unlock_msg: "Unlock your vault before saving a key.",
+    delete_unlock_msg: "Unlock your vault before deleting a key.",
+    delete_empty_msg: "Choose a saved key to delete.",
 }

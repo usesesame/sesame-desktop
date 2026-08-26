@@ -10,8 +10,8 @@ use crate::vault::storage::{
     check_supported_vault_format, clear_pin_throttle_state, complete_recovery_setup_for_session,
     derive_pin_wrapping_key, persist_session, read_pin_throttle_state, remove_hello_for_session,
     remove_pin_for_session, resume_recovery_setup_for_session, set_hello_for_session,
-    set_pin_for_session, validate_unlock_pin, vault_path, write_pin_throttle_state,
-    write_vault_file,
+    set_pin_for_session, validate_new_unlock_pin, validate_unlock_pin, vault_path,
+    write_pin_throttle_state, write_vault_file,
 };
 use crate::vault::util::random_id;
 use crate::vault::windows_hello;
@@ -132,7 +132,7 @@ pub fn create_vault(
     write_vault_file(&path, &opened.file)?;
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    establish_pin_throttle_state(&app, &state);
+    let _ = establish_pin_throttle_state(&app, &state);
 
     let snapshot = snapshot_for(&opened.payload);
     // `OpenedVault` zeroizes on drop, so clone and let it drop rather than moving fields out.
@@ -261,6 +261,7 @@ pub fn set_unlock_pin(
 ) -> VaultResult<()> {
     let mut pin = request.pin;
     let result = (|| {
+        validate_new_unlock_pin(&pin)?;
         let mut session = state
             .session
             .lock()
@@ -272,8 +273,8 @@ pub fn set_unlock_pin(
     })();
     pin.zeroize();
     if result.is_ok() {
+        let _ = establish_pin_throttle_state(&app, &state);
         state.cache_pin_unlock(true);
-        establish_pin_throttle_state(&app, &state);
     }
     result
 }
@@ -366,7 +367,7 @@ pub fn unlock_with_windows_hello(
     key_array.zeroize();
     drop(session);
     if result.is_ok() {
-        establish_pin_throttle_state(&app, &state);
+        let _ = establish_pin_throttle_state(&app, &state);
     }
     result
 }
@@ -462,12 +463,18 @@ fn ensure_pin_throttle_loaded(app: &AppHandle, state: &State<'_, VaultState>) ->
     Ok(())
 }
 
-pub(super) fn establish_pin_throttle_state(app: &AppHandle, state: &State<'_, VaultState>) {
-    if let Ok(mut guard) = state.pin_guard.lock() {
-        guard.record_success();
-        let _ = write_pin_throttle_state(app, &guard);
-        state.mark_pin_throttle_loaded();
-    }
+pub(super) fn establish_pin_throttle_state(
+    app: &AppHandle,
+    state: &State<'_, VaultState>,
+) -> VaultResult<()> {
+    let mut guard = state
+        .pin_guard
+        .lock()
+        .map_err(|_| "Sesame could not read the PIN protection state.".to_string())?;
+    guard.record_success();
+    write_pin_throttle_state(app, &guard)?;
+    state.mark_pin_throttle_loaded();
+    Ok(())
 }
 
 pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &State<'_, VaultState>) {
@@ -504,7 +511,7 @@ pub fn unlock_vault(
     let result = install_unlocked_session(&state, &mut session, path, key_array, file);
     drop(session);
     if result.is_ok() {
-        establish_pin_throttle_state(&app, &state);
+        let _ = establish_pin_throttle_state(&app, &state);
     }
     result
 }

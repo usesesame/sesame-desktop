@@ -14,9 +14,8 @@ concurrency:
 # portal, admin app, and browser extension have their own repositories and
 # their own CI, so nothing here builds them.
 #
-# Linux runs the cheap checks for fast feedback. Windows runs the vault core
-# and the production build, because the core depends on windows-sys and the
-# desktop bundle is a Windows build.
+# Linux runs the cheap checks for fast feedback. Both platforms build the
+# desktop app and its packages.
 #
 # `npm run desktop:ci` runs the same owned command surface locally.
 
@@ -123,6 +122,69 @@ jobs:
       - name: Build the desktop binary
         run: npm run tauri -- build --no-bundle
 
+  desktop-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: linux
+
+      - name: Install the webview and tray libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libdbus-1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsecret-tools \
+            patchelf \
+            xdg-utils \
+            rpm
+
+      - run: npm ci
+
+      - name: Check generated TypeScript bindings are current
+        run: |
+          npm run types:generate
+          if [ -n "$(git status --porcelain -- src/lib/generated)" ]; then
+            echo "src/lib/generated is out of date. Run 'npm run types:generate' and commit the result." >&2
+            git status --porcelain -- src/lib/generated >&2
+            exit 1
+          fi
+
+      - name: Check Linux desktop prerequisites
+        run: npm run desktop:linux:bundle-prerequisites
+
+      - name: Build the frontend
+        run: npm run desktop:build
+
+      - name: Lint and test the vault core
+        run: |
+          npm run desktop:lint:rust
+          cargo test --manifest-path src-tauri/Cargo.toml
+          cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview
+
+      - name: Build the Linux bundles
+        run: >-
+          npm run tauri -- build --bundles deb,rpm,appimage
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
   # ---------------------------------------------------------------------
   # Supply chain. Independent of the product jobs, so a new advisory does
   # not read as a broken build.
@@ -164,15 +226,7 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked
 
       - name: Audit Rust dependencies
-        # Both advisories affect quick-xml's namespace reader. The only locked
-        # quick-xml 0.39 dependency is a Linux-only Wayland build tool; it is
-        # absent from Sesame's Windows dependency graph and no patched
-        # wayland-scanner release exists yet. Keep these explicit, reviewable
-        # exceptions until upstream can move to quick-xml >= 0.41.
-        run: >-
-          cargo audit --file src-tauri/Cargo.lock
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
+        run: cargo audit --file src-tauri/Cargo.lock
 
       - name: Scan for secrets
         # The hosted action requires a commercial licence for organization

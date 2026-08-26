@@ -305,7 +305,7 @@ pub fn restore_backup(
     state.cache_pin_unlock(pin_unlock_available);
     state.cache_hello_unlock(hello_unlock_available);
     if pin_unlock_available {
-        establish_pin_throttle_state(&app, &state);
+        let _ = establish_pin_throttle_state(&app, &state);
     } else {
         discard_pin_throttle_state(&app, &state);
     }

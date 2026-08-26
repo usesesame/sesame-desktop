@@ -1,13 +1,9 @@
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
+use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
     DeleteSoftwareLicenseResult, SaveSoftwareLicenseResult, SoftwareLicense, SoftwareLicenseInput,
-    TaggedItem,
 };
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 fn software_license_from_input(input: SoftwareLicenseInput) -> VaultResult<SoftwareLicense> {
     let title = input.title.trim();
@@ -60,109 +56,18 @@ fn software_license_from_input(input: SoftwareLicenseInput) -> VaultResult<Softw
     })
 }
 
-fn payload_without_software_license(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    if !payload
-        .software_licenses
-        .iter()
-        .any(|license| license.id == id)
-    {
-        return Err("That saved licence no longer exists.".into());
-    }
-    let mut next = payload.clone();
-    next.software_licenses.retain(|license| license.id != id);
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_software_license(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<SoftwareLicense> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    session
-        .payload
-        .software_licenses
-        .iter()
-        .find(|license| license.id == id)
-        .cloned()
-        .ok_or_else(|| "That saved licence no longer exists.".to_string())
-}
-
-#[tauri::command]
-pub fn save_software_license(
+impl_record_commands! {
+    item: SoftwareLicense,
     input: SoftwareLicenseInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveSoftwareLicenseResult> {
-    let mut license = software_license_from_input(input)?;
-    let license_id = license.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a licence.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(existing) = next_payload
-        .software_licenses
-        .iter_mut()
-        .find(|saved| saved.id == license_id)
-    {
-        let previous = existing.clone();
-        license.created_at = existing.created_at;
-        license.revision = existing.revision.saturating_add(1);
-        license.folder_id = existing.folder_id.clone();
-        license.favourite = existing.favourite;
-        license.last_used_at = existing.last_used_at;
-        *existing = license;
-        crate::vault::history::capture_history(
-            &mut next_payload,
-            TaggedItem::SoftwareLicense(previous),
-        );
-    } else {
-        next_payload.software_licenses.push(license);
-    }
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveSoftwareLicenseResult {
-        id: license_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_software_license(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<DeleteSoftwareLicenseResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved licence to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a licence.")?;
-    let license = session
-        .payload
-        .software_licenses
-        .iter()
-        .find(|license| license.id == id)
-        .cloned()
-        .ok_or("That saved licence no longer exists.")?;
-    let mut next_payload = payload_without_software_license(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::SoftwareLicense(license));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteSoftwareLicenseResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: SoftwareLicense,
+    save_result: SaveSoftwareLicenseResult,
+    delete_result: DeleteSoftwareLicenseResult,
+    from_input: software_license_from_input,
+    get_fn: get_software_license,
+    save_fn: save_software_license,
+    delete_fn: delete_software_license,
+    missing_noun: "licence",
+    save_unlock_msg: "Unlock your vault before saving a licence.",
+    delete_unlock_msg: "Unlock your vault before deleting a licence.",
+    delete_empty_msg: "Choose a saved licence to delete.",
 }

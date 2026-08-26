@@ -12,6 +12,7 @@ mod items;
 mod lifecycle;
 mod logins;
 mod quick_access;
+mod record_commands;
 mod secure_notes;
 mod software_licenses;
 mod ssh_keys;

@@ -55,7 +55,7 @@
     <input id="confirm-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={confirmPin} aria-invalid={showMismatch} aria-describedby={showMismatch || errorMessage ? 'pin-setup-error' : undefined} on:input={updateConfirmation} />
     {#if showMismatch}<p id="pin-setup-error" class="form-error" role="alert">Those PINs do not match.</p>
     {:else if errorMessage}<p id="pin-setup-error" class="form-error" role="alert">{errorMessage}</p>{/if}
-    <p class="pin-security-note"><Icon name="monitor" size={15} /><span>The PIN is combined with a random secret protected by Windows before it wraps your vault key.</span></p>
+    <p class="pin-security-note"><Icon name="monitor" size={15} /><span>The PIN is combined with a random secret kept in this device's protected credential store before it wraps your vault key.</span></p>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={onCancel}>Not now</button>
       <button type="submit" class="primary-button" disabled={working || !pinsComplete || !pinsMatch}>{working ? 'Saving…' : 'Save PIN'}</button>

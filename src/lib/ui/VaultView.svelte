@@ -3,6 +3,7 @@
   import Icon from '../Icon.svelte'
   import { issueChipLabel, issueChips, issueFilterLabel, issueKindLabels } from '../issue-kinds'
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
+  import { platformCapabilities } from '../platform'
   import { useAppStores } from '../stores/app-stores'
   import type { BreachCheckResult, IssueKind, ItemKind } from '../types'
   import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels, tagFilter, tagFromFilter } from '../vault-collections'
@@ -528,10 +529,12 @@
 
         <div class="login-actions">
           {#if loginCard.url}<button class="site-action" on:click={() => onOpenWebsite(loginCard.url)}><Icon name="globe" size={17} /><span>Open site</span></button>{:else}<button class="site-action missing-action" on:click={onAddWebsite}><Icon name="globe" size={17} /><span>Add website</span></button>{/if}
-          {#if autoTypeEntryId === loginCard.id && autoTypeCountdown > 0}
-            <button class="site-action autotype-armed" on:click={onCancelAutoType}><Icon name="keyboard" size={17} /><span>Switch windows… typing in {autoTypeCountdown}. Cancel</span></button>
-          {:else}
-            <button class="site-action" disabled={!loginCard.username && !loginCard.password} on:click={onStartAutoType}><Icon name="keyboard" size={17} /><span>Auto-type</span></button>
+          {#if $platformCapabilities.autoType}
+            {#if autoTypeEntryId === loginCard.id && autoTypeCountdown > 0}
+              <button class="site-action autotype-armed" on:click={onCancelAutoType}><Icon name="keyboard" size={17} /><span>Switch windows… typing in {autoTypeCountdown}. Cancel</span></button>
+            {:else}
+              <button class="site-action" disabled={!loginCard.username && !loginCard.password} on:click={onStartAutoType}><Icon name="keyboard" size={17} /><span>Auto-type</span></button>
+            {/if}
           {/if}
           {#if loginCard.totpCode}<button class="totp-action" on:click={() => loginCard.totpCode && onCopy(loginCard.totpCode, '2FA code')} aria-label={`Copy 2FA code. ${totpRemaining} seconds remaining.`}><span>2FA code</span><strong>{loginCard.totpCode}</strong><span class="totp-countdown" style={`--totp-progress: ${totpProgress}`} aria-hidden="true"><small>{totpRemaining}</small></span></button>{#if totpRefreshIssue}<span class="totp-refresh-issue">Waiting to refresh</span>{/if}{:else}<button class="no-totp" on:click={onOpenLoginEditor}><Icon name="key" size={15} /> Add 2FA</button>{/if}
         </div>

@@ -27,7 +27,8 @@ pub struct DiagnosticInput {
     code: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticStatus {
     exists: bool,
@@ -40,7 +41,8 @@ pub struct DiagnosticStatus {
     recent: Vec<RecentEvent>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationCount {
     operation: String,
@@ -48,7 +50,8 @@ pub struct OperationCount {
     error_count: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeCount {
     code: String,
@@ -56,7 +59,8 @@ pub struct CodeCount {
     level: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentEvent {
     timestamp: u64,
@@ -491,6 +495,7 @@ fn allowed_code(value: &str) -> bool {
             | "identity_fill_listener_failed"
             | "vault_lock_listener_failed"
             | "idle_warning_listener_failed"
+            | "platform_capabilities_failed"
     )
 }
 

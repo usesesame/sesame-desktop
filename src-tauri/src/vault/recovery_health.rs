@@ -7,17 +7,20 @@ use super::{storage, VaultResult};
 
 const MAX_RECOVERY_HEALTH_BYTES: u64 = 64 * 1024;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryHealth {
     pub vault_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_exported_revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "string")]
     pub last_exported_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_verified_revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "string")]
     pub last_verified_at: Option<DateTime<Utc>>,
 }
 

@@ -36,7 +36,8 @@ struct ValidatedHost {
     addresses: Vec<SocketAddr>,
 }
 
-#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct WebsiteIconCacheStatus {
     entry_count: usize,

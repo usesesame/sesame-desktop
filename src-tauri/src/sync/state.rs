@@ -109,7 +109,7 @@ pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
     // Tag first: a crash leaves a mismatch that reads as absent, which fails closed.
-    let protected = crate::vault::platform::protect_for_windows_profile(&state_tag(&body))
+    let protected = crate::vault::platform::protect_for_device(&state_tag(&body))
         .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
     crate::vault::storage::atomic_replace(path, &body)
@@ -119,7 +119,7 @@ pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
 pub fn read_protected(path: &Path) -> Option<SyncBase> {
     let body = std::fs::read(path).ok()?;
     let protected = std::fs::read(tag_path(path)).ok()?;
-    let expected = crate::vault::platform::unprotect_for_windows_profile(&protected).ok()?;
+    let expected = crate::vault::platform::unprotect_for_device(&protected).ok()?;
     let actual = state_tag(&body);
     // Constant-time compare: an attacker who can write the state file controls both sides.
     if actual.len() != expected.len()

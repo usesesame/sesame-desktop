@@ -1,0 +1,6 @@
+[env]
+TS_RS_EXPORT_DIR = { value = "src/lib/generated", relative = true }
+# Tauri IPC serializes through JSON; every u64/u32 timestamp and counter in
+# these types arrives in the frontend as a plain JS number, never a bigint.
+# Match the type ts-rs emits to what the runtime value actually is.
+TS_RS_LARGE_INT = "number"

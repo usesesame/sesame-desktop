@@ -163,6 +163,7 @@ commands.allow = [
   "set_quick_access_shortcut",
   "get_autostart_enabled",
   "set_autostart_enabled",
+  "get_platform_capabilities",
 ]
 
 [[permission]]
@@ -178,7 +179,7 @@ commands.allow = [
 identifier = "clipboard-guard"
 description = "Digest-based clipboard auto-clear lifecycle for the main window."
 commands.allow = [
-  "arm_clipboard_clear",
+  "copy_secret",
   "clear_clipboard_if_unchanged",
 ]
 
@@ -190,7 +191,7 @@ commands.allow = [
   "search_quick_access_items",
   "get_quick_access_field",
   "open_quick_access_item",
-  "arm_clipboard_clear",
+  "copy_secret",
   "clear_clipboard_if_unchanged",
 ]
 

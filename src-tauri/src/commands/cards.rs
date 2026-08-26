@@ -1,10 +1,7 @@
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
-use crate::vault::types::{Card, CardInput, DeleteCardResult, SaveCardResult, TaggedItem};
+use crate::commands::record_commands::impl_record_commands;
+use crate::vault::types::{Card, CardInput, DeleteCardResult, SaveCardResult};
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 fn card_from_input(input: CardInput) -> VaultResult<Card> {
     let title = input.title.trim();
@@ -66,84 +63,19 @@ fn card_from_input(input: CardInput) -> VaultResult<Card> {
     })
 }
 
-fn payload_without_card(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    let mut next = payload.clone();
-    match next.take_active_item(id) {
-        Some(TaggedItem::Card(_)) => {}
-        _ => return Err("That saved card no longer exists.".into()),
-    }
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_card(id: String, state: State<'_, VaultState>) -> VaultResult<Card> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    match session.payload.active_item(&id) {
-        Some(TaggedItem::Card(card)) => Ok(card),
-        _ => Err("That saved card no longer exists.".into()),
-    }
-}
-
-#[tauri::command]
-pub fn save_card(input: CardInput, state: State<'_, VaultState>) -> VaultResult<SaveCardResult> {
-    let mut card = card_from_input(input)?;
-    let card_id = card.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a card.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(previous) = next_payload.take_active_item(&card_id) {
-        let TaggedItem::Card(existing) = previous else {
-            return Err("That item id belongs to a different kind of saved item.".into());
-        };
-        card.created_at = existing.created_at;
-        card.revision = existing.revision.saturating_add(1);
-        card.folder_id = existing.folder_id.clone();
-        card.favourite = existing.favourite;
-        card.last_used_at = existing.last_used_at;
-        card.legacy_fields = existing.legacy_fields.clone();
-        crate::vault::history::capture_history(&mut next_payload, TaggedItem::Card(existing));
-    }
-    next_payload.insert_active_item(TaggedItem::Card(card))?;
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveCardResult {
-        id: card_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_card(id: String, state: State<'_, VaultState>) -> VaultResult<DeleteCardResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved card to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a card.")?;
-    let card = match session.payload.active_item(id) {
-        Some(TaggedItem::Card(card)) => card,
-        _ => return Err("That saved card no longer exists.".into()),
-    };
-    let mut next_payload = payload_without_card(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::Card(card));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteCardResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+impl_record_commands! {
+    item: Card,
+    input: CardInput,
+    variant: Card,
+    save_result: SaveCardResult,
+    delete_result: DeleteCardResult,
+    from_input: card_from_input,
+    get_fn: get_card,
+    save_fn: save_card,
+    delete_fn: delete_card,
+    missing_noun: "card",
+    save_unlock_msg: "Unlock your vault before saving a card.",
+    delete_unlock_msg: "Unlock your vault before deleting a card.",
+    delete_empty_msg: "Choose a saved card to delete.",
+    extra_carry: |item, existing| item.legacy_fields = existing.legacy_fields.clone(),
 }

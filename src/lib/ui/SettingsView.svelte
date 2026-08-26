@@ -3,8 +3,9 @@
   import Icon from '../Icon.svelte'
   import SyncPreviewHost from './SyncPreviewHost.svelte'
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
-  import { SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
+  import { appVersion, SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
+  import { platformCapabilities } from '../platform'
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
@@ -237,9 +238,10 @@
             </article>
             <article>
               <span class="settings-icon"><Icon name="monitor" size={16} /></span>
-              <div class="setting-copy"><strong>Start with Windows</strong><p>Opens in the tray when you sign in to Windows. The vault stays locked until you unlock it.</p></div>
-              <button type="button" class="switch" class:active={autostartEnabled} role="switch" aria-checked={autostartEnabled} aria-label="Start with Windows" disabled={autostartWorking} on:click={onToggleAutostart}><span></span></button>
+              <div class="setting-copy"><strong>Start at sign-in</strong><p>Opens in the tray when you sign in. The vault stays locked until you unlock it.</p></div>
+              <button type="button" class="switch" class:active={autostartEnabled} role="switch" aria-checked={autostartEnabled} aria-label="Start at sign-in" disabled={autostartWorking} on:click={onToggleAutostart}><span></span></button>
             </article>
+            {#if $platformCapabilities.quickAccessShortcut}
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Quick access shortcut</strong><p>Opens the quick access popup from anywhere, even while Sesame is in the tray.</p></div>
@@ -247,10 +249,15 @@
                 {recordingShortcut ? 'Press keys (Esc cancels)' : formatAccelerator(quickAccessShortcut)}
               </button>
             </article>
+            {/if}
             <article>
               <span class="settings-icon"><Icon name="archive" size={16} /></span>
-              <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '...'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
-              {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing...' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking...' : 'Check now'}</button>{/if}
+              {#if $platformCapabilities.desktopUpdates}
+                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '...'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
+                {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing...' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking...' : 'Check now'}</button>{/if}
+              {:else}
+                <div class="setting-copy"><strong>Desktop updates</strong><p>Sesame does not update itself on this system. You are running {$appVersion ? `version ${$appVersion}` : 'this build'}. Update it the way you installed it to get security fixes.</p></div>
+              {/if}
             </article>
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
@@ -272,21 +279,27 @@
         <section class="settings-group" aria-labelledby="settings-group-security-device">
           <h3 id="settings-group-security-device">This device</h3>
           <div class="settings-list">
+            {#if $platformCapabilities.sessionAutoLock}
             <article>
               <span class="settings-icon"><Icon name="lock" size={16} /></span>
               <div class="setting-copy"><strong>Automatic lock</strong><p>Lock the vault after a period without keyboard or pointer activity.</p></div>
               <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
             </article>
+            {/if}
+            {#if $platformCapabilities.pinUnlock}
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a six-digit PIN on this device. Your master password or recovery kit remains available.</p></div>
               <button type="button" class="switch" class:active={pinUnlockAvailable} role="switch" aria-checked={pinUnlockAvailable} aria-label="Unlock with PIN" disabled={pinWorking} on:click={onTogglePin}><span></span></button>
             </article>
+            {/if}
+            {#if $platformCapabilities.biometricUnlock}
             <article>
               <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Unlock with Windows Hello</strong><p>Use this device's Windows Hello gesture. Your master password or recovery kit remains available, and Sesame never receives your biometric data.</p></div>
               <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
             </article>
+            {/if}
             <article>
               <span class="settings-icon"><Icon name="copy" size={16} /></span>
               <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>

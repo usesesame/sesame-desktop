@@ -1,14 +1,14 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::State;
 
+use crate::commands::record_commands::impl_record_commands;
 use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
 use crate::vault::types::{
     Attachment, DeleteDocumentMetadataResult, DocumentMetadata, DocumentMetadataInput,
-    SaveDocumentMetadataResult, TaggedItem,
+    SaveDocumentMetadataResult,
 };
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::{VaultResult, VaultState};
 
 /// Local-only storage inside the encrypted payload blob, so worst-case growth stays bounded.
 pub const MAX_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
@@ -77,103 +77,22 @@ fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMeta
     })
 }
 
-fn payload_without_document(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    if !payload.documents.iter().any(|document| document.id == id) {
-        return Err("That saved document no longer exists.".into());
-    }
-    let mut next = payload.clone();
-    next.documents.retain(|document| document.id != id);
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_document(id: String, state: State<'_, VaultState>) -> VaultResult<DocumentMetadata> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    session
-        .payload
-        .documents
-        .iter()
-        .find(|document| document.id == id)
-        .cloned()
-        .ok_or_else(|| "That saved document no longer exists.".to_string())
-}
-
-#[tauri::command]
-pub fn save_document(
+impl_record_commands! {
+    item: DocumentMetadata,
     input: DocumentMetadataInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveDocumentMetadataResult> {
-    let mut document = document_from_input(input)?;
-    let document_id = document.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a document.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(existing) = next_payload
-        .documents
-        .iter_mut()
-        .find(|saved| saved.id == document_id)
-    {
-        let previous = existing.clone();
-        document.created_at = existing.created_at;
-        document.revision = existing.revision.saturating_add(1);
-        document.folder_id = existing.folder_id.clone();
-        document.favourite = existing.favourite;
-        document.last_used_at = existing.last_used_at;
-        // Attachments change only through the dedicated add/remove commands.
-        document.attachments = existing.attachments.clone();
-        *existing = document;
-        crate::vault::history::capture_history(&mut next_payload, TaggedItem::Document(previous));
-    } else {
-        next_payload.documents.push(document);
-    }
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveDocumentMetadataResult {
-        id: document_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_document(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<DeleteDocumentMetadataResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved document to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a document.")?;
-    let document = session
-        .payload
-        .documents
-        .iter()
-        .find(|document| document.id == id)
-        .cloned()
-        .ok_or("That saved document no longer exists.")?;
-    let mut next_payload = payload_without_document(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::Document(document));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteDocumentMetadataResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: Document,
+    save_result: SaveDocumentMetadataResult,
+    delete_result: DeleteDocumentMetadataResult,
+    from_input: document_from_input,
+    get_fn: get_document,
+    save_fn: save_document,
+    delete_fn: delete_document,
+    missing_noun: "document",
+    save_unlock_msg: "Unlock your vault before saving a document.",
+    delete_unlock_msg: "Unlock your vault before deleting a document.",
+    delete_empty_msg: "Choose a saved document to delete.",
+    // Attachments change only through the dedicated add/remove commands below.
+    extra_carry: |item, existing| item.attachments = existing.attachments.clone(),
 }
 
 fn attachment_from_input(

@@ -6,8 +6,8 @@ use std::sync::{
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window,
-    WindowEvent,
+    App, AppHandle, LogicalSize, Manager, PhysicalSize, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, Window, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -18,6 +18,8 @@ use crate::vault::VaultState;
 pub const MINIMIZED_LAUNCH_ARG: &str = "--minimized";
 
 pub const QUICK_ACCESS_SHORTCUT: &str = "Ctrl+Alt+S";
+const MAIN_MIN_WIDTH: f64 = 860.0;
+const MAIN_MIN_HEIGHT: f64 = 600.0;
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -38,10 +40,12 @@ impl Default for DesktopShellState {
 
 pub fn setup(app: &mut App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("sesame.open", "Open Sesame").build(app)?;
+    let quick_access =
+        MenuItemBuilder::with_id("sesame.quick-access", "Quick access").build(app)?;
     let lock = MenuItemBuilder::with_id("sesame.lock", "Lock vault").build(app)?;
     let quit = MenuItemBuilder::with_id("sesame.quit", "Quit Sesame").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&open, &lock, &quit])
+        .items(&[&open, &quick_access, &lock, &quit])
         .build()?;
 
     let mut tray = TrayIconBuilder::with_id("sesame-tray")
@@ -50,6 +54,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
         .tooltip("Sesame local vault")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "sesame.open" => show_main_window(app),
+            "sesame.quick-access" => toggle_quick_access(app),
             "sesame.lock" => lock_vault(app),
             "sesame.quit" => {
                 QUITTING.store(true, Ordering::Release);
@@ -78,6 +83,7 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     tray.build(app)?;
 
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_min_size(Some(LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
         harden_release_webview(&window);
     }
     if let Some(window) = app.get_webview_window("quick-access") {
@@ -92,11 +98,40 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     Ok(())
 }
 
+pub fn global_shortcut_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        linux_global_shortcut_available(
+            std::env::var_os("GDK_BACKEND").as_deref(),
+            std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+            std::env::var_os("XDG_SESSION_TYPE").as_deref(),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_global_shortcut_available(
+    gdk_backend: Option<&std::ffi::OsStr>,
+    wayland_display: Option<&std::ffi::OsStr>,
+    session_type: Option<&std::ffi::OsStr>,
+) -> bool {
+    if gdk_backend.is_some_and(|backend| backend.to_string_lossy().contains("x11")) {
+        return true;
+    }
+    let wayland_session = wayland_display.is_some()
+        || session_type.is_some_and(|value| value.eq_ignore_ascii_case("wayland"));
+    !wayland_session
+}
+
 #[tauri::command]
 pub fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
-        .map_err(|_| "Sesame could not read the Windows startup setting.".to_string())
+        .map_err(|_| "Sesame could not read the startup setting.".to_string())
 }
 
 #[tauri::command]
@@ -107,7 +142,7 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
     } else {
         autostart.disable()
     }
-    .map_err(|_| "Sesame could not update the Windows startup setting.".to_string())
+    .map_err(|_| "Sesame could not update the startup setting.".to_string())
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {
@@ -117,6 +152,12 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             let _ = window.hide();
         }
         return;
+    }
+    if let WindowEvent::Resized(size) = event {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        if let Some(size) = bounded_main_size(*size, scale) {
+            let _ = window.set_size(size);
+        }
     }
     if let WindowEvent::CloseRequested { api, .. } = event {
         let close_to_tray = window
@@ -129,6 +170,17 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             let _ = window.hide();
         }
     }
+}
+
+fn bounded_main_size(size: PhysicalSize<u32>, scale: f64) -> Option<PhysicalSize<u32>> {
+    let minimum_width = (MAIN_MIN_WIDTH * scale).round() as u32;
+    let minimum_height = (MAIN_MIN_HEIGHT * scale).round() as u32;
+    (size.width < minimum_width || size.height < minimum_height).then(|| {
+        PhysicalSize::new(
+            size.width.max(minimum_width),
+            size.height.max(minimum_height),
+        )
+    })
 }
 
 pub fn toggle_quick_access(app: &AppHandle) {
@@ -170,6 +222,12 @@ pub fn set_quick_access_shortcut(
     if trimmed.is_empty() {
         return Err("Choose a key combination first.".to_string());
     }
+    if !global_shortcut_available() {
+        return Err(
+            "This desktop session does not support a global shortcut. Open quick access from the Sesame tray icon."
+                .to_string(),
+        );
+    }
     let mut active = state
         .active_shortcut
         .lock()
@@ -201,7 +259,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Sesame")
         .inner_size(1360.0, 860.0)
-        .min_inner_size(1000.0, 700.0)
+        .min_inner_size(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)
         .resizable(true)
         .decorations(false)
         .visible(false)
@@ -248,4 +306,62 @@ pub fn lock_vault_if_unlocked(app: &AppHandle) -> bool {
         lock_vault(app);
     }
     has_session
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_wayland_session_reports_no_global_shortcut() {
+        use std::ffi::OsStr;
+
+        assert!(!linux_global_shortcut_available(
+            None,
+            Some(OsStr::new("wayland-1")),
+            Some(OsStr::new("wayland"))
+        ));
+        assert!(!linux_global_shortcut_available(
+            None,
+            None,
+            Some(OsStr::new("Wayland"))
+        ));
+        assert!(linux_global_shortcut_available(
+            None,
+            None,
+            Some(OsStr::new("x11"))
+        ));
+        assert!(linux_global_shortcut_available(None, None, None));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn forcing_the_gtk_backend_to_x11_restores_the_global_shortcut() {
+        use std::ffi::OsStr;
+
+        assert!(linux_global_shortcut_available(
+            Some(OsStr::new("x11")),
+            Some(OsStr::new("wayland-1")),
+            Some(OsStr::new("wayland"))
+        ));
+        assert!(!linux_global_shortcut_available(
+            Some(OsStr::new("wayland")),
+            Some(OsStr::new("wayland-1")),
+            Some(OsStr::new("wayland"))
+        ));
+    }
+
+    #[test]
+    fn main_window_size_never_falls_below_the_usable_floor() {
+        assert_eq!(
+            bounded_main_size(PhysicalSize::new(800, 550), 1.0),
+            Some(PhysicalSize::new(860, 600))
+        );
+        assert_eq!(bounded_main_size(PhysicalSize::new(1200, 800), 1.0), None);
+        assert_eq!(
+            bounded_main_size(PhysicalSize::new(1500, 900), 2.0),
+            Some(PhysicalSize::new(1720, 1200))
+        );
+    }
 }

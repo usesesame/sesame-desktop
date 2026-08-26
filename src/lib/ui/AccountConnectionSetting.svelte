@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
+  import { platformCapabilities } from '../platform'
   import type { ServiceConnectionStatus } from '../types'
 
   export let connection: ServiceConnectionStatus
@@ -46,7 +47,9 @@
     <strong>Sesame account</strong>
     <p>
       {#if !available}
-        Account linking is available in the installed Windows app.
+        Account linking is available in the installed desktop app.
+      {:else if !$platformCapabilities.accountLinking}
+        Account linking is not available on this operating system yet. Your local vault is unaffected.
       {:else}
         {description}
       {/if}
@@ -55,6 +58,8 @@
 
   {#if !available}
     <span class="status-pill neutral">Desktop only</span>
+  {:else if !$platformCapabilities.accountLinking}
+    <span class="status-pill neutral">Not on this system</span>
   {:else if connection.connected}
     <div class="settings-service-actions">
       <span class:offline={connection.state === 'offline' || connection.state === 'serviceUnavailable' || connection.state === 'rateLimited'} class:warning={connection.state === 'suspended' || connection.state === 'needsAttention'} class="status-pill">{statusLabel}</span>

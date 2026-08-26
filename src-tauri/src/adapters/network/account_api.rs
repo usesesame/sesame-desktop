@@ -3,7 +3,7 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use crate::vault::capabilities::require_desktop_linking;
-use crate::vault::platform::protect_for_windows_profile;
+use crate::vault::platform::protect_for_device;
 use crate::vault::service::{
     read_service_connection, read_service_token, remove_service_connection, service_api_base_url,
     service_client, write_service_connection,
@@ -50,7 +50,7 @@ pub async fn link_desktop_service(
         return Err("The account service returned an incomplete desktop connection.".into());
     }
     let token_bytes = linked.access_token.as_bytes().to_vec();
-    let protected_token = protect_for_windows_profile(&token_bytes)?;
+    let protected_token = protect_for_device(&token_bytes)?;
     let mut token_bytes = token_bytes;
     token_bytes.zeroize();
     linked.access_token.zeroize();
