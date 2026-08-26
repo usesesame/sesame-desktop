@@ -1,15 +1,12 @@
 //! Saved Custom Records: a free list of labelled fields for anything that does not fit a typed item.
 
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
+use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
     CustomFieldEntry, CustomRecord, CustomRecordInput, DeleteCustomRecordResult,
-    SaveCustomRecordResult, TaggedItem,
+    SaveCustomRecordResult,
 };
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 const FIELD_KINDS: [&str; 3] = ["text", "secret", "date"];
 const MAX_FIELDS: usize = 50;
@@ -85,102 +82,18 @@ fn custom_record_from_input(input: CustomRecordInput) -> VaultResult<CustomRecor
     })
 }
 
-fn payload_without_custom_record(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    if !payload.custom_records.iter().any(|record| record.id == id) {
-        return Err("That saved record no longer exists.".into());
-    }
-    let mut next = payload.clone();
-    next.custom_records.retain(|record| record.id != id);
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_custom_record(id: String, state: State<'_, VaultState>) -> VaultResult<CustomRecord> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    session
-        .payload
-        .custom_records
-        .iter()
-        .find(|record| record.id == id)
-        .cloned()
-        .ok_or_else(|| "That saved record no longer exists.".to_string())
-}
-
-#[tauri::command]
-pub fn save_custom_record(
+impl_record_commands! {
+    item: CustomRecord,
     input: CustomRecordInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveCustomRecordResult> {
-    let mut record = custom_record_from_input(input)?;
-    let record_id = record.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a record.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(existing) = next_payload
-        .custom_records
-        .iter_mut()
-        .find(|saved| saved.id == record_id)
-    {
-        let previous = existing.clone();
-        record.created_at = existing.created_at;
-        record.revision = existing.revision.saturating_add(1);
-        record.folder_id = existing.folder_id.clone();
-        record.favourite = existing.favourite;
-        record.last_used_at = existing.last_used_at;
-        *existing = record;
-        crate::vault::history::capture_history(
-            &mut next_payload,
-            TaggedItem::CustomRecord(previous),
-        );
-    } else {
-        next_payload.custom_records.push(record);
-    }
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveCustomRecordResult {
-        id: record_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_custom_record(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<DeleteCustomRecordResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved record to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a record.")?;
-    let record = session
-        .payload
-        .custom_records
-        .iter()
-        .find(|record| record.id == id)
-        .cloned()
-        .ok_or("That saved record no longer exists.")?;
-    let mut next_payload = payload_without_custom_record(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::CustomRecord(record));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteCustomRecordResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: CustomRecord,
+    save_result: SaveCustomRecordResult,
+    delete_result: DeleteCustomRecordResult,
+    from_input: custom_record_from_input,
+    get_fn: get_custom_record,
+    save_fn: save_custom_record,
+    delete_fn: delete_custom_record,
+    missing_noun: "record",
+    save_unlock_msg: "Unlock your vault before saving a record.",
+    delete_unlock_msg: "Unlock your vault before deleting a record.",
+    delete_empty_msg: "Choose a saved record to delete.",
 }

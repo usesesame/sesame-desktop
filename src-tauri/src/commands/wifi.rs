@@ -1,12 +1,9 @@
-use tauri::State;
-
-use crate::vault::snapshot::snapshot_for;
-use crate::vault::trash::trash_item;
+use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
-    DeleteWifiNetworkResult, SaveWifiNetworkResult, TaggedItem, WifiNetwork, WifiNetworkInput,
+    DeleteWifiNetworkResult, SaveWifiNetworkResult, WifiNetwork, WifiNetworkInput,
 };
 use crate::vault::util::{random_id, unix_timestamp};
-use crate::vault::{VaultPayload, VaultResult, VaultState};
+use crate::vault::VaultResult;
 
 fn wifi_network_from_input(input: WifiNetworkInput) -> VaultResult<WifiNetwork> {
     let title = input.title.trim();
@@ -57,102 +54,18 @@ fn wifi_network_from_input(input: WifiNetworkInput) -> VaultResult<WifiNetwork> 
     })
 }
 
-fn payload_without_wifi_network(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
-    if !payload.wifi_networks.iter().any(|network| network.id == id) {
-        return Err("That saved network no longer exists.".into());
-    }
-    let mut next = payload.clone();
-    next.wifi_networks.retain(|network| network.id != id);
-    Ok(next)
-}
-
-#[tauri::command]
-pub fn get_wifi_network(id: String, state: State<'_, VaultState>) -> VaultResult<WifiNetwork> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    session
-        .payload
-        .wifi_networks
-        .iter()
-        .find(|network| network.id == id)
-        .cloned()
-        .ok_or_else(|| "That saved network no longer exists.".to_string())
-}
-
-#[tauri::command]
-pub fn save_wifi_network(
+impl_record_commands! {
+    item: WifiNetwork,
     input: WifiNetworkInput,
-    state: State<'_, VaultState>,
-) -> VaultResult<SaveWifiNetworkResult> {
-    let mut network = wifi_network_from_input(input)?;
-    let network_id = network.id.clone();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before saving a network.")?;
-    let mut next_payload = session.payload.clone();
-    if let Some(existing) = next_payload
-        .wifi_networks
-        .iter_mut()
-        .find(|saved| saved.id == network_id)
-    {
-        let previous = existing.clone();
-        network.created_at = existing.created_at;
-        network.revision = existing.revision.saturating_add(1);
-        network.folder_id = existing.folder_id.clone();
-        network.favourite = existing.favourite;
-        network.last_used_at = existing.last_used_at;
-        *existing = network;
-        crate::vault::history::capture_history(
-            &mut next_payload,
-            TaggedItem::WifiNetwork(previous),
-        );
-    } else {
-        next_payload.wifi_networks.push(network);
-    }
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(SaveWifiNetworkResult {
-        id: network_id,
-        snapshot: snapshot_for(&session.payload),
-    })
-}
-
-#[tauri::command]
-pub fn delete_wifi_network(
-    id: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<DeleteWifiNetworkResult> {
-    let id = id.trim();
-    if id.is_empty() {
-        return Err("Choose a saved network to delete.".into());
-    }
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before deleting a network.")?;
-    let network = session
-        .payload
-        .wifi_networks
-        .iter()
-        .find(|network| network.id == id)
-        .cloned()
-        .ok_or("That saved network no longer exists.")?;
-    let mut next_payload = payload_without_wifi_network(&session.payload, id)?;
-    trash_item(&mut next_payload, TaggedItem::WifiNetwork(network));
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
-    Ok(DeleteWifiNetworkResult {
-        deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
-    })
+    variant: WifiNetwork,
+    save_result: SaveWifiNetworkResult,
+    delete_result: DeleteWifiNetworkResult,
+    from_input: wifi_network_from_input,
+    get_fn: get_wifi_network,
+    save_fn: save_wifi_network,
+    delete_fn: delete_wifi_network,
+    missing_noun: "network",
+    save_unlock_msg: "Unlock your vault before saving a network.",
+    delete_unlock_msg: "Unlock your vault before deleting a network.",
+    delete_empty_msg: "Choose a saved network to delete.",
 }
