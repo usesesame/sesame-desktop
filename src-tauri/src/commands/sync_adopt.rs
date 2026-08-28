@@ -8,7 +8,9 @@ use zeroize::Zeroize;
 use super::sync::{local_data_dir, present};
 use crate::sync::client::SyncClient;
 use crate::sync::envelope::snapshot_aad_for;
-use crate::vault::crypto::{decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes};
+use crate::vault::crypto::{
+    bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes,
+};
 use crate::vault::util::generate_recovery_kit;
 use crate::vault::{VaultState, RECOVERY_WRAP_AAD, WRAP_AAD};
 
@@ -112,7 +114,7 @@ pub async fn sync_adopt_vault(
         let wrapping_key = derive_key(&master_password, &vault.kdf)?;
         let mut confirmed = decrypt_bytes(&wrapping_key, &vault.key_wrap, WRAP_AAD)
             .map_err(|_| "That master password is not correct.".to_string())?;
-        let matches = confirmed.as_slice() == vault.key.as_slice();
+        let matches = bytes_match(confirmed.as_slice(), vault.key.as_slice());
         confirmed.zeroize();
         if !matches {
             return Err("That master password is not correct.".into());

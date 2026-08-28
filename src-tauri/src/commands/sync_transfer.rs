@@ -403,7 +403,7 @@ pub async fn sync_remove_device(
             crate::vault::WRAP_AAD,
         )
         .map_err(|_| "That master password is not correct.".to_string())?;
-        let matches = confirmed.as_slice() == vault.key.as_slice();
+        let matches = crate::vault::crypto::bytes_match(confirmed.as_slice(), vault.key.as_slice());
         confirmed.zeroize();
         if !matches {
             return Err("That master password is not correct.".into());

@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
@@ -8,7 +8,7 @@ use crate::vault::backup::{
     apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, managed_vault_paths,
     prepare_backup_for_restore, read_backup_file, stage_managed_vault_files, verify_backup_file,
 };
-use crate::vault::platform::securely_delete;
+use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health;
 use crate::vault::storage::{check_supported_vault_format, vault_path, write_export_file};
 use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
@@ -31,10 +31,9 @@ pub fn create_backup(state: State<'_, VaultState>) -> VaultResult<String> {
         .parent()
         .ok_or("Sesame could not find the vault folder.")?
         .join("backups");
-    fs::create_dir_all(&backup_dir)
-        .map_err(|_| "Sesame could not create the backup folder.".to_string())?;
+    create_private_dir(&backup_dir)?;
     let backup_name = format!("sesame-backup-{}-{}.sesame", unix_timestamp(), random_id());
-    fs::copy(&session.path, backup_dir.join(&backup_name))
+    copy_private_file(&session.path, &backup_dir.join(&backup_name))
         .map_err(|_| "Sesame could not create the encrypted backup.".to_string())?;
     Ok(backup_name)
 }
@@ -69,7 +68,7 @@ pub fn export_backup(
     if !parent.exists() {
         return Err("The selected backup folder no longer exists.".into());
     }
-    fs::copy(&session.path, &destination)
+    copy_private_file(&session.path, &destination)
         .map_err(|_| "Sesame could not write the encrypted backup to that location.".to_string())?;
     if let (Some(vault_id), revision) = (
         session.payload.vault_id.as_deref(),
