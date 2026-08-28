@@ -8,6 +8,7 @@ mod commands;
 #[cfg(feature = "wdio")]
 mod desktop_e2e;
 mod diagnostics;
+#[cfg(feature = "sync-preview")]
 mod sync;
 mod vault;
 
@@ -269,17 +270,6 @@ pub fn run() {
         .manage(browser_fill::BrowserFillState::default())
         .manage(desktop_shell::DesktopShellState::default())
         .manage(clipboard::ClipboardGuard::default())
-        // Managed only in a preview build, like every other part of Sync.
-        .manage({
-            #[cfg(feature = "sync-preview")]
-            {
-                sync::coordinator::Coordinator::new()
-            }
-            #[cfg(not(feature = "sync-preview"))]
-            {
-                ()
-            }
-        })
         .setup(|app| {
             if let Some(public_key) =
                 adapters::network::public_updates::updater_public_key_if_configured()
@@ -314,6 +304,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(desktop_shell::handle_window_event);
+
+    #[cfg(feature = "sync-preview")]
+    let builder = builder.manage(sync::coordinator::Coordinator::new());
 
     #[cfg(feature = "wdio")]
     let builder = builder.invoke_handler(sesame_wdio_handler!());
