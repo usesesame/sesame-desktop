@@ -119,10 +119,11 @@ wallet. PIN peppers and local attempt-throttle state are authenticated and
 encrypted with that key. Windows uses DPAPI for the same boundary. Windows
 Hello and auto-type remain unavailable on Linux.
 
-PIN unlock requires a Secret Service wallet provider. GNOME Keyring supplies
-one on GNOME. KWallet supplies `ksecretd`, which Sesame starts when needed on
-other desktops such as Hyprland. On Arch, install either `kwallet` or
-`gnome-keyring` if the desktop does not already provide one.
+PIN unlock requires a Secret Service wallet provider. When no wallet is
+running, Sesame starts `gnome-keyring-daemon` or `ksecretd` itself, so GNOME,
+KDE, and minimal desktops such as Hyprland need no manual start-up. On Arch,
+install either `kwallet` or `gnome-keyring` if the desktop does not already
+provide one.
 
 The browser connection uses a socket in the per-user runtime directory rather
 than a named pipe. Both ends check the peer's user id and executable path

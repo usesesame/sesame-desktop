@@ -1,135 +1,43 @@
-#[allow(unused_imports)]
-use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::VaultResult;
 
-#[cfg(windows)]
-pub fn protect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
-    use std::ptr::null;
-    use windows_sys::Win32::{
-        Foundation::LocalFree,
-        Security::Cryptography::{CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB},
-    };
-
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: data.len() as u32,
-        pbData: data.as_ptr() as *mut u8,
-    };
-    let mut output = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: std::ptr::null_mut(),
-    };
-    let protected = unsafe {
-        CryptProtectData(
-            &input,
-            null(),
-            null(),
-            null(),
-            null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if protected == 0 {
-        return Err("Windows could not protect this vault for the current profile.".into());
-    }
-    let result =
-        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
-    unsafe {
-        LocalFree(output.pbData as _);
-    }
-    Ok(result)
-}
-
-#[cfg(windows)]
-pub fn unprotect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
-    use std::ptr::{null, null_mut};
-    use windows_sys::Win32::{
-        Foundation::LocalFree,
-        Security::Cryptography::{
-            CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-        },
-    };
-
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: data.len() as u32,
-        pbData: data.as_ptr() as *mut u8,
-    };
-    let mut output = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: null_mut(),
-    };
-    let unprotected = unsafe {
-        CryptUnprotectData(
-            &input,
-            null_mut(),
-            null(),
-            null(),
-            null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if unprotected == 0 {
-        return Err("Windows could not unlock this vault for the current profile.".into());
-    }
-    let result =
-        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
-    unsafe {
-        LocalFree(output.pbData as _);
-    }
-    Ok(result)
-}
-
-#[cfg(windows)]
-pub fn device_protection_available() -> bool {
-    true
-}
-
-#[cfg(target_os = "linux")]
 const TRUSTED_BINARY_DIRECTORIES: [&str; 4] = [
     "/usr/bin",
     "/bin",
     "/usr/local/bin",
     "/run/current-system/sw/bin",
 ];
-#[cfg(target_os = "linux")]
 const SECRET_TOOL: &str = "secret-tool";
-#[cfg(target_os = "linux")]
 const KDE_SECRET_SERVICE: &str = "ksecretd";
-#[cfg(target_os = "linux")]
+const GNOME_KEYRING_DAEMON: &str = "gnome-keyring-daemon";
+/// `--start` asks an activatable wallet to come up and exit; a bare
+/// gnome-keyring-daemon would stay in the foreground.
+const WALLET_DAEMONS: [(&str, &[&str]); 2] = [
+    (KDE_SECRET_SERVICE, &[]),
+    (GNOME_KEYRING_DAEMON, &["--start", "--components=secrets"]),
+];
 const DEVICE_KEY_HEADER: &[u8] = b"sesame:linux-device-key:v1\0";
-#[cfg(target_os = "linux")]
 const DEVICE_KEY_AAD: &[u8] = b"sesame:linux-device-protection:v1";
 
-#[cfg(target_os = "linux")]
-fn trusted_binary_in(
-    directories: &[&str],
-    name: &str,
-) -> Option<std::path::PathBuf> {
+const SECRET_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const SECRET_SERVICE_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn trusted_binary_in(directories: &[&str], name: &str) -> Option<PathBuf> {
     directories
         .iter()
         .map(|directory| Path::new(directory).join(name))
         .find(|candidate| candidate.is_file())
 }
 
-#[cfg(target_os = "linux")]
-fn secret_tool_path() -> Option<std::path::PathBuf> {
+fn secret_tool_path() -> Option<PathBuf> {
     trusted_binary_in(&TRUSTED_BINARY_DIRECTORIES, SECRET_TOOL)
 }
 
-#[cfg(target_os = "linux")]
 pub fn device_protection_available() -> bool {
     secret_tool_path().is_some()
 }
 
-#[cfg(target_os = "linux")]
-const SECRET_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-#[cfg(target_os = "linux")]
-const SECRET_SERVICE_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
-
-#[cfg(target_os = "linux")]
 fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: std::time::Duration,
@@ -166,7 +74,6 @@ fn wait_with_timeout(
     }
 }
 
-#[cfg(target_os = "linux")]
 fn run_linux_device_key_lookup(
     secret_tool: &Path,
     timeout: std::time::Duration,
@@ -190,37 +97,40 @@ fn run_linux_device_key_lookup(
     wait_with_timeout(child, timeout)
 }
 
-#[cfg(target_os = "linux")]
-fn start_kde_secret_service() {
-    use std::process::{Command, Stdio};
-
-    let Some(service) = trusted_binary_in(&TRUSTED_BINARY_DIRECTORIES, KDE_SECRET_SERVICE) else {
-        return;
-    };
-    let Ok(mut child) = Command::new(service)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return;
-    };
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+fn start_wallet_daemons() {
+    start_wallet_daemons_in(&TRUSTED_BINARY_DIRECTORIES);
 }
 
-#[cfg(target_os = "linux")]
+fn start_wallet_daemons_in(directories: &[&str]) {
+    use std::process::{Command, Stdio};
+
+    for (daemon, arguments) in WALLET_DAEMONS {
+        let Some(binary) = trusted_binary_in(directories, daemon) else {
+            continue;
+        };
+        let Ok(mut child) = Command::new(binary)
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
 fn device_key_lookup_settled(output: &std::process::Output) -> bool {
     output.status.success() || output.stderr.iter().all(u8::is_ascii_whitespace)
 }
 
-#[cfg(target_os = "linux")]
 fn lookup_linux_device_key(secret_tool: &Path) -> VaultResult<std::process::Output> {
     lookup_linux_device_key_within(secret_tool, SECRET_SERVICE_TOTAL_TIMEOUT)
 }
 
-#[cfg(target_os = "linux")]
 fn lookup_linux_device_key_within(
     secret_tool: &Path,
     budget: std::time::Duration,
@@ -230,7 +140,7 @@ fn lookup_linux_device_key_within(
     if device_key_lookup_settled(&output) {
         return Ok(output);
     }
-    start_kde_secret_service();
+    start_wallet_daemons();
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() {
@@ -248,10 +158,7 @@ fn lookup_linux_device_key_within(
     }
 }
 
-#[cfg(target_os = "linux")]
-fn read_linux_device_key(
-    secret_tool: &Path,
-) -> VaultResult<Option<zeroize::Zeroizing<[u8; 32]>>> {
+fn read_linux_device_key(secret_tool: &Path) -> VaultResult<Option<zeroize::Zeroizing<[u8; 32]>>> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
     let output = lookup_linux_device_key(secret_tool)?;
@@ -276,7 +183,6 @@ fn read_linux_device_key(
     Ok(Some(zeroize::Zeroizing::new(key)))
 }
 
-#[cfg(target_os = "linux")]
 fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use rand::RngCore;
@@ -326,7 +232,6 @@ fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing
     Ok(key)
 }
 
-#[cfg(target_os = "linux")]
 fn linux_device_key(create: bool) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
     let Some(secret_tool) = secret_tool_path() else {
         return Err("Linux PIN unlock requires Secret Service support from libsecret and your desktop wallet.".into());
@@ -340,7 +245,6 @@ fn linux_device_key(create: bool) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn protect_with_linux_key(data: &[u8], key: &[u8; 32], nonce: &[u8; 24]) -> VaultResult<Vec<u8>> {
     use chacha20poly1305::{
         aead::{Aead, KeyInit, Payload},
@@ -365,7 +269,6 @@ fn protect_with_linux_key(data: &[u8], key: &[u8; 32], nonce: &[u8; 24]) -> Vaul
     Ok(protected)
 }
 
-#[cfg(target_os = "linux")]
 fn unprotect_with_linux_key(data: &[u8], key: &[u8; 32]) -> VaultResult<Vec<u8>> {
     use chacha20poly1305::{
         aead::{Aead, KeyInit, Payload},
@@ -389,7 +292,6 @@ fn unprotect_with_linux_key(data: &[u8], key: &[u8; 32]) -> VaultResult<Vec<u8>>
         .map_err(|_| "The Linux device-protected value could not be opened.".to_string())
 }
 
-#[cfg(target_os = "linux")]
 pub fn protect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
     use rand::RngCore;
 
@@ -399,185 +301,15 @@ pub fn protect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
     protect_with_linux_key(data, &key, &nonce)
 }
 
-#[cfg(target_os = "linux")]
 pub fn unprotect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
     let key = linux_device_key(false)?;
     unprotect_with_linux_key(data, &key)
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn device_protection_available() -> bool {
-    false
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn protect_for_device(_data: &[u8]) -> VaultResult<Vec<u8>> {
-    Err("Device protection is not available on this operating system.".into())
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn unprotect_for_device(_data: &[u8]) -> VaultResult<Vec<u8>> {
-    Err("Device protection is not available on this operating system.".into())
-}
-
-#[cfg(windows)]
-pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination_wide: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-    let result = unsafe {
-        MoveFileExW(
-            source_wide.as_ptr(),
-            destination_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        return Err("Sesame could not complete the local vault save.".into());
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    fs::rename(source, destination)
-        .map_err(|_| "Sesame could not complete the local vault save.".to_string())
-}
-
-#[cfg(unix)]
-pub fn create_private_dir(path: &Path) -> VaultResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::create_dir_all(path)
-        .map_err(|_| "Sesame could not prepare its local vault folder.".to_string())?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|_| "Sesame could not protect its local vault folder.".to_string())
-}
-
-#[cfg(not(unix))]
-pub fn create_private_dir(path: &Path) -> VaultResult<()> {
-    fs::create_dir_all(path).map_err(|_| "Sesame could not prepare its local vault folder.".to_string())
-}
-
-#[cfg(unix)]
-pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|_| "Sesame could not prepare the file.".to_string())
-}
-
-#[cfg(not(unix))]
-pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
-    std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|_| "Sesame could not prepare the file.".to_string())
-}
-
-#[cfg(unix)]
-pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut output = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(destination)
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())?;
-    let mut input = std::fs::File::open(source)
-        .map_err(|_| "Sesame could not read the vault copy.".to_string())?;
-    std::io::copy(&mut input, &mut output)
-        .and_then(|_| output.sync_all())
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())
-}
-
-#[cfg(not(unix))]
-pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    fs::copy(source, destination)
-        .map(|_| ())
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())
-}
-
-/// Best-effort secure deletion: overwrites with random bytes; wear-leveled storage cannot be guaranteed.
-pub fn securely_delete(path: &Path) -> VaultResult<()> {
-    if path.is_dir() {
-        for entry in fs::read_dir(path)
-            .map_err(|_| "Sesame could not read a staged vault directory.".to_string())?
-        {
-            let entry =
-                entry.map_err(|_| "Sesame could not read a staged vault entry.".to_string())?;
-            securely_delete(&entry.path())?;
-        }
-        fs::remove_dir(path)
-            .map_err(|_| "Sesame could not remove a staged vault directory.".to_string())?;
-    } else if path.is_file() {
-        overwrite_file(path)?;
-        fs::remove_file(path)
-            .map_err(|_| "Sesame could not remove a staged vault file.".to_string())?;
-    }
-    Ok(())
-}
-
-fn overwrite_file(path: &Path) -> VaultResult<()> {
-    use rand::RngCore;
-    use std::io::Write;
-
-    let metadata = fs::metadata(path)
-        .map_err(|_| "Sesame could not inspect a staged vault file.".to_string())?;
-    let len = metadata.len() as usize;
-    if len == 0 {
-        return Ok(());
-    }
-
-    const PASS_COUNT: usize = 3;
-    const CHUNK_SIZE: usize = 64 * 1024;
-    let mut chunk = vec![0u8; CHUNK_SIZE.min(len)];
-
-    for pass in 0..PASS_COUNT {
-        if pass == 0 {
-            rand::rng().fill_bytes(&mut chunk);
-        } else if pass == 1 {
-            chunk.fill(0xFF);
-        } else {
-            chunk.fill(0x00);
-        }
-
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|_| "Sesame could not open a staged vault file for deletion.".to_string())?;
-        let mut remaining = len;
-        while remaining > 0 {
-            let to_write = chunk.len().min(remaining);
-            file.write_all(&chunk[..to_write])
-                .map_err(|_| "Sesame could not overwrite a staged vault file.".to_string())?;
-            remaining -= to_write;
-        }
-        file.flush()
-            .map_err(|_| "Sesame could not flush an overwrite pass.".to_string())?;
-        file.sync_all()
-            .map_err(|_| "Sesame could not sync an overwrite pass to disk.".to_string())?;
-    }
-    Ok(())
-}
-
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -623,6 +355,40 @@ mod tests {
         let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
         assert_eq!(trusted_binary_in(&borrowed, "secret-tool"), Some(binary));
         assert_eq!(trusted_binary_in(&borrowed, "ksecretd"), None);
+
+        let _ = fs::remove_dir_all(&directory);
+        Ok(())
+    }
+
+    #[test]
+    fn wallet_remediation_starts_every_daemon_it_finds() -> VaultResult<()> {
+        let directory = std::env::temp_dir().join(format!("sesame-wallets-{}", std::process::id()));
+        fs::create_dir_all(&directory)
+            .map_err(|_| "could not create the probe directory".to_string())?;
+        let mut markers = Vec::new();
+        for (daemon, _) in WALLET_DAEMONS {
+            let marker = directory.join(format!("{daemon}.started"));
+            let script = format!("#!/bin/sh\ntouch '{}'\n", marker.to_string_lossy());
+            let binary = directory.join(daemon);
+            fs::write(&binary, script.as_bytes())
+                .map_err(|_| "could not write the probe binary".to_string())?;
+            fs::set_permissions(&binary, PermissionsExt::from_mode(0o755))
+                .map_err(|_| "could not make the probe binary executable".to_string())?;
+            markers.push(marker);
+        }
+
+        let directories = [directory.to_string_lossy().into_owned()];
+        let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
+        start_wallet_daemons_in(&borrowed);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !markers.iter().all(|marker| marker.exists()) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the wallet daemons never ran"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
 
         let _ = fs::remove_dir_all(&directory);
         Ok(())
