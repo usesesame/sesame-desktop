@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager};
-
 use super::{plan_registration, RegistrationError, RegistrationPlan, RegistrationState, HOST_NAME};
+
+use crate::app_identity::APP_IDENTIFIER;
 
 pub const HOST_FILE_NAME: &str = "sesame-browser-host.exe";
 
@@ -17,23 +17,14 @@ pub fn unsupported_error() -> RegistrationError {
     )
 }
 
-pub fn plan(app: &AppHandle) -> Result<RegistrationPlan, RegistrationError> {
+pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
     let app_executable = std::env::current_exe().map_err(|_| {
         RegistrationError::new(
             "registration_host_missing",
             "Sesame could not locate its browser helper.",
         )
     })?;
-    let folder = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|_| {
-            RegistrationError::new(
-                "registration_manifest_failed",
-                "Sesame could not locate its browser connection folder.",
-            )
-        })?
-        .join("native-messaging");
+    let folder = local_data_dir()?.join("native-messaging");
     let manifest = folder.join(format!("{HOST_NAME}.json"));
     let firefox_manifest = folder.join(format!("{HOST_NAME}.firefox.json"));
     Ok(RegistrationPlan {
@@ -42,6 +33,18 @@ pub fn plan(app: &AppHandle) -> Result<RegistrationPlan, RegistrationError> {
         edge: vec![manifest],
         firefox: vec![firefox_manifest],
     })
+}
+
+fn local_data_dir() -> Result<PathBuf, RegistrationError> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|directory| directory.join(APP_IDENTIFIER))
+        .ok_or_else(|| {
+            RegistrationError::new(
+                "registration_manifest_failed",
+                "Sesame could not locate its browser connection folder.",
+            )
+        })
 }
 
 pub fn commit(plan: &RegistrationPlan) -> Result<(), RegistrationError> {
@@ -55,9 +58,9 @@ pub fn commit(plan: &RegistrationPlan) -> Result<(), RegistrationError> {
     let edge_manifest = plan.edge.first().ok_or_else(registry_failed)?;
     let firefox_manifest = plan.firefox.first().ok_or_else(registry_failed)?;
     for (registry_path, manifest) in [
-        (chrome_registry_path(), chrome_manifest),
-        (edge_registry_path(), edge_manifest),
-        (firefox_registry_path(), firefox_manifest),
+        (CHROME_REGISTRY_KEY, chrome_manifest),
+        (EDGE_REGISTRY_KEY, edge_manifest),
+        (FIREFOX_REGISTRY_KEY, firefox_manifest),
     ] {
         write_registry_default(registry_path, manifest).map_err(|_| registry_failed())?;
     }
@@ -71,15 +74,15 @@ pub fn matches(plan: &RegistrationPlan) -> RegistrationState {
         chrome_registered: plan
             .chrome
             .first()
-            .is_some_and(|manifest| registry_default_matches(chrome_registry_path(), manifest)),
+            .is_some_and(|manifest| registry_default_matches(CHROME_REGISTRY_KEY, manifest)),
         edge_registered: plan
             .edge
             .first()
-            .is_some_and(|manifest| registry_default_matches(edge_registry_path(), manifest)),
+            .is_some_and(|manifest| registry_default_matches(EDGE_REGISTRY_KEY, manifest)),
         firefox_registered: plan
             .firefox
             .first()
-            .is_some_and(|manifest| registry_default_matches(firefox_registry_path(), manifest)),
+            .is_some_and(|manifest| registry_default_matches(FIREFOX_REGISTRY_KEY, manifest)),
     }
 }
 
@@ -99,16 +102,44 @@ fn desktop_executable_for(host_executable: &Path) -> PathBuf {
     host_executable.with_file_name("sesame.exe")
 }
 
-fn chrome_registry_path() -> &'static str {
-    r"Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser"
+const CHROME_REGISTRY_KEY: &str =
+    r"Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser";
+const EDGE_REGISTRY_KEY: &str =
+    r"Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser";
+const FIREFOX_REGISTRY_KEY: &str = r"Software\Mozilla\NativeMessagingHosts\app.usesesame.browser";
+
+pub fn registry_keys() -> &'static [&'static str] {
+    &[CHROME_REGISTRY_KEY, EDGE_REGISTRY_KEY, FIREFOX_REGISTRY_KEY]
 }
 
-fn edge_registry_path() -> &'static str {
-    r"Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser"
+pub fn erase(keys: &[&str]) -> Result<(), RegistrationError> {
+    let cleanup_failed = || {
+        RegistrationError::new(
+            "registration_cleanup_failed",
+            "Sesame could not remove its browser connection.",
+        )
+    };
+    for key in keys {
+        delete_registry_key(key).map_err(|_| cleanup_failed())?;
+    }
+    Ok(())
 }
 
-fn firefox_registry_path() -> &'static str {
-    r"Software\Mozilla\NativeMessagingHosts\app.usesesame.browser"
+fn delete_registry_key(subkey: &str) -> Result<(), u32> {
+    use std::{ffi::OsStr, ptr};
+
+    use windows_sys::Win32::{
+        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
+        System::Registry::{RegDeleteTreeW, HKEY, HKEY_CURRENT_USER},
+    };
+
+    let subkey = wide(OsStr::new(subkey));
+    let delete_result = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, subkey.as_ptr()) };
+    if delete_result == ERROR_SUCCESS || delete_result == ERROR_FILE_NOT_FOUND {
+        Ok(())
+    } else {
+        Err(delete_result)
+    }
 }
 
 fn write_registry_default(subkey: &str, value: &Path) -> Result<(), u32> {

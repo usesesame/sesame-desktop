@@ -288,7 +288,7 @@ pub fn run() {
                     .global_shortcut()
                     .register(desktop_shell::QUICK_ACCESS_SHORTCUT);
             }
-            match browser_host::register(app.handle()) {
+            match browser_host::install() {
                 Ok(_) => {
                     diagnostics::record_browser_host_registration(app.handle(), "registration_ok")
                 }

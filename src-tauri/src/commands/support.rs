@@ -30,17 +30,15 @@ pub fn clear_diagnostics(app: AppHandle) -> VaultResult<()> {
 }
 
 #[tauri::command]
-pub fn get_browser_integration_status(
-    app: AppHandle,
-) -> VaultResult<browser_host::BrowserIntegrationStatus> {
-    Ok(browser_host::status(&app))
+pub fn get_browser_integration_status() -> VaultResult<browser_host::BrowserIntegrationStatus> {
+    Ok(browser_host::status())
 }
 
 #[tauri::command]
 pub fn repair_browser_integration(
     app: AppHandle,
 ) -> VaultResult<browser_host::BrowserIntegrationStatus> {
-    match browser_host::register(&app) {
+    match browser_host::repair() {
         Ok(status) => {
             diagnostics::record_browser_host_registration(&app, "registration_ok");
             Ok(status)

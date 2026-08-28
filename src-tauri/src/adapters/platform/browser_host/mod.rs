@@ -2,7 +2,6 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::AppHandle;
 
 use crate::browser_protocol::{
     supported_protocol_version, BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES,
@@ -22,21 +21,24 @@ mod windows;
 
 #[cfg(windows)]
 use windows::{
-    commit, launch_desktop_app, matches, plan, unsupported_error, verification_failed_code,
+    commit, erase, launch_desktop_app, matches, plan, registry_keys, unsupported_error,
+    verification_failed_code,
 };
 #[cfg(windows)]
 pub use windows::{is_supported, HOST_FILE_NAME};
 
 #[cfg(target_os = "linux")]
 use linux::{
-    commit, launch_desktop_app, matches, plan, unsupported_error, verification_failed_code,
+    commit, erase, launch_desktop_app, matches, plan, registry_keys, unsupported_error,
+    verification_failed_code,
 };
 #[cfg(target_os = "linux")]
 pub use linux::{is_supported, HOST_FILE_NAME};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 use unsupported::{
-    commit, launch_desktop_app, matches, plan, unsupported_error, verification_failed_code,
+    commit, erase, launch_desktop_app, matches, plan, registry_keys, unsupported_error,
+    verification_failed_code,
 };
 #[cfg(not(any(windows, target_os = "linux")))]
 pub use unsupported::{is_supported, HOST_FILE_NAME};
@@ -83,6 +85,12 @@ struct RegistrationState {
 }
 
 #[derive(Debug)]
+pub struct RegistrationLocations {
+    pub manifests: Vec<PathBuf>,
+    pub registry_keys: Vec<&'static str>,
+}
+
+#[derive(Debug)]
 pub struct RegistrationError {
     diagnostic_code: &'static str,
     message: &'static str,
@@ -105,11 +113,38 @@ impl RegistrationError {
     }
 }
 
-pub fn register(app: &AppHandle) -> Result<BrowserIntegrationStatus, RegistrationError> {
+pub fn install() -> Result<BrowserIntegrationStatus, RegistrationError> {
+    install_registration()
+}
+
+pub fn repair() -> Result<BrowserIntegrationStatus, RegistrationError> {
+    install_registration()
+}
+
+pub fn uninstall() -> Result<(), RegistrationError> {
     if !is_supported() {
         return Err(unsupported_error());
     }
-    let plan = plan(app)?;
+    let locations = locations()?;
+    erase_registration(&locations)
+}
+
+pub fn locations() -> Result<RegistrationLocations, RegistrationError> {
+    if !is_supported() {
+        return Err(unsupported_error());
+    }
+    let plan = plan()?;
+    Ok(RegistrationLocations {
+        manifests: manifest_paths(&plan),
+        registry_keys: registry_keys().to_vec(),
+    })
+}
+
+fn install_registration() -> Result<BrowserIntegrationStatus, RegistrationError> {
+    if !is_supported() {
+        return Err(unsupported_error());
+    }
+    let plan = plan()?;
     if !plan.host.is_file() {
         return Err(RegistrationError::new(
             "registration_host_missing",
@@ -118,7 +153,7 @@ pub fn register(app: &AppHandle) -> Result<BrowserIntegrationStatus, Registratio
     }
     write_plan_manifests(&plan)?;
     commit(&plan)?;
-    let status = status(app);
+    let status = status();
     if !status.ready {
         return Err(RegistrationError::new(
             verification_failed_code(),
@@ -128,11 +163,37 @@ pub fn register(app: &AppHandle) -> Result<BrowserIntegrationStatus, Registratio
     Ok(status)
 }
 
-pub fn status(app: &AppHandle) -> BrowserIntegrationStatus {
+fn manifest_paths(plan: &RegistrationPlan) -> Vec<PathBuf> {
+    plan.chrome
+        .iter()
+        .chain(&plan.edge)
+        .chain(&plan.firefox)
+        .cloned()
+        .collect()
+}
+
+fn erase_registration(locations: &RegistrationLocations) -> Result<(), RegistrationError> {
+    let cleanup_failed = || {
+        RegistrationError::new(
+            "registration_cleanup_failed",
+            "Sesame could not remove its browser connection.",
+        )
+    };
+    for path in &locations.manifests {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(cleanup_failed()),
+        }
+    }
+    erase(&locations.registry_keys)
+}
+
+pub fn status() -> BrowserIntegrationStatus {
     if !is_supported() {
         return browser_status(BrowserStatusInputs::default());
     }
-    let Ok(plan) = plan(app) else {
+    let Ok(plan) = plan() else {
         return browser_status(BrowserStatusInputs {
             supported: true,
             ..Default::default()
@@ -155,9 +216,21 @@ pub fn status(app: &AppHandle) -> BrowserIntegrationStatus {
 }
 
 pub fn run() {
-    crate::diagnostics::record_browser_host_process("host_started");
     let mut args = std::env::args_os().skip(1);
-    let (first, second) = (args.next(), args.next());
+    let first = args.next();
+    match first.as_deref().and_then(|value| value.to_str()) {
+        Some("unregister") => {
+            finish_verb(uninstall(), "unregister_ok");
+            return;
+        }
+        Some("register") => {
+            finish_verb(install().map(|_| ()), "registration_ok");
+            return;
+        }
+        _ => {}
+    }
+    crate::diagnostics::record_browser_host_process("host_started");
+    let second = args.next();
     if !launcher_allowed(first.as_deref(), second.as_deref()) {
         crate::diagnostics::record_browser_host_process("host_origin_rejected");
         return;
@@ -173,6 +246,17 @@ pub fn run() {
             crate::diagnostics::record_browser_host_process("host_protocol_error")
         }
         Err(_) => crate::diagnostics::record_browser_host_process("host_io_error"),
+    }
+}
+
+fn finish_verb(result: Result<(), RegistrationError>, ok_code: &'static str) {
+    let code = match &result {
+        Ok(()) => ok_code,
+        Err(error) => error.diagnostic_code(),
+    };
+    crate::diagnostics::record_browser_host_process(code);
+    if result.is_err() {
+        std::process::exit(1);
     }
 }
 
@@ -535,5 +619,61 @@ mod manifest_tests {
             serde_json::json!([PINNED_FIREFOX_EXTENSION_ID])
         );
         assert!(manifest.get("allowed_origins").is_none());
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn scratch_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "sesame-host-lifecycle-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        root
+    }
+
+    #[test]
+    fn cleanup_removes_every_manifest_and_tolerates_missing_ones() {
+        let root = scratch_root("missing-tolerated");
+        let written = root.join("written.json");
+        let never_written = root.join("never-written.json");
+        std::fs::write(&written, b"manifest").expect("a manifest");
+
+        let locations = RegistrationLocations {
+            manifests: vec![written.clone(), never_written],
+            registry_keys: Vec::new(),
+        };
+        erase_registration(&locations).expect("cleanup succeeds");
+
+        assert!(!written.exists());
+    }
+
+    #[test]
+    fn cleanup_fails_when_a_manifest_cannot_be_removed() {
+        let root = scratch_root("undeletable");
+        let directory = root.join("a-directory");
+        std::fs::create_dir_all(&directory).expect("a stand-in manifest");
+
+        let locations = RegistrationLocations {
+            manifests: vec![directory],
+            registry_keys: Vec::new(),
+        };
+        assert!(erase_registration(&locations).is_err());
+    }
+
+    #[test]
+    fn the_verb_words_are_never_valid_launcher_arguments() {
+        assert!(!launcher_allowed(
+            Some(std::ffi::OsStr::new("register")),
+            None
+        ));
+        assert!(!launcher_allowed(
+            Some(std::ffi::OsStr::new("unregister")),
+            None
+        ));
     }
 }

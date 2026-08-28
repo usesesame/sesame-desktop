@@ -508,6 +508,8 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "registration_registry_failed"
             | "registration_status_failed"
             | "registration_unsupported"
+            | "registration_cleanup_failed"
+            | "unregister_ok"
             | "host_started"
             | "host_response_sent"
             | "host_no_request"
