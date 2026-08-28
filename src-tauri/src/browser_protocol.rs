@@ -146,13 +146,14 @@ impl BrowserRequest {
                 let password_ok = self.password.as_deref().is_some_and(|password| {
                     !password.is_empty() && password.len() <= MAX_CREDENTIAL_FIELD_BYTES
                 });
-                let username_ok = self.username.as_deref().map_or(true, |username| {
-                    username.len() <= MAX_CREDENTIAL_FIELD_BYTES
-                });
+                let username_ok = self
+                    .username
+                    .as_deref()
+                    .is_none_or(|username| username.len() <= MAX_CREDENTIAL_FIELD_BYTES);
                 let title_ok = self
                     .title
                     .as_deref()
-                    .map_or(true, |title| !title.is_empty() && title.len() <= 512);
+                    .is_none_or(|title| !title.is_empty() && title.len() <= 512);
                 let kind_ok = matches!(self.kind.as_deref(), Some("new") | Some("update"));
                 origin_ok
                     && password_ok

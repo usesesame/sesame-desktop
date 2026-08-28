@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::Path;
 
@@ -7,9 +7,12 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
-    decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
+    bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
 };
-use crate::platform::{protect_for_device, replace_file, unprotect_for_device};
+use crate::platform::{
+    copy_private_file, create_private_dir, open_private_file, protect_for_device, replace_file,
+    unprotect_for_device,
+};
 use crate::snapshot::duplicate_key;
 use crate::{
     payload_aad_for_file,
@@ -94,17 +97,11 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
     let parent = path
         .parent()
         .ok_or("Sesame could not find the local vault folder.")?;
-    fs::create_dir_all(parent)
-        .map_err(|_| "Sesame could not prepare its local vault folder.".to_string())?;
+    create_private_dir(parent)?;
     let bytes = serde_json::to_vec(file)
         .map_err(|_| "Sesame could not save the local vault.".to_string())?;
     let tmp_path = path.with_extension("sesame.tmp");
-    let mut tmp = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&tmp_path)
-        .map_err(|_| "Sesame could not prepare the local vault save.".to_string())?;
+    let mut tmp = open_private_file(&tmp_path)?;
     tmp.write_all(&bytes)
         .and_then(|_| tmp.sync_all())
         .map_err(|_| "Sesame could not write the local vault.".to_string())?;
@@ -112,7 +109,7 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
 
     if retain_previous && path.exists() {
         let previous = path.with_extension("sesame.prev");
-        fs::copy(path, previous)
+        copy_private_file(path, &previous)
             .map_err(|_| "Sesame could not protect the previous vault copy.".to_string())?;
     }
     replace_file(&tmp_path, path)
@@ -233,7 +230,7 @@ pub fn complete_recovery_setup_for_session(
     let recovery_wrapping_key = Zeroizing::new(derive_key(&normalized, recovery_kdf)?);
     let mut recovered = decrypt_bytes(&recovery_wrapping_key, recovery_wrap, RECOVERY_WRAP_AAD)
         .map_err(|_| "That recovery kit is not correct.".to_string())?;
-    let matches = recovered.as_slice() == session.key.as_slice();
+    let matches = bytes_match(recovered.as_slice(), session.key.as_slice());
     recovered.zeroize();
     if !matches {
         return Err("That recovery kit is not correct.".into());
@@ -260,7 +257,7 @@ pub fn rotate_master_password_for_session(
     let current_wrapping_key = Zeroizing::new(derive_key(current_password, &session.kdf)?);
     let mut confirmed_key = decrypt_bytes(&current_wrapping_key, &session.key_wrap, WRAP_AAD)
         .map_err(|_| "Your current master password is not correct.".to_string())?;
-    let matches_session = confirmed_key.as_slice() == session.key.as_slice();
+    let matches_session = bytes_match(confirmed_key.as_slice(), session.key.as_slice());
     confirmed_key.zeroize();
     if !matches_session {
         return Err("Your current master password is not correct.".into());
@@ -804,12 +801,7 @@ pub fn atomic_replace(destination: &Path, bytes: &[u8]) -> VaultResult<()> {
         .and_then(|n| n.to_str())
         .ok_or("Sesame could not read the destination file name.")?;
     let temporary = parent.join(format!(".{name}.{}.tmp", random_id()));
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&temporary)
-        .map_err(|_| "Sesame could not prepare the temporary file.".to_string())?;
+    let mut file = open_private_file(&temporary)?;
     if file.write_all(bytes).and_then(|_| file.sync_all()).is_err() {
         drop(file);
         let _ = fs::remove_file(&temporary);

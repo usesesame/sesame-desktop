@@ -112,3 +112,14 @@ pub fn serialize_payload(payload: &VaultPayload) -> VaultResult<Zeroizing<Vec<u8
         .map(Zeroizing::new)
         .map_err(|_| "Sesame could not prepare the local vault.".to_string())
 }
+
+pub fn bytes_match(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0_u8;
+    for (index, byte) in left.iter().enumerate() {
+        difference |= byte ^ right[index];
+    }
+    difference == 0
+}

@@ -178,7 +178,7 @@ fn quick_access_items(payload: &VaultPayload, query: &str) -> Vec<QuickAccessIte
             }
         })
         .collect();
-    items.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+    items.sort_by_key(|item| item.title.to_lowercase());
     items.truncate(QUICK_ACCESS_RESULT_LIMIT);
     items
 }
