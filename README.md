@@ -1,45 +1,40 @@
 # Sesame
 
-Sesame is a password and recovery vault that is local-first. The desktop app
-stands on its own: you can create, unlock, search, import, back up, and export a
-vault with no account and no Sesame server.
+Sesame is a local-first password and recovery vault. The desktop app works
+without an account or Sesame server. You can create, unlock, search, import,
+back up, and export a vault locally.
 
-The repository also ships an optional hosted stack for accounts, downloads,
-support, and administration. It sits outside the vault's trust boundary and
-never receives a vault, master password, recovery kit, PIN, TOTP seed, or
-wrapping key.
+The account service, public website, and browser extension are separate
+projects. They are outside the vault trust boundary. Sesame never receives a
+vault, master password, recovery kit, PIN, TOTP seed, or wrapping key.
 
 Sesame is early software, and an independent security review has not finished
 yet. Do not rely on it for your only copy of important credentials for now.
 
-## Project shape
+## Repository shape
 
-The repository is a monorepo because the surfaces share release contracts,
-rather than because they must be deployed together.
+This repository contains the desktop app and native-messaging host. The other
+projects have their own releases and CI.
 
 | Path | What it is | Required to use a local vault? |
 | --- | --- | --- |
 | `src/` | Svelte desktop interface | Yes |
 | `src-tauri/` | Tauri host and Rust vault core | Yes |
-| `extensions/sesame/` | Chrome and Edge extension | No |
-| `backend/` | Vault-blind Go API | No |
-| `website/` | Public marketing site | No |
-| `account/` | Account portal served with the API | No |
-| `admin/` | Administration interface for the API | No |
-| `design/` | Shared design tokens, the single source for every surface | Yes |
+| `design/` | Desktop design tokens | Yes |
 | `tools/` | Contract tests, release evidence, and CI helpers | No |
 
-This split supports three ways to run Sesame:
+Other Sesame projects:
 
-1. Use or build only the desktop app. This is the default and needs no server.
-2. Run the desktop app with your own optional account service.
-3. Host the complete website, API, database, account portal, and admin
-   interface.
+- [sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension):
+  the Chrome, Edge, and experimental Firefox packages
+- [sesame-server](https://github.com/usesesame/sesame-server): the vault-blind
+  Go API, account portal, and administration portal
+- [sesame-website](https://github.com/usesesame/sesame-website): the static
+  public site
 
-The website should remain replaceable. A self-hosted API should not depend on
-Sesame's public marketing site, and the desktop must keep working when every
-hosted service is unavailable. Sync code exists but is disabled and must stay
-disabled until its security gate passes.
+The desktop must work when hosted services are unavailable. Sync preview code
+is excluded from shipping builds. It remains unavailable until it passes its
+security gate.
 
 Before changing vault, browser, or authentication code, read the security
 rules in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -67,6 +62,15 @@ sudo pacman -S --needed \
   libayatana-appindicator librsvg libsecret xdg-utils
 ```
 
+On Windows:
+
+```powershell
+npm.cmd ci
+npm.cmd run tauri:dev:browser
+```
+
+On Linux, after installing the dependencies above:
+
 ```sh
 npm ci
 npm run desktop:linux:dev
@@ -78,21 +82,10 @@ Linux packaging also requires `patchelf`, `dpkg-deb`, and `rpmbuild`. On Arch,
 install them with `sudo pacman -S --needed patchelf dpkg rpm-tools`. The Linux
 bundle command checks these tools before building.
 
-Optional surfaces run separately:
+Run checks for the area you changed. The usual full local check is:
 
 ```powershell
-npm.cmd run website:dev   # http://localhost:4173
-npm.cmd run admin:dev     # http://localhost:4174
-npm.cmd run api:up        # API, PostgreSQL, and local test mail
-```
-
-`npm.cmd run api:up` writes development-only secrets into the ignored root
-`.env` file. Do not reuse them in a deployment.
-
-Run the checks that cover the area you changed. The usual full local check is:
-
-```powershell
-npm.cmd run ci:all
+npm.cmd run desktop:ci
 ```
 
 The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -113,14 +106,13 @@ The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
 | Account linking | Yes | No |
 | Signed desktop updates | Yes | No |
 
-Linux reads the screen lock from systemd-logind, falling back to the desktop's
-own screensaver interface. Inactivity has no shared Linux interface, so it is
-read from GNOME's or KDE's idle monitor and the automatic lock delay is hidden
-on desktops that publish neither.
+Linux reads screen-lock status from systemd-logind and falls back to the
+desktop screensaver interface. It reads idle time from GNOME or KDE. The
+automatic-lock delay is hidden when neither desktop provides an idle monitor.
 
-Wayland publishes no protocol for global hotkeys, so the quick access shortcut
-is registered only in an X11 session and the setting is hidden elsewhere. Open
-quick access from the tray icon there, or start Sesame with `GDK_BACKEND=x11`.
+Wayland has no global-hotkey protocol. Sesame registers the quick-access
+shortcut only in X11 sessions and hides the setting elsewhere. Use the tray
+icon, or start Sesame with `GDK_BACKEND=x11`.
 
 Linux keeps Sesame's random device-protection key in the desktop Secret Service
 wallet. PIN peppers and local attempt-throttle state are authenticated and
@@ -144,10 +136,9 @@ extension's clean-profile verification passes on Linux.
 ## Licence and trademarks
 
 Sesame is licensed under the
-[GNU Affero General Public License v3.0 or later](LICENSE). The licence covers
-the desktop, browser extension, website, account portal, admin interface, and
-hosted API in this repository. In particular, a modified hosted version must
-offer its corresponding source, as the AGPL requires.
+[GNU Affero General Public License v3.0 or later](LICENSE). It covers the
+desktop app and native-messaging host in this repository. The related Sesame
+repositories publish their own licence files.
 
 The source licence does not grant rights to present a modified build or hosted
 service as an official Sesame product. The separate [trademark policy](TRADEMARKS.md)

@@ -1,13 +1,13 @@
 # Security policy
 
-Sesame is a password manager in private beta. It has not had an independent
+Sesame is an early password manager. It has not had an independent
 security audit. If you find a way to read, alter, or leak vault data, we want
 to hear about it before anyone else does.
 
 ## Reporting a vulnerability
 
 **Do not open a public issue, discussion, or pull request for a security
-problem.** A public report reaches attackers before it reaches beta users who
+problem.** A public report reaches attackers before it reaches users who
 hold real credentials in a vault.
 
 Use GitHub private vulnerability reporting: open the repository's **Security**
@@ -47,13 +47,12 @@ a follow-up rather than assuming the report was received.
 
 ## Supported versions
 
-Only the current private-beta release receives fixes. Beta builds are delivered
-through an account-gated download and a signed updater, so the practical
-guidance is to update rather than to patch an older build.
+Only the current release receives fixes. The practical guidance is to update
+rather than to patch an older build.
 
 | Version | Supported |
 | --- | --- |
-| Current private-beta release | Yes |
+| Current release | Yes |
 | Any earlier build | No. Update instead |
 
 ## Scope
@@ -64,23 +63,19 @@ In scope:
   PIN handling, throttling, backups, restore, import, secure deletion,
   inactivity locking, clipboard handling.
 - The desktop interface (`src/`) where it can expose or mishandle vault data.
-- The native messaging host and the fill approval path
-  (`src-tauri/src/browser_*.rs`, `extensions/sesame/`).
-- The Go API (`backend/`): authentication, session handling, CSRF and origin
-  checks, desktop link and device tokens, download tickets, passkeys, support
-  intake, the signed capability envelope.
-- The admin boundary (`admin/`, `/v1/admin/*`): privilege escalation between
-  roles, audit-log tampering, crossing from an admin session to website account
-  or vault data.
-- The website (`website/`): account takeover, session fixation, and anything
-  that leaks one account's data to another.
-- The release pipeline: artifact substitution, updater signature bypass, and
-  ticket reuse.
+- The native-messaging host, local transport, and fill approval path under
+  `src-tauri/src/bin/`, `src-tauri/src/adapters/platform/`, and
+  `src-tauri/src/browser_fill*.rs`.
+- The desktop release pipeline: artifact substitution, updater signature
+  bypass, installer lifecycle, and rollback behaviour.
 
 Out of scope:
 
+- The browser extension itself, account service, administration portal, and
+  public website. Report those in their own repositories. If a finding crosses
+  a boundary, report it once and identify both sides.
 - Anything documented as not protected against. An attacker who already has
-  code execution as the logged-in Windows user, or a compromised operating
+  code execution as the logged-in desktop user, or a compromised operating
   system, is outside the model.
 - Optional website icons revealing saved domains to those sites. This is
   documented behaviour of a setting that is off by default.
@@ -110,5 +105,5 @@ Stated plainly so a report does not spend effort on a known position:
 - Sesame has not had an independent security audit.
 - The recovery kit cannot be reset or recovered. That is a design decision, not
   a bug.
-- Sync is not enabled. The wire contract exists in
-  `backend/internal/syncproto` and is reachable from no HTTP route.
+- Sync is not enabled. Preview-only desktop code is gated by the
+  `sync-preview` Cargo feature, which shipping builds do not enable.

@@ -72,14 +72,13 @@ into the pull request.
 | `design/` or `tools/` | `npm run desktop:contracts` |
 | Anything, before review | `npm run desktop:ci` |
 
-Use the `desktop:` scripts. The older `npm run contracts`, `npm run
-version:check`, and `npm run ci:all` reach into the other products and fail in
-this repository.
+Use the `desktop:` scripts named above. They are the stable public command
+surface for this repository.
 
-There is no behaviour test suite yet. The checks above cover types, lint,
-builds, and the structural contracts, and that is all they cover. So if you
-change unlock, migration, import, backup, or the browser fill flow, exercise it
-by hand and write in the pull request what you did and what you saw.
+Unit tests cover the Svelte controllers and Rust vault core. There is no
+installed-app lifecycle suite yet. If you change unlock, migration, import,
+backup, or the browser fill flow, exercise it by hand and write in the pull
+request what you did and what you saw.
 
 If you change what the desktop is allowed to depend on, run `npm run
 desktop:boundary:verify`. It copies the files listed in `desktop-boundary.json`
