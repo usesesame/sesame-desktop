@@ -222,6 +222,7 @@ pub fn delete_local_vault(
 
 #[tauri::command]
 pub fn inspect_backup(
+    app: AppHandle,
     source: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<BackupInspection> {
@@ -231,7 +232,7 @@ pub fn inspect_backup(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?
         .is_some();
-    if !unlocked {
+    if !unlocked && vault_path(&app)?.exists() {
         return Err("Unlock your vault before inspecting a backup.".into());
     }
     let source = PathBuf::from(source);

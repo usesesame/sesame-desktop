@@ -119,7 +119,7 @@ fn save_new_login(
         password: payload.password,
         folder: String::new(),
         folder_id: None,
-        totp: String::new(),
+        totp: None,
         backup_codes: Vec::new(),
         recovery_email: String::new(),
         recovery_phone: String::new(),

@@ -82,7 +82,9 @@ Linux packaging also requires `patchelf`, `dpkg-deb`, and `rpmbuild`. On Arch,
 install them with `sudo pacman -S --needed patchelf dpkg rpm-tools`. The Linux
 bundle command checks these tools before building.
 
-Run checks for the area you changed. The usual full local check is:
+Run checks for the area you changed. While you work, `npm run desktop:test`
+runs the interface unit tests, the vault core tests, and the contract checks
+in one command. The usual full local check is:
 
 ```powershell
 npm.cmd run desktop:ci

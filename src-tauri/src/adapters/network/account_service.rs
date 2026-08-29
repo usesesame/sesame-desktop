@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::ensure_crypto_provider;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::{AppHandle, Manager};
 use zeroize::Zeroize;
@@ -45,6 +46,7 @@ pub fn service_client() -> VaultResult<reqwest::Client> {
     if parsed.scheme() != "https" && !loopback_http {
         return Err("Sesame refuses to send an account token over an insecure network URL.".into());
     }
+    ensure_crypto_provider();
     reqwest::Client::builder()
         .https_only(!loopback_http)
         .timeout(Duration::from_secs(12))

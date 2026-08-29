@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use super::ensure_crypto_provider;
 use serde::{Deserialize, Serialize};
 
 use crate::vault::service::{read_service_connection, read_service_token, service_api_base_url};
@@ -197,6 +198,7 @@ impl SyncClient {
         if parsed.scheme() != "https" && !loopback_http {
             return Err("Sesame refuses to send vault ciphertext over an insecure URL.".into());
         }
+        ensure_crypto_provider();
         let http = reqwest::Client::builder()
             .https_only(!loopback_http)
             .timeout(REQUEST_TIMEOUT)

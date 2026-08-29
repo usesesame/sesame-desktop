@@ -23,7 +23,7 @@ export interface OnboardingControllerOptions {
 export interface OnboardingController {
   state: ReturnType<typeof controllerStore<OnboardingState>>
   startAfterVaultCreation(): void
-  startIfNeeded(dismissed: boolean, recoveryVerified: boolean, onboardingRequired?: boolean): void
+  startIfNeeded(dismissed: boolean, onboardingRequired?: boolean): void
   advance(): void
   skipTo(step: OnboardingStep): void
   dismiss(): void
@@ -41,9 +41,10 @@ export function createOnboardingController({ stores, onOpenPinSetup, onRecoveryV
   }
 
   // An unverified vault must resume at recovery-display, never at beta-warning.
-  function startIfNeeded(dismissed: boolean, recoveryVerified: boolean, onboardingRequired = false) {
+  // The host flag owns setup truth: a completed vault never repeats the kit.
+  function startIfNeeded(dismissed: boolean, onboardingRequired = false) {
+    const current = state.value()
     if (onboardingRequired && vault.value().status.unlocked) {
-      const current = state.value()
       if (current.step === 'none' || current.dismissed) {
         state.patch({ step: 'recovery-display', dismissed: false })
       }
@@ -53,9 +54,10 @@ export function createOnboardingController({ stores, onOpenPinSetup, onRecoveryV
       state.patch({ step: 'none', dismissed: true })
       return
     }
-    const current = state.value()
-    if (current.step !== 'none' || current.dismissed || !vault.value().status.unlocked) return
-    state.patch({ step: recoveryVerified ? 'beta-warning' : 'recovery-display' })
+    if (current.dismissed || !vault.value().status.unlocked) return
+    if (current.step === 'none' || current.step === 'recovery-display' || current.step === 'recovery-verify') {
+      state.patch({ step: 'beta-warning' })
+    }
   }
 
   function advance() {

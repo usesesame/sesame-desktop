@@ -68,12 +68,17 @@ into the pull request.
 | You changed | Run |
 | --- | --- |
 | `src/` | `npm run desktop:lint:js`, `npm run desktop:check` |
-| `src-tauri/` | `npm run desktop:lint:rust`, `cargo test --manifest-path src-tauri/Cargo.toml` |
+| `src-tauri/` | `npm run desktop:lint:rust`, `npm run desktop:test:rust` |
 | `design/` or `tools/` | `npm run desktop:contracts` |
+| Anything, while you work | `npm run desktop:test` |
 | Anything, before review | `npm run desktop:ci` |
 
 Use the `desktop:` scripts named above. They are the stable public command
 surface for this repository.
+
+`npm run desktop:test` is the everyday loop: interface unit tests, vault core
+tests, and the contract suites, in one command. `npm run desktop:ci` adds the
+production build, the lints, and the Sync preview feature tests.
 
 Unit tests cover the Svelte controllers and Rust vault core. There is no
 installed-app lifecycle suite yet. If you change unlock, migration, import,
@@ -83,7 +88,9 @@ request what you did and what you saw.
 If you change what the desktop is allowed to depend on, run `npm run
 desktop:boundary:verify`. It copies the files listed in `desktop-boundary.json`
 into a temporary directory and runs `npm ci` and `npm run desktop:ci` there,
-which is how we know the desktop still stands on its own.
+which is how we know the desktop still stands on its own. CI runs the same
+check on a weekly schedule and on demand, so a boundary that breaks quietly
+does not stay broken.
 
 ## Filling in the pull request template
 

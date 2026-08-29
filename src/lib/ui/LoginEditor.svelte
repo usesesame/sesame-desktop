@@ -30,7 +30,8 @@
   export let editorTitle = 'Add a login'
   export let savingLogin = false
   export let focusUrl = false
-  export let onSubmit: () => void
+  export let hasTotp = false
+  export let onSubmit: (totpEntered: boolean) => void
   export let onClose: () => void
   export let onDelete: () => void
 
@@ -40,6 +41,7 @@
   // Tracked from input events, not a draft snapshot, which would hold a second copy of the password.
   let dirty = false
   let confirmingDiscard = false
+  let totpEntered = false
 
   function requestClose() {
     if (savingLogin) return
@@ -103,7 +105,7 @@
   initialFocus={focusInitial}
   ariaBusy={savingLogin}
 >
-  <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
+  <form on:submit|preventDefault={() => onSubmit(totpEntered)} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
   <header class="editor-header">
     <div><p class="eyebrow">{loginDraft.id ? 'Saved login' : 'New login'}</p><h2 id="login-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingLogin} on:click={requestClose} aria-label="Close login editor">×</button>
@@ -159,7 +161,7 @@
 
     <section class="editor-section">
       <div><h3>Two-factor code</h3><p>Paste the base32 secret or the full <code>otpauth://</code> link.</p></div>
-      <label class="field-only-label">2FA secret<input bind:value={loginDraft.totp} placeholder="Optional" autocomplete="off" /></label>
+      <label class="field-only-label">2FA secret<input bind:value={loginDraft.totp} on:input={() => (totpEntered = true)} placeholder={hasTotp ? 'Configured. Type a new secret to replace it, or clear the field to remove 2FA.' : 'Optional'} autocomplete="off" /></label>
     </section>
 
     <section class="editor-section">
