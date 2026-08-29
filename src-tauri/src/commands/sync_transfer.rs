@@ -57,7 +57,9 @@ pub(super) async fn approve_frozen_device(
         if payload.vault_id.as_deref() != Some(vault_id) {
             return Err("That approval was prepared for a different vault.".into());
         }
-        crate::sync::keys::seal_vault_key(vault.key.as_ref(), &recipient_key, &current.vault_id)?
+        vault.expose_vault_key(|key| {
+            crate::sync::keys::seal_vault_key(key, &recipient_key, &current.vault_id)
+        })?
     };
 
     let encoded = crate::sync::keys::encode_package(&sealed);
@@ -146,7 +148,8 @@ pub async fn sync_upload_vault(
         let plaintext = serde_json::to_vec(&*payload)
             .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
         let digest = crate::sync::state::payload_digest(&plaintext);
-        let blob = crate::vault::crypto::encrypt_bytes(&vault.key, &plaintext, &aad)?;
+        let blob = vault
+            .expose_vault_key(|key| crate::vault::crypto::encrypt_bytes(key, &plaintext, &aad))?;
         (blob, payload.entries.len(), digest)
     };
 
@@ -246,8 +249,9 @@ pub async fn sync_download_vault(
             );
         }
 
-        let plaintext =
-            crate::vault::crypto::decrypt_bytes(&vault.key, &blob, &snapshot_aad_for(&envelope))?;
+        let plaintext = vault.expose_vault_key(|key| {
+            crate::vault::crypto::decrypt_bytes(key, &blob, &snapshot_aad_for(&envelope))
+        })?;
         let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&plaintext)
             .map_err(|_| "The synced vault could not be read.".to_string())?;
         let count = payload.entries.len();
@@ -407,7 +411,9 @@ pub async fn sync_remove_device(
             crate::vault::WRAP_AAD,
         )
         .map_err(|_| "That master password is not correct.".to_string())?;
-        let matches = crate::vault::crypto::bytes_match(confirmed.as_slice(), vault.key.as_slice());
+        let matches = vault.expose_vault_key(|key| {
+            Ok(crate::vault::crypto::bytes_match(confirmed.as_slice(), key))
+        })?;
         confirmed.zeroize();
         if !matches {
             return Err("That master password is not correct.".into());
@@ -585,7 +591,7 @@ pub async fn sync_conflict_details(
         .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
     let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
     let local_payload = vault.open_payload()?;
-    let remote = decrypt_snapshot(&vault.key, &envelope)?;
+    let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
     let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
         .map_err(|_| "The synced vault could not be read.".to_string())?;
 
@@ -653,7 +659,7 @@ pub async fn sync_resolve_conflict(
         let local_payload = vault.open_payload()?;
         let local = serde_json::to_vec(&*local_payload)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-        let remote = decrypt_snapshot(&vault.key, &envelope)?;
+        let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
         let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
             .map_err(|_| "The synced vault could not be read.".to_string())?;
         let remote_entries = remote_payload.entries.len();
@@ -702,22 +708,24 @@ pub async fn sync_resolve_conflict(
                 .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
             let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
             confirm_unchanged(vault, &captured_digest)?;
-            crate::vault::crypto::encrypt_bytes(
-                &vault.key,
-                &local_plaintext,
-                &snapshot_aad_for_draft(&crate::sync::envelope::EnvelopeDraft {
-                    vault_id: &current.vault_id,
-                    device_id: &identity.device_id,
-                    revision: (current.revision + 1) as u64,
-                    vault_epoch: current.vault_epoch.max(1) as u64,
-                    device_epoch,
-                    operation: crate::sync::envelope::OPERATION_SNAPSHOT,
-                    tombstone_id: "",
-                    previous_digest: &current.digest,
-                    nonce: &[],
-                    ciphertext: &[],
-                }),
-            )?
+            vault.expose_vault_key(|key| {
+                crate::vault::crypto::encrypt_bytes(
+                    key,
+                    &local_plaintext,
+                    &snapshot_aad_for_draft(&crate::sync::envelope::EnvelopeDraft {
+                        vault_id: &current.vault_id,
+                        device_id: &identity.device_id,
+                        revision: (current.revision + 1) as u64,
+                        vault_epoch: current.vault_epoch.max(1) as u64,
+                        device_epoch,
+                        operation: crate::sync::envelope::OPERATION_SNAPSHOT,
+                        tombstone_id: "",
+                        previous_digest: &current.digest,
+                        nonce: &[],
+                        ciphertext: &[],
+                    }),
+                )
+            })?
         };
         let nonce = decode_bytes(&blob.nonce)?;
         let ciphertext = decode_bytes(&blob.ciphertext)?;

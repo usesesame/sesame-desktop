@@ -93,7 +93,7 @@ fn verify_master_password(session: &UnlockedVault, secret: &str) -> VaultResult<
     let wrapping_key = Zeroizing::new(derive_key(secret, &session.kdf)?);
     let mut candidate = decrypt_bytes(&wrapping_key, &session.key_wrap, WRAP_AAD)
         .map_err(|_| "That master password does not open this vault.".to_string())?;
-    let matched = bytes_match(&candidate, session.key.as_ref());
+    let matched = session.expose_vault_key(|key| Ok(bytes_match(&candidate, key)))?;
     candidate.zeroize();
     if matched {
         Ok(())

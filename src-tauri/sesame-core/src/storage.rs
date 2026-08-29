@@ -141,6 +141,9 @@ fn persist_payload(
         next_payload.revision += 1;
         let next_records = VaultRecordStore::from_payload(&next_payload)?;
         let payload_aad = payload_aad_for_file(VAULT_FORMAT_VERSION, session.setup_complete)?;
+        let serialized_payload = serialize_payload(&next_payload)?;
+        let encrypted_payload =
+            session.expose_vault_key(|key| encrypt_bytes(key, &serialized_payload, payload_aad))?;
         let file = VaultFile {
             format_version: VAULT_FORMAT_VERSION,
             kdf: session.kdf.clone(),
@@ -151,11 +154,7 @@ fn persist_payload(
             pin_wrap: session.pin_wrap.clone(),
             hello_wrap: session.hello_wrap.clone(),
             setup_complete: session.setup_complete,
-            payload: encrypt_bytes(
-                &session.key,
-                &serialize_payload(&next_payload)?,
-                payload_aad,
-            )?,
+            payload: encrypted_payload,
         };
         if keep_previous {
             write_vault_file(&session.path, &file)?;
@@ -198,11 +197,8 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
     let recovery_kit_for_display = recovery_kit.to_string();
     let recovery_kdf = default_kdf_params();
     let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
-    let recovery_wrap = encrypt_bytes(
-        &recovery_wrapping_key,
-        session.key.as_slice(),
-        RECOVERY_WRAP_AAD,
-    )?;
+    let recovery_wrap = session
+        .expose_vault_key(|key| encrypt_bytes(&recovery_wrapping_key, key, RECOVERY_WRAP_AAD))?;
 
     let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
     let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
@@ -235,7 +231,7 @@ pub fn complete_recovery_setup_for_session(
     let recovery_wrapping_key = Zeroizing::new(derive_key(&normalized, recovery_kdf)?);
     let mut recovered = decrypt_bytes(&recovery_wrapping_key, recovery_wrap, RECOVERY_WRAP_AAD)
         .map_err(|_| "That recovery kit is not correct.".to_string())?;
-    let matches = bytes_match(recovered.as_slice(), session.key.as_slice());
+    let matches = session.expose_vault_key(|key| Ok(bytes_match(recovered.as_slice(), key)))?;
     recovered.zeroize();
     if !matches {
         return Err("That recovery kit is not correct.".into());
@@ -262,7 +258,8 @@ pub fn rotate_master_password_for_session(
     let current_wrapping_key = Zeroizing::new(derive_key(current_password, &session.kdf)?);
     let mut confirmed_key = decrypt_bytes(&current_wrapping_key, &session.key_wrap, WRAP_AAD)
         .map_err(|_| "Your current master password is not correct.".to_string())?;
-    let matches_session = bytes_match(confirmed_key.as_slice(), session.key.as_slice());
+    let matches_session =
+        session.expose_vault_key(|key| Ok(bytes_match(confirmed_key.as_slice(), key)))?;
     confirmed_key.zeroize();
     if !matches_session {
         return Err("Your current master password is not correct.".into());
@@ -283,7 +280,8 @@ pub fn rotate_master_password_for_session(
     let new_recovery_wrap =
         encrypt_bytes(&recovery_wrapping_key, &*new_vault_key, RECOVERY_WRAP_AAD)?;
 
-    let previous_key = std::mem::replace(&mut session.key, new_vault_key);
+    let protected_new_key = crate::vault_key::VaultKey::new(*new_vault_key)?;
+    let previous_key = session.replace_vault_key(protected_new_key);
     let previous_kdf = std::mem::replace(&mut session.kdf, new_kdf);
     let previous_key_wrap = std::mem::replace(&mut session.key_wrap, new_key_wrap);
     let previous_recovery_kdf =
@@ -294,7 +292,7 @@ pub fn rotate_master_password_for_session(
     let previous_hello_wrap = session.hello_wrap.take();
 
     if let Err(error) = persist_session_without_previous(session) {
-        session.key = previous_key;
+        session.replace_vault_key(previous_key);
         session.kdf = previous_kdf;
         session.key_wrap = previous_key_wrap;
         session.recovery_kdf = previous_recovery_kdf;
@@ -319,7 +317,8 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(pepper)));
     pepper.zeroize();
     let wrapping_key = Zeroizing::new(derive_key(secret.as_str(), &kdf)?);
-    let key_wrap = encrypt_bytes(&wrapping_key, session.key.as_slice(), PIN_WRAP_AAD)?;
+    let key_wrap =
+        session.expose_vault_key(|key| encrypt_bytes(&wrapping_key, key, PIN_WRAP_AAD))?;
 
     let previous = session.pin_wrap.replace(PinWrap {
         kdf,
