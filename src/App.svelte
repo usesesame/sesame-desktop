@@ -640,7 +640,7 @@
         titleFor={historyItemTitle}
       />
     {:else if $selection.activeView === 'backups'}
-      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} onExportBackup={backupController.exportEncryptedBackup} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
+      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
         theme={$settings.theme}
@@ -761,8 +761,12 @@
       <DataControlsModal
         dataActionWorking={$cleanupState.dataActionWorking}
         bind:readableExportConfirmed={$cleanupState.readableExportConfirmed}
+        exportPresenceRequired={$cleanupState.exportPresenceRequired}
+        bind:exportPresencePassword={$cleanupState.exportPresencePassword}
+        errorMessage={$feedbackState.errorMessage}
         onClose={cleanupController.closeDataControls}
         onExportReadable={cleanupController.exportReadableVault}
+        onConfirmPresence={cleanupController.confirmExportPresence}
         onOpenDeleteVault={cleanupController.openDeleteVault}
       />
     {:else if active?.kind === 'delete-vault'}

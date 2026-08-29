@@ -5,7 +5,11 @@
 
   export let health: RecoveryHealth | null = null
   export let currentRevision: number = 0
+  export let exportPresenceRequired = false
+  export let exportPresencePassword = ''
+  export let errorMessage = ''
   export let onExportBackup: () => void
+  export let onConfirmPresence: () => void
   export let onBeginRestore: () => void
   export let onMakeBackup: () => void
   export let onOpenDrill: () => void
@@ -36,6 +40,28 @@
   {/if}
   <div class="backup-list">
     <article class="backup-card"><span class="backup-icon"><Icon name="archive" size={25} /></span><div><h3>Export an encrypted backup</h3><p>Choose where to save a copy of your vault.</p></div><button type="button" class="primary-button" on:click={onExportBackup}>Export backup <Icon name="chevron-right" size={16} /></button></article>
+    {#if exportPresenceRequired}
+      <article class="backup-card">
+        <form class="presence-confirm" novalidate on:submit|preventDefault={onConfirmPresence}>
+          <label class="delete-vault-input" for="backup-presence-password">Master password</label>
+          <p class="backup-presence-note">Sesame asks for your master password before it writes a copy of your vault to a file.</p>
+          <input
+            id="backup-presence-password"
+            name="backup-presence-password"
+            type="password"
+            bind:value={exportPresencePassword}
+            autocomplete="current-password"
+            spellcheck="false"
+            aria-invalid={Boolean(errorMessage)}
+            aria-describedby={errorMessage ? 'backup-presence-error' : undefined}
+          />
+          {#if errorMessage}<p id="backup-presence-error" class="form-error" role="alert">{errorMessage}</p>{/if}
+          <div class="confirm-actions">
+            <button type="submit" class="primary-button" disabled={!exportPresencePassword}>Confirm and export</button>
+          </div>
+        </form>
+      </article>
+    {/if}
     <article class="backup-card"><span class="backup-icon"><Icon name="shield" size={24} /></span><div><h3>Run a recovery drill</h3><p>Open a backup without changing your vault, then optionally test the full restore.</p></div><button type="button" class="secondary-button" on:click={onOpenDrill}>Test a backup</button></article>
     <article class="backup-card"><span class="backup-icon"><Icon name="refresh" size={24} /></span><div><h3>Restore from a backup</h3><p>Checks the file and keeps a safety copy of the current vault before replacing it.</p></div><button type="button" class="secondary-button" on:click={onBeginRestore}>Choose backup</button></article>
   </div>
@@ -44,6 +70,16 @@
 </section>
 
 <style>
+  .presence-confirm { display: grid; gap: var(--space-1); }
+  .backup-presence-note { margin: 0; color: var(--text-muted); font-size: var(--type-1); }
+  .presence-confirm input {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--text);
+  }
   .recovery-health {
     display: grid;
     gap: var(--space-1);

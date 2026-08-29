@@ -4,6 +4,8 @@ use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::lifecycle::{discard_pin_throttle_state, establish_pin_throttle_state};
+use crate::commands::require_release_presence;
+use crate::release::ReleasePresence;
 use crate::vault::backup::{
     apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, managed_vault_paths,
     prepare_backup_for_restore, read_backup_file, stage_managed_vault_files, verify_backup_file,
@@ -43,7 +45,9 @@ pub fn export_backup(
     app: AppHandle,
     destination: String,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
+    require_release_presence(&state, &presence)?;
     let session = state
         .session
         .lock()
@@ -86,7 +90,9 @@ pub fn export_backup(
 pub fn export_vault_csv(
     destination: String,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<Vec<String>> {
+    require_release_presence(&state, &presence)?;
     let session = state
         .session
         .lock()
@@ -136,7 +142,9 @@ pub fn export_recovery_kit(
     destination: String,
     kit: String,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
+    require_release_presence(&state, &presence)?;
     let session = state
         .session
         .lock()
