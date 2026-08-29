@@ -67,7 +67,7 @@ pub use storage::*;
 
 #[allow(unused_imports)]
 pub use sesame_core::{
-    payload_aad_for_file, HelloWrap, PinWrap, UnlockedVault, VaultResult, VaultState,
+    payload_aad_for_file, HelloWrap, PinWrap, UnlockedVault, VaultKey, VaultResult, VaultState,
     FORMAT_9_PAYLOAD_AAD, HELLO_KEY_NAME_PREFIX, LEGACY_PAYLOAD_AAD, MAX_BACKUP_BYTES,
     MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB, MAX_KDF_PARALLELISM, MAX_VAULT_FILE_BYTES, PAYLOAD_AAD,
     PENDING_SETUP_PAYLOAD_AAD, PIN_WRAP_AAD, RECOVERY_WRAP_AAD, SERVICE_CONNECTION_FORMAT_VERSION,

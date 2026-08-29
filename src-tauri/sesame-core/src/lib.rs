@@ -18,6 +18,7 @@ pub mod throttle;
 pub mod trash;
 pub mod types;
 pub mod util;
+pub mod vault_key;
 pub mod windows_hello;
 
 #[allow(unused_imports)]
@@ -51,14 +52,14 @@ pub use trash::*;
 pub use types::*;
 #[allow(unused_imports)]
 pub use util::*;
+#[allow(unused_imports)]
+pub use vault_key::*;
 
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
 };
-
-use zeroize::Zeroizing;
 
 pub const CORE_API_VERSION: u32 = 1;
 
@@ -213,7 +214,7 @@ impl VaultState {
 
 pub struct UnlockedVault {
     pub path: PathBuf,
-    pub key: Zeroizing<[u8; 32]>,
+    key: vault_key::VaultKey,
     pub kdf: KdfParams,
     pub key_wrap: CipherBlob,
     pub legacy_device_wrap: Option<String>,
@@ -229,7 +230,9 @@ impl UnlockedVault {
     pub fn from_opened(path: PathBuf, opened: &api::OpenedVault) -> VaultResult<Self> {
         Ok(Self {
             path,
-            key: opened.key.clone(),
+            key: vault_key::VaultKey::new(opened.key.as_slice().try_into().map_err(|_| {
+                "The local vault key is invalid. Restore a known-good encrypted backup.".to_string()
+            })?)?,
             kdf: opened.file.kdf.clone(),
             key_wrap: opened.file.key_wrap.clone(),
             legacy_device_wrap: opened.file.legacy_device_wrap.clone(),
@@ -244,6 +247,17 @@ impl UnlockedVault {
 
     pub fn open_payload(&self) -> VaultResult<record_store::OpenedPayload> {
         self.records.open_payload()
+    }
+
+    pub fn expose_vault_key<T>(
+        &self,
+        operation: impl FnOnce(&[u8; 32]) -> VaultResult<T>,
+    ) -> VaultResult<T> {
+        self.key.expose(operation)
+    }
+
+    pub fn replace_vault_key(&mut self, key: vault_key::VaultKey) -> vault_key::VaultKey {
+        std::mem::replace(&mut self.key, key)
     }
 
     pub fn open_item(&self, id: &str) -> VaultResult<record_store::OpenedItem> {
