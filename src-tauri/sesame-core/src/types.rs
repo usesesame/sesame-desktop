@@ -254,8 +254,7 @@ pub struct LoginCard {
     pub favourite: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_used_at: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub totp: Option<String>,
+    pub has_totp: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub totp_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -357,7 +356,7 @@ pub struct LoginInput {
     #[serde(default)]
     pub folder_id: Option<String>,
     #[serde(default)]
-    pub totp: String,
+    pub totp: Option<String>,
     #[serde(default)]
     pub backup_codes: Vec<String>,
     #[serde(default)]

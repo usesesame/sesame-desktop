@@ -16,9 +16,12 @@
     "desktop:check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run desktop:test:unit",
     "desktop:test:unit": "vitest run",
     "desktop:coverage": "vitest run --coverage",
-    "desktop:test": "node tools/skip-with-message.mjs \"desktop browser\" \"npm run desktop:build\"",
+    "desktop:test": "npm run desktop:test:unit && npm run desktop:test:rust && npm run desktop:contracts",
+    "desktop:test:browser": "node tools/skip-with-message.mjs \"desktop browser\" \"npm run desktop:build\"",
     "desktop:test:app": "node tools/skip-with-message.mjs \"installed-desktop lifecycle suite\"",
-    "desktop:ci": "npm run desktop:version:check && npm run desktop:lint:js && npm run desktop:contracts && npm run desktop:check && npm run desktop:build && npm run desktop:lint:rust && cargo test --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview",
+    "desktop:test:rust": "npm run desktop:host:stage && cargo test --manifest-path src-tauri/Cargo.toml",
+    "desktop:test:rust:sync": "npm run desktop:host:stage && cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview",
+    "desktop:ci": "npm run desktop:version:check && npm run desktop:lint:js && npm run desktop:contracts && npm run desktop:check && npm run desktop:build && npm run desktop:lint:rust && npm run desktop:test:rust && npm run desktop:test:rust:sync",
     "desktop:boundary:verify": "node tools/verify-desktop-boundary.mjs --run",
     "browser:fixtures": "node tools/serve-browser-retail-fixtures.mjs",
     "desktop:bundle:prepare": "npm run desktop:build && npm run desktop:host:stage",
@@ -61,6 +64,7 @@
     "@testing-library/user-event": "^14.6.3",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^24.13.2",
+    "@tauri-apps/cli": "^2.11.4",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.8.1",
     "eslint-plugin-svelte": "^3.23.0",
@@ -76,7 +80,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/cli": "^2.11.4",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1"
   }

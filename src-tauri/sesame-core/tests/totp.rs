@@ -1,4 +1,6 @@
-use sesame_core::snapshot::totp_from_value;
+use sesame_core::imports::resolved_totp;
+use sesame_core::snapshot::{login_card_for, totp_from_value};
+use sesame_core::types::{VaultEntry, VaultPayload};
 
 // RFC 6238 test key "12345678901234567890" in base32.
 const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -54,4 +56,48 @@ fn surrounding_whitespace_does_not_stop_a_secret_being_read() {
         panic!("a padded secret was rejected");
     };
     assert_eq!(totp.generate(59), "287082");
+}
+
+#[test]
+fn the_login_card_derives_a_code_but_never_carries_the_seed() {
+    let entry = VaultEntry {
+        title: "Example".into(),
+        totp: Some(RFC_KEY.to_string()),
+        ..VaultEntry::default()
+    };
+    let card = login_card_for(&VaultPayload::default(), &entry);
+    let wire = serde_json::to_string(&card).expect("the card serializes");
+    assert!(card.has_totp, "a configured seed was not reported");
+    assert!(card.totp_code.is_some(), "no code was derived");
+    assert!(
+        !wire.contains(RFC_KEY),
+        "the raw seed crossed the interface boundary: {wire}"
+    );
+
+    let bare = VaultEntry {
+        title: "Example".into(),
+        ..VaultEntry::default()
+    };
+    assert!(!login_card_for(&VaultPayload::default(), &bare).has_totp);
+}
+
+#[test]
+fn a_save_that_omits_the_secret_keeps_the_stored_one() {
+    assert_eq!(
+        resolved_totp(None, Some(RFC_KEY.to_string())),
+        Some(RFC_KEY.to_string())
+    );
+}
+
+#[test]
+fn an_explicitly_emptied_secret_is_cleared() {
+    assert_eq!(resolved_totp(Some(String::new()), Some(RFC_KEY.to_string())), None);
+}
+
+#[test]
+fn a_typed_secret_is_trimmed_and_stored() {
+    assert_eq!(
+        resolved_totp(Some(format!("  {RFC_KEY}  ")), None),
+        Some(RFC_KEY.to_string())
+    );
 }

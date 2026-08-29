@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::vault::backup::snapshot_vault_revision;
-use crate::vault::imports::entry_from_input;
+use crate::vault::imports::{entry_from_input, resolved_totp};
 use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for, snapshot_for};
 use crate::vault::storage::{
     commit_payload_change, materialize_entry_folder, payload_with_item_favourite,
@@ -189,6 +189,7 @@ pub fn refresh_totp(
 
 #[tauri::command]
 pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResult<SaveLoginResult> {
+    let totp_input = input.totp.clone();
     let mut entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
     let mut session = state
@@ -216,6 +217,7 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
         updated.legacy_fields = existing.legacy_fields.clone();
         updated.favourite = existing.favourite;
         updated.last_used_at = existing.last_used_at;
+        updated.totp = resolved_totp(totp_input, previous.totp.clone());
         updated.password_updated_at =
             if previous.password == updated.password && previous.password_updated_at > 0 {
                 previous.password_updated_at

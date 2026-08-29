@@ -1,3 +1,4 @@
+use super::ensure_crypto_provider;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::{redirect::Policy, Client};
 use serde::{Deserialize, Serialize};
@@ -245,6 +246,7 @@ fn redirect_target(original: &str, location: &str) -> VaultResult<String> {
 }
 
 fn icon_client(host: &str, pinned: &[SocketAddr]) -> VaultResult<Client> {
+    ensure_crypto_provider();
     Client::builder()
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(4))

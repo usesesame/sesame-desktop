@@ -31,7 +31,7 @@ function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
 
 function emptyLoginDraft(password = ''): LoginInput {
   return {
-    title: '', url: '', urls: [], tags: [], username: '', email: '', password, folder: '', totp: '', backupCodes: [],
+    title: '', url: '', urls: [], tags: [], username: '', email: '', password, folder: '', totp: undefined, backupCodes: [],
     recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '',
   }
 }
@@ -52,6 +52,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     savingLogin: false,
     editorTitle: 'Add a login',
     editorFocusUrl: false,
+    editorHasTotp: false,
     loginDraft: emptyLoginDraft(),
     entryMenu: null as { id: string; x: number; y: number } | null,
     folderWorking: false,
@@ -154,7 +155,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
 
   function closeEditor() {
     modal.close('login-editor')
-    state.patch({ loginDraft: emptyLoginDraft() })
+    state.patch({ loginDraft: emptyLoginDraft(), editorHasTotp: false })
   }
 
   function openEditor() {
@@ -165,10 +166,11 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     state.patch({
       loginDraft: {
         id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: card.password,
-        folder: card.folder, folderId: card.folderId, totp: card.totp || '', backupCodes: card.backupCodes || [],
+        folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: card.backupCodes || [],
         recoveryEmail: card.recoveryEmail || '', recoveryPhone: card.recoveryPhone || '',
         recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '',
       },
+      editorHasTotp: card.hasTotp,
       editorTitle: 'Edit login', editorFocusUrl: false,
     })
     feedback.clearError()
@@ -274,7 +276,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     openNew(password = '') {
       const opened = modal.open({ kind: 'login-editor' })
       if (!opened) return
-      state.patch({ loginDraft: emptyLoginDraft(password), editorTitle: 'Add a login', editorFocusUrl: false })
+      state.patch({ loginDraft: emptyLoginDraft(password), editorHasTotp: false, editorTitle: 'Add a login', editorFocusUrl: false })
       feedback.clearError()
     },
     openEditor,
@@ -355,7 +357,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       try {
         const result = await saveLogin({
           id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: card.password,
-          folder: card.folder, folderId: card.folderId, totp: card.totp || '', backupCodes: [], recoveryEmail: '', recoveryPhone: '',
+          folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], recoveryEmail: '', recoveryPhone: '',
           recoveryNotApplicable: true, notes: card.notes || '',
         })
         vault.patch({ snapshot: result.snapshot, loginCard: { ...card, backupCodes: undefined, recoveryEmail: undefined, recoveryPhone: undefined, recoveryNotApplicable: true } })
@@ -366,12 +368,12 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         state.patch({ recoveryActionWorking: false })
       }
     },
-    async submit() {
+    async submit(totpEntered: boolean) {
       const draft = state.value().loginDraft
       state.patch({ savingLogin: true })
       feedback.clearError()
       try {
-        const result = await saveLogin({ ...draft, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
+        const result = await saveLogin({ ...draft, totp: totpEntered ? draft.totp : undefined, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
         vault.patch({ snapshot: result.snapshot })
         const savedEntry = result.snapshot.entries.find((entry) => entry.id === result.id)
         selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
@@ -548,7 +550,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       stopAutoTypeCountdown()
       state.set({
         passwordVisible: false, savingLogin: false, editorTitle: 'Add a login',
-        editorFocusUrl: false, loginDraft: emptyLoginDraft(),
+        editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,
         breachCheckEntryId: '', breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '',
         autoTypeEntryId: '', autoTypeCountdown: 0,

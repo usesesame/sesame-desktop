@@ -189,7 +189,7 @@ pub fn login_card_for(payload: &VaultPayload, entry: &VaultEntry) -> LoginCard {
         folder: folder_name_for(payload, entry),
         favourite: entry.favourite,
         last_used_at: entry.last_used_at,
-        totp: entry.totp.clone(),
+        has_totp: entry.totp.as_deref().is_some_and(|seed| !seed.is_empty()),
         totp_code,
         totp_remaining,
         backup_codes: (!entry.backup_codes.is_empty()).then(|| entry.backup_codes.clone()),

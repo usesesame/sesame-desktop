@@ -496,6 +496,10 @@ fn allowed_code(value: &str) -> bool {
             | "vault_lock_listener_failed"
             | "idle_warning_listener_failed"
             | "platform_capabilities_failed"
+            | "picker_opened"
+            | "picker_cancelled"
+            | "selection_verified"
+            | "modal_refused"
     )
 }
 
