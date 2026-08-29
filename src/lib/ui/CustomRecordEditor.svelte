@@ -67,21 +67,23 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this record appears in your list</span><input bind:this={titleInput} bind:value={recordDraft.title} required maxlength="160" placeholder="e.g. Passport application" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this record appears in your list</span><input name="record-title" bind:this={titleInput} bind:value={recordDraft.title} required maxlength="160" placeholder="e.g. Passport application…" autocomplete="off" /></label>
 
     <section class="editor-section custom-fields-section">
       <div><h3>Fields</h3><p>Your own labelled values. A secret field is masked until you reveal it, the same as a password.</p></div>
       {#each recordDraft.fields as field, index (index)}
         <div class="custom-field-row">
-          <input value={field.label} on:input={(event) => updateField(index, { label: event.currentTarget.value })} maxlength="160" placeholder="Label" autocomplete="off" class="custom-field-label" />
+          <input value={field.label} on:input={(event) => updateField(index, { label: event.currentTarget.value })} maxlength="160" placeholder="Label…" autocomplete="off" spellcheck="false" class="custom-field-label" aria-label={`Field ${index + 1} label`} />
           <input
             value={field.value}
             on:input={(event) => updateField(index, { value: event.currentTarget.value })}
             maxlength="4000"
-            placeholder="Value"
+            placeholder="Value…"
             autocomplete="off"
+            spellcheck={field.kind === 'secret' ? false : undefined}
             type={field.kind === 'secret' ? 'password' : 'text'}
             class="custom-field-value"
+            aria-label={`Field ${index + 1} value`}
           />
           <SelectMenu
             label={`Field ${index + 1} kind`}
@@ -95,8 +97,8 @@
       <button type="button" class="secondary-button custom-field-add" on:click={addField}><Icon name="plus" size={14} /><span>Add field</span></button>
     </section>
 
-    <label>Notes<textarea bind:value={recordDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={recordDraft.tags.join(', ')} on:input={(event) => (recordDraft = { ...recordDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family" /></label>
+    <label>Notes<textarea name="record-notes" bind:value={recordDraft.notes} rows="4" maxlength="4000"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="record-tags" value={recordDraft.tags.join(', ')} on:input={(event) => (recordDraft = { ...recordDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family…" /></label>
   </div>
 
   {#if confirmingDiscard}

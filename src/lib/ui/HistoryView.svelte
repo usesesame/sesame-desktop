@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
+  import ViewHeader from './ViewHeader.svelte'
   import type { HistorySummary, ItemPreview } from '../types'
 
   export let items: HistorySummary[] = []
@@ -64,10 +65,10 @@
 </script>
 
 <section class="history-view">
+  <ViewHeader title="History" />
   {#if !items.length}
     <section class="item-empty-state">
       <span class="empty-brand size-md history-empty-icon"><Icon name="refresh" size={32} /></span>
-      <p class="eyebrow">Nothing here</p>
       <h2>No saved versions yet.</h2>
       <p>Editing a saved item keeps its previous version here for 30 days, so an unwanted change can be undone.</p>
     </section>

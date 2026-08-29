@@ -69,7 +69,7 @@
   </div>
 
   <label class="browser-fill-remember">
-    <input type="checkbox" bind:checked={$browserFill.remember} disabled={working} />
+    <input name="remember-browser-fill" type="checkbox" bind:checked={$browserFill.remember} disabled={working} />
     <span><strong>Fill this login here without asking for 15 minutes</strong><small>Applies to {request.hostname} and this login only. Sesame forgets it when the vault locks or changes, and it is never saved to disk.</small></span>
   </label>
 

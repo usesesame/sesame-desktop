@@ -36,7 +36,7 @@
       </ul>
 
       <label class="sync-confirm">
-        <input type="checkbox" bind:checked={understood} disabled={working} />
+        <input name="sync-enable-understood" type="checkbox" bind:checked={understood} disabled={working} />
         <span>I have my recovery kit saved outside Sesame.</span>
       </label>
 

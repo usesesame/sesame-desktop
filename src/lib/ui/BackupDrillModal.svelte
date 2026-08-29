@@ -51,7 +51,7 @@
     </div>
   {:else if !verification}
     <div class="drill-file"><Icon name="archive" size={17} /><div><strong>{selection.fileName}</strong><small>Vault format {selection.formatVersion}</small></div><button type="button" class="text-button" disabled={working} on:click={onChoose}>Change</button></div>
-    <label class="drill-secret">Master password or recovery kit<input bind:this={secretInput} bind:value={secret} type="password" autocomplete="off" spellcheck="false" disabled={working} /></label>
+    <label class="drill-secret">Master password or recovery kit<input bind:this={secretInput} name="backup-drill-secret" bind:value={secret} type="password" autocomplete="off" spellcheck="false" disabled={working} /></label>
     <p class="drill-privacy"><Icon name="shield" size={14} /> Used locally for this check and cleared when the drill closes.</p>
     {#if error}<p class="field-error" role="alert">{error}</p>{/if}
     <div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={onClose}>Cancel</button><button type="button" class="primary-button" disabled={working || !secret.trim()} on:click={onVerify}>{working ? 'Verifying…' : 'Verify backup'}</button></div>

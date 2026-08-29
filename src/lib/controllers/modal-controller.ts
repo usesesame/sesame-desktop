@@ -8,7 +8,6 @@ export type ActiveModal =
   | { kind: 'import' }
   | { kind: 'restore' }
   | { kind: 'backup-drill' }
-  | { kind: 'switching-journey' }
   | { kind: 'login-editor' }
   | { kind: 'delete-login'; entryId: string }
   | { kind: 'identity-editor' }

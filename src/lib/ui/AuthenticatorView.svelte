@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
   import Icon from '../Icon.svelte'
+  import ViewHeader from './ViewHeader.svelte'
   import { copyToClipboard, listTotpCodes } from '../vault'
   import type { TotpCodeEntry } from '../types'
 
@@ -106,6 +107,7 @@
 </script>
 
 <section class="authenticator-view">
+<ViewHeader title="Authenticator" />
 {#if loading}
   <p class="authenticator-status" role="status">Reading your codes…</p>
 {:else if loadFailed}
@@ -118,58 +120,59 @@
     <button type="button" class="primary-button" on:click={onOpenImport}>Import codes</button>
   </div>
 {:else}
-  <label class="search-box authenticator-search">
-    <Icon name="search" size={16} />
-    <input type="search" bind:value={query} placeholder="Search codes" autocomplete="off" spellcheck="false" />
-  </label>
+  <section class="authenticator-card">
+    <label class="search-box authenticator-search">
+      <Icon name="search" size={16} />
+      <input name="authenticator-search" type="search" bind:value={query} placeholder="Search codes…" aria-label="Search authenticator codes" autocomplete="off" spellcheck="false" />
+    </label>
 
-  {#if copyFailed}
-    <p class="authenticator-status" role="alert">Sesame could not copy that code to the clipboard. Try again.</p>
-  {/if}
-  {#if !filtered.length}
-    <p class="authenticator-status">No code matches that search.</p>
-  {:else}
-    <ul class="authenticator-list">
-      {#each filtered as code (code.id)}
-        {@const index = codes.indexOf(code)}
-        {@const left = secondsLeft(index, now)}
-        <li>
-          <button type="button" class="authenticator-row" on:click={() => void copy(code)}>
-            <span class="entry-avatar" aria-hidden="true">{code.initials}</span>
-            <span class="authenticator-names">
-              <strong>{code.title}</strong>
-              {#if code.site}<small>{code.site}</small>{/if}
-            </span>
-            <span class="authenticator-code" class:expiring={left <= 5}>{code.code}</span>
-            {#if copiedId === code.id}
-              <span class="authenticator-copied">Copied</span>
-            {:else}
-              <span
-                class="code-countdown"
-                class:expiring={left <= 5}
-                style={`--totp-progress: ${sweep(code, index, now) * 100}%`}
-                role="img"
-                aria-label={`${left} seconds left`}
-              ><small>{left}</small></span>
-            {/if}
-          </button>
-        </li>
-      {/each}
-    </ul>
-  {/if}
+    {#if copyFailed}
+      <p class="authenticator-status" role="alert">Sesame could not copy that code to the clipboard. Try again.</p>
+    {/if}
+    {#if !filtered.length}
+      <p class="authenticator-status">No code matches that search.</p>
+    {:else}
+      <ul class="authenticator-list">
+        {#each filtered as code (code.id)}
+          {@const index = codes.indexOf(code)}
+          {@const left = secondsLeft(index, now)}
+          <li>
+            <button type="button" class="authenticator-row" on:click={() => void copy(code)}>
+              <span class="entry-avatar" aria-hidden="true">{code.initials}</span>
+              <span class="authenticator-names">
+                <strong>{code.title}</strong>
+                {#if code.site}<small>{code.site}</small>{/if}
+              </span>
+              <span class="authenticator-code" class:expiring={left <= 5}>{code.code}</span>
+              {#if copiedId === code.id}
+                <span class="authenticator-copied">Copied</span>
+              {:else}
+                <span
+                  class="code-countdown"
+                  class:expiring={left <= 5}
+                  style={`--totp-progress: ${sweep(code, index, now) * 100}%`}
+                  role="img"
+                  aria-label={`${left} seconds left`}
+                ><small>{left}</small></span>
+              {/if}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
 {/if}
 </section>
 
 <style>
-  .authenticator-status { margin: var(--space-5) 0 0; color: var(--text-muted); font-size: var(--type-2); }
-  /* Layout only: .search-box carries the field treatment and its focus ring. */
-  .authenticator-search { max-width: 24rem; margin-top: var(--space-5); padding: 0 var(--space-3); }
-  .authenticator-search input { padding: 11px 0; font-size: var(--type-2); }
+  .authenticator-status { margin: var(--space-3) 0 0; color: var(--text-muted); font-size: var(--type-2); }
+  /* The card matches the vault list panel: surface container, inset search, hover rows. */
+  .authenticator-card { margin: var(--space-4) 0 0; padding: var(--space-4); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raised); }
+  .authenticator-search { margin-top: 0; padding: 0 var(--space-2); }
   .authenticator-list {
     display: grid;
-    gap: var(--space-2);
-    max-width: 40rem;
-    margin: var(--space-4) 0 0;
+    gap: 2px;
+    margin: var(--space-3) 0 0;
     padding: 0;
     list-style: none;
   }
@@ -179,16 +182,16 @@
     align-items: center;
     gap: var(--space-3);
     width: 100%;
-    border: 1px solid var(--border-soft);
+    border: 0;
     border-radius: var(--radius-md);
-    padding: var(--space-3);
-    background: var(--surface);
+    padding: var(--space-2) var(--space-3);
+    background: transparent;
     color: var(--text);
     text-align: left;
     cursor: pointer;
     transition: background var(--t-fast) ease;
   }
-  .authenticator-row:hover { background: var(--surface-3); }
+  .authenticator-row:hover { background: var(--control-hover); }
   .authenticator-names { display: grid; gap: 2px; min-width: 0; }
   .authenticator-names strong { overflow: hidden; font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .authenticator-names small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
@@ -235,7 +238,7 @@
   }
   .code-countdown.expiring small { color: var(--warn-text); }
   /* The disc sits on the row, so it follows the row rather than staying behind. */
-  .authenticator-row:hover .code-countdown::before { background: var(--surface-3); }
+  .authenticator-row:hover .code-countdown::before { background: color-mix(in srgb, var(--text) 4%, var(--surface)); }
   .authenticator-empty {
     display: grid;
     justify-items: center;

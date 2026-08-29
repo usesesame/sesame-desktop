@@ -75,7 +75,7 @@
 <main class="welcome-shell" class:pin-unlock={showPin}>
   <section class="unlock-card" aria-labelledby="unlock-heading" aria-busy={isWorking}>
     <div class="card-topline"><span>{status.exists ? 'Unlock Sesame' : 'Set up Sesame'}</span>{#if !status.exists}<SetupProgress step={1} />{:else}<span class="beta-chip">BETA</span>{/if}</div>
-    <h2 id="unlock-heading">{!status.exists ? 'Create your vault.' : recoveryUnlockOpen ? 'Use another unlock method.' : showPin ? 'Enter your PIN' : 'Enter your master password'}</h2>
+    <h1 id="unlock-heading">{!status.exists ? 'Create your vault.' : recoveryUnlockOpen ? 'Use another unlock method.' : showPin ? 'Enter your PIN' : 'Enter your master password'}</h1>
     {#if !showPin}<p>{!status.exists ? 'Choose a master password. You will get a one-time recovery kit to write down.' : recoveryUnlockOpen ? 'Enter the master password or the recovery kit for this vault.' : 'This vault opens with the master password you chose.'}</p>{/if}
     {#if restoreMessage}<div class="restore-success" role="status"><Icon name="check" size={16} /><span>{restoreMessage}</span></div>{/if}
 
@@ -91,6 +91,7 @@
           <input
             bind:this={pinField}
             class="pin-entry"
+            name="unlock-pin"
             type="password"
             inputmode="numeric"
             autocomplete="off"
@@ -109,17 +110,17 @@
         {#if errorMessage}
           <p id="unlock-error" class="form-error" role="alert">{errorMessage}</p>
         {:else if isWorking}
-          <p class="pin-status" role="status">Unlocking...</p>
+          <p class="pin-status" role="status">Unlocking…</p>
         {/if}
       </form>
       <button type="button" class="text-button unlock-alternative" on:click={openRecovery}>Use master password or recovery kit</button>
     {:else}
       <form on:submit|preventDefault={onSubmitMasterPassword}>
         <label for="master-password">{recoveryUnlockOpen ? 'Master password or recovery kit' : 'Master password'}</label>
-        <input bind:this={masterPasswordInput} id="master-password" type="password" bind:value={masterPassword} autocomplete={recoveryUnlockOpen ? 'off' : status.exists ? 'current-password' : 'new-password'} spellcheck="false" aria-invalid={Boolean(errorMessage)} aria-describedby={errorMessage ? 'unlock-error' : undefined} />
+        <input bind:this={masterPasswordInput} id="master-password" name="master-password" type="password" bind:value={masterPassword} autocomplete={recoveryUnlockOpen ? 'off' : status.exists ? 'current-password' : 'new-password'} spellcheck="false" aria-invalid={Boolean(errorMessage)} aria-describedby={errorMessage ? 'unlock-error' : undefined} />
         {#if !status.exists}
           <label for="confirm-password">Confirm master password</label>
-          <input id="confirm-password" type="password" bind:value={confirmPassword} autocomplete="new-password" />
+          <input id="confirm-password" name="confirm-password" type="password" bind:value={confirmPassword} autocomplete="new-password" />
         {/if}
         {#if errorMessage}<p id="unlock-error" class="form-error" role="alert">{errorMessage}</p>{/if}
         <button class="primary-button full" type="submit" disabled={isWorking}>

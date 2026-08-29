@@ -71,6 +71,7 @@
   {:else}
     <form class="settings-service-connect" on:submit|preventDefault={connect}>
       <input
+        name="desktop-code"
         aria-label="One-time desktop code"
         bind:value={desktopCode}
         placeholder="One-time code"

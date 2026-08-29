@@ -5,7 +5,7 @@
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
   import { platformCapabilities } from '../platform'
   import { useAppStores } from '../stores/app-stores'
-  import type { BreachCheckResult, IssueKind, ItemKind } from '../types'
+  import type { BreachCheckResult, ItemKind, VaultPane } from '../types'
   import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels, tagFilter, tagFromFilter } from '../vault-collections'
   import { itemKindIcon, itemKindLabel, itemKindMeta, itemTags, type VaultItem } from '../vault-items'
   import AddItemMenu from './AddItemMenu.svelte'
@@ -68,7 +68,6 @@
   export let onCopy: (value: string, label: string) => void
   export let onOpenWebsite: (url: string) => void
   export let onGoSecurity: () => void
-  export let onShowSecurityFilter: (filter: IssueKind) => void
   export let onAddWebsite: () => void
   export let onOpenDuplicateReview: () => void
   export let onToggleFavourite: (id: string, favourite: boolean) => void
@@ -112,12 +111,15 @@
   $: activeIssue = $selection.securityFilter
   $: activePasswordIssues = selectedEntry?.passwordIssues.filter((issue) => issue.kind === activeIssue) ?? []
 
-  $: securityGood = $vault.snapshot?.security.good ?? 0
-  $: healthPercent = snapshotEntries.length ? Math.round((securityGood / snapshotEntries.length) * 100) : 100
-  $: healthTier = healthPercent >= 80 ? 'good' : healthPercent >= 50 ? 'fair' : 'weak'
-
   let panelWidths = readPanelWidths()
   const commitPanelWidths = () => storePanelWidths(panelWidths)
+  let pane: VaultPane = $selection.activeItemId ? 'detail' : 'list'
+  let lastActiveItemId = $selection.activeItemId
+
+  $: if ($selection.activeItemId !== lastActiveItemId) {
+    lastActiveItemId = $selection.activeItemId
+    pane = $selection.activeItemId ? 'detail' : 'list'
+  }
 
   let searchInput: HTMLInputElement
   let passwordRevealTimer: ReturnType<typeof setTimeout> | null = null
@@ -258,7 +260,15 @@
 
   function activateRow(item: VaultItem) {
     if (multiSelect) onToggleMultiSelect(item.id, !selectedSet.has(item.id))
-    else onSelectItem(item.id, item.kind)
+    else {
+      onSelectItem(item.id, item.kind)
+      pane = 'detail'
+    }
+  }
+
+  function selectRecent(item: VaultItem) {
+    onSelectItem(item.id, item.kind)
+    pane = 'detail'
   }
 
   let lastFocusSearchToken = 0
@@ -304,16 +314,28 @@
 
 <svelte:window on:keydown={handleWindowKeydown} on:mousedown={handleSortOutside} on:mousedown={handleFolderOutside} />
 
+<header class="vault-view-header">
+  <div><h2>Vault</h2></div>
+  <button type="button" class="security-summary-button" on:click={onGoSecurity}>
+    <Icon name="shield-alert" size={15} />
+    {#if ($vault.snapshot?.security.needsAttention ?? 0) > 0}
+      {$vault.snapshot?.security.needsAttention} {$vault.snapshot?.security.needsAttention === 1 ? 'finding' : 'findings'}
+    {:else}
+      Checkup
+    {/if}
+  </button>
+</header>
+
 {#if !allItems.length}
   <section class="empty-workspace">
-    <img class="empty-brand size-md" src="/favicon.svg" alt="" />
+    <img class="empty-brand size-md" src="/favicon.svg" alt="" width="512" height="512" />
     <h2>Bring in your logins.</h2>
     <p>Import an export from another password manager. Sesame reads it on this device.</p>
     <button class="primary-button" on:click={onImport}>Choose export file</button>
     <button class="text-button empty-add" on:click={() => onOpenNewLogin()}>Add a login instead</button>
   </section>
 {:else}
-  <div class="vault-layout" style="--vault-list-width: {panelWidths.list}px; --vault-rail-width: {panelWidths.rail}px;">
+  <div class="vault-layout pane-{pane}" style="--vault-list-width: {panelWidths.list}px;">
     <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
         <div>
@@ -326,7 +348,7 @@
         </div>
       </div>
 
-      <label class="search-box"><Icon name="search" size={15} /><input bind:this={searchInput} value={$selection.searchQuery} on:input={(event) => onSearch(event.currentTarget.value)} placeholder="Search every item" aria-label="Search every saved item" aria-keyshortcuts="Control+K Meta+K /" />{#if !$selection.searchQuery}<kbd aria-hidden="true">/</kbd>{:else}<button type="button" aria-label="Clear search" on:click={onClearSearch}>×</button>{/if}</label>
+      <label class="search-box"><Icon name="search" size={15} /><input bind:this={searchInput} value={$selection.searchQuery} on:input={(event) => onSearch(event.currentTarget.value)} placeholder="Search every item…" aria-label="Search every saved item" aria-keyshortcuts="Control+K Meta+K /" />{#if !$selection.searchQuery}<kbd aria-hidden="true">/</kbd>{:else}<button type="button" aria-label="Clear search" on:click={onClearSearch}>×</button>{/if}</label>
 
       <div class="vault-list-tools">
         <ItemFilterMenu
@@ -424,7 +446,7 @@
                 <span class="entry-title"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
                 {#if item.securityLevel === 'needs-work'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
               </button>
-              {#if !multiSelect}<button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}>{item.favourite ? '★' : '☆'}</button>{/if}
+              {#if !multiSelect}<button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>{/if}
             </div>
           {/each}
         </div>
@@ -444,11 +466,12 @@
     />
 
     <section class="login-card-area">
+      <button type="button" class="vault-back-button" on:click={() => (pane = 'list')}><Icon name="chevron-left" size={15} /> Back to items</button>
       {#if recentItems.length}
         <nav class="recent-strip" aria-label="Recently viewed items">
           <span class="recent-strip-label">Recent</span>
           {#each recentItems as item (item.id)}
-            <button type="button" class="recent-chip" on:click={() => onSelectItem(item.id, item.kind)} title={item.title}>
+            <button type="button" class="recent-chip" on:click={() => selectRecent(item)} title={item.title}>
               {item.title}
             </button>
           {/each}
@@ -469,15 +492,15 @@
             onShowTag={(tag) => onShowCollection(tagFilter(tag))}
           />
         {:else}
-          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" /><h2>{itemLoading ? 'Opening…' : 'Select an item.'}</h2><p>Its details will appear here.</p></div>
+          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item.'}</h2><p>Its details will appear here.</p></div>
         {/if}
       {:else if $vault.loginCard}
         {@const loginCard = $vault.loginCard}
         <div class="login-title-row">
           <div class="entry-avatar large-entry"><WebsiteIcon site={loginCard.site} initials={loginCard.initials} enabled={siteIconsEnabled} /></div>
-          <div><h2>{loginCard.title}</h2><div class="login-meta">{#if loginCard.url}<a href={loginCard.url} target="_blank" rel="noreferrer noopener">{loginCard.site}</a>{:else}<span class="site-missing">Website not saved</span>{/if}{#if loginCard.folderId}<button type="button" class="folder-badge" on:click={() => onShowCollection(loginCard.folderId ?? '')}><Icon name="folder" size={12} />{loginCard.folder}</button>{/if}</div>{#if selectedEntry?.issueKinds.length}<div class="issue-chips">{#each issueChips(selectedEntry.issueKinds).shown as issue (issue)}<span class="issue-chip"><Icon name="alert" size={11} />{issueChipLabel(issue)}</span>{/each}{#if issueChips(selectedEntry.issueKinds).extra}<span class="issue-chip issue-chip-more">+{issueChips(selectedEntry.issueKinds).extra} more</span>{/if}</div>{/if}</div>
+          <div><h2>{loginCard.title}</h2><div class="login-meta">{#if loginCard.url}<a href={loginCard.url} target="_blank" rel="noreferrer noopener">{loginCard.site}</a>{:else}<span class="site-missing">Website not saved</span>{/if}{#if loginCard.folderId}<span class="login-meta-sep" aria-hidden="true">·</span><button type="button" class="login-folder" on:click={() => onShowCollection(loginCard.folderId ?? '')}><Icon name="folder" size={12} />{loginCard.folder}</button>{/if}{#if selectedEntry?.issueKinds.length}{#each issueChips(selectedEntry.issueKinds).shown as issue (issue)}<span class="issue-chip"><Icon name="alert" size={11} />{issueChipLabel(issue)}</span>{/each}{#if issueChips(selectedEntry.issueKinds).extra}<span class="issue-chip issue-chip-more">+{issueChips(selectedEntry.issueKinds).extra} more</span>{/if}{/if}</div></div>
           <div class="login-title-actions">
-            <button type="button" class="card-favourite" class:active={loginCard.favourite} aria-label={loginCard.favourite ? 'Remove from favourites' : 'Add to favourites'} aria-pressed={loginCard.favourite} on:click={() => onToggleFavourite(loginCard.id, !loginCard.favourite)}>{loginCard.favourite ? '★' : '☆'}</button>
+            <button type="button" class="card-favourite" class:active={loginCard.favourite} aria-label={loginCard.favourite ? 'Remove from favourites' : 'Add to favourites'} aria-pressed={loginCard.favourite} on:click={() => onToggleFavourite(loginCard.id, !loginCard.favourite)}><Icon name={loginCard.favourite ? 'star-filled' : 'star'} size={17} /></button>
             <button class="more-button" aria-label="Edit login" on:click={onOpenLoginEditor}><Icon name="more" size={19} /></button>
           </div>
         </div>
@@ -566,40 +589,9 @@
           </section>
         {/if}
       {:else}
-        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" /><h2>Select an item.</h2><p>Its details will appear here.</p></div>
+        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item.</h2><p>Its details will appear here.</p></div>
       {/if}
     </section>
 
-    <PanelResizer
-      label="Resize the security panel"
-      value={panelWidths.rail}
-      min={PANEL_WIDTH_LIMITS.rail.min}
-      max={PANEL_WIDTH_LIMITS.rail.max}
-      fallback={PANEL_WIDTH_LIMITS.rail.fallback}
-      direction={-1}
-      onResize={(next) => (panelWidths = { ...panelWidths, rail: next })}
-      onCommit={commitPanelWidths}
-    />
-
-    <aside class="security-rail">
-      <h3 class="rail-title">Security status</h3>
-      <div class="score-ring" data-tier={healthTier} style={`--p: ${Math.max(healthPercent, 4)}%`} role="img" aria-label={`Vault health ${healthPercent} percent. ${securityGood} of ${snapshotEntries.length} accounts ready.`}><div class="score-ring-inner"><strong>{healthPercent}<span class="score-unit">%</span></strong></div></div>
-      <h3>{($vault.snapshot?.security.needsAttention ?? 0) > 0 ? 'Review needed.' : 'All clear.'}</h3>
-      <p>{($vault.snapshot?.security.needsAttention ?? 0) > 0 ? `${securityGood} of ${snapshotEntries.length} accounts are ready. Choose a check to work through the rest.` : 'Every saved account is in good shape.'}</p>
-      {#if ($vault.snapshot?.security.needsAttention ?? 0) > 0}
-        <div class="rail-breakdown">
-          {#if $vault.snapshot?.security.weakPasswords}<button type="button" on:click={() => onShowSecurityFilter('weak-password')}><span class="rail-dot"></span>Weak passwords<strong>{$vault.snapshot.security.weakPasswords}</strong></button>{/if}
-          {#if $vault.snapshot?.security.commonPasswords}<button type="button" on:click={() => onShowSecurityFilter('common-password')}><span class="rail-dot"></span>Common passwords<strong>{$vault.snapshot.security.commonPasswords}</strong></button>{/if}
-          {#if $vault.snapshot?.security.reusedPasswords}<button type="button" on:click={() => onShowSecurityFilter('reused-password')}><span class="rail-dot"></span>Reused passwords<strong>{$vault.snapshot.security.reusedPasswords}</strong></button>{/if}
-          {#if $vault.snapshot?.security.compromisedPatterns}<button type="button" on:click={() => onShowSecurityFilter('compromised-pattern')}><span class="rail-dot"></span>Unsafe patterns<strong>{$vault.snapshot.security.compromisedPatterns}</strong></button>{/if}
-          {#if $vault.snapshot?.security.oldPasswords}<button type="button" on:click={() => onShowSecurityFilter('old-password')}><span class="rail-dot"></span>Old passwords<strong>{$vault.snapshot.security.oldPasswords}</strong></button>{/if}
-          {#if $vault.snapshot?.security.noTotp}<button type="button" on:click={() => onShowSecurityFilter('totp')}><span class="rail-dot"></span>No 2FA saved<strong>{$vault.snapshot.security.noTotp}</strong></button>{/if}
-          {#if $vault.snapshot?.security.missingUrls}<button type="button" on:click={() => onShowSecurityFilter('url')}><span class="rail-dot"></span>No website<strong>{$vault.snapshot.security.missingUrls}</strong></button>{/if}
-          {#if $vault.snapshot?.security.missingRecovery}<button type="button" on:click={() => onShowSecurityFilter('recovery')}><span class="rail-dot"></span>Recovery not reviewed<strong>{$vault.snapshot.security.missingRecovery}</strong></button>{/if}
-          {#if $vault.snapshot?.security.duplicateCandidates}<button type="button" on:click={() => onShowSecurityFilter('duplicate')}><span class="rail-dot"></span>Possible duplicates<strong>{$vault.snapshot.security.duplicateCandidates}</strong></button>{/if}
-        </div>
-      {/if}
-      <button class="secondary-button rail-button" on:click={onGoSecurity}>See full checkup</button>
-    </aside>
   </div>
 {/if}

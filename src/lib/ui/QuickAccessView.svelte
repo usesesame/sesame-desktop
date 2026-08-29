@@ -164,7 +164,7 @@
   {:else}
     <label class="quick-access-search">
       <Icon name="search" size={16} />
-      <input bind:this={searchInput} bind:value={query} on:input={() => void updateSearch()} type="text" autocomplete="off" spellcheck="false" placeholder="Search Sesame" />
+      <input bind:this={searchInput} name="quick-access-search" bind:value={query} on:input={() => void updateSearch()} type="search" autocomplete="off" spellcheck="false" placeholder="Search Sesame…" aria-label="Search saved items" />
     </label>
     {#if items.length}
       <ul class="quick-access-results">
@@ -175,7 +175,7 @@
                 {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
               <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
-              <span class="quick-access-result-state">{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
+              <span class="quick-access-result-state" role={workingId === item.id || doneId === item.id ? 'status' : undefined}>{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
             </button>
             <span class="quick-access-actions">
             {#each item.actions.slice(1) as action (action.field)}
@@ -208,10 +208,11 @@
 
 <style>
   :global(body) { min-width: 0; background: transparent; }
-  .quick-access { animation: view-enter .16s cubic-bezier(.2, .7, .2, 1) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise), var(--shadow-panel); overflow: hidden; }
+  .quick-access { animation: view-enter .16s var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise), var(--shadow-panel); overflow: hidden; }
   .quick-access-status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; color: var(--text-muted); font-size: var(--type-2); text-align: center; }
   .quick-access-search { display: flex; align-items: center; gap: var(--space-2); flex: none; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); }
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }
+  .quick-access-search:focus-within { box-shadow: var(--field-ring); }
   .quick-access-search input:focus { box-shadow: none; }
   .quick-access-results { display: flex; flex-direction: column; gap: 2px; margin: var(--space-2) 0 0; padding: 0 var(--space-1) 0 0; list-style: none; overflow-y: auto; scrollbar-gutter: stable; }
   .quick-access-result-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; align-items: center; gap: var(--space-1); }

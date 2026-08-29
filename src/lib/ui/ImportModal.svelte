@@ -162,7 +162,7 @@
       {#if $imports.preview.intentionallyOmittedItems > 0}
         <div class="import-conflict-note"><Icon name="alert" size={16} /><p><strong>Some items are not imported.</strong><span>Sesame does not yet support this item type. Keep the original export until you have checked that the imported items are complete.</span></p></div>
       {/if}
-      <label class="import-option"><input type="checkbox" checked={$imports.skipExactDuplicates} on:change={(event) => imports.patch({ skipExactDuplicates: event.currentTarget.checked })} /><span><strong>Skip exact duplicates</strong><small>Only logins with the same account details are skipped. Conflicts are still imported separately for review.</small></span></label>
+      <label class="import-option"><input name="skip-exact-duplicates" type="checkbox" checked={$imports.skipExactDuplicates} on:change={(event) => imports.patch({ skipExactDuplicates: event.currentTarget.checked })} /><span><strong>Skip exact duplicates</strong><small>Only logins with the same account details are skipped. Conflicts are still imported separately for review.</small></span></label>
       <div class="import-preview-actions"><button type="button" class="secondary-button" on:click={onResetImport} disabled={$imports.importing}>Choose another file</button><button type="button" class="primary-button" on:click={onConfirmImport} disabled={$imports.importing}>{$imports.importing ? 'Adding locally…' : 'Add to vault'}</button></div>
     </section>
   {:else}

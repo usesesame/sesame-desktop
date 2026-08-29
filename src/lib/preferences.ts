@@ -12,7 +12,6 @@ const KEYS = {
   panelWidths: 'sesame-panel-widths',
   sortMode: 'sesame-sort-mode',
   quickAccessShortcut: 'sesame-quick-access-shortcut',
-  switchingChecklist: 'sesame-switching-checklist-v1',
 } as const
 
 export const DEFAULT_QUICK_ACCESS_SHORTCUT = 'Ctrl+Alt+S'
@@ -135,12 +134,10 @@ export function storeQuickAccessShortcut(value: string): void {
 
 export interface PanelWidths {
   list: number
-  rail: number
 }
 
 export const PANEL_WIDTH_LIMITS = {
-  list: { min: 220, max: 460, fallback: 300 },
-  rail: { min: 200, max: 360, fallback: 236 },
+  list: { min: 280, max: 460, fallback: 300 },
 } as const
 
 function validWidth(value: unknown, limits: { min: number; max: number; fallback: number }): number {
@@ -150,7 +147,7 @@ function validWidth(value: unknown, limits: { min: number; max: number; fallback
 }
 
 export function defaultPanelWidths(): PanelWidths {
-  return { list: PANEL_WIDTH_LIMITS.list.fallback, rail: PANEL_WIDTH_LIMITS.rail.fallback }
+  return { list: PANEL_WIDTH_LIMITS.list.fallback }
 }
 
 export function readPanelWidths(): PanelWidths {
@@ -162,7 +159,6 @@ export function readPanelWidths(): PanelWidths {
     const record = parsed as Record<string, unknown>
     return {
       list: validWidth(record.list, PANEL_WIDTH_LIMITS.list),
-      rail: validWidth(record.rail, PANEL_WIDTH_LIMITS.rail),
     }
   } catch {
     return defaultPanelWidths()
@@ -172,43 +168,5 @@ export function readPanelWidths(): PanelWidths {
 export function storePanelWidths(widths: PanelWidths): void {
   write(KEYS.panelWidths, JSON.stringify({
     list: validWidth(widths.list, PANEL_WIDTH_LIMITS.list),
-    rail: validWidth(widths.rail, PANEL_WIDTH_LIMITS.rail),
   }))
-}
-
-export interface SwitchingChecklist {
-  regularSites: boolean
-  recoveryDetails: boolean
-  browserFill: boolean
-  dualRun: boolean
-}
-
-const emptySwitchingChecklist = (): SwitchingChecklist => ({
-  regularSites: false,
-  recoveryDetails: false,
-  browserFill: false,
-  dualRun: false,
-})
-
-// The dual-run period runs for two weeks, so these ticks outlive the guide that sets them.
-export function readSwitchingChecklist(): SwitchingChecklist {
-  const raw = read(KEYS.switchingChecklist)
-  if (!raw) return emptySwitchingChecklist()
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== 'object' || parsed === null) return emptySwitchingChecklist()
-    const record = parsed as Record<string, unknown>
-    return {
-      regularSites: record.regularSites === true,
-      recoveryDetails: record.recoveryDetails === true,
-      browserFill: record.browserFill === true,
-      dualRun: record.dualRun === true,
-    }
-  } catch {
-    return emptySwitchingChecklist()
-  }
-}
-
-export function storeSwitchingChecklist(checklist: SwitchingChecklist): void {
-  write(KEYS.switchingChecklist, JSON.stringify(checklist))
 }

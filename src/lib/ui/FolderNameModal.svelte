@@ -21,7 +21,7 @@
     <span class="confirm-icon"><Icon name="folder" size={20} /></span>
     <h2 id="folder-name-heading">{title}</h2>
     <p id="folder-name-description">{description}</p>
-    <label>Folder name<input bind:value={name} maxlength="100" required autocomplete="off" /></label>
+    <label>Folder name<input name="folder-name" bind:value={name} maxlength="100" required autocomplete="off" /></label>
     <div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={onClose}>Cancel</button><button type="submit" class="primary-button" disabled={working || !name.trim()}>{working ? 'Saving…' : 'Save folder'}</button></div>
   </form>
 </ModalShell>

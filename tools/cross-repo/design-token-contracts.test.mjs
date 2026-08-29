@@ -130,26 +130,18 @@ function tokenBlock(css, pattern) {
   return ''
 }
 
-test('the surface ladder climbs in the same order in both themes', () => {
+test('the surface model resolves compatibility aliases to canvas or panel', () => {
   const css = readFileSync(join(root, 'design', 'tokens.css'), 'utf8')
-  const ladder = ['bg', 'surface-inset', 'surface-3', 'surface-2', 'surface']
 
   for (const [name, pattern] of [
     ['light', /^:root \{/m],
     ['dark', /^:root\[data-theme="dark"\] \{/m],
   ]) {
     const block = tokenBlock(css, pattern)
-    const steps = ladder.map((token) => {
-      const match = block.match(new RegExp(`--${token}:\\s*(#[0-9a-fA-F]{6})\\s*;`))
-      assert.ok(match, `${name} palette is missing --${token}`)
-      return { token, hex: match[1], lum: luminance(match[1]) }
-    })
-    for (let i = 1; i < steps.length; i += 1) {
-      assert.ok(
-        steps[i].lum > steps[i - 1].lum,
-        `${name}: --${steps[i].token} (${steps[i].hex}) must sit above --${steps[i - 1].token} (${steps[i - 1].hex}) in the elevation ladder, but it is darker or equal`,
-      )
-    }
+    assert.match(block, /--surface-2:\s*var\(--surface\)/, `${name} --surface-2 must resolve to the panel surface`)
+    assert.match(block, /--surface-3:\s*var\(--bg-workspace\)/, `${name} --surface-3 must resolve to the canvas`)
+    assert.match(block, /--surface-inset:\s*var\(--bg-workspace\)/, `${name} --surface-inset must resolve to the canvas`)
+    assert.match(block, /--surface-note:\s*var\(--bg-workspace\)/, `${name} --surface-note must resolve to the canvas`)
   }
 })
 
@@ -249,7 +241,7 @@ test('the retired focus tokens are gone so no surface can reach for them again',
   assert.match(tokens, /--field-border-hover:/)
 })
 
-test('focus is the gold halo alone, on every field and every surface', () => {
+test('field focus uses the shared high-contrast focus token on every surface', () => {
   const css = readFileSync(join(root, 'design', 'tokens.css'), 'utf8')
 
   function block(header) {
@@ -269,14 +261,22 @@ test('focus is the gold halo alone, on every field and every surface', () => {
   }
 
   const light = block(':root {')
-
-  // The gold halo alone is nowhere near 3:1, a recorded deviation from WCAG 2.2 SC 1.4.11. See the Fields block in design/tokens.css.
-  assert.match(light.get('--field-ring'), /var\(--gold\)/, '--field-ring no longer draws the gold halo')
+  const dark = block(':root[data-theme="dark"] {')
+  assert.match(light.get('--field-ring'), /var\(--focus-ring\)/, '--field-ring must draw the shared focus token')
   assert.doesNotMatch(
     light.get('--field-ring'),
     /0 0 0 1px/,
     'a solid 1px layer is back inside --field-ring, which is the doubled edge this treatment removed',
   )
+
+  for (const [name, palette] of [['light', light], ['dark', dark]]) {
+    const focus = palette.get('--focus-ring')
+    const surface = palette.get('--surface')
+    assert.match(focus, /^#[0-9a-fA-F]{6}$/)
+    assert.match(surface, /^#[0-9a-fA-F]{6}$/)
+    const ratio = (Math.max(luminance(focus), luminance(surface)) + 0.05) / (Math.min(luminance(focus), luminance(surface)) + 0.05)
+    assert.ok(ratio >= 3, `${name} focus ring contrast is ${ratio.toFixed(2)}:1, below 3:1`)
+  }
 
   for (const surface of [['src', 'app.css'], ['website', 'src', 'site.css'], ['admin', 'src', 'app.css']]) {
     const name = surface.join('/')
@@ -354,7 +354,7 @@ test('the 2FA button is the same height as the button beside it', () => {
   )
 })
 
-test('the sidebar draws its own overlays rather than the theme-tinted ones', () => {
+test('the sidebar uses its navigation surface tokens consistently', () => {
   const css = readFileSync(join(root, 'src', 'app.css'), 'utf8')
   const offenders = []
   for (const line of css.split('\n')) {
@@ -364,7 +364,7 @@ test('the sidebar draws its own overlays rather than the theme-tinted ones', () 
   assert.deepEqual(
     offenders,
     [],
-    `these sidebar rules use a theme-tinted overlay on a surface that is dark in both themes:\n  ${offenders.join('\n  ')}`,
+    `these sidebar rules bypass the navigation surface tokens:\n  ${offenders.join('\n  ')}`,
   )
   for (const name of ['--sidebar-hover', '--sidebar-active-layer', '--sidebar-active-top', '--sidebar-active-lift']) {
     assert.ok(css.includes(`${name}:`), `${name} is not declared in src/app.css`)

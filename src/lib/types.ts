@@ -263,6 +263,19 @@ export type ImportSource =
 
 export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'trash' | 'history' | 'backups' | 'settings'
 
+export type VaultPane = 'list' | 'detail'
+
+export interface NavigationItem {
+  id: View
+  label: string
+  icon: string
+}
+
+export interface NavigationGroup {
+  label: string
+  items: NavigationItem[]
+}
+
 export type Theme = 'auto' | 'light' | 'dark'
 
 export type SecurityFilter = IssueKind | null

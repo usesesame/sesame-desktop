@@ -135,9 +135,9 @@
   .group-panel,
   .review-panel {
     min-height: 0;
-    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface);
+    box-shadow: var(--shadow-raised);
     overflow: hidden;
   }
 

@@ -5,6 +5,7 @@
   import GeneratorView from './GeneratorView.svelte'
   import PassphraseGeneratorView from './PassphraseGeneratorView.svelte'
   import PasswordStrengthView from './PasswordStrengthView.svelte'
+  import ViewHeader from './ViewHeader.svelte'
 
   export let onCopy: (value: string, label: string) => void
   export let onUseInLogin: (password: string) => void
@@ -47,6 +48,7 @@
 </script>
 
 <section class="tools-view">
+  <ViewHeader title="Password tools" />
   {#if $recentGenerations.items.length > 0}
     <section class="recent-generations" aria-label="Recently generated">
       <h3>Recent</h3>

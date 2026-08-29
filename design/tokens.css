@@ -7,7 +7,7 @@
 
   /* ---- Type ---------------------------------------------------------- */
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  --font-display: "Sitka Text", Sitka, Constantia, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-display: var(--font-ui);
   --font-code: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 
   --type-1: 0.75rem;   /* 12px */
@@ -27,10 +27,10 @@
   --space-7: 2.5rem;  /* 40px */
 
   /* ---- Radii ----------------------------------------------------------- */
-  --radius-sm: 0.5rem;   /* 8px */
-  --radius-md: 0.75rem;  /* 12px */
-  --radius-lg: 1rem;     /* 16px */
-  --radius-xl: 1.25rem;  /* 20px */
+  --radius-sm: 0.25rem;  /* 4px */
+  --radius-md: 0.5rem;   /* 8px */
+  --radius-lg: 0.75rem;  /* 12px */
+  --radius-xl: 0.75rem;
   --radius-pill: 999px;
 
   /* ---- Base and surfaces ------------------------------------------------ */
@@ -39,10 +39,10 @@
   --bg-workspace: #f8f7f2;
   --surface: #fffefa;
   --surface-glass: rgba(255, 254, 249, .88);
-  --surface-2: #fcfcf8;
-  --surface-3: #f6f7f1;
-  --surface-inset: #f3f7ef;
-  --surface-note: #f8f8f2;
+  --surface-2: var(--surface);
+  --surface-3: var(--bg-workspace);
+  --surface-inset: var(--bg-workspace);
+  --surface-note: var(--bg-workspace);
   --welcome-glow: #fbecd0;
   --welcome-glow-mid: #f7f4ed;
 
@@ -56,15 +56,15 @@
   --field-bg: var(--surface-inset);
   --field-border: var(--border-input);
   --field-border-hover: color-mix(in srgb, var(--text-2) 25%, var(--field-border));
-  --field-ring: 0 0 0 3px color-mix(in srgb, var(--gold) 34%, transparent);
+  --field-ring: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 28%, transparent);
   --field-ring-danger: 0 0 0 3px color-mix(in srgb, var(--danger) 26%, transparent);
 
   /* ---- Text ------------------------------------------------------------- */
   --text-heading: #273329;
   --text: #334136;
   --text-2: #536154;
-  --text-muted: #758075;
-  --text-faint: #8b9588;
+  --text-muted: #667267;
+  --text-faint: #727d72;
   --eyebrow: #728071;
 
   /* ---- Green accent --accent is the button; --accent-link stays readable as text. */
@@ -84,7 +84,6 @@
   --ok-text: #4f7757;
   --ok-bg: #eaf3e9;
 
-  /* ---- Gold bright for brand marks and focus; the soft family for avatars and chips. */
   --gold: #eabf52;
   --gold-mark-text: #28352a;
   --gold-soft-bg: #fdedc2;
@@ -124,14 +123,14 @@
   --control-active-lift: 0 1px 3px rgba(45, 55, 45, .12);
 
   /* ---- Effects */
-  --focus-ring: var(--gold);
+  --focus-ring: #27613a;
   --edge-highlight: rgba(255, 255, 255, .7);
   --scrollbar-thumb: rgba(90, 105, 90, .32);
   --scrollbar-thumb-hover: rgba(90, 105, 90, .55);
   --backdrop: rgba(30, 40, 32, .38);
 
-  --shadow-panel: 0 1px 3px rgba(45, 55, 45, .05), 0 6px 16px rgba(45, 55, 45, .05), 0 22px 46px rgba(45, 55, 45, .07), inset 0 1px 0 rgba(255, 255, 255, .7);
-  --shadow-card: 0 24px 60px rgba(60, 69, 52, .08);
+  --shadow-panel: none;
+  --shadow-card: none;
   /* The website's two-layer card shadow */
   --shadow-raised: 0 1px 2px rgba(45, 55, 45, .05), 0 8px 24px rgba(45, 55, 45, .06);
   --shadow-lift: 0 2px 4px rgba(45, 55, 45, .05), 0 18px 44px rgba(45, 55, 45, .11);
@@ -172,10 +171,10 @@
     /* Elevation order matches light: bg < inset < 3 < 2 < surface. */
     --surface: #201e15;
     --surface-glass: rgba(32, 30, 21, .9);
-    --surface-2: #1e1c14;
-    --surface-3: #1b1912;
-    --surface-inset: #191710;
-    --surface-note: #232014;
+    --surface-2: var(--surface);
+    --surface-3: var(--bg-workspace);
+    --surface-inset: var(--bg-workspace);
+    --surface-note: var(--bg-workspace);
     --welcome-glow: #2f2a19;
     --welcome-glow-mid: #201d12;
 
@@ -187,9 +186,10 @@
     --text-heading: #e9efe1;
     --text: #d2dac8;
     --text-2: #b0baa6;
-    --text-muted: #8a9683;
-    --text-faint: #6f7d69;
+    --text-muted: #9aa595;
+    --text-faint: #8d9989;
     --eyebrow: #8a9683;
+    --focus-ring: #91c79d;
 
     --accent: #3d6a4b;
     --accent-hover: #487a58;
@@ -244,8 +244,8 @@
     --scrollbar-thumb-hover: rgba(200, 214, 196, .34);
     --backdrop: rgba(0, 0, 0, .6);
 
-    --shadow-panel: 0 1px 3px rgba(0, 0, 0, .3), 0 8px 22px rgba(0, 0, 0, .34), 0 26px 52px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .05);
-    --shadow-card: 0 24px 60px rgba(0, 0, 0, .45);
+    --shadow-panel: none;
+    --shadow-card: none;
     --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
     --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
     --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);
@@ -264,10 +264,10 @@
   --bg-workspace: #1a1910;
   --surface: #201e15;
   --surface-glass: rgba(32, 30, 21, .9);
-  --surface-2: #1e1c14;
-  --surface-3: #1b1912;
-  --surface-inset: #191710;
-  --surface-note: #232014;
+  --surface-2: var(--surface);
+  --surface-3: var(--bg-workspace);
+  --surface-inset: var(--bg-workspace);
+  --surface-note: var(--bg-workspace);
   --welcome-glow: #2f2a19;
   --welcome-glow-mid: #201d12;
 
@@ -279,9 +279,10 @@
   --text-heading: #e9efe1;
   --text: #d2dac8;
   --text-2: #b0baa6;
-  --text-muted: #8a9683;
-  --text-faint: #6f7d69;
+  --text-muted: #9aa595;
+  --text-faint: #8d9989;
   --eyebrow: #8a9683;
+  --focus-ring: #91c79d;
 
   --accent: #3d6a4b;
   --accent-hover: #487a58;
@@ -326,8 +327,8 @@
   --scrollbar-thumb-hover: rgba(200, 214, 196, .34);
   --backdrop: rgba(0, 0, 0, .6);
 
-  --shadow-panel: 0 1px 3px rgba(0, 0, 0, .3), 0 8px 22px rgba(0, 0, 0, .34), 0 26px 52px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .05);
-  --shadow-card: 0 24px 60px rgba(0, 0, 0, .45);
+  --shadow-panel: none;
+  --shadow-card: none;
   --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
   --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);

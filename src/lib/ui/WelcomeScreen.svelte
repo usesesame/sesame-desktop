@@ -14,7 +14,7 @@
 
 <main class="welcome-intro">
   <section class="welcome-card" aria-labelledby="welcome-heading" aria-describedby="welcome-description">
-    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" /><span>Sesame</span></div>
+    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" width="512" height="512" /><span>Sesame</span></div>
     <h1 bind:this={heading} id="welcome-heading" tabindex="-1">Welcome to Sesame</h1>
     <p id="welcome-description" class="lede">
       Sesame keeps your passwords in an encrypted vault on this computer. Setup has four short steps, and you can change any of it later in Settings.
@@ -45,10 +45,9 @@
   .welcome-card {
     width: min(100%, 460px);
     padding: var(--space-6);
-    border: 0;
     border-radius: var(--radius-lg);
     background: var(--surface);
-    box-shadow: var(--shadow-raise);
+    box-shadow: var(--shadow-lift);
   }
   .brand { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-5); font-weight: 700; }
   .sesame-mark { width: 28px; height: 28px; }
@@ -59,7 +58,6 @@
     font-size: var(--type-5);
     line-height: 1.2;
   }
-  h1:focus-visible { outline: none; }
   .lede { margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
   .welcome-steps { display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: 0; list-style: none; }
   .welcome-steps li {
@@ -90,7 +88,7 @@
     font-size: var(--type-2);
     font-weight: 600;
     cursor: pointer;
-    transition: background var(--t-fast) ease;
+    transition: background-color var(--t-fast) ease;
   }
   .start-button:hover { background: var(--accent-hover); }
   .start-button:active { background: var(--accent-active); }
@@ -105,7 +103,7 @@
     font-size: var(--type-2);
     font-weight: 600;
     cursor: pointer;
-    transition: background var(--t-fast) ease;
+    transition: background-color var(--t-fast) ease;
   }
   .restore-button:hover { background: var(--tint); }
   .tiny-note { margin: var(--space-4) 0 0; color: var(--text-faint); font-size: var(--type-1); line-height: 1.55; }

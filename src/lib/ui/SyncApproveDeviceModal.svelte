@@ -14,6 +14,11 @@
   let matched = false
 
   $: if (!open) matched = false
+
+  function formatWhen(value: string): string {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  }
 </script>
 
 {#if open}
@@ -27,7 +32,7 @@
 
       <div class="sync-device-card">
         <p class="sync-device-name">{deviceLabel || 'Unnamed device'}</p>
-        {#if requestedAt}<p class="sync-device-meta">Asked {requestedAt}</p>{/if}
+        {#if requestedAt}<p class="sync-device-meta">Asked {formatWhen(requestedAt)}</p>{/if}
         <!-- The fingerprint is the only thing standing between the user and approving a device that is not theirs. -->
         <p class="sync-device-label">Fingerprint</p>
         <code class="sync-fingerprint">{fingerprint}</code>
@@ -39,7 +44,7 @@
       </p>
 
       <label class="sync-confirm">
-        <input type="checkbox" bind:checked={matched} disabled={working} />
+        <input name="sync-fingerprint-matched" type="checkbox" bind:checked={matched} disabled={working} />
         <span>The fingerprint matches the other device.</span>
       </label>
 
@@ -58,7 +63,6 @@
 <style>
   .sync-device-card {
     margin: var(--space-4) 0;
-    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--space-4);
     background: var(--surface-inset);
