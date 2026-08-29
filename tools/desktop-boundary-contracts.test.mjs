@@ -19,6 +19,34 @@ function filesUnder(directory) {
   })
 }
 
+test('the boundary carries every tool the standalone gate executes', () => {
+  const boundary = JSON.parse(read('desktop-boundary.json'))
+  const pkg = JSON.parse(read('package.json'))
+  const inBoundary = (relative) =>
+    boundary.files.includes(relative) ||
+    boundary.directories.some((directory) => relative.startsWith(`${directory}/`))
+
+  const closure = new Set(['desktop:ci'])
+  for (const name of closure) {
+    for (const next of (pkg.scripts[name] ?? '').matchAll(/npm run ([a-z:.-]+)/g)) closure.add(next[1])
+  }
+
+  const referenced = new Set()
+  for (const name of closure) {
+    for (const match of (pkg.scripts[name] ?? '').matchAll(/(tools\/[A-Za-z0-9._/-]+\.mjs)/g)) referenced.add(match[1])
+  }
+  for (const relative of referenced) {
+    assert.ok(inBoundary(relative), `${relative} is executed by the standalone gate but is not in desktop-boundary.json`)
+  }
+
+  const suites = boundary.files.filter((file) => file.startsWith('tools/') && file.endsWith('.test.mjs'))
+  for (const suite of suites) {
+    for (const match of read(suite).matchAll(/['"`](tools\/[A-Za-z0-9._/-]+\.mjs)['"`]/g)) {
+      assert.ok(inBoundary(match[1]), `${suite} executes ${match[1]} but it is not in desktop-boundary.json`)
+    }
+  }
+})
+
 test('the desktop repository owns a closed standalone command surface', () => {
   const boundary = JSON.parse(read('desktop-boundary.json'))
   assert.equal(boundary.schemaVersion, 1)
