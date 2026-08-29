@@ -3,7 +3,6 @@
 <!-- Name one primary area: interface, vault core, native host, docs, or build. -->
 
 - Area:
-- Work ledger ID:
 - Linked issue:
 - Depends on:
 
