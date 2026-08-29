@@ -1,6 +1,7 @@
 name: Boundary
 
 on:
+  pull_request:
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
