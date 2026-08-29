@@ -826,6 +826,7 @@
         editorTitle={$loginState.editorTitle}
         savingLogin={$loginState.savingLogin}
         focusUrl={$loginState.editorFocusUrl}
+        hasTotp={$loginState.editorHasTotp}
         onSubmit={loginController.submit}
         onClose={loginController.closeEditor}
         onDelete={loginController.requestCurrentDelete}

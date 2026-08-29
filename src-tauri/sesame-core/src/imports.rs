@@ -1553,6 +1553,13 @@ fn normalise_tags(values: Vec<String>) -> Vec<String> {
     tags
 }
 
+pub fn resolved_totp(input_totp: Option<String>, stored_totp: Option<String>) -> Option<String> {
+    match input_totp {
+        Some(value) => non_empty(value),
+        None => stored_totp,
+    }
+}
+
 pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
     let title = input.title.trim();
     if title.is_empty() {
@@ -1592,7 +1599,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         return Err("There are too many backup codes, or one is too long.".into());
     }
 
-    let totp = non_empty(input.totp);
+    let totp = input.totp.and_then(non_empty);
     if let Some(value) = totp.as_deref() {
         if totp_from_value(value).is_none() {
             return Err(

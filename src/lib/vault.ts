@@ -486,10 +486,10 @@ const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>(
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', password: 'preview-only-not-a-real-password', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', password: 'preview-only-not-a-real-password', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
   },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, recoveryNotApplicable: true, legacyFields: [] },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: true, legacyFields: [] },
 }
 
 const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
@@ -824,6 +824,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       folderId: input.folderId,
       folder: input.folder.trim(),
       favourite: previewCards[id]?.favourite ?? false,
+      hasTotp: Boolean(input.totp),
       backupCodes: input.backupCodes.filter(Boolean),
       recoveryEmail: input.recoveryEmail.trim() || undefined,
       recoveryPhone: input.recoveryPhone.trim() || undefined,
