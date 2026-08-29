@@ -969,7 +969,6 @@ pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
 }
 
 pub fn start(app: AppHandle) -> io::Result<()> {
-    // browser_host::register already reports the unsupported platform at startup.
     if !crate::browser_host::is_supported() {
         return Ok(());
     }

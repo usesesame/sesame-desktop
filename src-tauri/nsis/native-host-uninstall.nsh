@@ -3,9 +3,6 @@
 !include LogicLib.nsh
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
-    DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser"
-    DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser"
-    Delete "$LOCALAPPDATA\Sesame\native-messaging\app.usesesame.browser.json"
-    RMDir "$LOCALAPPDATA\Sesame\native-messaging"
+    ExecWait '"$INSTDIR\sesame-browser-host.exe" unregister'
   ${EndIf}
 !macroend

@@ -1,5 +1,3 @@
-use tauri::AppHandle;
-
 use super::{RegistrationError, RegistrationPlan, RegistrationState};
 
 pub const HOST_FILE_NAME: &str = "sesame-browser-host";
@@ -15,11 +13,19 @@ pub fn unsupported_error() -> RegistrationError {
     )
 }
 
-pub fn plan(_app: &AppHandle) -> Result<RegistrationPlan, RegistrationError> {
+pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
     Err(unsupported_error())
 }
 
 pub fn commit(_plan: &RegistrationPlan) -> Result<(), RegistrationError> {
+    Ok(())
+}
+
+pub fn registry_keys() -> &'static [&'static str] {
+    &[]
+}
+
+pub fn erase(_keys: &[&str]) -> Result<(), RegistrationError> {
     Ok(())
 }
 
