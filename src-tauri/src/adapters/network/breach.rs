@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use super::ensure_crypto_provider;
 use reqwest::Client;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
@@ -29,6 +30,7 @@ pub async fn check_password_breach(password: String) -> VaultResult<BreachCheckR
 
     let hex: String = digest.iter().map(|byte| format!("{byte:02X}")).collect();
     let (prefix, suffix) = hex.split_at(5);
+    ensure_crypto_provider();
     let client = Client::builder()
         .timeout(Duration::from_secs(HIBP_TIMEOUT_SECS))
         .build()

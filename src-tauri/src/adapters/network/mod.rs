@@ -8,3 +8,7 @@ pub(crate) mod public_updates;
 #[cfg(feature = "sync-preview")]
 pub(crate) mod sync;
 pub(crate) mod website_icons;
+
+pub(crate) fn ensure_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
