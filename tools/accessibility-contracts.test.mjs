@@ -334,7 +334,7 @@ test('the recently viewed strip stores ids, never vault content', () => {
 
 test('the vault grid has a track for every child it renders', () => {
   const view = component('VaultView.svelte')
-  const layoutStart = view.indexOf('<div class="vault-layout"')
+  const layoutStart = view.indexOf('<div class="vault-layout ')
   assert.ok(layoutStart >= 0, 'VaultView must render .vault-layout')
 
   const children = [...view.slice(layoutStart).matchAll(/^ {4}<(section|aside|PanelResizer)\b/gm)].length
@@ -361,8 +361,8 @@ test('the panel resizer is styled globally, not scoped to its component', () => 
   assert.match(css, /^\.panel-resizer \{/m, 'app.css must own the .panel-resizer rule')
   assert.match(
     css,
-    /@media \(max-width: 1280px\)[\s\S]{0,400}?\.panel-resizer \{ display: none; \}/,
-    'the handles must hide at the breakpoint where the rail is hidden',
+    /@media \(max-width: 960px\)[\s\S]{0,400}?\.vault-layout \.panel-resizer \{ display: none; \}/,
+    'the list handle must hide when the vault switches to one visible pane',
   )
 })
 

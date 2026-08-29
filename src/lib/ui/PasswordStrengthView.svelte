@@ -60,10 +60,12 @@
       <div class="strength-input-row">
         <input
           class="strength-input"
+          name="password-to-check"
           type={revealed ? 'text' : 'password'}
           autocomplete="off"
           spellcheck="false"
-          placeholder="Paste or type a password"
+          placeholder="Paste or type a password…"
+          aria-label="Password to check"
           bind:value
           on:input={scheduleCheck}
         />
@@ -74,7 +76,7 @@
       <p class="strength-privacy-note">Checked on this device. Nothing typed here is saved or sent.</p>
     </section>
 
-    <section class="generator-settings" aria-label="Strength result">
+    <section class="generator-settings" aria-label="Strength result" aria-live="polite">
       {#if checking}
         <p class="strength-status">Checking…</p>
       {:else if result && result.issues.length > 0}

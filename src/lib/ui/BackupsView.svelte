@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
+  import ViewHeader from './ViewHeader.svelte'
   import type { RecoveryHealth } from '../types'
 
   export let health: RecoveryHealth | null = null
@@ -8,7 +9,6 @@
   export let onBeginRestore: () => void
   export let onMakeBackup: () => void
   export let onOpenDrill: () => void
-  export let onOpenSwitchingJourney: () => void
 
   function formatDate(iso: string | undefined): string {
     if (!iso) return 'never'
@@ -27,12 +27,11 @@
 </script>
 
 <section class="backups-view">
-  <p class="lede">A Sesame backup is encrypted. Keep one somewhere separate from this computer.</p>
+  <ViewHeader title="Backups" />
   {#if health}
     <div class="recovery-health recovery-health-{status}">
-      <strong>Recovery health</strong>
-      <span>{statusMessage}</span>
-      <span class="recovery-health-meta">Last export: {formatDate(health.lastExportedAt)} · Last verified: {formatDate(health.lastVerifiedAt)}</span>
+      <p class="recovery-health-head"><span class="recovery-health-dot" aria-hidden="true"></span><strong>Recovery health</strong><span class="recovery-health-meta">Last export: {formatDate(health.lastExportedAt)} · Last verified: {formatDate(health.lastVerifiedAt)}</span></p>
+      <p class="recovery-health-message">{statusMessage}</p>
     </div>
   {/if}
   <div class="backup-list">
@@ -41,35 +40,37 @@
     <article class="backup-card"><span class="backup-icon"><Icon name="refresh" size={24} /></span><div><h3>Restore from a backup</h3><p>Checks the file and keeps a safety copy of the current vault before replacing it.</p></div><button type="button" class="secondary-button" on:click={onBeginRestore}>Choose backup</button></article>
   </div>
   <button type="button" class="text-button backup-local-copy" on:click={onMakeBackup}>Also keep a local copy</button>
-  <button type="button" class="text-button backup-local-copy" on:click={onOpenSwitchingJourney}>Open switching guide</button>
   <div class="backup-reminder"><strong>Before you rely on Sesame:</strong><span>Keep two copies in separate places and complete a recovery drill.</span></div>
 </section>
 
 <style>
   .recovery-health {
-    margin: 1rem 0;
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    background: var(--surface-2, #f5f5f5);
+    display: grid;
+    gap: var(--space-1);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-raised);
+  }
+  .recovery-health-head {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
   }
-
-  .recovery-health-good {
-    border-left: 0.25rem solid var(--ok-text);
+  .recovery-health-dot {
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--text-faint);
   }
-
-  .recovery-health-attention {
-    border-left: 0.25rem solid var(--warn-text);
-  }
-
-  .recovery-health-missing {
-    border-left: 0.25rem solid var(--danger);
-  }
-
-  .recovery-health-meta {
-    font-size: 0.875rem;
-    opacity: 0.8;
-  }
+  .recovery-health-good .recovery-health-dot { background: var(--ok-text); }
+  .recovery-health-attention .recovery-health-dot { background: var(--warn-text); }
+  .recovery-health-missing .recovery-health-dot { background: var(--danger); }
+  .recovery-health-head strong { color: var(--text-heading); font-size: var(--type-2); }
+  .recovery-health-meta { margin-left: auto; color: var(--text-muted); font-size: var(--type-1); }
+  .recovery-health-message { margin: 0; color: var(--text-muted); font-size: var(--type-2); }
 </style>

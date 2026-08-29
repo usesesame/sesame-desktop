@@ -78,7 +78,7 @@
   <span class="settings-icon"><Icon name="refresh" size={16} /></span>
   <div class="setting-copy">
     <strong>Sesame Sync</strong>
-    <p>{summary}. Sesame cannot read what it stores.</p>
+    <p role="status">{summary}. Sesame cannot read what it stores.</p>
     {#if $syncPreview.loadError}
       <p class="sync-note">{$syncPreview.loadError}</p>
     {/if}
@@ -161,7 +161,7 @@
   </div>
 {/if}
 {#if $syncPreview.removalRecoveryKit}
-  <div class="sync-own-code">
+  <div class="sync-own-code" role="status">
     <strong>Write down your new recovery kit</strong>
     <p>
       Your vault key changed, so every earlier recovery kit stopped working.
@@ -217,6 +217,7 @@
       type="password"
       bind:value={removalPassword}
       placeholder="Master password"
+      aria-label="Master password"
       autocomplete="current-password"
     />
     <div class="modal-actions">
@@ -254,6 +255,7 @@
       type="password"
       bind:value={joinPassword}
       placeholder="Master password"
+      aria-label="Master password"
       autocomplete="current-password"
     />
     <div class="modal-actions">

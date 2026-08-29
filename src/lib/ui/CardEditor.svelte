@@ -150,32 +150,32 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this card appears in your list, e.g. "Everyday card"</span><input bind:this={titleInput} bind:value={cardDraft.title} required maxlength="160" placeholder="e.g. Everyday card" autocomplete="off" /></label>
-    <label>Cardholder name<input bind:value={cardDraft.cardholderName} maxlength="256" autocomplete="cc-name" /></label>
+    <label>Name <span class="field-hint">How this card appears in your list, e.g. “Everyday card”</span><input name="card-title" bind:this={titleInput} bind:value={cardDraft.title} required maxlength="160" placeholder="e.g. Everyday card…" autocomplete="off" /></label>
+    <label>Cardholder name<input name="card-cardholder" bind:value={cardDraft.cardholderName} maxlength="256" autocomplete="cc-name" /></label>
     <label>Card number
       {#if network}<span class="field-hint">{network.name}</span>{/if}
-      <input value={groupNumber(numberDigits)} on:input={onNumberInput} maxlength="24" inputmode="numeric" autocomplete="cc-number" placeholder="e.g. 4242 4242 4242 4242" />
-      {#if numberLooksMistyped}<span class="field-warning">Check this number. A digit looks mistyped.</span>{/if}
+      <input name="card-number" value={groupNumber(numberDigits)} on:input={onNumberInput} maxlength="24" inputmode="numeric" autocomplete="cc-number" placeholder="e.g. 4242 4242 4242 4242" spellcheck="false" aria-invalid={numberLooksMistyped ? 'true' : undefined} />
+      {#if numberLooksMistyped}<span class="field-warning" aria-live="polite">Check this number. A digit looks mistyped.</span>{/if}
     </label>
     <div class="editor-two-column">
       <label>Expiry month <span class="field-hint">MM</span>
-        <input value={cardDraft.expiryMonth} on:input={onMonthInput} maxlength="2" inputmode="numeric" autocomplete="cc-exp-month" placeholder="09" />
-        {#if monthOutOfRange}<span class="field-warning">A month runs from 01 to 12.</span>{/if}
+        <input name="card-expiry-month" value={cardDraft.expiryMonth} on:input={onMonthInput} maxlength="2" inputmode="numeric" autocomplete="cc-exp-month" placeholder="09" aria-invalid={monthOutOfRange ? 'true' : undefined} />
+        {#if monthOutOfRange}<span class="field-warning" aria-live="polite">A month runs from 01 to 12.</span>{/if}
       </label>
       <label>Expiry year <span class="field-hint">YYYY</span>
-        <input value={cardDraft.expiryYear} on:input={onYearInput} maxlength="4" inputmode="numeric" autocomplete="cc-exp-year" placeholder="2030" />
-        {#if expired}<span class="field-warning">This card expired.</span>{/if}
+        <input name="card-expiry-year" value={cardDraft.expiryYear} on:input={onYearInput} maxlength="4" inputmode="numeric" autocomplete="cc-exp-year" placeholder="2030" aria-invalid={expired ? 'true' : undefined} />
+        {#if expired}<span class="field-warning" aria-live="polite">This card expired.</span>{/if}
       </label>
     </div>
     <div class="editor-two-column">
       <label>Security code {#if cscExpected}<span class="field-hint">{cscExpected} digits</span>{/if}
-        <input bind:value={cardDraft.securityCode} maxlength="4" inputmode="numeric" autocomplete="cc-csc" />
-        {#if cscUnexpectedLength}<span class="field-warning">{network?.name} uses {cscExpected} digits.</span>{/if}
+        <input name="card-security-code" bind:value={cardDraft.securityCode} maxlength="4" inputmode="numeric" autocomplete="cc-csc" spellcheck="false" aria-invalid={cscUnexpectedLength ? 'true' : undefined} />
+        {#if cscUnexpectedLength}<span class="field-warning" aria-live="polite">{network?.name} uses {cscExpected} digits.</span>{/if}
       </label>
-      <label>Network <span class="field-hint">Filled from the card number</span><input bind:value={cardDraft.brand} maxlength="64" autocomplete="cc-type" /></label>
+      <label>Network <span class="field-hint">Filled from the card number</span><input name="card-network" bind:value={cardDraft.brand} maxlength="64" autocomplete="cc-type" /></label>
     </div>
-    <label>Notes<textarea bind:value={cardDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={cardDraft.tags.join(', ')} on:input={(event) => (cardDraft = { ...cardDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel" /></label>
+    <label>Notes<textarea name="card-notes" bind:value={cardDraft.notes} rows="4" maxlength="4000"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="card-tags" value={cardDraft.tags.join(', ')} on:input={(event) => (cardDraft = { ...cardDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel…" /></label>
     <LegacyDataPanel fields={legacyFields} />
   </div>
 

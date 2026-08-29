@@ -29,6 +29,7 @@
     <label class="delete-vault-input" for="delete-vault-password">Master password</label>
     <input
       id="delete-vault-password"
+      name="delete-vault-password"
       type="password"
       bind:value={deleteVaultPassword}
       autocomplete="current-password"

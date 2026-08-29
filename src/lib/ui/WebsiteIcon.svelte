@@ -36,4 +36,4 @@
   }
 </script>
 
-<span bind:this={root} class="website-icon-content">{#if icon}<img src={icon} alt="" />{:else}{initials}{/if}</span>
+<span bind:this={root} class="website-icon-content">{#if icon}<img src={icon} alt="" width="32" height="32" loading="lazy" on:error={() => (icon = '')} />{:else}{initials}{/if}</span>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
   import DuplicateReview from './DuplicateReview.svelte'
+  import ViewHeader from './ViewHeader.svelte'
   import { issueKindLabels, issueSeverityWeight } from '../issue-kinds'
   import type { CleanupEntry, DuplicateGroup, IssueKind, VaultSnapshot } from '../types'
 
@@ -56,15 +57,13 @@
   </section>
 {:else}
 <section class="checkup-view">
-  <header class="view-header">
-    <div><h2>{snapshot?.security.needsAttention ? 'Review your vault' : 'No issues found'}</h2><p>These checks run while the vault is open. Nothing leaves this device.</p></div>
-    <div class="view-header-aside"><strong>{snapshot?.security.good ?? 0}</strong><span>accounts ready</span></div>
-  </header>
+  <ViewHeader title={snapshot?.security.needsAttention ? 'Review your vault' : 'No issues found'}>
+    <div slot="aside" class="view-header-aside"><strong>{snapshot?.security.good ?? 0}</strong><span>accounts ready</span></div>
+  </ViewHeader>
   <section class="findings-list" aria-label="Security findings">
     {#each findings as finding (finding.kind)}
-      <button class="finding-row" class:clear={finding.count === 0} disabled={finding.count === 0} on:click={finding.onClick}><span class="finding-icon"><Icon name={finding.icon} size={17} /></span><div><h3>{issueKindLabels[finding.kind].title}</h3><p>{finding.count ? finding.activeText : finding.clearText}</p></div><strong>{finding.count}</strong><Icon name="chevron-right" size={18} /></button>
+      <button class="finding-row" class:clear={finding.count === 0} disabled={finding.count === 0} on:click={finding.onClick}><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{issueKindLabels[finding.kind].title}</h3><p>{finding.count ? finding.activeText : finding.clearText}</p></div><strong>{finding.count}</strong><Icon name="chevron-right" size={18} /></button>
     {/each}
   </section>
-  <div class="privacy-callout"><span><Icon name="shield" size={16} /></span><div><strong>This checkup stays on your device.</strong><p>Passwords are compared only while your vault is unlocked.</p></div></div>
 </section>
 {/if}

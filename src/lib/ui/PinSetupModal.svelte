@@ -50,9 +50,9 @@
   <p id="pin-setup-description">Use six digits for everyday unlock on this device. Your master password or recovery kit remains the fallback.</p>
   <form novalidate on:submit|preventDefault={onSave}>
     <label for="unlock-pin">PIN</label>
-    <input id="unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={pin} on:input={updatePin} />
+    <input id="unlock-pin" name="new-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={pin} on:input={updatePin} />
     <label for="confirm-unlock-pin">Confirm PIN</label>
-    <input id="confirm-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={confirmPin} aria-invalid={showMismatch} aria-describedby={showMismatch || errorMessage ? 'pin-setup-error' : undefined} on:input={updateConfirmation} />
+    <input id="confirm-unlock-pin" name="confirm-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={confirmPin} aria-invalid={showMismatch} aria-describedby={showMismatch || errorMessage ? 'pin-setup-error' : undefined} on:input={updateConfirmation} />
     {#if showMismatch}<p id="pin-setup-error" class="form-error" role="alert">Those PINs do not match.</p>
     {:else if errorMessage}<p id="pin-setup-error" class="form-error" role="alert">{errorMessage}</p>{/if}
     <p class="pin-security-note"><Icon name="monitor" size={15} /><span>The PIN is combined with a random secret kept in this device's protected credential store before it wraps your vault key.</span></p>

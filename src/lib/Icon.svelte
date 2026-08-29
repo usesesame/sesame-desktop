@@ -141,6 +141,10 @@
   {:else if name === 'keyboard'}
     <rect x="2.5" y="6" width="19" height="12.5" rx="2.2" />
     <path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 14h9.5" />
+  {:else if name === 'star'}
+    <path d="M12 3.2l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.9-5.4 2.9 1-6-4.3-4.2 6-.9Z" />
+  {:else if name === 'star-filled'}
+    <path fill="currentColor" stroke="none" d="M12 3.2l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.9-5.4 2.9 1-6-4.3-4.2 6-.9Z" />
   {:else}
     <circle cx="12" cy="12" r="8" />
   {/if}

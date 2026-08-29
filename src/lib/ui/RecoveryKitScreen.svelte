@@ -106,7 +106,7 @@
 
 <main class="recovery-shell">
   <section class="recovery-card" aria-labelledby="recovery-kit-heading" aria-describedby="recovery-kit-description">
-    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" /><span>Sesame</span><span class="brand-progress"><SetupProgress step={2} /></span></div>
+    <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" width="512" height="512" /><span>Sesame</span><span class="brand-progress"><SetupProgress step={2} /></span></div>
     <p class="eyebrow">Recovery kit</p>
     <h1 bind:this={heading} id="recovery-kit-heading" tabindex="-1">
       {verifyMode ? 'Verify your kit' : 'Write this down.'}
@@ -132,17 +132,19 @@
           <p class="verify-error" role="alert">{saveError}</p>
         {/if}
       {/if}
-      <label class="recovery-confirm"><input type="checkbox" bind:checked={savedConfirmed} /> <span>I saved this outside Sesame.</span></label>
+      <label class="recovery-confirm"><input name="recovery-kit-saved" type="checkbox" bind:checked={savedConfirmed} /> <span>I saved this outside Sesame.</span></label>
     {:else}
       <div class="verify-groups" role="group" aria-label="Recovery kit verification">
         {#each verifyGroups as groupIndex, i (groupIndex)}
           <label class="verify-group">
             <span>Group {groupIndex + 1}</span>
             <input
+              name={`recovery-group-${groupIndex + 1}`}
               type="text"
               maxlength="6"
               autocomplete="off"
               autocapitalize="characters"
+              spellcheck="false"
               aria-invalid={verifyError ? 'true' : undefined}
               bind:value={verifyInputs[i]}
             />
@@ -179,8 +181,7 @@
     padding: 28px;
     border-radius: var(--radius-lg);
     background: var(--surface);
-    border: 0;
-    box-shadow: var(--shadow-raise);
+    box-shadow: var(--shadow-lift);
   }
   .brand {
     display: flex;
@@ -206,7 +207,6 @@
     margin: 0 0 18px;
     color: var(--text-muted);
   }
-  /* Each group is its own box, so a line can only ever break between groups. */
   .recovery-code {
     display: flex;
     flex-wrap: wrap;

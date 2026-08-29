@@ -17,6 +17,11 @@
   let choice: 'this' | 'other' | '' = ''
 
   $: if (!open) choice = ''
+
+  function formatWhen(value: string): string {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  }
 </script>
 
 {#if open}
@@ -33,7 +38,7 @@
           <input type="radio" name="sync-conflict" value="this" bind:group={choice} disabled={working} />
           <span class="sync-conflict-head">This device</span>
           <span class="sync-conflict-meta">Revision {thisDevice.revision}</span>
-          {#if thisDevice.changedAt}<span class="sync-conflict-meta">Changed {thisDevice.changedAt}</span>{/if}
+          {#if thisDevice.changedAt}<span class="sync-conflict-meta">Changed {formatWhen(thisDevice.changedAt)}</span>{/if}
           <span class="sync-conflict-count">{thisDevice.entryCount} logins</span>
         </label>
 
@@ -41,7 +46,7 @@
           <input type="radio" name="sync-conflict" value="other" bind:group={choice} disabled={working} />
           <span class="sync-conflict-head">{otherDevice.deviceLabel || 'Other device'}</span>
           <span class="sync-conflict-meta">Revision {otherDevice.revision}</span>
-          {#if otherDevice.changedAt}<span class="sync-conflict-meta">Uploaded {otherDevice.changedAt}</span>{/if}
+          {#if otherDevice.changedAt}<span class="sync-conflict-meta">Uploaded {formatWhen(otherDevice.changedAt)}</span>{/if}
           <span class="sync-conflict-count">{otherDevice.entryCount} logins</span>
         </label>
       </div>

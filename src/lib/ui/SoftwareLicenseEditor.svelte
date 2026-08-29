@@ -51,15 +51,15 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this licence appears in your list, e.g. "Office suite"</span><input bind:this={titleInput} bind:value={licenseDraft.title} required maxlength="160" placeholder="e.g. Office suite" autocomplete="off" /></label>
-    <label>Product<input bind:value={licenseDraft.productName} maxlength="256" autocomplete="off" /></label>
-    <label>Licence key<input bind:value={licenseDraft.licenseKey} maxlength="512" autocomplete="off" class="monospace-field" /></label>
+    <label>Name <span class="field-hint">How this licence appears in your list, e.g. “Office suite”</span><input name="licence-title" bind:this={titleInput} bind:value={licenseDraft.title} required maxlength="160" placeholder="e.g. Office suite…" autocomplete="off" /></label>
+    <label>Product<input name="licence-product" bind:value={licenseDraft.productName} maxlength="256" autocomplete="off" /></label>
+    <label>Licence key<input name="licence-key" bind:value={licenseDraft.licenseKey} maxlength="512" autocomplete="off" class="monospace-field" spellcheck="false" /></label>
     <div class="editor-two-column">
-      <label>Purchased from <span class="field-hint">Optional</span><input bind:value={licenseDraft.purchasedFrom} maxlength="256" autocomplete="off" /></label>
-      <label>Purchase date <span class="field-hint">Optional</span><input bind:value={licenseDraft.purchaseDate} maxlength="32" autocomplete="off" /></label>
+      <label>Purchased from <span class="field-hint">Optional</span><input name="licence-vendor" bind:value={licenseDraft.purchasedFrom} maxlength="256" autocomplete="off" /></label>
+      <label>Purchase date <span class="field-hint">Optional</span><input name="licence-purchase-date" bind:value={licenseDraft.purchaseDate} maxlength="32" autocomplete="off" /></label>
     </div>
-    <label>Notes<textarea bind:value={licenseDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={licenseDraft.tags.join(', ')} on:input={(event) => (licenseDraft = { ...licenseDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, design" /></label>
+    <label>Notes<textarea name="licence-notes" bind:value={licenseDraft.notes} rows="4" maxlength="4000"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="licence-tags" value={licenseDraft.tags.join(', ')} on:input={(event) => (licenseDraft = { ...licenseDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, design…" /></label>
   </div>
 
   {#if confirmingDiscard}

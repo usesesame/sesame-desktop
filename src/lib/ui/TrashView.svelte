@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
+  import ViewHeader from './ViewHeader.svelte'
   import type { ItemPreview, TrashSummary } from '../types'
 
   export let items: TrashSummary[] = []
@@ -19,10 +20,10 @@
 </script>
 
 <section class="trash-view">
+  <ViewHeader title="Trash" />
   {#if !items.length}
     <section class="item-empty-state">
       <span class="empty-brand size-md trash-empty-icon"><Icon name="trash" size={32} /></span>
-      <p class="eyebrow">Nothing here</p>
       <h2>Trash is empty.</h2>
       <p>A deleted login, identity, or other saved item stays here for 30 days before Sesame removes it for good.</p>
     </section>

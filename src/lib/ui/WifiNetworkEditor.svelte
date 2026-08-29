@@ -1,5 +1,6 @@
 <script lang="ts">
   import ModalShell from './ModalShell.svelte'
+  import Icon from '../Icon.svelte'
   import type { WifiNetworkInput } from '../types'
 
   export let networkDraft: WifiNetworkInput
@@ -33,6 +34,8 @@
   function focusInitial() {
     titleInput?.focus()
   }
+
+  let passwordVisible = false
 </script>
 
 <ModalShell
@@ -51,11 +54,16 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this network appears in your list, e.g. "Home Wi-Fi"</span><input bind:this={titleInput} bind:value={networkDraft.title} required maxlength="160" placeholder="e.g. Home Wi-Fi" autocomplete="off" /></label>
-    <label>Network name (SSID)<input bind:value={networkDraft.ssid} maxlength="64" autocomplete="off" /></label>
-    <label>Password<input bind:value={networkDraft.password} maxlength="256" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this network appears in your list, e.g. “Home Wi-Fi”</span><input name="wifi-title" bind:this={titleInput} bind:value={networkDraft.title} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
+    <label>Network name (SSID)<input name="wifi-ssid" bind:value={networkDraft.ssid} maxlength="64" autocomplete="off" spellcheck="false" /></label>
+    <label>Password
+      <span class="password-field single">
+        <input name="wifi-password" bind:value={networkDraft.password} maxlength="256" autocomplete="off" spellcheck="false" type={passwordVisible ? 'text' : 'password'} />
+        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
+      </span>
+    </label>
     <label>Security type <span class="field-hint">Optional</span>
-      <input bind:value={networkDraft.securityType} list="wifi-security-types" maxlength="32" autocomplete="off" placeholder="e.g. WPA2" />
+      <input name="wifi-security-type" bind:value={networkDraft.securityType} list="wifi-security-types" maxlength="32" autocomplete="off" placeholder="e.g. WPA2…" spellcheck="false" />
       <datalist id="wifi-security-types">
         <option value="WPA3"></option>
         <option value="WPA2/WPA3"></option>
@@ -65,8 +73,8 @@
         <option value="Open"></option>
       </datalist>
     </label>
-    <label>Notes<textarea bind:value={networkDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={networkDraft.tags.join(', ')} on:input={(event) => (networkDraft = { ...networkDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel" /></label>
+    <label>Notes<textarea name="wifi-notes" bind:value={networkDraft.notes} rows="4" maxlength="4000"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="wifi-tags" value={networkDraft.tags.join(', ')} on:input={(event) => (networkDraft = { ...networkDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel…" /></label>
   </div>
 
   {#if confirmingDiscard}

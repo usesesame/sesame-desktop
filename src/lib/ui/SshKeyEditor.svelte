@@ -1,5 +1,6 @@
 <script lang="ts">
   import ModalShell from './ModalShell.svelte'
+  import Icon from '../Icon.svelte'
   import type { SshKeyInput } from '../types'
 
   export let keyDraft: SshKeyInput
@@ -33,6 +34,8 @@
   function focusInitial() {
     titleInput?.focus()
   }
+
+  let passphraseVisible = false
 
   // A public key names its own algorithm in the first field, so nobody should
   // have to retype it. Private keys do not, except for the older PEM headers.
@@ -79,13 +82,18 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this key appears in your list, e.g. "Deploy key"</span><input bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key" autocomplete="off" /></label>
-    <label>Key type <span class="field-hint">Read from the key you paste</span><input bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" placeholder="e.g. ed25519" /></label>
-    <label>Private key<textarea bind:value={keyDraft.privateKey} on:input={fillKeyType} rows="6" maxlength="16000" class="monospace-field"></textarea></label>
-    <label>Public key<textarea bind:value={keyDraft.publicKey} on:input={fillKeyType} rows="3" maxlength="4000" class="monospace-field"></textarea></label>
-    <label>Passphrase<input bind:value={keyDraft.passphrase} maxlength="256" autocomplete="off" /></label>
-    <label>Notes<textarea bind:value={keyDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy" /></label>
+    <label>Name <span class="field-hint">How this key appears in your list, e.g. “Deploy key”</span><input name="ssh-key-title" bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key…" autocomplete="off" /></label>
+    <label>Key type <span class="field-hint">Read from the key you paste</span><input name="ssh-key-type" bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" placeholder="e.g. ed25519…" spellcheck="false" /></label>
+    <label>Private key<textarea name="ssh-private-key" bind:value={keyDraft.privateKey} on:input={fillKeyType} rows="6" maxlength="16000" class="monospace-field" spellcheck="false"></textarea></label>
+    <label>Public key<textarea name="ssh-public-key" bind:value={keyDraft.publicKey} on:input={fillKeyType} rows="3" maxlength="4000" class="monospace-field" spellcheck="false"></textarea></label>
+    <label>Passphrase
+      <span class="password-field single">
+        <input name="ssh-passphrase" bind:value={keyDraft.passphrase} maxlength="256" autocomplete="off" spellcheck="false" type={passphraseVisible ? 'text' : 'password'} />
+        <button type="button" class="icon-button" aria-label={passphraseVisible ? 'Hide passphrase' : 'Show passphrase'} aria-pressed={passphraseVisible} on:click={() => (passphraseVisible = !passphraseVisible)}><Icon name={passphraseVisible ? 'eye-off' : 'eye'} size={15} /></button>
+      </span>
+    </label>
+    <label>Notes<textarea name="ssh-key-notes" bind:value={keyDraft.notes} rows="4" maxlength="4000"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="ssh-key-tags" value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy…" /></label>
   </div>
 
   {#if confirmingDiscard}

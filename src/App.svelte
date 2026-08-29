@@ -6,7 +6,7 @@
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
   import { loadPlatformCapabilities } from './lib/platform'
-  import type { ImportSource, View } from './lib/types'
+  import type { ImportSource, NavigationGroup, View } from './lib/types'
   import { storeSortMode } from './lib/preferences'
   import { createFeedbackController } from './lib/controllers/feedback-controller'
   import { createLoginController } from './lib/controllers/login-controller'
@@ -68,7 +68,6 @@
   import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
   import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
   import BrowserSaveApprovalModal from './lib/ui/BrowserSaveApprovalModal.svelte'
-  import SwitchingJourneyModal from './lib/ui/SwitchingJourneyModal.svelte'
   import PinSetupModal from './lib/ui/PinSetupModal.svelte'
   import ChangeMasterPasswordModal from './lib/ui/ChangeMasterPasswordModal.svelte'
   import EntryContextMenu from './lib/ui/EntryContextMenu.svelte'
@@ -369,15 +368,21 @@
     onboardingController.startIfNeeded($settingsState.betaOnboardingDismissed, $vault.status.onboardingRequired ?? false)
   }
 
-  const navigation: Array<{ id: View; label: string; icon: string }> = [
-    { id: 'vault', label: 'Vault', icon: 'vault' },
-    { id: 'authenticator', label: 'Authenticator', icon: 'shield' },
-    { id: 'security', label: 'Security checkup', icon: 'shield' },
-    { id: 'tools', label: 'Tools', icon: 'key' },
-    { id: 'trash', label: 'Trash', icon: 'trash' },
-    { id: 'history', label: 'History', icon: 'refresh' },
-    { id: 'backups', label: 'Backups', icon: 'archive' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
+  const navigation: NavigationGroup[] = [
+    { label: 'Workspace', items: [
+      { id: 'vault', label: 'Vault', icon: 'vault' },
+      { id: 'authenticator', label: 'Authenticator', icon: 'shield' },
+      { id: 'security', label: 'Security', icon: 'shield' },
+    ] },
+    { label: 'Manage', items: [
+      { id: 'tools', label: 'Tools', icon: 'key' },
+      { id: 'backups', label: 'Backups', icon: 'archive' },
+      { id: 'history', label: 'History', icon: 'refresh' },
+      { id: 'trash', label: 'Trash', icon: 'trash' },
+    ] },
+    { label: '', items: [
+      { id: 'settings', label: 'Settings', icon: 'settings' },
+    ] },
   ]
   const importSources: Array<{ value: ImportSource; label: string }> = [
     { value: 'bitwarden-csv', label: 'Bitwarden CSV' },
@@ -399,11 +404,6 @@
     { value: 'aegis-json', label: 'Aegis JSON' },
     { value: '2fas-json', label: '2FAS JSON' },
   ]
-
-  async function openSwitchingJourney() {
-    await Promise.all([backupController.refreshHealth(), settingsController.refreshBrowserIntegration()])
-    modalController.open({ kind: 'switching-journey' })
-  }
 
   onMount(() => {
     let stopQuickAccessOpen = () => {}
@@ -480,8 +480,8 @@
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
   <main class="loading-screen" aria-live="polite">
-    <div class="loading-mark"><img class="sesame-mark large" src="/favicon.svg" alt="" /><span class="loading-spinner" aria-hidden="true"></span></div>
-    <p>Opening Sesame</p>
+    <div class="loading-mark"><img class="sesame-mark large" src="/favicon.svg" alt="" width="512" height="512" /><span class="loading-spinner" aria-hidden="true"></span></div>
+    <p>Opening Sesame…</p>
   </main>
 {:else if $vault.status.unlocked && ($onboardingState.step === 'recovery-display' || $onboardingState.step === 'recovery-verify')}
   {#key $onboardingState.step}
@@ -519,13 +519,10 @@
     {navigation}
     preview={$vault.status.preview}
     duplicateReviewOpen={$cleanupState.duplicateReviewOpen}
-    refreshing={$unlockState.refreshingVault}
     notice={$feedbackState.notice}
     errorMessage={$feedbackState.errorMessage}
     onNavigate={navigate}
     onLock={() => unlockController.lock()}
-    onCycleTheme={settingsController.cycleTheme}
-    onRefresh={unlockController.refreshCurrentView}
     onDismissNotice={feedbackController.dismissNotice}
     onDismissError={feedbackController.clearError}
     onNewLogin={() => loginController.openNew()}
@@ -587,7 +584,6 @@
         onCopy={loginController.copy}
         onOpenWebsite={loginController.openCurrentWebsite}
         onGoSecurity={() => selection.patch({ activeView: 'security' })}
-        onShowSecurityFilter={cleanupController.showSecurityFilter}
         onAddWebsite={loginController.openEditorWebsite}
         onOpenDuplicateReview={cleanupController.openDuplicateReview}
         onToggleFavourite={(id, favourite) => void itemController.toggleFavourite(id, favourite)}
@@ -644,7 +640,7 @@
         titleFor={historyItemTitle}
       />
     {:else if $selection.activeView === 'backups'}
-      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} onExportBackup={backupController.exportEncryptedBackup} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} onOpenSwitchingJourney={() => void openSwitchingJourney()} />
+      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} onExportBackup={backupController.exportEncryptedBackup} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
         theme={$settings.theme}
@@ -808,16 +804,6 @@
         onVerify={backupController.verifyDrillBackup}
         onRestore={backupController.restoreVerifiedBackup}
         onClose={backupController.closeDrill}
-      />
-    {:else if active?.kind === 'switching-journey'}
-      <SwitchingJourneyModal
-        health={$backupState.health}
-        currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)}
-        browserIntegration={$settingsState.browserIntegration}
-        onClose={() => modalController.close('switching-journey')}
-        onOpenBackups={() => selection.patch({ activeView: 'backups' })}
-        onImport={importController.open}
-        onOpenSettings={() => selection.patch({ activeView: 'settings' })}
       />
     {:else if active?.kind === 'login-editor'}
       <LoginEditor

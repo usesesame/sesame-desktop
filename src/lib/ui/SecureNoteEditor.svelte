@@ -60,9 +60,9 @@
   </header>
 
   <div class="editor-fields">
-    <label>Title <span class="field-hint">How this note appears in your list, e.g. "Home Wi-Fi"</span><input bind:this={titleInput} value={noteDraft.title} on:input={(event) => updateDraft({ title: event.currentTarget.value })} required maxlength="160" placeholder="e.g. Home Wi-Fi" autocomplete="off" /></label>
-    <label>Content<textarea value={noteDraft.content} on:input={(event) => updateDraft({ content: event.currentTarget.value })} rows="8" maxlength="20000" placeholder="What you want to keep"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input value={noteDraft.tags.join(', ')} on:input={(event) => updateDraft({ tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel" /></label>
+    <label>Title <span class="field-hint">How this note appears in your list, e.g. “Home Wi-Fi”</span><input name="note-title" bind:this={titleInput} value={noteDraft.title} on:input={(event) => updateDraft({ title: event.currentTarget.value })} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
+    <label>Content<textarea name="note-content" value={noteDraft.content} on:input={(event) => updateDraft({ content: event.currentTarget.value })} rows="8" maxlength="20000" placeholder="What you want to keep…"></textarea></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="note-tags" value={noteDraft.tags.join(', ')} on:input={(event) => updateDraft({ tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel…" /></label>
     <LegacyDataPanel fields={legacyFields} />
   </div>
 
