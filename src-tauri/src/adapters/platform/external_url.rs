@@ -91,12 +91,19 @@ pub fn open_external_url(
                 .lock()
                 .map_err(|_| "Sesame could not read the vault session.".to_string())?;
             let session = session.as_ref().ok_or("Unlock your vault first.")?;
-            if !session
-                .payload
-                .entries
-                .iter()
-                .any(|entry| entry_owns_url(entry, &parsed))
-            {
+            let index = session.snapshot();
+            let mut owned = false;
+            for summary in &index.entries {
+                let item = session.open_item(&summary.id)?;
+                let crate::vault::TaggedItem::Login(entry) = &*item else {
+                    return Err("That saved login no longer exists.".into());
+                };
+                if entry_owns_url(entry, &parsed) {
+                    owned = true;
+                    break;
+                }
+            }
+            if !owned {
                 return Err("That website is not attached to a saved login.".into());
             }
         }

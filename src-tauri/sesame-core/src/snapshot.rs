@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use totp_rs::{Algorithm as TotpAlgorithm, Secret, TOTP};
+use zeroize::Zeroize;
 
 use crate::{
     password_analysis::analyse_password,
@@ -14,7 +15,8 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
     let password_counts = password_counts(payload);
     let mut entries = Vec::new();
     let mut items = Vec::new();
-    for item in payload.item_views() {
+    let mut active_items = payload.item_views();
+    for item in &active_items {
         if let TaggedItem::Login(entry) = &item {
             let reused = !entry.password.is_empty()
                 && password_counts.get(&entry.password).copied().unwrap_or(0) > 1;
@@ -42,8 +44,9 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
             });
             continue;
         }
-        items.push(item_summary_for(payload, &item));
+        items.push(item_summary_for(payload, item));
     }
+    active_items.zeroize();
     entries.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
     items.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
     let mut trash = crate::trash::trash_summaries(payload);
@@ -165,7 +168,7 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
     }
 }
 
-pub fn login_card_for(payload: &VaultPayload, entry: &VaultEntry) -> LoginCard {
+pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
     let (totp_code, totp_remaining) = entry
         .totp
         .as_deref()
@@ -186,7 +189,7 @@ pub fn login_card_for(payload: &VaultPayload, entry: &VaultEntry) -> LoginCard {
         email: entry.email.clone(),
         password: entry.password.clone(),
         folder_id: entry.folder_id.clone(),
-        folder: folder_name_for(payload, entry),
+        folder: folder_name_from(folders, entry.folder_id.as_deref(), &entry.folder),
         favourite: entry.favourite,
         last_used_at: entry.last_used_at,
         has_totp: entry.totp.as_deref().is_some_and(|seed| !seed.is_empty()),
@@ -280,13 +283,26 @@ pub fn login_summary_for(entry: &VaultEntry) -> LoginSummary {
 }
 
 pub fn duplicate_groups_for(payload: &VaultPayload) -> Vec<DuplicateGroup> {
-    let mut groups = entries_by_duplicate_key(&payload.entries)
+    duplicate_groups_from_summaries(payload.entries.iter().map(login_summary_for).collect())
+}
+
+pub fn duplicate_groups_from_summaries(summaries: Vec<LoginSummary>) -> Vec<DuplicateGroup> {
+    let mut by_key = HashMap::new();
+    for summary in summaries {
+        if summary.duplicate_key != ":" {
+            by_key
+                .entry(summary.duplicate_key.clone())
+                .or_insert_with(Vec::new)
+                .push(summary);
+        }
+    }
+    let mut groups = by_key
         .into_iter()
         .filter_map(|(id, entries)| {
             if entries.len() < 2 {
                 return None;
             }
-            let site = domain_from_url(&entries[0].url);
+            let site = entries[0].site.clone();
             let label = if site.is_empty() {
                 entries[0].title.clone()
             } else {
@@ -299,11 +315,11 @@ pub fn duplicate_groups_for(payload: &VaultPayload) -> Vec<DuplicateGroup> {
                 entries: entries
                     .into_iter()
                     .map(|entry| CleanupEntry {
-                        id: entry.id.clone(),
-                        title: entry.title.clone(),
-                        site: domain_from_url(&entry.url),
-                        username: entry.username.clone(),
-                        initials: initials_for(&entry.title),
+                        id: entry.id,
+                        title: entry.title,
+                        site: entry.site,
+                        username: entry.username,
+                        initials: entry.initials,
                         reason: "Same website and username",
                     })
                     .collect(),
@@ -482,19 +498,22 @@ pub fn issue_kinds_for(
 }
 
 pub fn folder_name(payload: &VaultPayload, folder_id: Option<&str>) -> String {
-    folder_id
-        .and_then(|folder_id| payload.folders.iter().find(|folder| folder.id == folder_id))
+    folder_name_from(&payload.folders, folder_id, "")
+}
+
+fn folder_name_from(folders: &[Folder], folder_id: Option<&str>, fallback: &str) -> String {
+    let name = folder_id
+        .and_then(|folder_id| folders.iter().find(|folder| folder.id == folder_id))
         .map(|folder| folder.name.clone())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if name.is_empty() {
+        return fallback.to_string();
+    }
+    name
 }
 
 pub fn folder_name_for(payload: &VaultPayload, entry: &VaultEntry) -> String {
-    let name = folder_name(payload, entry.folder_id.as_deref());
-    if name.is_empty() {
-        // Only transient imports and pre-migration payloads have this value.
-        return entry.folder.clone();
-    }
-    name
+    folder_name_from(&payload.folders, entry.folder_id.as_deref(), &entry.folder)
 }
 
 pub fn duplicate_key(entry: &VaultEntry) -> String {

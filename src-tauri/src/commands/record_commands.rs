@@ -48,8 +48,9 @@ macro_rules! impl_record_commands {
                 .lock()
                 .map_err(|_| "Sesame could not read the vault session.".to_string())?;
             let session = session.as_ref().ok_or("Unlock your vault first.")?;
-            match session.payload.active_item(&id) {
-                Some(crate::vault::types::TaggedItem::$Variant(item)) => Ok(item),
+            let item = session.open_item(&id)?;
+            match &*item {
+                crate::vault::types::TaggedItem::$Variant(item) => Ok(item.clone()),
                 _ => Err(format!("That saved {} no longer exists.", $missing_noun)),
             }
         }
@@ -66,7 +67,8 @@ macro_rules! impl_record_commands {
                 .lock()
                 .map_err(|_| "Sesame could not read the vault session.".to_string())?;
             let session = session.as_mut().ok_or($save_unlock_msg)?;
-            let mut next_payload = session.payload.clone();
+            let payload = session.open_payload()?;
+            let mut next_payload = payload.clone();
             if let Some(previous) = next_payload.take_active_item(&item_id) {
                 let crate::vault::types::TaggedItem::$Variant(existing) = previous else {
                     return Err("That item id belongs to a different kind of saved item.".into());
@@ -90,7 +92,7 @@ macro_rules! impl_record_commands {
             state.advance_session_epoch();
             Ok($SaveResult {
                 id: item_id,
-                snapshot: crate::vault::snapshot::snapshot_for(&session.payload),
+                snapshot: session.snapshot(),
             })
         }
 
@@ -108,7 +110,8 @@ macro_rules! impl_record_commands {
                 .lock()
                 .map_err(|_| "Sesame could not read the vault session.".to_string())?;
             let session = session.as_mut().ok_or($delete_unlock_msg)?;
-            let mut next_payload = session.payload.clone();
+            let payload = session.open_payload()?;
+            let mut next_payload = payload.clone();
             let item = match next_payload.take_active_item(id) {
                 Some(crate::vault::types::TaggedItem::$Variant(item)) => item,
                 Some(_) => {
@@ -121,7 +124,7 @@ macro_rules! impl_record_commands {
             state.advance_session_epoch();
             Ok($DeleteResult {
                 deleted_id: id.to_string(),
-                snapshot: crate::vault::snapshot::snapshot_for(&session.payload),
+                snapshot: session.snapshot(),
             })
         }
     };

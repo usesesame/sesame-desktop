@@ -1,6 +1,6 @@
 use sesame_core::imports::resolved_totp;
 use sesame_core::snapshot::{login_card_for, totp_from_value};
-use sesame_core::types::{VaultEntry, VaultPayload};
+use sesame_core::types::VaultEntry;
 
 // RFC 6238 test key "12345678901234567890" in base32.
 const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -25,7 +25,11 @@ fn a_secret_is_read_however_the_site_printed_it() {
         let Some(totp) = parsed else {
             panic!("{name} secret was rejected");
         };
-        assert_eq!(totp.generate(59), "287082", "{name} produced a different code");
+        assert_eq!(
+            totp.generate(59),
+            "287082",
+            "{name} produced a different code"
+        );
     }
 }
 
@@ -65,7 +69,7 @@ fn the_login_card_derives_a_code_but_never_carries_the_seed() {
         totp: Some(RFC_KEY.to_string()),
         ..VaultEntry::default()
     };
-    let card = login_card_for(&VaultPayload::default(), &entry);
+    let card = login_card_for(&[], &entry);
     let wire = serde_json::to_string(&card).expect("the card serializes");
     assert!(card.has_totp, "a configured seed was not reported");
     assert!(card.totp_code.is_some(), "no code was derived");
@@ -78,7 +82,7 @@ fn the_login_card_derives_a_code_but_never_carries_the_seed() {
         title: "Example".into(),
         ..VaultEntry::default()
     };
-    assert!(!login_card_for(&VaultPayload::default(), &bare).has_totp);
+    assert!(!login_card_for(&[], &bare).has_totp);
 }
 
 #[test]
@@ -91,7 +95,10 @@ fn a_save_that_omits_the_secret_keeps_the_stored_one() {
 
 #[test]
 fn an_explicitly_emptied_secret_is_cleared() {
-    assert_eq!(resolved_totp(Some(String::new()), Some(RFC_KEY.to_string())), None);
+    assert_eq!(
+        resolved_totp(Some(String::new()), Some(RFC_KEY.to_string())),
+        None
+    );
 }
 
 #[test]

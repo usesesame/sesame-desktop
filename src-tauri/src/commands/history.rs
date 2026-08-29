@@ -3,8 +3,7 @@
 
 use tauri::State;
 
-use crate::vault::history::{history_version_preview, restore_version};
-use crate::vault::snapshot::snapshot_for;
+use crate::vault::history::restore_version;
 use crate::vault::types::{ItemPreview, RestoreHistoryVersionResult};
 use crate::vault::{VaultResult, VaultState};
 
@@ -23,7 +22,7 @@ pub fn preview_history_version(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    history_version_preview(&session.payload, id)
+    session.history_item_preview(id)
 }
 
 #[tauri::command]
@@ -42,11 +41,12 @@ pub fn restore_history_version(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before restoring a version.")?;
-    let (next_payload, restored_id) = restore_version(&session.payload, id)?;
+    let payload = session.open_payload()?;
+    let (next_payload, restored_id) = restore_version(&payload, id)?;
     crate::vault::storage::commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(RestoreHistoryVersionResult {
         restored_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }

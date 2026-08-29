@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{entry_from_input, resolved_totp};
-use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for, snapshot_for};
+use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for};
 use crate::vault::storage::{
     commit_payload_change, materialize_entry_folder, payload_with_item_favourite,
     payload_with_item_folder_id, payload_with_recorded_item_use, payload_without_login,
@@ -23,7 +23,7 @@ pub fn get_vault_snapshot(state: State<'_, VaultState>) -> VaultResult<VaultSnap
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 /// Small on purpose: a shortcut for retyping an address, not a directory.
@@ -40,32 +40,29 @@ pub fn suggest_field_values(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    Ok(suggested_values(&session.payload, &field))
-}
-
-fn suggested_values(payload: &VaultPayload, field: &str) -> Vec<String> {
-    let values: Box<dyn Iterator<Item = &str>> = match field {
-        "username" => Box::new(payload.entries.iter().map(|entry| entry.username.as_str())),
-        "email" => Box::new(
-            payload
-                .entries
-                .iter()
-                .map(|entry| entry.email.as_str())
-                .chain(
-                    payload
-                        .identities
-                        .iter()
-                        .map(|identity| identity.email.as_str()),
-                ),
-        ),
-        // An unknown field must not fall back to another field's values.
-        _ => return Vec::new(),
-    };
+    if !matches!(field.as_str(), "username" | "email") {
+        return Ok(Vec::new());
+    }
+    let index = session.snapshot();
+    let ids = index.entries.iter().map(|item| item.id.as_str()).chain(
+        index
+            .items
+            .iter()
+            .filter(|item| field == "email" && item.kind == "identity")
+            .map(|item| item.id.as_str()),
+    );
     let mut seen = HashSet::new();
     let mut suggestions = Vec::new();
-    for value in values {
+    for id in ids {
+        let item = session.open_item(id)?;
+        let value = match (&*item, field.as_str()) {
+            (TaggedItem::Login(entry), "username") => entry.username.as_str(),
+            (TaggedItem::Login(entry), "email") => entry.email.as_str(),
+            (TaggedItem::Identity(identity), "email") => identity.email.as_str(),
+            _ => continue,
+        };
         let trimmed = value.trim();
-        if trimmed.is_empty() || !seen.insert(trimmed) {
+        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
             continue;
         }
         suggestions.push(trimmed.to_string());
@@ -73,7 +70,7 @@ fn suggested_values(payload: &VaultPayload, field: &str) -> Vec<String> {
             break;
         }
     }
-    suggestions
+    Ok(suggestions)
 }
 
 #[tauri::command]
@@ -86,13 +83,12 @@ pub fn get_login_card(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let entry = session
-        .payload
-        .entries
-        .iter()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
-    Ok(login_card_for(&session.payload, entry))
+    let item = session.open_item(&id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Err("That saved login no longer exists.".into());
+    };
+    let index = session.snapshot();
+    Ok(login_card_for(&index.folders, entry))
 }
 
 #[tauri::command]
@@ -105,12 +101,10 @@ pub fn get_login_summary(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let entry = session
-        .payload
-        .entries
-        .iter()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
+    let item = session.open_item(&id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Err("That saved login no longer exists.".into());
+    };
     Ok(login_summary_for(entry))
 }
 
@@ -123,8 +117,17 @@ pub fn get_duplicate_groups(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    Ok(crate::vault::snapshot::duplicate_groups_for(
-        &session.payload,
+    let index = session.snapshot();
+    let mut summaries = Vec::with_capacity(index.entries.len());
+    for indexed in &index.entries {
+        let item = session.open_item(&indexed.id)?;
+        let TaggedItem::Login(entry) = &*item else {
+            return Err("That saved login no longer exists.".into());
+        };
+        summaries.push(login_summary_for(entry));
+    }
+    Ok(crate::vault::snapshot::duplicate_groups_from_summaries(
+        summaries,
     ))
 }
 
@@ -139,8 +142,13 @@ pub fn list_totp_codes(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    let index = session.snapshot();
     let mut codes = Vec::new();
-    for entry in &session.payload.entries {
+    for summary in &index.entries {
+        let item = session.open_item(&summary.id)?;
+        let TaggedItem::Login(entry) = &*item else {
+            return Err("That saved login no longer exists.".into());
+        };
         let Some((code, remaining, period)) = entry.totp.as_deref().and_then(current_totp) else {
             continue;
         };
@@ -168,12 +176,10 @@ pub fn refresh_totp(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let entry = session
-        .payload
-        .entries
-        .iter()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
+    let item = session.open_item(&id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Err("That saved login no longer exists.".into());
+    };
     let (totp_code, totp_remaining) = entry
         .totp
         .as_deref()
@@ -199,7 +205,8 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before saving a login.")?;
-    let mut next_payload = session.payload.clone();
+    let payload = session.open_payload()?;
+    let mut next_payload = payload.clone();
     materialize_entry_folder(&mut next_payload, &mut entry)?;
     if let Some(existing) = next_payload
         .entries
@@ -234,7 +241,7 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
     state.advance_session_epoch();
     Ok(SaveLoginResult {
         id: entry_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }
 
@@ -253,11 +260,11 @@ pub fn set_login_folders(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before organizing logins.")?;
-    let next_payload =
-        crate::vault::storage::payload_with_login_folders(&session.payload, &ids, &folder)?;
+    let payload = session.open_payload()?;
+    let next_payload = crate::vault::storage::payload_with_login_folders(&payload, &ids, &folder)?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 #[tauri::command]
@@ -274,10 +281,11 @@ pub fn bulk_assign_folder(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before organizing items.")?;
-    let next_payload = payload_with_item_folder_id(&session.payload, &ids, folder_id.as_deref())?;
+    let payload = session.open_payload()?;
+    let next_payload = payload_with_item_folder_id(&payload, &ids, folder_id.as_deref())?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 #[tauri::command]
@@ -319,10 +327,11 @@ fn change_folders(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before organizing folders.")?;
-    let next_payload = change(&session.payload)?;
+    let payload = session.open_payload()?;
+    let next_payload = change(&payload)?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 fn checked_item_ids(ids: Vec<String>) -> VaultResult<HashSet<String>> {
@@ -352,10 +361,11 @@ pub fn set_item_favourite(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before changing a favourite.")?;
-    let next_payload = payload_with_item_favourite(&session.payload, id.trim(), favourite)?;
+    let payload = session.open_payload()?;
+    let next_payload = payload_with_item_favourite(&payload, id.trim(), favourite)?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 #[tauri::command]
@@ -367,10 +377,11 @@ pub fn record_item_use(id: String, state: State<'_, VaultState>) -> VaultResult<
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before recording item use.")?;
-    let next_payload = payload_with_recorded_item_use(&session.payload, id.trim())?;
+    let payload = session.open_payload()?;
+    let next_payload = payload_with_recorded_item_use(&payload, id.trim())?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
-    Ok(snapshot_for(&session.payload))
+    Ok(session.snapshot())
 }
 
 #[tauri::command]
@@ -386,20 +397,20 @@ pub fn delete_login(id: String, state: State<'_, VaultState>) -> VaultResult<Del
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before deleting a login.")?;
-    let entry = session
-        .payload
+    let payload = session.open_payload()?;
+    let entry = payload
         .entries
         .iter()
         .find(|entry| entry.id == id)
         .cloned()
         .ok_or("That saved login no longer exists.")?;
-    let mut next_payload = payload_without_login(&session.payload, id)?;
+    let mut next_payload = payload_without_login(&payload, id)?;
     trash_item(&mut next_payload, TaggedItem::Login(entry));
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(DeleteLoginResult {
         deleted_id: id.to_string(),
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }
 
@@ -427,8 +438,9 @@ pub fn merge_duplicate_logins(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before merging logins.")?;
+    let payload = session.open_payload()?;
     let next_payload = crate::vault::storage::merged_duplicate_payload(
-        &session.payload,
+        &payload,
         &keep_id,
         &remove_ids,
         &request.choices,
@@ -438,7 +450,7 @@ pub fn merge_duplicate_logins(
     state.advance_session_epoch();
     Ok(MergeDuplicateLoginsResult {
         id: keep_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
         revision_backup_name,
     })
 }
@@ -456,15 +468,16 @@ pub fn get_merge_comparison(
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let mut group = Vec::with_capacity(ids.len());
+    let mut opened = Vec::with_capacity(ids.len());
     for id in &ids {
-        let entry = session
-            .payload
-            .entries
-            .iter()
-            .find(|entry| entry.id == id.trim())
-            .ok_or("One of those logins no longer exists.")?;
-        group.push(entry);
+        opened.push(session.open_item(id.trim())?);
     }
+    let group = opened
+        .iter()
+        .map(|item| match &**item {
+            TaggedItem::Login(entry) => Ok(entry),
+            _ => Err("One of those logins no longer exists.".to_string()),
+        })
+        .collect::<VaultResult<Vec<_>>>()?;
     Ok(crate::vault::snapshot::merge_comparison_for(&group))
 }

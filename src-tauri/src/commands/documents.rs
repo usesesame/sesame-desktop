@@ -2,7 +2,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::State;
 
 use crate::commands::record_commands::impl_record_commands;
-use crate::vault::snapshot::snapshot_for;
 use crate::vault::types::{
     Attachment, DeleteDocumentMetadataResult, DocumentMetadata, DocumentMetadataInput,
     SaveDocumentMetadataResult,
@@ -150,7 +149,8 @@ pub fn add_document_attachment(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before adding an attachment.")?;
-    let mut next_payload = session.payload.clone();
+    let payload = session.open_payload()?;
+    let mut next_payload = payload.clone();
     let index = next_payload
         .documents
         .iter()
@@ -170,7 +170,7 @@ pub fn add_document_attachment(
     state.advance_session_epoch();
     Ok(SaveDocumentMetadataResult {
         id: document_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }
 
@@ -187,7 +187,8 @@ pub fn remove_document_attachment(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before removing an attachment.")?;
-    let mut next_payload = session.payload.clone();
+    let payload = session.open_payload()?;
+    let mut next_payload = payload.clone();
     let index = next_payload
         .documents
         .iter()
@@ -206,6 +207,6 @@ pub fn remove_document_attachment(
     state.advance_session_epoch();
     Ok(SaveDocumentMetadataResult {
         id: document_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }

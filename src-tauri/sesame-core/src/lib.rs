@@ -11,6 +11,7 @@ pub mod migration;
 pub mod password_analysis;
 pub mod pending_import;
 pub mod platform;
+pub mod record_store;
 pub mod snapshot;
 pub mod storage;
 pub mod throttle;
@@ -37,6 +38,8 @@ pub use pending_import::*;
 #[allow(unused_imports)]
 pub use platform::*;
 #[allow(unused_imports)]
+pub use record_store::*;
+#[allow(unused_imports)]
 pub use snapshot::*;
 #[allow(unused_imports)]
 pub use storage::*;
@@ -55,7 +58,7 @@ use std::sync::{
     Mutex,
 };
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 pub const CORE_API_VERSION: u32 = 1;
 
@@ -219,11 +222,43 @@ pub struct UnlockedVault {
     pub pin_wrap: Option<PinWrap>,
     pub hello_wrap: Option<HelloWrap>,
     pub setup_complete: bool,
-    pub payload: VaultPayload,
+    records: record_store::VaultRecordStore,
 }
 
-impl Drop for UnlockedVault {
-    fn drop(&mut self) {
-        self.payload.zeroize();
+impl UnlockedVault {
+    pub fn from_opened(path: PathBuf, opened: &api::OpenedVault) -> VaultResult<Self> {
+        Ok(Self {
+            path,
+            key: opened.key.clone(),
+            kdf: opened.file.kdf.clone(),
+            key_wrap: opened.file.key_wrap.clone(),
+            legacy_device_wrap: opened.file.legacy_device_wrap.clone(),
+            recovery_kdf: opened.file.recovery_kdf.clone(),
+            recovery_wrap: opened.file.recovery_wrap.clone(),
+            pin_wrap: opened.file.pin_wrap.clone(),
+            hello_wrap: opened.file.hello_wrap.clone(),
+            setup_complete: opened.file.setup_complete,
+            records: record_store::VaultRecordStore::from_payload(&opened.payload)?,
+        })
+    }
+
+    pub fn open_payload(&self) -> VaultResult<record_store::OpenedPayload> {
+        self.records.open_payload()
+    }
+
+    pub fn open_item(&self, id: &str) -> VaultResult<record_store::OpenedItem> {
+        self.records.open_item(id)
+    }
+
+    pub fn snapshot(&self) -> VaultSnapshot {
+        self.records.snapshot()
+    }
+
+    pub fn trash_item_preview(&self, id: &str) -> VaultResult<ItemPreview> {
+        self.records.trash_item_preview(id)
+    }
+
+    pub fn history_item_preview(&self, id: &str) -> VaultResult<ItemPreview> {
+        self.records.history_item_preview(id)
     }
 }

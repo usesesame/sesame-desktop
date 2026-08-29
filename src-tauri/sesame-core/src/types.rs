@@ -117,7 +117,7 @@ pub struct VaultSetup {
     pub recovery_kit: String,
 }
 
-#[derive(Serialize, ts_rs::TS)]
+#[derive(Serialize, Clone, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultSnapshot {
@@ -146,7 +146,7 @@ pub struct Folder {
 // full secret-bearing login record (this file's other `VaultEntry` struct,
 // never exposed to the frontend under that shape). Do not derive TS on that
 // other struct.
-#[derive(Serialize, ts_rs::TS)]
+#[derive(Serialize, Clone, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultEntrySummary {
@@ -213,7 +213,7 @@ pub struct PasswordIssue {
     pub explanation: &'static str,
 }
 
-#[derive(Serialize, ts_rs::TS)]
+#[derive(Serialize, Clone, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct SecuritySummary {
@@ -1051,7 +1051,6 @@ pub struct IdentityInput {
     pub country: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1107,7 +1106,6 @@ pub struct SecureNoteInput {
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1187,7 +1185,6 @@ pub struct CardInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1253,7 +1250,6 @@ pub struct WifiNetworkInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1323,7 +1319,6 @@ pub struct SshKeyInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1393,7 +1388,6 @@ pub struct SoftwareLicenseInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1498,7 +1492,6 @@ pub struct DocumentMetadataInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1566,7 +1559,6 @@ pub struct CustomRecordInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1660,6 +1652,12 @@ struct PersistedVaultPayloadV8<'a> {
     revision: u64,
 }
 
+impl Drop for PersistedVaultPayloadV8<'_> {
+    fn drop(&mut self) {
+        self.items.zeroize();
+    }
+}
+
 /// Private: an older binary is rejected before it can decrypt a v8 payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1748,11 +1746,37 @@ impl VaultPayload {
     }
 
     pub fn active_item(&self, id: &str) -> Option<TaggedItem> {
-        self.item_views().into_iter().find(|item| item.id() == id)
+        macro_rules! find_item {
+            ($collection:expr, $variant:ident) => {
+                if let Some(item) = $collection.iter().find(|item| item.id == id) {
+                    return Some(TaggedItem::$variant(item.clone()));
+                }
+            };
+        }
+        find_item!(self.entries, Login);
+        find_item!(self.identities, Identity);
+        find_item!(self.secure_notes, SecureNote);
+        find_item!(self.cards, Card);
+        find_item!(self.wifi_networks, WifiNetwork);
+        find_item!(self.ssh_keys, SshKey);
+        find_item!(self.software_licenses, SoftwareLicense);
+        find_item!(self.documents, Document);
+        find_item!(self.custom_records, CustomRecord);
+        None
     }
 
     pub fn insert_active_item(&mut self, item: TaggedItem) -> Result<(), String> {
-        if self.active_item(item.id()).is_some() {
+        let id = item.id();
+        if self.entries.iter().any(|item| item.id == id)
+            || self.identities.iter().any(|item| item.id == id)
+            || self.secure_notes.iter().any(|item| item.id == id)
+            || self.cards.iter().any(|item| item.id == id)
+            || self.wifi_networks.iter().any(|item| item.id == id)
+            || self.ssh_keys.iter().any(|item| item.id == id)
+            || self.software_licenses.iter().any(|item| item.id == id)
+            || self.documents.iter().any(|item| item.id == id)
+            || self.custom_records.iter().any(|item| item.id == id)
+        {
             return Err("A saved item with that id already exists.".into());
         }
         match item {
@@ -1791,13 +1815,27 @@ impl VaultPayload {
 
     fn active_items(&self) -> Result<Vec<TaggedItem>, &'static str> {
         let mut ids = std::collections::HashSet::new();
-        let items = self.item_views();
-        for item in &items {
-            if !ids.insert(item.id().to_string()) {
-                return Err("The vault contains duplicate item ids and cannot be migrated safely.");
-            }
+        macro_rules! check_ids {
+            ($items:expr) => {
+                for item in $items {
+                    if !ids.insert(item.id.as_str()) {
+                        return Err(
+                            "The vault contains duplicate item ids and cannot be migrated safely.",
+                        );
+                    }
+                }
+            };
         }
-        Ok(items)
+        check_ids!(&self.entries);
+        check_ids!(&self.identities);
+        check_ids!(&self.secure_notes);
+        check_ids!(&self.cards);
+        check_ids!(&self.wifi_networks);
+        check_ids!(&self.ssh_keys);
+        check_ids!(&self.software_licenses);
+        check_ids!(&self.documents);
+        check_ids!(&self.custom_records);
+        Ok(self.item_views())
     }
 
     fn from_stored(stored: StoredVaultPayload) -> Result<Self, &'static str> {
@@ -2194,6 +2232,8 @@ impl Zeroize for VaultPayload {
         self.custom_records.zeroize();
         self.trash.zeroize();
         self.history.zeroize();
+        self.vault_id.zeroize();
+        self.revision.zeroize();
     }
 }
 
@@ -2436,7 +2476,8 @@ mod tests {
     #[test]
     fn records_stored_without_the_array_keys_still_load() {
         let note: SecureNote =
-            serde_json::from_str(r#"{"id":"a","title":"Wi-Fi","content":"example note body"}"#).unwrap();
+            serde_json::from_str(r#"{"id":"a","title":"Wi-Fi","content":"example note body"}"#)
+                .unwrap();
         assert!(note.tags.is_empty());
         let document: DocumentMetadata =
             serde_json::from_str(r#"{"id":"b","title":"Passport"}"#).unwrap();
