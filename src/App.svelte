@@ -542,6 +542,13 @@
         filterMenuOpen={$itemState.filterMenuOpen}
         {focusSearchToken}
         bind:passwordVisible={$loginState.passwordVisible}
+        revealedPassword={$loginState.revealedPassword}
+        passwordPresenceRequired={$loginState.passwordPresenceRequired}
+        bind:passwordPresenceSecret={$loginState.passwordPresenceSecret}
+        onRevealPassword={() => loginController.togglePasswordReveal()}
+        onCopyPassword={() => void loginController.copySelectedField('password')}
+        onConfirmPasswordPresence={() => void loginController.confirmPasswordPresence()}
+        onCancelPasswordPresence={loginController.cancelPasswordPresence}
         siteIconsEnabled={$settings.siteIconsEnabled}
         totpRemaining={$totp.remaining}
         totpProgress={$totp.progress}

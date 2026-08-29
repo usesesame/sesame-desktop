@@ -187,7 +187,7 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
         tags: entry.tags.clone(),
         username: entry.username.clone(),
         email: entry.email.clone(),
-        password: entry.password.clone(),
+        has_password: !entry.password.is_empty(),
         folder_id: entry.folder_id.clone(),
         folder: folder_name_from(folders, entry.folder_id.as_deref(), &entry.folder),
         favourite: entry.favourite,

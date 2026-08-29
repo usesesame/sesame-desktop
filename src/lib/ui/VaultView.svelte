@@ -61,6 +61,13 @@
   export let breachCheckError = ''
   export let onToggleBreachCheck: () => void
   export let onRunBreachCheck: () => void
+  export let revealedPassword = ''
+  export let passwordPresenceRequired = false
+  export let passwordPresenceSecret = ''
+  export let onRevealPassword: () => Promise<void>
+  export let onCopyPassword: () => void
+  export let onConfirmPasswordPresence: () => void
+  export let onCancelPasswordPresence: () => void
   export let autoTypeEntryId = ''
   export let autoTypeCountdown = 0
   export let onStartAutoType: () => void
@@ -244,6 +251,11 @@
       passwordVisible = false
       passwordRevealTimer = null
     }, PASSWORD_REVEAL_TIMEOUT_MS)
+  }
+
+  async function revealPassword() {
+    await onRevealPassword()
+    if (passwordVisible) setPasswordVisible(true)
   }
 
   $: if ($selection.collectionFilter === RECENT_FILTER) sortMenuOpen = false
@@ -528,7 +540,15 @@
         <section class="credentials-panel" aria-label="Login details">
           <div class="credential-row"><div class="credential-label"><Icon name="user" size={16} /><span>Username</span></div><code>{loginCard.username || 'No username saved'}</code><button type="button" class="credential-button" aria-label="Copy username" disabled={!loginCard.username} on:click={() => onCopy(loginCard.username, 'Username')}><Icon name="copy" size={15} /></button></div>
           {#if loginCard.email}<div class="credential-row"><div class="credential-label"><Icon name="mail" size={16} /><span>Email</span></div><code>{loginCard.email}</code><button type="button" class="credential-button" aria-label="Copy email" on:click={() => onCopy(loginCard.email, 'Email')}><Icon name="copy" size={15} /></button></div>{/if}
-          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{passwordVisible ? loginCard.password : '••••••••••••••••'}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.password} on:click={() => setPasswordVisible(!passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" disabled={!loginCard.password} on:click={() => onCopy(loginCard.password, 'Password')}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.password} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
+          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{passwordVisible ? revealedPassword : '••••••••••••••••'}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
+          {#if passwordPresenceRequired}
+            <form class="credential-presence" novalidate on:submit|preventDefault={onConfirmPasswordPresence}>
+              <label class="sr-only" for="reveal-presence-password">Master password</label>
+              <input id="reveal-presence-password" name="reveal-presence-password" type="password" bind:value={passwordPresenceSecret} autocomplete="current-password" spellcheck="false" placeholder="Master password" />
+              <button type="submit" class="secondary-button" disabled={!passwordPresenceSecret}>Confirm</button>
+              <button type="button" class="secondary-button" on:click={onCancelPasswordPresence}>Cancel</button>
+            </form>
+          {/if}
         </section>
 
         {#if breachCheckOpen}
@@ -556,7 +576,7 @@
             {#if autoTypeEntryId === loginCard.id && autoTypeCountdown > 0}
               <button class="site-action autotype-armed" on:click={onCancelAutoType}><Icon name="keyboard" size={17} /><span>Switch windows… typing in {autoTypeCountdown}. Cancel</span></button>
             {:else}
-              <button class="site-action" disabled={!loginCard.username && !loginCard.password} on:click={onStartAutoType}><Icon name="keyboard" size={17} /><span>Auto-type</span></button>
+              <button class="site-action" disabled={!loginCard.username && !loginCard.hasPassword} on:click={onStartAutoType}><Icon name="keyboard" size={17} /><span>Auto-type</span></button>
             {/if}
           {/if}
           {#if loginCard.totpCode}<button class="totp-action" on:click={() => loginCard.totpCode && onCopy(loginCard.totpCode, '2FA code')} aria-label={`Copy 2FA code. ${totpRemaining} seconds remaining.`}><span>2FA code</span><strong>{loginCard.totpCode}</strong><span class="totp-countdown" style={`--totp-progress: ${totpProgress}`} aria-hidden="true"><small>{totpRemaining}</small></span></button>{#if totpRefreshIssue}<span class="totp-refresh-issue">Waiting to refresh</span>{/if}{:else}<button class="no-totp" on:click={onOpenLoginEditor}><Icon name="key" size={15} /> Add 2FA</button>{/if}

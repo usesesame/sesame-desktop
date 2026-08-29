@@ -117,6 +117,7 @@ macro_rules! sesame_invoke_handler {
             commands::lock_vault,
             commands::get_recovery_health,
             commands::grant_presence,
+            commands::reveal_login_secret,
             commands::link_desktop_service,
             commands::get_service_connection_status,
             commands::disconnect_service,
