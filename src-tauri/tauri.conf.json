@@ -52,6 +52,14 @@
     "category": "Utility",
     "shortDescription": "A calm, local-first password and recovery vault",
     "externalBin": ["binaries/sesame-browser-host"],
+    "linux": {
+      "deb": {
+        "preRemoveScript": "linux/pre-remove.sh"
+      },
+      "rpm": {
+        "preRemoveScript": "linux/pre-remove.sh"
+      }
+    },
     "windows": {
       "allowDowngrades": false,
       "webviewInstallMode": {

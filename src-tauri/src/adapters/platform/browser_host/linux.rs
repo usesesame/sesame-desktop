@@ -1,8 +1,6 @@
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use tauri::AppHandle;
-
 use super::{plan_registration, RegistrationError, RegistrationPlan, RegistrationState, HOST_NAME};
 
 pub const HOST_FILE_NAME: &str = "sesame-browser-host";
@@ -22,7 +20,7 @@ pub fn unsupported_error() -> RegistrationError {
     )
 }
 
-pub fn plan(_app: &AppHandle) -> Result<RegistrationPlan, RegistrationError> {
+pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
     let host = std::env::current_exe()
         .map(|executable| executable.with_file_name(HOST_FILE_NAME))
         .map_err(|_| {
@@ -54,6 +52,14 @@ pub fn plan(_app: &AppHandle) -> Result<RegistrationPlan, RegistrationError> {
 }
 
 pub fn commit(_plan: &RegistrationPlan) -> Result<(), RegistrationError> {
+    Ok(())
+}
+
+pub fn registry_keys() -> &'static [&'static str] {
+    &[]
+}
+
+pub fn erase(_keys: &[&str]) -> Result<(), RegistrationError> {
     Ok(())
 }
 
@@ -158,5 +164,32 @@ mod tests {
 
         fs::write(&plan.firefox[0], b"not json").expect("a tampered manifest");
         assert!(!matches(&plan).firefox_registered);
+    }
+
+    #[test]
+    fn cleanup_targets_every_location_a_commit_wrote_and_spares_the_host() {
+        use super::super::{erase_registration, manifest_paths, RegistrationLocations};
+
+        let plan = scratch_plan("cleanup", "sesame-browser-host");
+        fs::write(&plan.host, b"host").expect("a placeholder host");
+        write_plan_manifests(&plan).expect("manifests written");
+        assert!(matches(&plan).chrome_registered);
+
+        let locations = RegistrationLocations {
+            manifests: manifest_paths(&plan),
+            registry_keys: registry_keys().to_vec(),
+        };
+        assert_eq!(
+            locations.manifests.len(),
+            plan.chrome.len() + plan.edge.len() + plan.firefox.len()
+        );
+
+        erase_registration(&locations).expect("cleanup succeeds");
+
+        let state = matches(&plan);
+        assert!(!state.chrome_registered);
+        assert!(!state.edge_registered);
+        assert!(!state.firefox_registered);
+        assert!(plan.host.is_file());
     }
 }

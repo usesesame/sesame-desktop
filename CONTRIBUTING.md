@@ -139,7 +139,7 @@ documentation. A comma, a colon, a full stop, or brackets will do the job.
 The extension itself is in
 [sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension).
 The desktop side of that boundary is here, in
-`src-tauri/src/adapters/platform/browser_host.rs` and `browser_pipe.rs`, with
+`src-tauri/src/adapters/platform/browser_host/` and `browser_pipe.rs`, with
 the wire format under `src-tauri/contracts/browser/`.
 
 Changing either side needs a security-boundary review and the clean-profile

@@ -133,11 +133,8 @@ test('the Windows uninstaller removes only Sesame native-host registration', () 
   const hook = readFileSync(join(root, 'src-tauri', 'nsis', 'native-host-uninstall.nsh'), 'utf8')
   assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
   assert.match(hook, /\$UpdateMode <> 1/)
-  assert.match(hook, /Chrome\\NativeMessagingHosts\\app\.usesesame\.browser/)
-  assert.match(hook, /Edge\\NativeMessagingHosts\\app\.usesesame\.browser/)
-  assert.match(hook, /native-messaging\\app\.usesesame\.browser\.json/)
-  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|HKLM|\$INSTDIR/i)
-  assert.doesNotMatch(hook, /RMDir "\$LOCALAPPDATA\\Sesame"/)
+  assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|HKLM|RmDir|DeleteRegKey/i)
 })
 
 test('the installer owns its own template and never offers to delete app data', () => {
