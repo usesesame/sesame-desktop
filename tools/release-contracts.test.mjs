@@ -46,3 +46,28 @@ test('release verification re-authenticates instead of trusting the session', ()
   assert.match(presence, /bytes_match\(/)
   assert.doesNotMatch(presence, /secret == |password == |\.key ==/)
 })
+
+test('the login card never carries the password across the seam', () => {
+  const card = read('src', 'lib', 'generated', 'LoginCard.ts')
+  assert.match(card, /hasPassword: boolean/)
+  assert.doesNotMatch(card, /password: string/)
+  const snapshot = read('src-tauri', 'sesame-core', 'src', 'snapshot.rs')
+  assert.match(snapshot, /has_password: !entry\.password\.is_empty\(\)/)
+})
+
+test('the saved password is revealed only through a presence gate', () => {
+  const logins = read('src-tauri', 'src', 'commands', 'logins.rs')
+  const start = logins.indexOf('pub fn reveal_login_secret(')
+  assert.ok(start >= 0, 'reveal_login_secret does not exist')
+  const body = logins.slice(start, logins.indexOf('\n#[cfg(test)]', start))
+  assert.match(body, /require_release_presence\(&state, &presence\)/)
+  const vault = read('src', 'lib', 'vault.ts')
+  assert.match(vault, /invoke(<[^>]+>)?\('reveal_login_secret', \{ id \}\)/)
+})
+
+test('a blank password on edit keeps the stored secret', () => {
+  const logins = read('src-tauri', 'src', 'commands', 'logins.rs')
+  const start = logins.indexOf('pub fn save_login(')
+  const body = logins.slice(start, logins.indexOf('\n#[tauri::command]', start))
+  assert.match(body, /keep_stored_password_on_blank_edit\(&mut updated, &previous\)/)
+})

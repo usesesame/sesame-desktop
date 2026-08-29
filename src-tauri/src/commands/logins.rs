@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use tauri::State;
 
+use crate::release::ReleasePresence;
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{entry_from_input, resolved_totp};
 use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for};
@@ -12,7 +13,7 @@ use crate::vault::storage::{
 use crate::vault::trash::trash_item;
 use crate::vault::{
     DeleteLoginResult, LoginInput, MergeComparison, MergeDuplicateLoginsRequest,
-    MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, VaultPayload, VaultResult,
+    MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, VaultEntry, VaultPayload, VaultResult,
     VaultSnapshot, VaultState,
 };
 
@@ -225,6 +226,7 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
         updated.favourite = existing.favourite;
         updated.last_used_at = existing.last_used_at;
         updated.totp = resolved_totp(totp_input, previous.totp.clone());
+        keep_stored_password_on_blank_edit(&mut updated, &previous);
         updated.password_updated_at =
             if previous.password == updated.password && previous.password_updated_at > 0 {
                 previous.password_updated_at
@@ -332,6 +334,13 @@ fn change_folders(
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(session.snapshot())
+}
+
+fn keep_stored_password_on_blank_edit(updated: &mut VaultEntry, previous: &VaultEntry) {
+    if updated.password.is_empty() {
+        updated.password = previous.password.clone();
+        updated.password_updated_at = previous.password_updated_at;
+    }
 }
 
 fn checked_item_ids(ids: Vec<String>) -> VaultResult<HashSet<String>> {
@@ -480,4 +489,67 @@ pub fn get_merge_comparison(
         })
         .collect::<VaultResult<Vec<_>>>()?;
     Ok(crate::vault::snapshot::merge_comparison_for(&group))
+}
+
+#[tauri::command]
+pub fn reveal_login_secret(
+    id: String,
+    state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
+) -> VaultResult<String> {
+    crate::commands::require_release_presence(&state, &presence)?;
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    let item = session.open_item(&id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Err("That saved login no longer exists.".into());
+    };
+    Ok(entry.password.clone())
+}
+
+#[cfg(test)]
+mod keep_password_tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_edit_keeps_the_stored_password() {
+        let mut updated = VaultEntry {
+            id: "login-a".to_string(),
+            password: String::new(),
+            ..VaultEntry::default()
+        };
+        let previous = VaultEntry {
+            id: "login-a".to_string(),
+            password: "fictional-stored-secret".to_string(),
+            password_updated_at: 42,
+            ..VaultEntry::default()
+        };
+
+        keep_stored_password_on_blank_edit(&mut updated, &previous);
+
+        assert_eq!(updated.password, "fictional-stored-secret");
+        assert_eq!(updated.password_updated_at, 42);
+    }
+
+    #[test]
+    fn a_typed_password_replaces_the_stored_one() {
+        let mut updated = VaultEntry {
+            id: "login-a".to_string(),
+            password: "fictional-new-secret".to_string(),
+            ..VaultEntry::default()
+        };
+        let previous = VaultEntry {
+            id: "login-a".to_string(),
+            password: "fictional-stored-secret".to_string(),
+            password_updated_at: 42,
+            ..VaultEntry::default()
+        };
+
+        keep_stored_password_on_blank_edit(&mut updated, &previous);
+
+        assert_eq!(updated.password, "fictional-new-secret");
+    }
 }

@@ -27,6 +27,7 @@ description = "Redacted vault snapshots and explicit item reads for the main win
 commands.allow = [
   "get_vault_snapshot",
   "get_login_card",
+  "reveal_login_secret",
   "search_items",
   "suggest_field_values",
   "get_login_summary",
