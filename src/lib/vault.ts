@@ -7,6 +7,8 @@ import type { BackupInspection, BackupSelection, BackupVerification, BreachCheck
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
 
+export const PRESENCE_REQUIRED = 'presenceRequired'
+
 /// Wraps Rust's plain-string errors, which are hand-authored and never carry a path or secret.
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -1224,6 +1226,11 @@ export async function recordDiagnostic(operation: string, code: string): Promise
 export async function getDiagnosticStatus(): Promise<DiagnosticStatus> {
   if (previewMode) return { exists: false, eventCount: 0, errorCount: 0, sizeBytes: 0, localOnly: true, byOperation: [], byCode: [], recent: [] }
   return invoke<DiagnosticStatus>('get_diagnostic_status')
+}
+
+export async function grantPresence(secret: string): Promise<void> {
+  if (previewMode) return
+  await invoke('grant_presence', { secret })
 }
 
 export async function exportRecoveryKit(kit: string): Promise<string | null> {

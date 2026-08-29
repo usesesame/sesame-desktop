@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "vault-lifecycle"
-description = "Vault setup, unlock, lock, recovery, and local unlock settings for the main window."
+description = "Vault setup, unlock, lock, recovery, presence for deliberate releases, and local unlock settings for the main window."
 commands.allow = [
   "get_vault_status",
   "create_vault",
@@ -15,6 +15,7 @@ commands.allow = [
   "enable_windows_hello",
   "disable_windows_hello",
   "unlock_with_windows_hello",
+  "grant_presence",
   "set_auto_lock_minutes",
   "lock_vault",
   "get_recovery_health",

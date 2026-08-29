@@ -6,7 +6,9 @@ import {
   exportVaultCsv,
   getDuplicateGroups,
   getMergeComparison,
+  grantPresence,
   mergeDuplicateLogins,
+  PRESENCE_REQUIRED,
   recordDiagnostic,
 } from '../vault'
 import { controllerStore } from './controller-store'
@@ -41,6 +43,8 @@ export function createCleanupController(options: CleanupControllerOptions) {
     mergeComparison: null as MergeComparison | null,
     mergeChoices: {} as MergeChoices,
     readableExportConfirmed: false,
+    exportPresenceRequired: false,
+    exportPresencePassword: '',
     deleteVaultPassword: '',
     dataActionWorking: false,
   })
@@ -65,6 +69,32 @@ export function createCleanupController(options: CleanupControllerOptions) {
       feedback.setError(error)
     } finally {
       state.patch({ duplicateReviewLoading: false })
+    }
+  }
+
+  async function runReadableExport() {
+    state.patch({ dataActionWorking: true })
+    feedback.clearError()
+    try {
+      const fileNames = await exportVaultCsv()
+      if (fileNames?.length) {
+        feedback.showNotice(
+          'Readable export created',
+          fileNames.length > 1
+            ? `${fileNames.join(' and ')} contain unencrypted vault data.`
+            : `${fileNames[0]} contains unencrypted login data.`,
+        )
+      }
+      state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ exportPresenceRequired: true })
+        feedback.setErrorMessage('Confirm your master password before Sesame writes a readable copy of your vault.')
+      } else {
+        feedback.setError(error)
+      }
+    } finally {
+      state.patch({ dataActionWorking: false })
     }
   }
 
@@ -188,7 +218,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
       if (first) await options.selectEntry(first.id)
     },
     openDataControls() {
-      state.patch({ readableExportConfirmed: false })
+      state.patch({ readableExportConfirmed: false, exportPresenceRequired: false, exportPresencePassword: '' })
       modal.open({ kind: 'data-controls' })
     },
     closeDataControls() { modal.close('data-controls') },
@@ -205,18 +235,17 @@ export function createCleanupController(options: CleanupControllerOptions) {
     setDeleteVaultPassword(deleteVaultPassword: string) { state.patch({ deleteVaultPassword }) },
     async exportReadableVault() {
       if (!state.value().readableExportConfirmed) return
+      await runReadableExport()
+    },
+    async confirmExportPresence() {
+      const secret = state.value().exportPresencePassword
+      if (!secret || state.value().dataActionWorking) return
       state.patch({ dataActionWorking: true })
       feedback.clearError()
       try {
-        const fileNames = await exportVaultCsv()
-        if (fileNames?.length) {
-          feedback.showNotice(
-            'Readable export created',
-            fileNames.length > 1
-              ? `${fileNames.join(' and ')} contain unencrypted vault data.`
-              : `${fileNames[0]} contains unencrypted login data.`,
-          )
-        }
+        await grantPresence(secret)
+        state.patch({ exportPresencePassword: '' })
+        await runReadableExport()
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -247,6 +276,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
         duplicateReviewOpen: false, duplicateGroups: [], duplicateGroupId: undefined, duplicateSelectedIds: [],
         duplicateReviewLoading: false, cleanupWorking: false, deleteCandidate: null, deleteBatch: [], mergeCandidate: null,
         mergeKeepId: '', mergeComparison: null, mergeChoices: {}, readableExportConfirmed: false,
+        exportPresenceRequired: false, exportPresencePassword: '',
         deleteVaultPassword: '', dataActionWorking: false,
       })
     },

@@ -417,10 +417,10 @@
           "markdownDescription": "Item and folder mutation, deletion, restoration, and duplicate merging for the main window."
         },
         {
-          "description": "Vault setup, unlock, lock, recovery, and local unlock settings for the main window.",
+          "description": "Vault setup, unlock, lock, recovery, presence for deliberate releases, and local unlock settings for the main window.",
           "type": "string",
           "const": "vault-lifecycle",
-          "markdownDescription": "Vault setup, unlock, lock, recovery, and local unlock settings for the main window."
+          "markdownDescription": "Vault setup, unlock, lock, recovery, presence for deliberate releases, and local unlock settings for the main window."
         },
         {
           "description": "Redacted vault snapshots and explicit item reads for the main window.",
