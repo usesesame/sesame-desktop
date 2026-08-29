@@ -1051,7 +1051,6 @@ pub struct IdentityInput {
     pub country: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1107,7 +1106,6 @@ pub struct SecureNoteInput {
     pub content: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1187,7 +1185,6 @@ pub struct CardInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1253,7 +1250,6 @@ pub struct WifiNetworkInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1323,7 +1319,6 @@ pub struct SshKeyInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1393,7 +1388,6 @@ pub struct SoftwareLicenseInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1498,7 +1492,6 @@ pub struct DocumentMetadataInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1566,7 +1559,6 @@ pub struct CustomRecordInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
-
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -2436,7 +2428,8 @@ mod tests {
     #[test]
     fn records_stored_without_the_array_keys_still_load() {
         let note: SecureNote =
-            serde_json::from_str(r#"{"id":"a","title":"Wi-Fi","content":"example note body"}"#).unwrap();
+            serde_json::from_str(r#"{"id":"a","title":"Wi-Fi","content":"example note body"}"#)
+                .unwrap();
         assert!(note.tags.is_empty());
         let document: DocumentMetadata =
             serde_json::from_str(r#"{"id":"b","title":"Passport"}"#).unwrap();

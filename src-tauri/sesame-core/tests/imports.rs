@@ -4,22 +4,22 @@ use sesame_core::imports::{
 };
 
 fn chrome(csv: &str) -> Vec<sesame_core::types::VaultEntry> {
-    import_browser_csv_entries(csv, "Chrome").expect("Chrome import").0
+    import_browser_csv_entries(csv, "Chrome")
+        .expect("Chrome import")
+        .0
 }
 
 #[test]
 fn a_password_keeps_the_whitespace_it_was_exported_with() {
-    let entries = chrome(
-        "name,url,username,password\nExample,https://example.test,person,\"  spaced  \"\n",
-    );
+    let entries =
+        chrome("name,url,username,password\nExample,https://example.test,person,\"  spaced  \"\n");
     assert_eq!(entries[0].password, "  spaced  ");
 }
 
 #[test]
 fn a_password_keeps_an_interior_comma_and_quote() {
-    let entries = chrome(
-        "name,url,username,password\nExample,https://example.test,person,\"a,b\"\"c\"\n",
-    );
+    let entries =
+        chrome("name,url,username,password\nExample,https://example.test,person,\"a,b\"\"c\"\n");
     assert_eq!(entries[0].password, "a,b\"c");
 }
 
@@ -57,7 +57,8 @@ fn a_file_without_the_expected_columns_is_refused_with_a_readable_message() {
 
 #[test]
 fn headers_are_matched_regardless_of_case_and_spacing() {
-    let entries = chrome("Name, URL , Username ,Password\nExample,https://example.test,person,secret\n");
+    let entries =
+        chrome("Name, URL , Username ,Password\nExample,https://example.test,person,secret\n");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].password, "secret");
 }
@@ -81,7 +82,10 @@ fn firefox_and_keepass_exports_are_read_by_their_own_column_names() {
 
 #[test]
 fn an_unreasonably_large_file_is_refused_before_it_is_parsed() {
-    let huge = format!("name,url,username,password\n{}", "x".repeat(26 * 1024 * 1024));
+    let huge = format!(
+        "name,url,username,password\n{}",
+        "x".repeat(26 * 1024 * 1024)
+    );
     let Err(error) = parse_import_entries(&huge, "chrome-csv") else {
         panic!("a file past the ceiling must be refused");
     };
@@ -131,7 +135,10 @@ fn a_bitwarden_ssh_key_becomes_an_ssh_key_item() {
     assert_eq!(key.title, "Deploy key");
     assert_eq!(key.key_type, "ssh-ed25519");
     assert!(key.private_key.contains("fictional"));
-    assert_eq!(key.public_key, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build");
+    assert_eq!(
+        key.public_key,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build"
+    );
     assert_eq!(key.notes, "build server");
 }
 
@@ -175,7 +182,9 @@ fn an_otpauth_list_becomes_code_only_entries() {
 
 #[test]
 fn a_file_with_no_links_is_refused_with_a_readable_message() {
-    let error = parse_import_entries("nothing to see here\n", "otpauth-txt").err().expect("should be refused");
+    let error = parse_import_entries("nothing to see here\n", "otpauth-txt")
+        .err()
+        .expect("should be refused");
     assert!(error.contains("otpauth://"), "unexpected message: {error}");
 }
 
@@ -215,8 +224,11 @@ fn twofas_services_import_with_and_without_an_otp_block() {
 
 #[test]
 fn a_malformed_secret_is_counted_rather_than_saved_as_a_broken_code() {
-    let broken = r#"{ "services": [ { "name": "Bad", "secret": "!!!!", "otp": { "account": "x" } } ] }"#;
-    let error = parse_import_entries(broken, "2fas-json").err().expect("should be refused");
+    let broken =
+        r#"{ "services": [ { "name": "Bad", "secret": "!!!!", "otp": { "account": "x" } } ] }"#;
+    let error = parse_import_entries(broken, "2fas-json")
+        .err()
+        .expect("should be refused");
     assert!(error.contains("no time-based codes"), "unexpected: {error}");
 }
 

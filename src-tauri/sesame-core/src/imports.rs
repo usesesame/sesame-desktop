@@ -8,8 +8,7 @@ use crate::{
     types::*,
     util::{
         domain_from_url, non_empty, normalise_header, normalise_url, random_id, record_secret,
-        record_value,
-        split_backup_codes, unix_timestamp,
+        record_value, split_backup_codes, unix_timestamp,
     },
     VaultEntry, VaultResult,
 };
@@ -447,7 +446,11 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
     // SshKey has no legacy_fields, so custom fields cannot be carried. Count them
     // rather than letting the report claim nothing was left behind.
     for field in &item.fields {
-        if field.value.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+        if field
+            .value
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
             fidelity.record(FieldDisposition::IntentionallyOmitted);
         }
     }
@@ -1348,7 +1351,9 @@ fn otpauth_url(
     if !issuer.trim().is_empty() {
         url.push_str(&format!("&issuer={}", encode_component(issuer)));
     }
-    url.push_str(&format!("&digits={digits}&period={period}&algorithm={algorithm}"));
+    url.push_str(&format!(
+        "&digits={digits}&period={period}&algorithm={algorithm}"
+    ));
     url
 }
 

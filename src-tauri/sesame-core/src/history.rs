@@ -281,6 +281,9 @@ mod change_tests {
             security_code: "456".to_string(),
             ..Card::default()
         });
-        assert_eq!(changed_fields(&before, &after), vec!["security code".to_string()]);
+        assert_eq!(
+            changed_fields(&before, &after),
+            vec!["security code".to_string()]
+        );
     }
 }

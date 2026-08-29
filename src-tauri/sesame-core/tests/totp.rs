@@ -25,7 +25,11 @@ fn a_secret_is_read_however_the_site_printed_it() {
         let Some(totp) = parsed else {
             panic!("{name} secret was rejected");
         };
-        assert_eq!(totp.generate(59), "287082", "{name} produced a different code");
+        assert_eq!(
+            totp.generate(59),
+            "287082",
+            "{name} produced a different code"
+        );
     }
 }
 
@@ -91,7 +95,10 @@ fn a_save_that_omits_the_secret_keeps_the_stored_one() {
 
 #[test]
 fn an_explicitly_emptied_secret_is_cleared() {
-    assert_eq!(resolved_totp(Some(String::new()), Some(RFC_KEY.to_string())), None);
+    assert_eq!(
+        resolved_totp(Some(String::new()), Some(RFC_KEY.to_string())),
+        None
+    );
 }
 
 #[test]
