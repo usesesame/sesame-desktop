@@ -6,6 +6,7 @@ import {
   exportBackup,
   getRecoveryHealth,
   getVaultStatus,
+  recordDiagnostic,
   restoreBackup,
   verifyBackup,
 } from '../vault'
@@ -88,13 +89,23 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     },
     async beginRestore() {
       feedback.clearError()
+      void recordDiagnostic('restore', 'picker_opened')
       try {
         const restoreSelection = await chooseBackupForRestore()
-        if (restoreSelection) {
-          const opened = modal.open({ kind: 'restore' })
-          if (opened) state.patch({ restoreSelection, restoreConfirmed: false, restoreSecret: '' })
+        if (!restoreSelection) {
+          void recordDiagnostic('restore', 'picker_cancelled')
+          return
+        }
+        void recordDiagnostic('restore', 'selection_verified')
+        const opened = modal.open({ kind: 'restore' })
+        if (opened) {
+          state.patch({ restoreSelection, restoreConfirmed: false, restoreSecret: '' })
+        } else {
+          void recordDiagnostic('restore', 'modal_refused')
+          feedback.setErrorMessage('Close the open dialog first, then try restoring again.')
         }
       } catch (error) {
+        void recordDiagnostic('restore', 'failed')
         feedback.setError(error)
       }
     },
@@ -105,14 +116,18 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     },
     async confirmRestore() {
       const current = state.value()
-      if (!current.restoreSelection || !current.restoreConfirmed || !current.restoreSecret) return
+      if (!current.restoreSelection || !current.restoreSecret) return
+      if (vault.value().status.exists && !current.restoreConfirmed) return
       state.patch({ restoringBackup: true })
       feedback.clearError()
       try {
+        const hadVault = vault.value().status.exists
         const restored = await restoreBackup(current.restoreSelection.source, current.restoreSecret)
         const message = restored.safetyBackupName
           ? `Backup restored. Sesame kept the previous vault as ${restored.safetyBackupName}.`
-          : 'Backup restored.'
+          : hadVault
+            ? 'Backup restored.'
+            : 'Backup restored. Unlock with the master password or recovery kit from that backup.'
         modal.close('restore')
         state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '' })
         await applyRestoredVault(message)

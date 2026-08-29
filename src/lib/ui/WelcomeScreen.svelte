@@ -4,6 +4,8 @@
   import { platformCapabilities } from '../platform'
 
   export let onStart: () => void
+  export let onRestoreBackup: () => void
+  export let errorMessage = ''
 
   let heading: HTMLHeadingElement
 
@@ -25,7 +27,9 @@
     </ul>
 
     <button type="button" class="start-button" on:click={onStart}>Start setup</button>
-    <p class="tiny-note">Your vault, master password, and recovery kit stay on this computer.</p>
+    <button type="button" class="restore-button" on:click={onRestoreBackup}>Restore from a backup</button>
+    {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
+    <p class="tiny-note">Already have an encrypted Sesame backup? Restoring it brings back the vault it was taken from. Otherwise your vault, master password, and recovery kit stay on this computer.</p>
   </section>
 </main>
 
@@ -90,5 +94,19 @@
   }
   .start-button:hover { background: var(--accent-hover); }
   .start-button:active { background: var(--accent-active); }
+  .restore-button {
+    width: 100%;
+    margin-top: var(--space-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 11px 18px;
+    color: var(--accent-link);
+    background: var(--surface-inset);
+    font-size: var(--type-2);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--t-fast) ease;
+  }
+  .restore-button:hover { background: var(--tint); }
   .tiny-note { margin: var(--space-4) 0 0; color: var(--text-faint); font-size: var(--type-1); line-height: 1.55; }
 </style>

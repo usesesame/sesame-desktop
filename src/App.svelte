@@ -366,11 +366,7 @@
   onNativeVaultLocked = () => unlockController.applyLockedUi('Vault locked.')
 
   $: if ($vault.status.unlocked && $settingsState.preferenceLoaded) {
-    onboardingController.startIfNeeded(
-      $settingsState.betaOnboardingDismissed,
-      $settingsState.recoveryVerified,
-      $vault.status.onboardingRequired ?? false,
-    )
+    onboardingController.startIfNeeded($settingsState.betaOnboardingDismissed, $vault.status.onboardingRequired ?? false)
   }
 
   const navigation: Array<{ id: View; label: string; icon: string }> = [
@@ -499,7 +495,11 @@
     />
   {/key}
 {:else if !$vault.status.unlocked && !$vault.status.exists && !setupWelcomeSeen && !$unlockState.restoreMessage}
-  <WelcomeScreen onStart={() => (setupWelcomeSeen = true)} />
+  <WelcomeScreen
+    onStart={() => (setupWelcomeSeen = true)}
+    onRestoreBackup={() => void backupController.beginRestore()}
+    errorMessage={$feedbackState.errorMessage}
+  />
 {:else if !$vault.status.unlocked}
   <UnlockScreen
     status={$vault.status}
@@ -704,6 +704,7 @@
       />
     {/if}
   </WorkspaceShell>
+{/if}
 
   {#if $loginState.entryMenu && $contextEntry}
     <EntryContextMenu
@@ -790,6 +791,8 @@
         bind:restoreConfirmed={$backupState.restoreConfirmed}
         bind:restoreSecret={$backupState.restoreSecret}
         restoringBackup={$backupState.restoringBackup}
+        replacesVault={$vault.status.exists}
+        errorMessage={$feedbackState.errorMessage}
         onClose={backupController.closeRestore}
         onConfirm={backupController.confirmRestore}
       />
@@ -1017,4 +1020,3 @@
       }}
     />
   {/if}
-{/if}

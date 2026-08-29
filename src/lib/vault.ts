@@ -1194,8 +1194,9 @@ export async function chooseBackupForRestore(): Promise<BackupSelection | null> 
 // The backup must open with its own secret before it can replace the active vault.
 export async function restoreBackup(source: string, secret: string): Promise<RestoreBackupResult> {
   if (previewMode) {
+    const hadVault = previewUnlocked
     previewUnlocked = false
-    return { safetyBackupName: 'sesame-before-restore-preview.sesame', pinUnlockAvailable: false, helloUnlockAvailable: false }
+    return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false }
   }
   return invoke<RestoreBackupResult>('restore_backup', { request: { source, secret } })
 }
