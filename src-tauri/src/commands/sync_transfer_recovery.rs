@@ -19,7 +19,8 @@ pub async fn sync_restore_conflict_backup(app: AppHandle, state: tauri::State<'_
     let contents = crate::sync::conflict_backup::read_verified(&path, &vault.key)?;
     let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&contents.payload).map_err(|_| "That recovery copy could not be read.".to_string())?;
     let entry_count = payload.entries.len();
-    let current_payload = serde_json::to_vec(&vault.payload).map_err(|_| "Sesame could not read the local vault.".to_string())?;
+    let current = vault.open_payload()?;
+    let current_payload = serde_json::to_vec(&*current).map_err(|_| "Sesame could not read the local vault.".to_string())?;
     let written = crate::sync::conflict_backup::write_verified(&directory, vault, crate::sync::conflict_backup::Side::ThisDevice, contents.revision, &current_payload, &backup_stamp())?;
     crate::vault::storage::commit_payload_change(vault, payload)?;
     state.advance_session_epoch();

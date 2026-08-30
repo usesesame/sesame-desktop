@@ -2,10 +2,8 @@
 //! snapshot deliberately omits usernames, network names, and note contents;
 //! only the ids of the matches cross back to the interface.
 
+use crate::vault::{Folder, TaggedItem, VaultResult, VaultState};
 use tauri::State;
-
-use crate::vault::snapshot::folder_name;
-use crate::vault::{TaggedItem, VaultPayload, VaultResult, VaultState};
 
 #[tauri::command]
 pub fn search_items(query: String, state: State<'_, VaultState>) -> VaultResult<Vec<String>> {
@@ -18,23 +16,30 @@ pub fn search_items(query: String, state: State<'_, VaultState>) -> VaultResult<
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let payload = &session.payload;
-    Ok(payload
-        .item_views()
-        .into_iter()
-        .filter(|item| item_matches_search(payload, item, &needle))
-        .map(|item| item.id().to_string())
-        .collect())
+    let index = session.snapshot();
+    let mut matches = Vec::new();
+    for id in index
+        .entries
+        .iter()
+        .map(|item| item.id.as_str())
+        .chain(index.items.iter().map(|item| item.id.as_str()))
+    {
+        let item = session.open_item(id)?;
+        if item_matches_search(&index.folders, &item, &needle) {
+            matches.push(id.to_string());
+        }
+    }
+    Ok(matches)
 }
 
-fn item_matches_search(payload: &VaultPayload, item: &TaggedItem, needle: &str) -> bool {
+fn item_matches_search(folders: &[Folder], item: &TaggedItem, needle: &str) -> bool {
     let metadata = item.metadata();
     if metadata.item_title().to_lowercase().contains(needle)
         || metadata
             .item_tags()
             .iter()
             .any(|tag| tag.to_lowercase().contains(needle))
-        || folder_name(payload, metadata.item_folder_id())
+        || folder_name(folders, metadata.item_folder_id())
             .to_lowercase()
             .contains(needle)
     {
@@ -43,6 +48,12 @@ fn item_matches_search(payload: &VaultPayload, item: &TaggedItem, needle: &str) 
     searchable_fields(item)
         .iter()
         .any(|field| field.to_lowercase().contains(needle))
+}
+
+fn folder_name(folders: &[Folder], id: Option<&str>) -> String {
+    id.and_then(|id| folders.iter().find(|folder| folder.id == id))
+        .map(|folder| folder.name.clone())
+        .unwrap_or_default()
 }
 
 /// Everything a search may read. Passwords, keys, licence keys, security
@@ -90,5 +101,40 @@ fn searchable_fields(item: &TaggedItem) -> Vec<&str> {
             fields.extend(record.fields.iter().map(|field| field.label.as_str()));
             fields
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::VaultEntry;
+
+    fn login() -> TaggedItem {
+        TaggedItem::Login(VaultEntry {
+            id: "fictional-login".to_string(),
+            title: "Northwind".to_string(),
+            username: "casey".to_string(),
+            password: "fictional-secret-canary".to_string(),
+            folder_id: Some("fictional-folder".to_string()),
+            ..VaultEntry::default()
+        })
+    }
+
+    #[test]
+    fn search_matches_allowed_record_fields_and_redacted_folders() {
+        let folders = vec![Folder {
+            id: "fictional-folder".to_string(),
+            name: "Work".to_string(),
+        }];
+        let item = login();
+
+        assert!(item_matches_search(&folders, &item, "north"));
+        assert!(item_matches_search(&folders, &item, "casey"));
+        assert!(item_matches_search(&folders, &item, "work"));
+    }
+
+    #[test]
+    fn search_does_not_match_secret_fields() {
+        assert!(!item_matches_search(&[], &login(), "secret-canary"));
     }
 }
