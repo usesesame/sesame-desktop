@@ -7,6 +7,8 @@ import type { BackupInspection, BackupSelection, BackupVerification, BreachCheck
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
 
+export const PRESENCE_REQUIRED = 'presenceRequired'
+
 /// Wraps Rust's plain-string errors, which are hand-authored and never carry a path or secret.
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -486,10 +488,10 @@ const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>(
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', password: 'preview-only-not-a-real-password', folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
   },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', password: 'preview-only-not-a-real-password', folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: true, legacyFields: [] },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: true, legacyFields: [] },
 }
 
 const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
@@ -658,7 +660,7 @@ export async function searchQuickAccessItems(query: string): Promise<QuickAccess
 export async function getQuickAccessField(id: string, field: string, confirmed = false): Promise<QuickAccessValue> {
   if (previewMode) {
     const card = previewCards[id]
-    return { value: (field === 'totp' ? card?.totpCode : card?.password) ?? '' }
+    return { value: (field === 'totp' ? card?.totpCode : card?.hasPassword ? 'preview-only-not-a-real-password' : '') ?? '' }
   }
   return invoke<QuickAccessValue>('get_quick_access_field', { id, field, confirmed })
 }
@@ -820,7 +822,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       tags: input.tags ?? [],
       username: input.username.trim(),
       email: input.email.trim(),
-      password: input.password,
+      hasPassword: Boolean(input.password),
       folderId: input.folderId,
       folder: input.folder.trim(),
       favourite: previewCards[id]?.favourite ?? false,
@@ -1224,6 +1226,16 @@ export async function recordDiagnostic(operation: string, code: string): Promise
 export async function getDiagnosticStatus(): Promise<DiagnosticStatus> {
   if (previewMode) return { exists: false, eventCount: 0, errorCount: 0, sizeBytes: 0, localOnly: true, byOperation: [], byCode: [], recent: [] }
   return invoke<DiagnosticStatus>('get_diagnostic_status')
+}
+
+export async function grantPresence(secret: string): Promise<void> {
+  if (previewMode) return
+  await invoke('grant_presence', { secret })
+}
+
+export async function revealLoginSecret(id: string): Promise<string> {
+  if (previewMode) return 'fictional-preview-secret'
+  return invoke<string>('reveal_login_secret', { id })
 }
 
 export async function exportRecoveryKit(kit: string): Promise<string | null> {

@@ -8,6 +8,7 @@ mod commands;
 #[cfg(feature = "wdio")]
 mod desktop_e2e;
 mod diagnostics;
+mod release;
 #[cfg(feature = "sync-preview")]
 mod sync;
 mod vault;
@@ -115,6 +116,8 @@ macro_rules! sesame_invoke_handler {
             commands::restore_backup,
             commands::lock_vault,
             commands::get_recovery_health,
+            commands::grant_presence,
+            commands::reveal_login_secret,
             commands::link_desktop_service,
             commands::get_service_connection_status,
             commands::disconnect_service,
@@ -268,6 +271,7 @@ pub fn run() {
         )
         .manage(vault::VaultState::default())
         .manage(browser_fill::BrowserFillState::default())
+        .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())
         .manage(clipboard::ClipboardGuard::default())
         .setup(|app| {

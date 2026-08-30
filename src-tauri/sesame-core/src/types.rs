@@ -247,7 +247,7 @@ pub struct LoginCard {
     pub username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub email: String,
-    pub password: String,
+    pub has_password: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<String>,
     pub folder: String,

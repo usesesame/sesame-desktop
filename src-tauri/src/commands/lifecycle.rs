@@ -149,10 +149,12 @@ fn install_unlocked_session(
     state: &State<'_, VaultState>,
     session: &mut Option<UnlockedVault>,
     path: PathBuf,
-    key_array: [u8; 32],
+    mut key_array: [u8; 32],
     file: VaultFile,
 ) -> VaultResult<VaultSnapshot> {
-    let opened = sesame_core::api::open_vault_with_key(&file, key_array)?;
+    let opened = sesame_core::api::open_vault_with_key(&file, key_array);
+    key_array.zeroize();
+    let opened = opened?;
     let pin_unlock_available = opened.file.pin_wrap.is_some();
     let hello_unlock_available = opened.file.hello_wrap.is_some();
     // Same zeroize-on-drop workaround `create_vault` uses.
@@ -282,7 +284,8 @@ pub fn enable_windows_hello(state: State<'_, VaultState>) -> VaultResult<()> {
         .as_mut()
         .ok_or("Unlock your vault before turning on Windows Hello unlock.")?;
     let key_name = format!("{HELLO_KEY_NAME_PREFIX}{}", random_id());
-    let material = windows_hello::create_and_wrap(&key_name, &session.key)?;
+    let material =
+        session.expose_vault_key(|key| windows_hello::create_and_wrap(&key_name, key))?;
     let wrap = HelloWrap {
         key_name: material.key_name,
         ciphertext: URL_SAFE_NO_PAD.encode(material.ciphertext),

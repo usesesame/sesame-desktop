@@ -6,6 +6,8 @@ import {
   exportBackup,
   getRecoveryHealth,
   getVaultStatus,
+  grantPresence,
+  PRESENCE_REQUIRED,
   recordDiagnostic,
   restoreBackup,
   verifyBackup,
@@ -36,6 +38,8 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     drillError: '',
     health: null as RecoveryHealth | null,
     healthLoading: false,
+    exportPresenceRequired: false,
+    exportPresencePassword: '',
   })
 
   function clearDrill() {
@@ -52,6 +56,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
   async function applyRestoredVault(message: string) {
     vault.patch({ snapshot: null, loginCard: null, status: { ...(await getVaultStatus()), unlocked: false } })
     selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault' })
+    state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })
     onRestored(message)
   }
 
@@ -67,6 +72,22 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     }
   }
 
+  async function runEncryptedExport() {
+    try {
+      const name = await exportBackup()
+      if (name) feedback.showNotice('Backup exported', `${name} is still encrypted.`)
+      await refreshHealth()
+      state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ exportPresenceRequired: true })
+        feedback.setErrorMessage('Confirm your master password before Sesame writes a backup copy.')
+      } else {
+        feedback.setError(error)
+      }
+    }
+  }
+
   return {
     state,
     refreshHealth,
@@ -79,12 +100,21 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       }
     },
     async exportEncryptedBackup() {
+      await runEncryptedExport()
+    },
+    async confirmExportPresence() {
+      const secret = state.value().exportPresencePassword
+      if (!secret || state.value().healthLoading) return
+      state.patch({ healthLoading: true })
+      feedback.clearError()
       try {
-        const name = await exportBackup()
-        if (name) feedback.showNotice('Backup exported', `${name} is still encrypted.`)
-        await refreshHealth()
+        await grantPresence(secret)
+        state.patch({ exportPresencePassword: '' })
+        await runEncryptedExport()
       } catch (error) {
         feedback.setError(error)
+      } finally {
+        state.patch({ healthLoading: false })
       }
     },
     async beginRestore() {
@@ -206,6 +236,8 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
         drillError: '',
         health: null,
         healthLoading: false,
+        exportPresenceRequired: false,
+        exportPresencePassword: '',
       })
     },
   }

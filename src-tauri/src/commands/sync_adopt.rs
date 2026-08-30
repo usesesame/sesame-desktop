@@ -114,7 +114,7 @@ pub async fn sync_adopt_vault(
         let wrapping_key = derive_key(&master_password, &vault.kdf)?;
         let mut confirmed = decrypt_bytes(&wrapping_key, &vault.key_wrap, WRAP_AAD)
             .map_err(|_| "That master password is not correct.".to_string())?;
-        let matches = bytes_match(confirmed.as_slice(), vault.key.as_slice());
+        let matches = vault.expose_vault_key(|key| Ok(bytes_match(confirmed.as_slice(), key)))?;
         confirmed.zeroize();
         if !matches {
             return Err("That master password is not correct.".into());
@@ -139,7 +139,7 @@ pub async fn sync_adopt_vault(
 /// Old-key wraps are rebuilt or dropped; a stale PIN wrap would unlock a vault this one cannot read.
 pub(super) fn adopt(
     vault: &mut crate::vault::UnlockedVault,
-    key: [u8; 32],
+    mut key: [u8; 32],
     payload: crate::vault::types::VaultPayload,
     master_password: &str,
 ) -> Result<String, String> {
@@ -154,13 +154,15 @@ pub(super) fn adopt(
     recovery_kit.zeroize();
     let recovery_wrap = encrypt_bytes(&recovery_wrapping_key, &key, RECOVERY_WRAP_AAD)?;
 
+    let protected_key = crate::vault::VaultKey::new(key)?;
+    key.zeroize();
     let previous = (
         std::mem::replace(&mut vault.kdf, kdf),
         std::mem::replace(&mut vault.key_wrap, key_wrap),
         std::mem::replace(&mut vault.recovery_kdf, Some(recovery_kdf)),
         std::mem::replace(&mut vault.recovery_wrap, Some(recovery_wrap)),
         std::mem::replace(&mut vault.pin_wrap, None),
-        std::mem::replace(&mut vault.key, zeroize::Zeroizing::new(key)),
+        vault.replace_vault_key(protected_key),
     );
 
     if let Err(error) =
@@ -172,7 +174,7 @@ pub(super) fn adopt(
         vault.recovery_kdf = previous.2;
         vault.recovery_wrap = previous.3;
         vault.pin_wrap = previous.4;
-        vault.key = previous.5;
+        vault.replace_vault_key(previous.5);
         return Err(error);
     }
     Ok(shown)

@@ -10,10 +10,13 @@ import {
   createFolder,
   deleteFolder,
   getLoginCard,
+  grantPresence,
   openWebsite,
+  PRESENCE_REQUIRED,
   recordDiagnostic,
   renameFolder,
   recordItemUse,
+  revealLoginSecret,
   saveLogin,
   setItemFavourite,
 } from '../vault'
@@ -25,7 +28,7 @@ import type { ModalController } from './modal-controller'
 
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
 
-function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
+  function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
   return field === 'username' ? 'Username' : field === 'email' ? 'Email' : 'Password'
 }
 
@@ -49,6 +52,10 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   const { selection, settings, totp, vault } = stores
   const state = controllerStore({
     passwordVisible: false,
+    revealedPassword: '',
+    revealedFor: '',
+    passwordPresenceRequired: false,
+    passwordPresenceSecret: '',
     savingLogin: false,
     editorTitle: 'Add a login',
     editorFocusUrl: false,
@@ -83,6 +90,25 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     : null)
   const loginIds = derived(vault, ($vault) => new Set(($vault.snapshot?.entries ?? []).map((entry) => entry.id)))
 
+  async function ensureRevealed(id: string): Promise<string> {
+    if (state.value().revealedFor === id && state.value().revealedPassword) {
+      return state.value().revealedPassword
+    }
+    try {
+      const secret = await revealLoginSecret(id)
+      state.patch({ revealedPassword: secret, revealedFor: id, passwordPresenceRequired: false })
+      return secret
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ passwordPresenceRequired: true, revealedFor: id, passwordPresenceSecret: '' })
+        feedback.setErrorMessage('Confirm your master password to show the saved password.')
+      } else {
+        feedback.setError(error)
+      }
+      return ''
+    }
+  }
+
   async function selectEntry(id: string) {
     selectionRequestToken += 1
     const requestToken = selectionRequestToken
@@ -101,7 +127,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !vault.value().status.unlocked) return
       vault.patch({ loginCard: card })
       selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
-      state.patch({ passwordVisible: false })
+      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '' })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
         if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !current) return
@@ -165,7 +191,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     if (!opened) return
     state.patch({
       loginDraft: {
-        id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: card.password,
+        id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
         folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: card.backupCodes || [],
         recoveryEmail: card.recoveryEmail || '', recoveryPhone: card.recoveryPhone || '',
         recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '',
@@ -291,6 +317,33 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       state.patch({ loginDraft: { ...draft, password: makePassword({ length: 20, options: { lowercase: true, uppercase: true, numbers: true, symbols: true }, avoidAmbiguous: true } ) } })
     },
     closeEditor,
+    async togglePasswordReveal() {
+      const card = vault.value().loginCard
+      if (!card?.hasPassword) return
+      if (state.value().passwordVisible) {
+        state.patch({ passwordVisible: false })
+        return
+      }
+      const secret = await ensureRevealed(card.id)
+      if (secret) state.patch({ passwordVisible: true })
+    },
+    async confirmPasswordPresence() {
+      const secret = state.value().passwordPresenceSecret
+      const id = state.value().revealedFor
+      if (!secret || !id) return
+      state.patch({ passwordPresenceSecret: '' })
+      try {
+        await grantPresence(secret)
+      } catch (error) {
+        feedback.setError(error)
+        return
+      }
+      const revealed = await ensureRevealed(id)
+      if (revealed) state.patch({ passwordPresenceRequired: false, passwordVisible: true })
+    },
+    cancelPasswordPresence() {
+      state.patch({ passwordPresenceRequired: false, passwordPresenceSecret: '' })
+    },
     toggleBreachCheck() {
       const card = vault.value().loginCard
       if (!card) return
@@ -301,10 +354,12 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     },
     async runBreachCheck() {
       const card = vault.value().loginCard
-      if (!card?.password || state.value().breachCheckWorking) return
+      if (!card?.hasPassword || state.value().breachCheckWorking) return
+      const secret = await ensureRevealed(card.id)
+      if (!secret) return
       state.patch({ breachCheckWorking: true, breachCheckError: '' })
       try {
-        const result = await checkPasswordBreach(card.password)
+        const result = await checkPasswordBreach(secret)
         state.patch({ breachCheckResult: result })
       } catch (error) {
         state.patch({ breachCheckError: error instanceof Error ? error.message : 'Sesame could not reach the breach-check service. Try again.' })
@@ -356,7 +411,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       feedback.clearError()
       try {
         const result = await saveLogin({
-          id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: card.password,
+          id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
           folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], recoveryEmail: '', recoveryPhone: '',
           recoveryNotApplicable: true, notes: card.notes || '',
         })
@@ -412,14 +467,14 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     async copySelectedField(field: 'username' | 'email' | 'password') {
       const card = vault.value().loginCard
       if (!card) return
-      const value = card[field]
+      const value = field === 'password' ? await ensureRevealed(card.id) : card[field]
       if (value) await copy(value, copyFieldLabel(field))
-      else feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
+      else if (field !== 'password' || card.hasPassword) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
     async copyContextField(id: string, field: 'username' | 'email' | 'password') {
       const card = await contextCard(id)
       state.patch({ entryMenu: null })
-      const value = card?.[field]
+      const value = field === 'password' ? await ensureRevealed(id) : card?.[field]
       if (value) await copy(value, copyFieldLabel(field))
       else if (card) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
@@ -549,7 +604,8 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       // A countdown in flight must not fire after the lock it was racing against.
       stopAutoTypeCountdown()
       state.set({
-        passwordVisible: false, savingLogin: false, editorTitle: 'Add a login',
+        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '',
+        savingLogin: false, editorTitle: 'Add a login',
         editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,
         breachCheckEntryId: '', breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '',

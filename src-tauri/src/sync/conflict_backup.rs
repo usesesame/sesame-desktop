@@ -48,7 +48,8 @@ pub fn write_verified(
     std::fs::create_dir_all(directory)
         .map_err(|_| "Sesame could not create the recovery copy folder.".to_string())?;
 
-    let encrypted_payload = encrypt_bytes(&vault.key, payload_bytes, PAYLOAD_AAD)?;
+    let encrypted_payload =
+        vault.expose_vault_key(|key| encrypt_bytes(key, payload_bytes, PAYLOAD_AAD))?;
     let file = VaultFile {
         format_version: VAULT_FORMAT_VERSION,
         kdf: vault.kdf.clone(),
@@ -66,7 +67,7 @@ pub fn write_verified(
 
     let path = create_new_file(directory, side, revision, stamp, &body)?;
 
-    let recovered = read_verified(&path, &vault.key)?;
+    let recovered = vault.expose_vault_key(|key| read_verified(&path, key))?;
     if recovered.payload != payload_bytes || recovered.revision != revision {
         // Remove it rather than leave an artifact that claims to hold a vault it does not.
         let _ = std::fs::remove_file(&path);
