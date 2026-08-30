@@ -46,7 +46,8 @@ pub fn create_private_dir(path: &Path) -> VaultResult<()> {
 
 #[cfg(not(unix))]
 pub fn create_private_dir(path: &Path) -> VaultResult<()> {
-    fs::create_dir_all(path).map_err(|_| "Sesame could not prepare its local vault folder.".to_string())
+    fs::create_dir_all(path)
+        .map_err(|_| "Sesame could not prepare its local vault folder.".to_string())
 }
 
 #[cfg(unix)]

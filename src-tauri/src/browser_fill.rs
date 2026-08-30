@@ -2024,3 +2024,208 @@ mod grant_tests {
         assert!(state.pending_card_request().is_none());
     }
 }
+
+#[cfg(test)]
+mod origin_attacks {
+    use super::*;
+
+    const CANARY_PASSWORD: &str = "fictional-secret-canary";
+
+    fn request(value: &str) -> Option<NormalizedOrigin> {
+        NormalizedOrigin::from_request(value)
+    }
+
+    fn saved(value: &str) -> Option<NormalizedOrigin> {
+        NormalizedOrigin::from_saved_url(value)
+    }
+
+    fn entry(id: &str, url: &str, password: &str) -> VaultEntry {
+        VaultEntry {
+            id: id.to_string(),
+            title: format!("Entry {id}"),
+            username: "casey".to_string(),
+            email: "casey@example.test".to_string(),
+            password: password.to_string(),
+            url: url.to_string(),
+            ..VaultEntry::default()
+        }
+    }
+
+    #[test]
+    fn fill_requests_must_be_bare_origins() {
+        for rejected in [
+            "https://casey:fictional@example.test/",
+            "https://casey@example.test/",
+            "https://example.test/sign-in",
+            "https://example.test/?next=/vault",
+            "https://example.test/#settings",
+            "ftp://example.test/",
+            "http://example.test/",
+            "javascript:alert(1)",
+            "https://example.test./",
+            "file:///etc/fictional",
+        ] {
+            assert!(
+                request(rejected).is_none(),
+                "{rejected} was accepted as a fill origin"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_urls_cannot_smuggle_credentials_or_a_trailing_dot() {
+        assert!(saved("https://casey:fictional@example.test/").is_none());
+        assert!(saved("https://casey@example.test/").is_none());
+        assert!(saved("https://example.test./").is_none());
+        assert!(saved("  https://example.test  ").is_some());
+    }
+
+    #[test]
+    fn lookalike_origins_never_match_a_saved_site() {
+        let cases = [
+            ("https://example.test", "https://example.test.evil.test"),
+            ("https://example.test", "https://examp1e.test"),
+            ("https://example.test", "https://examplextest"),
+            ("https://example.test", "https://evil.test"),
+            (
+                "https://www.example.test",
+                "https://www.example.test.evil.test",
+            ),
+            ("https://example.test", "https://example.test:8443"),
+            ("https://example.test:8443", "https://example.test"),
+            ("https://example.test", "https://www.not-example.test"),
+            ("https://127.0.0.1", "https://127.0.0.1.evil.test"),
+            ("https://example.test", "https://[::1]"),
+        ];
+        for (saved_url, request_url) in cases {
+            let saved_origin =
+                saved(saved_url).unwrap_or_else(|| panic!("{saved_url} did not parse"));
+            let requested = request(request_url)
+                .unwrap_or_else(|| panic!("{request_url} did not parse as a request origin"));
+            assert!(
+                origin_match_kind(&saved_origin, &requested).is_none(),
+                "{saved_url} matched {request_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_exact_origins_and_the_www_alias_match() {
+        let matches = [
+            ("https://example.test", "https://example.test"),
+            ("https://example.test", "https://example.test:443"),
+            ("https://EXAMPLE.test", "https://example.test"),
+            ("https://www.example.test", "https://example.test"),
+            ("https://example.test", "https://www.example.test"),
+            ("https://www.example.test", "https://WWW.Example.test"),
+        ];
+        for (saved_url, request_url) in matches {
+            let saved_origin = saved(saved_url).expect("saved origin");
+            let requested = request(request_url).expect("request origin");
+            let kind = origin_match_kind(&saved_origin, &requested)
+                .unwrap_or_else(|| panic!("{saved_url} did not match {request_url}"));
+            let expected = if saved_origin == requested {
+                "exact"
+            } else {
+                "wwwAlias"
+            };
+            assert_eq!(
+                kind.as_str(),
+                expected,
+                "{saved_url} matched {request_url} with the wrong rule"
+            );
+        }
+    }
+
+    #[test]
+    fn http_is_local_development_only() {
+        assert!(request("http://localhost:3000/").is_some());
+        assert!(request("http://127.0.0.1:3000/").is_some());
+        assert!(request("http://[::1]:3000/").is_some());
+        assert!(request("http://example.test/").is_none());
+        assert!(request("http://192.168.1.10/").is_none());
+
+        let local = saved("http://localhost:3000/").expect("local saved origin");
+        let loopback_http = saved("http://[::1]/").expect("loopback saved origin");
+        assert!(
+            origin_match_kind(&local, &request("http://localhost:3000/").expect("local")).is_some()
+        );
+        assert!(origin_match_kind(
+            &loopback_http,
+            &request("https://[::1]/").expect("loopback https")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn a_login_only_fills_its_own_site() {
+        let entries = vec![
+            entry("login-bank", "https://bank.test", CANARY_PASSWORD),
+            entry("login-evil", "https://bank.test.evil.test", CANARY_PASSWORD),
+        ];
+        let requested = request("https://bank.test").expect("request origin");
+
+        let candidates = matching_entries(&entries, &requested);
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["login-bank"]
+        );
+    }
+
+    #[test]
+    fn a_login_without_a_usable_password_never_fills() {
+        let oversized_username = {
+            let mut value = entry("login-huge-user", "https://example.test", CANARY_PASSWORD);
+            value.username = "u".repeat(MAX_CREDENTIAL_FIELD_BYTES + 1);
+            value
+        };
+        let entries = vec![
+            entry("login-empty", "https://example.test", ""),
+            entry(
+                "login-huge-password",
+                "https://example.test",
+                &"A".repeat(MAX_CREDENTIAL_FIELD_BYTES + 1),
+            ),
+            oversized_username,
+        ];
+
+        let candidates =
+            matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn a_candidate_carries_no_secret() {
+        let entries = vec![entry("login-a", "https://example.test", CANARY_PASSWORD)];
+
+        let candidates =
+            matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        let wire = serde_json::to_string(&candidates).expect("serialized candidates");
+        assert!(!wire.contains(CANARY_PASSWORD));
+        assert!(wire.contains("casey"));
+    }
+
+    #[test]
+    fn the_candidate_list_is_bounded() {
+        let entries: Vec<VaultEntry> = (0..64)
+            .map(|index| {
+                entry(
+                    &format!("login-{index}"),
+                    "https://example.test",
+                    CANARY_PASSWORD,
+                )
+            })
+            .collect();
+
+        let candidates =
+            matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
+    }
+}

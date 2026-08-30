@@ -32,7 +32,10 @@ fn the_guard_covers_the_password_column_too_not_only_the_name() {
         password: "=1+1".into(),
         ..VaultEntry::default()
     });
-    assert!(csv.contains("'=1+1"), "password was exported unguarded:\n{csv}");
+    assert!(
+        csv.contains("'=1+1"),
+        "password was exported unguarded:\n{csv}"
+    );
 }
 
 #[test]

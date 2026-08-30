@@ -105,8 +105,8 @@ pub fn migrate_payload(payload: &mut VaultPayload) -> bool {
             .as_ref()
             .is_some_and(|folder_id| !ids.contains(folder_id))
         {
-        // A dangling reference would leave a folder that cannot be managed.
-        entry.folder_id = None;
+            // A dangling reference would leave a folder that cannot be managed.
+            entry.folder_id = None;
             changed = true;
         }
         if entry.created_at == 0 {

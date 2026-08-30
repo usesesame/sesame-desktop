@@ -223,7 +223,10 @@ fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing
         let _ = child.wait();
         return Err("Sesame could not write to the Linux credential store.".into());
     }
-    if !wait_with_timeout(child, SECRET_SERVICE_TIMEOUT)?.status.success() {
+    if !wait_with_timeout(child, SECRET_SERVICE_TIMEOUT)?
+        .status
+        .success()
+    {
         return Err(
             "Sesame could not save the Linux device key. Unlock your system wallet and try again."
                 .into(),

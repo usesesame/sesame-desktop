@@ -22,7 +22,7 @@ fn matching_entries(
                 saved_origin: saved_origin.canonical(),
                 match_kind: requested_kind.as_str(),
             });
-            if candidates.len() > MAX_MATCHING_CANDIDATES {
+            if candidates.len() >= MAX_MATCHING_CANDIDATES {
                 return candidates;
             }
         }

@@ -23,7 +23,10 @@ fn a_short_password_is_reported_as_weak() {
 fn a_password_from_the_common_list_is_named_as_such_whatever_its_case() {
     for value in ["password", "PASSWORD", "  Password  "] {
         let analysis = analyse_password_value(value);
-        assert!(analysis.has("common-password"), "{value} was not recognised");
+        assert!(
+            analysis.has("common-password"),
+            "{value} was not recognised"
+        );
         assert!(analysis.score <= 1, "{value} scored {}", analysis.score);
     }
 }

@@ -38,7 +38,10 @@ fn each_further_wrong_pin_costs_more_than_the_last() {
     for extra in 0..4 {
         let guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT + extra, NOW);
         let Err(seconds) = guard.check_at(NOW) else {
-            panic!("no cooldown after {} failures", PIN_FAILURES_BEFORE_LOCKOUT + extra);
+            panic!(
+                "no cooldown after {} failures",
+                PIN_FAILURES_BEFORE_LOCKOUT + extra
+            );
         };
         seen.push(seconds);
     }
@@ -69,7 +72,10 @@ fn the_count_survives_being_written_out_and_read_back() {
     let guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT + 1, NOW);
     let restored = PinAttemptGuard::from_persisted(guard.persisted());
     assert_eq!(restored.check_at(NOW), guard.check_at(NOW));
-    assert_eq!(restored.persisted().failures, PIN_FAILURES_BEFORE_LOCKOUT + 1);
+    assert_eq!(
+        restored.persisted().failures,
+        PIN_FAILURES_BEFORE_LOCKOUT + 1
+    );
 }
 
 #[test]
@@ -79,4 +85,34 @@ fn a_clock_moved_backwards_keeps_the_lock_rather_than_releasing_it() {
         guard.check_at(NOW - 3_600_000).is_err(),
         "winding the clock back released the cooldown"
     );
+}
+
+#[test]
+fn the_reported_wait_is_the_exact_wait() {
+    let guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT, NOW);
+    let Err(seconds) = guard.check_at(NOW) else {
+        panic!("the threshold failure did not start a cooldown");
+    };
+    assert!(guard.check_at(NOW + seconds * 1_000 - 1).is_err());
+    assert!(guard.check_at(NOW + seconds * 1_000).is_ok());
+}
+
+#[test]
+fn a_failure_during_a_cooldown_deepens_the_next_wait() {
+    let mut guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT, NOW);
+    guard.record_failure_at(NOW + 1_000);
+
+    assert!(guard.check_at(NOW + 15_000).is_err());
+    assert!(guard.check_at(NOW + 31_000).is_ok());
+}
+
+#[test]
+fn a_storm_of_failures_below_the_threshold_never_locks() {
+    let mut guard = PinAttemptGuard::default();
+    for _ in 0..50 {
+        guard.record_failure_at(NOW);
+        assert!(guard.check_at(NOW).is_ok());
+        guard.record_success();
+    }
+    assert_eq!(guard.persisted().failures, 0);
 }
