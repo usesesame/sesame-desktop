@@ -38,7 +38,10 @@ fn each_further_wrong_pin_costs_more_than_the_last() {
     for extra in 0..4 {
         let guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT + extra, NOW);
         let Err(seconds) = guard.check_at(NOW) else {
-            panic!("no cooldown after {} failures", PIN_FAILURES_BEFORE_LOCKOUT + extra);
+            panic!(
+                "no cooldown after {} failures",
+                PIN_FAILURES_BEFORE_LOCKOUT + extra
+            );
         };
         seen.push(seconds);
     }
@@ -69,7 +72,10 @@ fn the_count_survives_being_written_out_and_read_back() {
     let guard = guard_after_failures(PIN_FAILURES_BEFORE_LOCKOUT + 1, NOW);
     let restored = PinAttemptGuard::from_persisted(guard.persisted());
     assert_eq!(restored.check_at(NOW), guard.check_at(NOW));
-    assert_eq!(restored.persisted().failures, PIN_FAILURES_BEFORE_LOCKOUT + 1);
+    assert_eq!(
+        restored.persisted().failures,
+        PIN_FAILURES_BEFORE_LOCKOUT + 1
+    );
 }
 
 #[test]

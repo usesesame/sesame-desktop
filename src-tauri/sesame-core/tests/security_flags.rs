@@ -61,8 +61,17 @@ fn a_unique_strong_password_raises_nothing_about_the_password() {
     let duplicates = duplicate_key_counts(&payload);
     let passwords = password_counts(&payload);
     let kinds = issue_kinds_for(&payload.entries[0], &duplicates, &passwords);
-    for password_issue in ["weak-password", "common-password", "reused-password", "compromised-pattern", "old-password"] {
-        assert!(!kinds.contains(&password_issue), "a good password was flagged as {kinds:?}");
+    for password_issue in [
+        "weak-password",
+        "common-password",
+        "reused-password",
+        "compromised-pattern",
+        "old-password",
+    ] {
+        assert!(
+            !kinds.contains(&password_issue),
+            "a good password was flagged as {kinds:?}"
+        );
     }
 }
 
@@ -70,7 +79,11 @@ fn a_unique_strong_password_raises_nothing_about_the_password() {
 fn the_same_account_saved_twice_is_reported_as_a_duplicate() {
     let payload = payload(vec![
         login("https://one.test", "person", "Tr0ub4dor&3-Xanthic-Quilt"),
-        login("https://WWW.One.TEST/login", "PERSON", "Different&Secret-9182"),
+        login(
+            "https://WWW.One.TEST/login",
+            "PERSON",
+            "Different&Secret-9182",
+        ),
     ]);
     let duplicates = duplicate_key_counts(&payload);
     let passwords = password_counts(&payload);

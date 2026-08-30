@@ -17,7 +17,11 @@ fn login(url: &str, username: &str, password: &str) -> VaultEntry {
 #[test]
 fn the_same_account_written_differently_gets_the_same_key() {
     let plain = login("https://example.test", "Person@Example.test", "secret");
-    let dressed = login("https://WWW.Example.TEST/login?next=1", "person@example.test", "secret");
+    let dressed = login(
+        "https://WWW.Example.TEST/login?next=1",
+        "person@example.test",
+        "secret",
+    );
     assert_eq!(duplicate_key(&plain), duplicate_key(&dressed));
 }
 
@@ -32,7 +36,11 @@ fn different_accounts_on_one_site_stay_separate() {
 fn an_entry_with_neither_address_nor_username_is_not_matched_against_anything() {
     let empty = login("", "", "secret");
     assert!(!is_duplicate_key_eligible(&empty));
-    assert!(is_duplicate_key_eligible(&login("https://example.test", "", "secret")));
+    assert!(is_duplicate_key_eligible(&login(
+        "https://example.test",
+        "",
+        "secret"
+    )));
     assert!(is_duplicate_key_eligible(&login("", "person", "secret")));
 }
 
@@ -59,8 +67,14 @@ fn a_changed_password_for_a_known_account_is_not_skipped() {
 fn an_account_that_is_not_in_the_vault_is_never_skipped() {
     let existing = vec![login("https://example.test", "person", "secret")];
     let index = entries_by_duplicate_key(&existing);
-    assert!(!should_skip_exact_duplicate(&login("https://other.test", "person", "secret"), &index));
-    assert!(!should_skip_exact_duplicate(&login("https://example.test", "someone", "secret"), &index));
+    assert!(!should_skip_exact_duplicate(
+        &login("https://other.test", "person", "secret"),
+        &index
+    ));
+    assert!(!should_skip_exact_duplicate(
+        &login("https://example.test", "someone", "secret"),
+        &index
+    ));
 }
 
 #[test]

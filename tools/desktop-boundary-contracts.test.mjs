@@ -75,6 +75,7 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(pkg.scripts['desktop:ci'], /desktop:lint:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust:sync/)
+  assert.match(pkg.scripts['desktop:lint:rust'], /cargo fmt --manifest-path src-tauri\/Cargo\.toml --all --check/)
   assert.match(pkg.scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml$/)
   assert.match(pkg.scripts['desktop:test:rust:sync'], /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview$/)
   assert.doesNotMatch(pkg.scripts['desktop:ci'], /website|admin|backend|extension:/)
@@ -147,5 +148,48 @@ test('every registered command is reachable through a permission group', () => {
     unreachable,
     [],
     `these commands are registered but no permission group allows them: ${unreachable.join(', ')}`,
+  )
+})
+
+// `node --test` exits 0 when a glob matches no file and when a file declares no
+// test, so a renamed or emptied suite would otherwise pass by checking nothing.
+test('desktop:contracts schedules every tool suite and no empty one', () => {
+  const present = readdirSync(join(root, 'tools'), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.test.mjs'))
+    .map((entry) => `tools/${entry.name}`)
+  assert.ok(present.length > 0, 'tools/ contains no test suites')
+
+  const pkg = JSON.parse(read('package.json'))
+  const glob = '"tools/*-contracts.test.mjs"'
+  assert.ok(pkg.scripts.contracts.includes(glob), 'the contracts script no longer declares the flat -contracts glob')
+  const explicit = [...pkg.scripts.contracts.matchAll(/(tools\/[A-Za-z0-9._/-]+\.test\.mjs)/g)].map((match) => match[1])
+  const globbed = present.filter((file) => /-contracts\.test\.mjs$/.test(file))
+  const scheduled = new Set([...explicit, ...globbed])
+
+  assert.deepEqual(
+    present.filter((file) => !scheduled.has(file)),
+    [],
+    `these suites exist but desktop:contracts never runs them: ${present.filter((file) => !scheduled.has(file)).join(', ')}`,
+  )
+  assert.deepEqual(
+    [...scheduled].filter((file) => !present.includes(file)),
+    [],
+    `desktop:contracts schedules suites that do not exist: ${[...scheduled].filter((file) => !present.includes(file)).join(', ')}`,
+  )
+
+  for (const file of present) {
+    assert.match(read(...file.split('/')), /\btest\(/, `${file} declares no test, so it passes without checking anything`)
+  }
+})
+
+test('no npm script passes by announcing a skip', () => {
+  const pkg = JSON.parse(read('package.json'))
+  const skippers = Object.entries(pkg.scripts)
+    .filter(([, command]) => /skip-with-message/.test(command))
+    .map(([name]) => name)
+  assert.deepEqual(
+    skippers,
+    [],
+    `these scripts report a pass without checking anything: ${skippers.join(', ')}`,
   )
 })
