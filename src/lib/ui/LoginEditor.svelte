@@ -4,7 +4,9 @@
   import Icon from '../Icon.svelte'
   import { generatorLabels, generatorOptionKeys } from '../generator'
   import { useAppStores } from '../stores/app-stores'
-  import { suggestFieldValues } from '../vault'
+  import { grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
+  import { messageFor } from '../controllers/feedback-controller'
+  import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import type { Folder, LoginInput } from '../types'
 
   // Fetched once per field on first focus; no store, so nothing survives a lock.
@@ -63,6 +65,7 @@
   /// Copies the generated password in; nothing touches the clipboard.
   function takeGenerated() {
     if (!$generator.password) return
+    passwordDisplay = $generator.password
     loginDraft = { ...loginDraft, password: $generator.password }
     dirty = true
   }
@@ -80,6 +83,60 @@
 
   // Starts hidden every time the editor opens, since the component is rebuilt.
   let passwordVisible = false
+
+  // The saved secret stays out of the draft until someone asks to see it, so a
+  // save with an untouched field still means "keep the stored password".
+  let passwordDisplay = ''
+  let passwordRevealWorking = false
+  let revealError = ''
+  let presenceOpen = false
+  let presenceSecret = ''
+  let presenceError = ''
+
+  async function togglePasswordVisibility() {
+    if (passwordDisplay) {
+      passwordVisible = !passwordVisible
+      return
+    }
+    if (!loginDraft.id || passwordRevealWorking) return
+    passwordRevealWorking = true
+    revealError = ''
+    try {
+      passwordDisplay = await revealLoginSecret(loginDraft.id)
+      passwordVisible = true
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) presenceOpen = true
+      else revealError = messageFor(error)
+    } finally {
+      passwordRevealWorking = false
+    }
+  }
+
+  async function confirmEditorPresence() {
+    if (!loginDraft.id) return
+    try {
+      await grantPresence(presenceSecret)
+    } catch (error) {
+      presenceError = messageFor(error)
+      presenceSecret = ''
+      return
+    }
+    try {
+      passwordDisplay = await revealLoginSecret(loginDraft.id)
+      passwordVisible = true
+      presenceOpen = false
+      presenceSecret = ''
+      presenceError = ''
+    } catch (error) {
+      presenceError = messageFor(error)
+    }
+  }
+
+  function cancelEditorPresence() {
+    presenceOpen = false
+    presenceSecret = ''
+    presenceError = ''
+  }
 
   function focusInitial() {
     if (focusUrl && urlInput) {
@@ -132,12 +189,13 @@
     </div>
     <label>Password
       <span class="password-field">
-        <input name="login-password" bind:value={loginDraft.password} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} />
-        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
+        <input name="login-password" value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
+        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={(!passwordDisplay && !loginDraft.id) || passwordRevealWorking} on:click={togglePasswordVisibility}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
         <button type="button" class="icon-button" aria-label="Generate a password" title="Generate a password" on:click={generatePassword}><Icon name="refresh" size={15} /></button>
         <button type="button" class="icon-button" aria-label="Password options" title="Password options" aria-expanded={generatorOpen} on:click={() => (generatorOpen = !generatorOpen)}><Icon name="settings" size={15} /></button>
       </span>
     </label>
+    {#if revealError}<p class="form-error" role="alert">{revealError}</p>{/if}
 
     {#if generatorOpen}
       <section class="editor-generator" aria-label="Password options">
@@ -191,4 +249,8 @@
     <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={onDelete}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
   {/if}
   </form>
+
+  {#if presenceOpen}
+    <PasswordPresenceModal bind:presenceSecret={presenceSecret} errorMessage={presenceError} onConfirm={confirmEditorPresence} onCancel={cancelEditorPresence} />
+  {/if}
 </ModalShell>

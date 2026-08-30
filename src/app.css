@@ -1001,6 +1001,9 @@ button.no-totp:hover { filter: brightness(.97); }
 .delete-vault-input { display: block; margin-top: var(--space-5); color: var(--text); font-size: var(--type-2); font-weight: 700; }
 .delete-vault-modal input { width: 100%; margin-top: var(--space-2); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface); font-size: var(--type-3); outline: none; }
 .delete-vault-modal input:focus-visible { border-color: var(--danger); box-shadow: var(--field-ring-danger); outline: none; }
+.presence-modal { width: min(100%, 470px); }
+.presence-modal input { width: 100%; margin-top: var(--space-2); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface); font-size: var(--type-3); outline: none; }
+.presence-modal input:focus-visible { box-shadow: var(--field-ring); outline: none; }
 
 /* =========================================================================
    Feature: import

@@ -6,6 +6,13 @@ release cannot be published without saying what changed in it.
 
 ## 0.2.0
 
+- Revealing a saved password now asks for the master password in a proper
+  dialog instead of an unstyled inline row. The login editor can also show the
+  saved password it edits, verified the same way as the vault detail view, and
+  saving an untouched password field still keeps the stored one.
+- Copy and reveal prompts no longer stack notifications: opening the master
+  password dialog does not also raise a "Nothing to copy" notice, and a wrong
+  master password reports its error once, inside the dialog that asked for it.
 - Sesame now runs on Linux. The same vault, record types, unlock methods,
   auto-lock, quick access, backups, and browser integration work on Linux, and
   the build produces deb, rpm, and AppImage packages. Device protection keeps
