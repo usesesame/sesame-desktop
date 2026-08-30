@@ -151,7 +151,12 @@ fn lookup_linux_device_key_within(
         if remaining.is_zero() {
             return Ok(output);
         }
-        output = run_linux_device_key_lookup(secret_tool, remaining.min(SECRET_SERVICE_TIMEOUT))?;
+        output =
+            match run_linux_device_key_lookup(secret_tool, remaining.min(SECRET_SERVICE_TIMEOUT)) {
+                Ok(output) => output,
+                Err(_) if std::time::Instant::now() >= deadline => return Ok(output),
+                Err(error) => return Err(error),
+            };
         if device_key_lookup_settled(&output) {
             return Ok(output);
         }
@@ -422,12 +427,15 @@ mod tests {
         fs::create_dir_all(&directory)
             .map_err(|_| "could not create the probe directory".to_string())?;
         let binary = directory.join("secret-tool");
-        fs::write(&binary, b"#!/bin/sh\necho 'not activatable' >&2\nexit 1\n")
-            .map_err(|_| "could not write the probe binary".to_string())?;
+        fs::write(
+            &binary,
+            b"#!/bin/sh\nmarker=\"$0.count\"\nif [ -e \"$marker\" ]; then exec sleep 5; fi\n: > \"$marker\"\necho 'not activatable' >&2\nexit 1\n",
+        )
+        .map_err(|_| "could not write the probe binary".to_string())?;
         fs::set_permissions(&binary, PermissionsExt::from_mode(0o755))
             .map_err(|_| "could not make the probe binary executable".to_string())?;
 
-        let budget = std::time::Duration::from_secs(1);
+        let budget = std::time::Duration::from_millis(250);
         let started = std::time::Instant::now();
         let output = lookup_linux_device_key_within(&binary, budget)?;
         let elapsed = started.elapsed();
