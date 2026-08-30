@@ -12,6 +12,7 @@
   import ItemFilterMenu from './ItemFilterMenu.svelte'
   import ItemDetail from './ItemDetail.svelte'
   import PanelResizer from './PanelResizer.svelte'
+  import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { PANEL_WIDTH_LIMITS, readPanelWidths, storePanelWidths } from '../preferences'
 
@@ -64,6 +65,7 @@
   export let revealedPassword = ''
   export let passwordPresenceRequired = false
   export let passwordPresenceSecret = ''
+  export let passwordPresenceError = ''
   export let onRevealPassword: () => Promise<void>
   export let onCopyPassword: () => void
   export let onConfirmPasswordPresence: () => void
@@ -542,12 +544,7 @@
           {#if loginCard.email}<div class="credential-row"><div class="credential-label"><Icon name="mail" size={16} /><span>Email</span></div><code>{loginCard.email}</code><button type="button" class="credential-button" aria-label="Copy email" on:click={() => onCopy(loginCard.email, 'Email')}><Icon name="copy" size={15} /></button></div>{/if}
           <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{passwordVisible ? revealedPassword : '••••••••••••••••'}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
           {#if passwordPresenceRequired}
-            <form class="credential-presence" novalidate on:submit|preventDefault={onConfirmPasswordPresence}>
-              <label class="sr-only" for="reveal-presence-password">Master password</label>
-              <input id="reveal-presence-password" name="reveal-presence-password" type="password" bind:value={passwordPresenceSecret} autocomplete="current-password" spellcheck="false" placeholder="Master password" />
-              <button type="submit" class="secondary-button" disabled={!passwordPresenceSecret}>Confirm</button>
-              <button type="button" class="secondary-button" on:click={onCancelPasswordPresence}>Cancel</button>
-            </form>
+            <PasswordPresenceModal bind:presenceSecret={passwordPresenceSecret} errorMessage={passwordPresenceError} onConfirm={onConfirmPasswordPresence} onCancel={onCancelPasswordPresence} />
           {/if}
         </section>
 

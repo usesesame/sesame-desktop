@@ -23,7 +23,7 @@ import {
 import { FAVOURITES_FILTER, RECENT_FILTER, rememberRecent } from '../vault-collections'
 import { vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
-import type { FeedbackController } from './feedback-controller'
+import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
@@ -56,6 +56,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     revealedFor: '',
     passwordPresenceRequired: false,
     passwordPresenceSecret: '',
+    passwordPresenceError: '',
     savingLogin: false,
     editorTitle: 'Add a login',
     editorFocusUrl: false,
@@ -100,8 +101,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       return secret
     } catch (error) {
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
-        state.patch({ passwordPresenceRequired: true, revealedFor: id, passwordPresenceSecret: '' })
-        feedback.setErrorMessage('Confirm your master password to show the saved password.')
+        state.patch({ passwordPresenceRequired: true, revealedFor: id, passwordPresenceSecret: '', passwordPresenceError: '' })
       } else {
         feedback.setError(error)
       }
@@ -127,7 +127,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !vault.value().status.unlocked) return
       vault.patch({ loginCard: card })
       selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
-      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '' })
+      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
         if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !current) return
@@ -335,14 +335,14 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       try {
         await grantPresence(secret)
       } catch (error) {
-        feedback.setError(error)
+        state.patch({ passwordPresenceError: messageFor(error) })
         return
       }
       const revealed = await ensureRevealed(id)
-      if (revealed) state.patch({ passwordPresenceRequired: false, passwordVisible: true })
+      if (revealed) state.patch({ passwordPresenceRequired: false, passwordVisible: true, passwordPresenceError: '' })
     },
     cancelPasswordPresence() {
-      state.patch({ passwordPresenceRequired: false, passwordPresenceSecret: '' })
+      state.patch({ passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
     },
     toggleBreachCheck() {
       const card = vault.value().loginCard
@@ -469,14 +469,14 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       if (!card) return
       const value = field === 'password' ? await ensureRevealed(card.id) : card[field]
       if (value) await copy(value, copyFieldLabel(field))
-      else if (field !== 'password' || card.hasPassword) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
+      else if (!state.value().passwordPresenceRequired && (field !== 'password' || !card.hasPassword)) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
     async copyContextField(id: string, field: 'username' | 'email' | 'password') {
       const card = await contextCard(id)
       state.patch({ entryMenu: null })
       const value = field === 'password' ? await ensureRevealed(id) : card?.[field]
       if (value) await copy(value, copyFieldLabel(field))
-      else if (card) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
+      else if (!state.value().passwordPresenceRequired && card) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
     async editContext(id: string) {
       state.patch({ entryMenu: null })
@@ -604,7 +604,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       // A countdown in flight must not fire after the lock it was racing against.
       stopAutoTypeCountdown()
       state.set({
-        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '',
+        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '',
         savingLogin: false, editorTitle: 'Add a login',
         editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,
