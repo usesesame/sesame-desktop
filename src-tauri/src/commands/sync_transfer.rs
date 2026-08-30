@@ -53,7 +53,8 @@ pub(super) async fn approve_frozen_device(
         let vault = session
             .as_ref()
             .ok_or("Unlock Sesame before approving a device.")?;
-        if vault.payload.vault_id.as_deref() != Some(vault_id) {
+        let payload = vault.open_payload()?;
+        if payload.vault_id.as_deref() != Some(vault_id) {
             return Err("That approval was prepared for a different vault.".into());
         }
         crate::sync::keys::seal_vault_key(vault.key.as_ref(), &recipient_key, &current.vault_id)?
@@ -141,11 +142,12 @@ pub async fn sync_upload_vault(
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-        let plaintext = serde_json::to_vec(&vault.payload)
+        let payload = vault.open_payload()?;
+        let plaintext = serde_json::to_vec(&*payload)
             .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
         let digest = crate::sync::state::payload_digest(&plaintext);
         let blob = crate::vault::crypto::encrypt_bytes(&vault.key, &plaintext, &aad)?;
-        (blob, vault.payload.entries.len(), digest)
+        (blob, payload.entries.len(), digest)
     };
 
     let nonce = decode_bytes(&blob.nonce)?;
@@ -234,7 +236,8 @@ pub async fn sync_download_vault(
         let vault = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
 
         // An ordinary pull replaces the vault, so it must not run over edits never uploaded.
-        let local = serde_json::to_vec(&vault.payload)
+        let payload = vault.open_payload()?;
+        let local = serde_json::to_vec(&*payload)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
         if base.has_local_changes(&local) {
             return Err(
@@ -389,7 +392,8 @@ pub async fn sync_remove_device(
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-        if vault.payload.vault_id.as_deref() != Some(current.vault_id.as_str()) {
+        let payload = vault.open_payload()?;
+        if payload.vault_id.as_deref() != Some(current.vault_id.as_str()) {
             return Err("The unlocked vault is not the Sync vault for this account.".into());
         }
         // Verify the current wrapper before asking the service to commit: a mistype must not orphan every path.
@@ -408,7 +412,7 @@ pub async fn sync_remove_device(
         if !matches {
             return Err("That master password is not correct.".into());
         }
-        let plaintext = serde_json::to_vec(&vault.payload)
+        let plaintext = serde_json::to_vec(&*payload)
             .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
         let blob = crate::vault::crypto::encrypt_bytes(
             &new_key,
@@ -425,7 +429,7 @@ pub async fn sync_remove_device(
         )?;
         (
             blob,
-            vault.payload.entries.len(),
+            payload.entries.len(),
             crate::sync::state::payload_digest(&plaintext),
         )
     };
@@ -479,7 +483,7 @@ pub async fn sync_remove_device(
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let vault = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
-        let payload = vault.payload.clone();
+        let payload = vault.open_payload()?.clone();
         let recovery_kit = super::sync_adopt::adopt(vault, new_key, payload, &master_password)?;
         state.advance_session_epoch();
         recovery_kit
@@ -580,6 +584,7 @@ pub async fn sync_conflict_details(
         .lock()
         .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
     let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
+    let local_payload = vault.open_payload()?;
     let remote = decrypt_snapshot(&vault.key, &envelope)?;
     let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
         .map_err(|_| "The synced vault could not be read.".to_string())?;
@@ -589,7 +594,7 @@ pub async fn sync_conflict_details(
             device_label: "This device".to_string(),
             revision: base.as_ref().map(|entry| entry.revision).unwrap_or(0),
             changed_at: String::new(),
-            entry_count: vault.payload.entries.len(),
+            entry_count: local_payload.entries.len(),
         },
         other_device: SyncConflictSideView {
             device_label: sender_label,
@@ -645,13 +650,14 @@ pub async fn sync_resolve_conflict(
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
 
-        let local = serde_json::to_vec(&vault.payload)
+        let local_payload = vault.open_payload()?;
+        let local = serde_json::to_vec(&*local_payload)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
         let remote = decrypt_snapshot(&vault.key, &envelope)?;
         let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
             .map_err(|_| "The synced vault could not be read.".to_string())?;
         let remote_entries = remote_payload.entries.len();
-        let local_entries = vault.payload.entries.len();
+        let local_entries = local_payload.entries.len();
 
         let directory = crate::sync::conflict_backup::backup_dir(&data_dir);
         let stamp = backup_stamp();
@@ -782,7 +788,8 @@ pub async fn sync_resolve_conflict(
 
 /// Refuses to continue if the local vault changed since capture: the recovery copy lacks later edits.
 fn confirm_unchanged(vault: &crate::vault::UnlockedVault, captured: &str) -> Result<(), String> {
-    let now = serde_json::to_vec(&vault.payload)
+    let payload = vault.open_payload()?;
+    let now = serde_json::to_vec(&*payload)
         .map_err(|_| "Sesame could not read the local vault.".to_string())?;
     if crate::sync::state::payload_digest(&now) != captured {
         return Err(
@@ -890,7 +897,8 @@ async fn run_one_transfer(
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let vault = session.as_ref().ok_or("sync_locked")?;
-        let plaintext = serde_json::to_vec(&vault.payload)
+        let payload = vault.open_payload()?;
+        let plaintext = serde_json::to_vec(&*payload)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
         base.as_ref()
             .map(|entry| entry.has_local_changes(&plaintext))

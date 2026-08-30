@@ -6,6 +6,7 @@ use crate::types::{
 };
 use crate::util::{random_id, unix_timestamp};
 use crate::VaultResult;
+use zeroize::Zeroize;
 
 pub const HISTORY_RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 
@@ -140,7 +141,7 @@ fn changed_fields(previous: &TaggedItem, successor: &TaggedItem) -> Vec<String> 
 
 pub fn history_summaries(payload: &VaultPayload) -> Vec<HistorySummary> {
     let cutoff = unix_timestamp().saturating_sub(HISTORY_RETENTION_SECONDS);
-    let live: Vec<TaggedItem> = payload.item_views();
+    let mut live: Vec<TaggedItem> = payload.item_views();
     let mut entries: Vec<&HistoryEntry> = payload
         .history
         .iter()
@@ -172,6 +173,7 @@ pub fn history_summaries(payload: &VaultPayload) -> Vec<HistorySummary> {
                 .unwrap_or_default(),
         });
     }
+    live.zeroize();
     summaries
 }
 

@@ -70,10 +70,8 @@ pub fn export_backup(
     }
     copy_private_file(&session.path, &destination)
         .map_err(|_| "Sesame could not write the encrypted backup to that location.".to_string())?;
-    if let (Some(vault_id), revision) = (
-        session.payload.vault_id.as_deref(),
-        session.payload.revision,
-    ) {
+    let snapshot = session.snapshot();
+    if let (Some(vault_id), revision) = (snapshot.vault_id.as_deref(), snapshot.revision) {
         let _ = recovery_health::update_after_export_with_payload(&app, vault_id, revision);
     }
     destination
@@ -110,14 +108,15 @@ pub fn export_vault_csv(
     if !parent.exists() {
         return Err("The selected export folder no longer exists.".into());
     }
-    let bytes = csv_export_bytes(&session.payload)?;
+    let payload = session.open_payload()?;
+    let bytes = csv_export_bytes(&payload)?;
     write_export_file(&destination, &bytes)?;
     let mut written = vec![backup_file_name(&destination)?];
 
-    if !session.payload.identities.is_empty() {
+    if !payload.identities.is_empty() {
         let identities_destination = identities_export_path(&destination)
             .ok_or("Sesame could not name the exported identities file.")?;
-        let identities_bytes = identities_csv_bytes(&session.payload)?;
+        let identities_bytes = identities_csv_bytes(&payload)?;
         write_export_file(&identities_destination, &identities_bytes)?;
         written.push(backup_file_name(&identities_destination)?);
     }
@@ -262,11 +261,14 @@ pub fn verify_backup(
     let result = verify_backup_file(&source, &secret);
     secret.zeroize();
     let verification = result?;
-    let current_vault_id = state.session.lock().ok().and_then(|session| {
-        session
-            .as_ref()
-            .and_then(|vault| vault.payload.vault_id.clone())
-    });
+    let current_vault_id = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?
+        .as_ref()
+        .map(|vault| vault.open_payload())
+        .transpose()?
+        .and_then(|payload| payload.vault_id.clone());
     if let (Some(vault_id), Some(current_id)) = (
         verification.vault_id.as_deref(),
         current_vault_id.as_deref(),
@@ -326,10 +328,14 @@ pub fn get_recovery_health(
     app: AppHandle,
     state: State<'_, VaultState>,
 ) -> VaultResult<recovery_health::RecoveryHealth> {
-    let current_id = state
+    let session = state
         .session
         .lock()
-        .ok()
-        .and_then(|session| session.as_ref().and_then(|s| s.payload.vault_id.clone()));
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let current_id = session
+        .as_ref()
+        .map(|vault| vault.open_payload())
+        .transpose()?
+        .and_then(|payload| payload.vault_id.clone());
     recovery_health::get_health(&app, current_id.as_deref())
 }

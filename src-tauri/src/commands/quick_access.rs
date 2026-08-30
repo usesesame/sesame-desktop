@@ -9,7 +9,7 @@ use crate::adapters::platform::desktop_shell::show_main_window;
 use crate::vault::snapshot::current_totp;
 use crate::vault::storage::vault_path;
 use crate::vault::util::initials_for;
-use crate::vault::{Identity, TaggedItem, VaultPayload, VaultResult, VaultState};
+use crate::vault::{Identity, TaggedItem, VaultResult, VaultState};
 
 const QUICK_ACCESS_WINDOW: &str = "quick-access";
 const QUICK_ACCESS_RESULT_LIMIT: usize = 8;
@@ -95,7 +95,23 @@ pub fn search_quick_access_items(
     let session = session
         .as_ref()
         .ok_or("Unlock your vault in Sesame first.")?;
-    Ok(quick_access_items(&session.payload, &query))
+    let index = session.snapshot();
+    let needle = query.trim().to_lowercase();
+    let mut items = Vec::new();
+    for id in index
+        .entries
+        .iter()
+        .map(|item| item.id.as_str())
+        .chain(index.items.iter().map(|item| item.id.as_str()))
+    {
+        let item = session.open_item(id)?;
+        if quick_access_matches(&item, &needle) {
+            items.push(quick_access_item(&item));
+        }
+    }
+    items.sort_by_key(|item| item.title.to_lowercase());
+    items.truncate(QUICK_ACCESS_RESULT_LIMIT);
+    Ok(items)
 }
 
 #[tauri::command]
@@ -114,10 +130,7 @@ pub fn get_quick_access_field(
     let session = session
         .as_ref()
         .ok_or("Unlock your vault in Sesame first.")?;
-    let item = session
-        .payload
-        .active_item(id.trim())
-        .ok_or("That saved item no longer exists.")?;
+    let item = session.open_item(id.trim())?;
     let action = quick_access_actions(&item)
         .into_iter()
         .find(|action| action.field == field.trim())
@@ -149,9 +162,7 @@ pub fn open_quick_access_item(
         let session = session
             .as_ref()
             .ok_or("Unlock your vault in Sesame first.")?;
-        if session.payload.active_item(&id).is_none() {
-            return Err("That saved item no longer exists.".into());
-        }
+        session.open_item(&id)?;
     }
     let _ = window.hide();
     show_main_window(&app);
@@ -159,28 +170,17 @@ pub fn open_quick_access_item(
         .map_err(|_| "Sesame could not open that item in the main window.".to_string())
 }
 
-fn quick_access_items(payload: &VaultPayload, query: &str) -> Vec<QuickAccessItem> {
-    let needle = query.trim().to_lowercase();
-    let mut items: Vec<QuickAccessItem> = payload
-        .item_views()
-        .into_iter()
-        .filter(|item| quick_access_matches(item, &needle))
-        .map(|item| {
-            let actions = quick_access_actions(&item);
-            let preview = item.preview();
-            QuickAccessItem {
-                id: item.id().to_string(),
-                kind: item.kind(),
-                initials: initials_for(&preview.title),
-                title: preview.title,
-                subtitle: preview.detail.unwrap_or_default(),
-                actions,
-            }
-        })
-        .collect();
-    items.sort_by_key(|item| item.title.to_lowercase());
-    items.truncate(QUICK_ACCESS_RESULT_LIMIT);
-    items
+fn quick_access_item(item: &TaggedItem) -> QuickAccessItem {
+    let actions = quick_access_actions(item);
+    let preview = item.preview();
+    QuickAccessItem {
+        id: item.id().to_string(),
+        kind: item.kind(),
+        initials: initials_for(&preview.title),
+        title: preview.title,
+        subtitle: preview.detail.unwrap_or_default(),
+        actions,
+    }
 }
 
 fn quick_access_matches(item: &TaggedItem, needle: &str) -> bool {
@@ -343,4 +343,36 @@ fn quick_access_value(item: &TaggedItem, field: &str) -> Option<String> {
         _ => String::new(),
     };
     (!value.trim().is_empty()).then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::VaultEntry;
+
+    fn login() -> TaggedItem {
+        TaggedItem::Login(VaultEntry {
+            id: "fictional-login".to_string(),
+            title: "Northwind".to_string(),
+            username: "casey".to_string(),
+            password: "fictional-secret-canary".to_string(),
+            ..VaultEntry::default()
+        })
+    }
+
+    #[test]
+    fn quick_access_result_is_redacted_after_one_record_is_opened() {
+        let result = quick_access_item(&login());
+        let serialized = serde_json::to_string(&result).expect("serialized quick access item");
+
+        assert!(serialized.contains("Northwind"));
+        assert!(serialized.contains("Copy password"));
+        assert!(!serialized.contains("fictional-secret-canary"));
+    }
+
+    #[test]
+    fn quick_access_search_does_not_match_secret_values() {
+        assert!(quick_access_matches(&login(), "casey"));
+        assert!(!quick_access_matches(&login(), "secret-canary"));
+    }
 }

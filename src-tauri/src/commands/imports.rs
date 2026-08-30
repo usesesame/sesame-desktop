@@ -7,7 +7,7 @@ use crate::vault::imports::{parse_import_entries, read_import_file, validate_imp
 use crate::vault::pending_import::{take_matching, PendingImport};
 use crate::vault::snapshot::{
     duplicate_key, entries_by_duplicate_key, existing_import_relation, is_duplicate_key_eligible,
-    should_skip_exact_duplicate, snapshot_for,
+    should_skip_exact_duplicate,
 };
 use crate::vault::storage::{commit_payload_change, materialize_entry_folder};
 use crate::vault::{
@@ -104,7 +104,8 @@ pub fn preview_import(
     let session = session
         .as_ref()
         .ok_or("Unlock your vault before importing.")?;
-    let existing_by_key = entries_by_duplicate_key(&session.payload.entries);
+    let payload = session.open_payload()?;
+    let existing_by_key = entries_by_duplicate_key(&payload.entries);
     let mut seen_import_keys = HashSet::new();
     let mut exact_duplicates = 0;
     let mut account_conflicts = 0;
@@ -177,7 +178,8 @@ pub fn commit_import(
         take_matching(&mut slot, import_id.trim())?.into_parts()
     };
     let revision_backup_name = snapshot_vault_revision(&session.path, "import")?;
-    let existing_by_key = entries_by_duplicate_key(&session.payload.entries);
+    let payload = session.open_payload()?;
+    let existing_by_key = entries_by_duplicate_key(&payload.entries);
     let mut skipped_exact_duplicates = 0;
     let entries = if skip_exact_duplicates {
         imported
@@ -199,7 +201,7 @@ pub fn commit_import(
     let imported_identities = identities.len();
     let imported_ssh_keys = ssh_keys.len();
     // No duplicate-key model for notes, cards, identities, and SSH keys: every one is kept.
-    let mut next_payload = session.payload.clone();
+    let mut next_payload = payload.clone();
     insert_imported_items(
         &mut next_payload,
         entries,
@@ -211,7 +213,7 @@ pub fn commit_import(
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(ImportResult {
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
         imported_secure_notes,
         imported_cards,
         imported_identities,
