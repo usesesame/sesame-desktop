@@ -4,19 +4,7 @@
 use tauri::State;
 use zeroize::Zeroize;
 
-use crate::vault::{VaultPayload, VaultResult, VaultState};
-
-fn credentials_for(payload: &VaultPayload, id: &str) -> VaultResult<(String, String)> {
-    let entry = payload
-        .entries
-        .iter()
-        .find(|entry| entry.id == id)
-        .ok_or("That saved login no longer exists.")?;
-    if entry.username.is_empty() && entry.password.is_empty() {
-        return Err("This login has nothing saved to type.".to_string());
-    }
-    Ok((entry.username.clone(), entry.password.clone()))
-}
+use crate::vault::{TaggedItem, VaultResult, VaultState};
 
 #[tauri::command]
 pub fn auto_type(id: String, state: State<'_, VaultState>) -> VaultResult<()> {
@@ -26,7 +14,14 @@ pub fn auto_type(id: String, state: State<'_, VaultState>) -> VaultResult<()> {
             .lock()
             .map_err(|_| "Sesame could not read the vault session.".to_string())?;
         let session = session.as_ref().ok_or("Unlock your vault first.")?;
-        credentials_for(&session.payload, &id)?
+        let item = session.open_item(&id)?;
+        let TaggedItem::Login(entry) = &*item else {
+            return Err("That saved login no longer exists.".into());
+        };
+        if entry.username.is_empty() && entry.password.is_empty() {
+            return Err("This login has nothing saved to type.".to_string());
+        }
+        (entry.username.clone(), entry.password.clone())
     };
     let result = send_credentials(&username, &password);
     username.zeroize();

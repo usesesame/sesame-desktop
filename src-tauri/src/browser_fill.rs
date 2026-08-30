@@ -21,7 +21,7 @@ use crate::{
         IdentityFillFields, MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
-    vault::{random_id, Card, Identity, VaultEntry, VaultState},
+    vault::{random_id, Card, Identity, TaggedItem, VaultEntry, VaultState},
 };
 
 use crate::browser_host::HOST_FILE_NAME;
@@ -1216,7 +1216,13 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             diagnostics::record_browser_host_registration(app, "fill_locked");
             return BrowserResponse::unavailable(&request.request_id, "locked");
         };
-        let candidates = matching_entries(&session.payload.entries, &origin);
+        let payload = match session.open_payload() {
+            Ok(payload) => payload,
+            Err(_) => {
+                return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable")
+            }
+        };
+        let candidates = matching_entries(&payload.entries, &origin);
         (vault.session_epoch(), candidates)
     };
     if candidates.is_empty() {
@@ -1314,17 +1320,23 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         emit_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::unavailable(&request.request_id, "locked");
     };
-    let Some(entry) = session.payload.entries.iter().find(|entry| {
-        entry.id == login_id
-            && NormalizedOrigin::from_saved_url(&entry.url)
-                .as_ref()
-                .and_then(|saved| origin_match_kind(saved, &origin))
-                .is_some()
-            && credential_fields_valid(entry)
-    }) else {
+    let Ok(item) = session.open_item(&login_id) else {
         emit_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::unavailable(&request.request_id, "staleRequest");
     };
+    let TaggedItem::Login(entry) = &*item else {
+        emit_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+    };
+    if NormalizedOrigin::from_saved_url(&entry.url)
+        .as_ref()
+        .and_then(|saved| origin_match_kind(saved, &origin))
+        .is_none()
+        || !credential_fields_valid(entry)
+    {
+        emit_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+    }
     BrowserResponse::fill_for(request, identity_value(entry), entry.password.clone())
 }
 
@@ -1379,9 +1391,18 @@ fn save_response(
             return BrowserResponse::save_unavailable(&request.request_id, "locked");
         };
         // `update` candidates come from the vault, never from the extension.
+        let payload = match session.open_payload() {
+            Ok(payload) => payload,
+            Err(_) => {
+                return BrowserResponse::save_unavailable(
+                    &request.request_id,
+                    "approvalUnavailable",
+                )
+            }
+        };
         let candidates = match kind {
             SaveKind::New => Vec::new(),
-            SaveKind::Update => matching_entries(&session.payload.entries, &origin),
+            SaveKind::Update => matching_entries(&payload.entries, &origin),
         };
         (vault.session_epoch(), candidates)
     };
@@ -1546,8 +1567,16 @@ fn card_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             diagnostics::record_browser_host_registration(app, "card_locked");
             return BrowserResponse::card_unavailable(&request.request_id, "locked");
         };
-        let candidates = session
-            .payload
+        let payload = match session.open_payload() {
+            Ok(payload) => payload,
+            Err(_) => {
+                return BrowserResponse::card_unavailable(
+                    &request.request_id,
+                    "approvalUnavailable",
+                )
+            }
+        };
+        let candidates = payload
             .cards
             .iter()
             .filter(|card| card_supports_fields(card, &requested_fields))
@@ -1630,15 +1659,18 @@ fn card_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         emit_card_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::card_unavailable(&request.request_id, "locked");
     };
-    let Some(card) = session
-        .payload
-        .cards
-        .iter()
-        .find(|card| card.id == card_id && card_supports_fields(card, &requested_fields))
-    else {
+    let Ok(item) = session.open_item(&card_id) else {
         emit_card_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     };
+    let TaggedItem::Card(card) = &*item else {
+        emit_card_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    };
+    if !card_supports_fields(card, &requested_fields) {
+        emit_card_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
+    }
     BrowserResponse::card_for(request, selected_card_fields(card, &requested_fields))
 }
 

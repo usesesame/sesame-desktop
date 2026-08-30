@@ -1,6 +1,6 @@
 use sesame_core::imports::resolved_totp;
 use sesame_core::snapshot::{login_card_for, totp_from_value};
-use sesame_core::types::{VaultEntry, VaultPayload};
+use sesame_core::types::VaultEntry;
 
 // RFC 6238 test key "12345678901234567890" in base32.
 const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -69,7 +69,7 @@ fn the_login_card_derives_a_code_but_never_carries_the_seed() {
         totp: Some(RFC_KEY.to_string()),
         ..VaultEntry::default()
     };
-    let card = login_card_for(&VaultPayload::default(), &entry);
+    let card = login_card_for(&[], &entry);
     let wire = serde_json::to_string(&card).expect("the card serializes");
     assert!(card.has_totp, "a configured seed was not reported");
     assert!(card.totp_code.is_some(), "no code was derived");
@@ -82,7 +82,7 @@ fn the_login_card_derives_a_code_but_never_carries_the_seed() {
         title: "Example".into(),
         ..VaultEntry::default()
     };
-    assert!(!login_card_for(&VaultPayload::default(), &bare).has_totp);
+    assert!(!login_card_for(&[], &bare).has_totp);
 }
 
 #[test]

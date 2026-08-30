@@ -2,7 +2,6 @@ use tauri::{AppHandle, State};
 
 use crate::browser_fill::SaveKind;
 use crate::vault::imports::entry_from_input;
-use crate::vault::snapshot::snapshot_for;
 use crate::vault::storage::commit_payload_change;
 use crate::vault::types::TaggedItem;
 use crate::vault::util::unix_timestamp;
@@ -141,13 +140,14 @@ fn save_new_login(
                 .to_string(),
         );
     }
-    let mut next_payload = session.payload.clone();
+    let current = session.open_payload()?;
+    let mut next_payload = current.clone();
     next_payload.entries.push(entry);
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
     Ok(SaveLoginResult {
         id: entry_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }
 
@@ -182,11 +182,12 @@ fn save_login_update(
         );
     }
     // Re-verified under the lock: still exactly this origin's saved login.
-    if !browser_fill::verify_update_target(&session.payload.entries, &payload.origin, &target_id) {
+    let current = session.open_payload()?;
+    if !browser_fill::verify_update_target(&current.entries, &payload.origin, &target_id) {
         return Err("That saved login no longer matches this site.".to_string());
     }
 
-    let mut next_payload = session.payload.clone();
+    let mut next_payload = current.clone();
     let Some(existing) = next_payload
         .entries
         .iter_mut()
@@ -203,7 +204,7 @@ fn save_login_update(
     vault.advance_session_epoch();
     Ok(SaveLoginResult {
         id: target_id,
-        snapshot: snapshot_for(&session.payload),
+        snapshot: session.snapshot(),
     })
 }
 

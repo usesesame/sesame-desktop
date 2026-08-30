@@ -31,8 +31,16 @@ fn identity_response(
             diagnostics::record_browser_host_registration(app, "identity_locked");
             return BrowserResponse::identity_unavailable(&request.request_id, "locked");
         };
-        let candidates: Vec<IdentityFillCandidate> = session
-            .payload
+        let payload = match session.open_payload() {
+            Ok(payload) => payload,
+            Err(_) => {
+                return BrowserResponse::identity_unavailable(
+                    &request.request_id,
+                    "approvalUnavailable",
+                )
+            }
+        };
+        let candidates: Vec<IdentityFillCandidate> = payload
             .identities
             .iter()
             .take(MAX_MATCHING_CANDIDATES)
@@ -129,12 +137,11 @@ fn identity_response(
         emit_identity_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "locked");
     };
-    let Some(identity) = session
-        .payload
-        .identities
-        .iter()
-        .find(|identity| identity.id == identity_id)
-    else {
+    let Ok(item) = session.open_item(&identity_id) else {
+        emit_identity_cancelled(app, &approval_id, "vaultChanged");
+        return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
+    };
+    let TaggedItem::Identity(identity) = &*item else {
         emit_identity_cancelled(app, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     };

@@ -161,10 +161,11 @@ pub(super) fn adopt(
         std::mem::replace(&mut vault.recovery_wrap, Some(recovery_wrap)),
         std::mem::replace(&mut vault.pin_wrap, None),
         std::mem::replace(&mut vault.key, zeroize::Zeroizing::new(key)),
-        std::mem::replace(&mut vault.payload, payload),
     );
 
-    if let Err(error) = crate::vault::storage::persist_session_without_previous(vault) {
+    if let Err(error) =
+        crate::vault::storage::commit_payload_change_without_previous(vault, payload)
+    {
         // Nothing partially applied: a failed write restores the old key and contents.
         vault.kdf = previous.0;
         vault.key_wrap = previous.1;
@@ -172,7 +173,6 @@ pub(super) fn adopt(
         vault.recovery_wrap = previous.3;
         vault.pin_wrap = previous.4;
         vault.key = previous.5;
-        vault.payload = previous.6;
         return Err(error);
     }
     Ok(shown)

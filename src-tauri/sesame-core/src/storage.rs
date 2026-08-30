@@ -16,6 +16,7 @@ use crate::platform::{
 use crate::snapshot::duplicate_key;
 use crate::{
     payload_aad_for_file,
+    record_store::VaultRecordStore,
     throttle::{PersistedPinThrottle, PinAttemptGuard},
     UnlockedVault, VaultResult, PIN_WRAP_AAD, RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
 };
@@ -119,64 +120,69 @@ pub fn persist_session(session: &mut UnlockedVault) -> VaultResult<()> {
     if !session.setup_complete {
         return Err("Verify your recovery kit before using this vault.".into());
     }
-    session.payload.revision += 1;
-    let result = persist_session_internal(session, true);
-    if result.is_err() {
-        session.payload.revision -= 1;
-    }
-    result
+    let payload = session.open_payload()?;
+    persist_payload(session, payload.clone(), true)
 }
 
 pub fn persist_session_without_previous(session: &mut UnlockedVault) -> VaultResult<()> {
     if !session.setup_complete {
         return Err("Verify your recovery kit before using this vault.".into());
     }
-    session.payload.revision += 1;
-    let result = persist_session_internal(session, false);
-    if result.is_err() {
-        session.payload.revision -= 1;
-    }
+    let payload = session.open_payload()?;
+    persist_payload(session, payload.clone(), false)
+}
+
+fn persist_payload(
+    session: &mut UnlockedVault,
+    mut next_payload: VaultPayload,
+    keep_previous: bool,
+) -> VaultResult<()> {
+    let result = (|| {
+        next_payload.revision += 1;
+        let next_records = VaultRecordStore::from_payload(&next_payload)?;
+        let payload_aad = payload_aad_for_file(VAULT_FORMAT_VERSION, session.setup_complete)?;
+        let file = VaultFile {
+            format_version: VAULT_FORMAT_VERSION,
+            kdf: session.kdf.clone(),
+            key_wrap: session.key_wrap.clone(),
+            legacy_device_wrap: session.legacy_device_wrap.clone(),
+            recovery_kdf: session.recovery_kdf.clone(),
+            recovery_wrap: session.recovery_wrap.clone(),
+            pin_wrap: session.pin_wrap.clone(),
+            hello_wrap: session.hello_wrap.clone(),
+            setup_complete: session.setup_complete,
+            payload: encrypt_bytes(
+                &session.key,
+                &serialize_payload(&next_payload)?,
+                payload_aad,
+            )?,
+        };
+        if keep_previous {
+            write_vault_file(&session.path, &file)?;
+        } else {
+            write_vault_file_without_previous(&session.path, &file)?;
+        }
+        session.records = next_records;
+        Ok(())
+    })();
+    next_payload.zeroize();
     result
 }
 
-fn persist_session_internal(session: &UnlockedVault, keep_previous: bool) -> VaultResult<()> {
-    let payload_aad = payload_aad_for_file(VAULT_FORMAT_VERSION, session.setup_complete)?;
-    let file = VaultFile {
-        format_version: VAULT_FORMAT_VERSION,
-        kdf: session.kdf.clone(),
-        key_wrap: session.key_wrap.clone(),
-        legacy_device_wrap: session.legacy_device_wrap.clone(),
-        recovery_kdf: session.recovery_kdf.clone(),
-        recovery_wrap: session.recovery_wrap.clone(),
-        pin_wrap: session.pin_wrap.clone(),
-        hello_wrap: session.hello_wrap.clone(),
-        setup_complete: session.setup_complete,
-        payload: encrypt_bytes(
-            &session.key,
-            &serialize_payload(&session.payload)?,
-            payload_aad,
-        )?,
-    };
-    if keep_previous {
-        write_vault_file(&session.path, &file)
-    } else {
-        write_vault_file_without_previous(&session.path, &file)
-    }
-}
-
-fn pending_setup_is_empty(session: &UnlockedVault) -> bool {
-    session.payload.folders.is_empty()
-        && session.payload.entries.is_empty()
-        && session.payload.identities.is_empty()
-        && session.payload.secure_notes.is_empty()
-        && session.payload.cards.is_empty()
-        && session.payload.wifi_networks.is_empty()
-        && session.payload.ssh_keys.is_empty()
-        && session.payload.software_licenses.is_empty()
-        && session.payload.documents.is_empty()
-        && session.payload.custom_records.is_empty()
-        && session.payload.trash.is_empty()
-        && session.payload.history.is_empty()
+fn pending_setup_is_empty(session: &UnlockedVault) -> VaultResult<bool> {
+    let payload = session.open_payload()?;
+    Ok(payload.folders.is_empty()
+        && payload.entries.is_empty()
+        && payload.identities.is_empty()
+        && payload.secure_notes.is_empty()
+        && payload.cards.is_empty()
+        && payload.wifi_networks.is_empty()
+        && payload.ssh_keys.is_empty()
+        && payload.software_licenses.is_empty()
+        && payload.documents.is_empty()
+        && payload.custom_records.is_empty()
+        && payload.trash.is_empty()
+        && payload.history.is_empty())
 }
 
 /// Replaces the abandoned kit; only the new one can finish or recover the pending vault.
@@ -184,7 +190,7 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
     if session.setup_complete {
         return Err("This vault has already finished recovery setup.".into());
     }
-    if !pending_setup_is_empty(session) {
+    if !pending_setup_is_empty(session)? {
         return Err("This unfinished vault contains data and cannot restart setup safely.".into());
     }
 
@@ -200,9 +206,8 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
 
     let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
     let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
-    session.payload.revision += 1;
-    if let Err(error) = persist_session_internal(session, false) {
-        session.payload.revision -= 1;
+    let payload = session.open_payload()?;
+    if let Err(error) = persist_payload(session, payload.clone(), false) {
         session.recovery_kdf = previous_kdf;
         session.recovery_wrap = previous_wrap;
         return Err(error);
@@ -403,12 +408,14 @@ pub fn commit_payload_change(
     session: &mut UnlockedVault,
     next_payload: VaultPayload,
 ) -> VaultResult<()> {
-    let previous_payload = std::mem::replace(&mut session.payload, next_payload);
-    if let Err(error) = persist_session(session) {
-        session.payload = previous_payload;
-        return Err(error);
-    }
-    Ok(())
+    persist_payload(session, next_payload, true)
+}
+
+pub fn commit_payload_change_without_previous(
+    session: &mut UnlockedVault,
+    next_payload: VaultPayload,
+) -> VaultResult<()> {
+    persist_payload(session, next_payload, false)
 }
 
 pub fn payload_without_login(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayload> {
@@ -555,12 +562,13 @@ pub fn delete_folder_from_payload(
     let mut next_payload = payload.clone();
     next_payload.folders.retain(|folder| folder.id != folder_id);
     let now = unix_timestamp();
-    let filed: Vec<String> = next_payload
-        .item_views()
+    let mut items = next_payload.item_views();
+    let filed: Vec<String> = items
         .iter()
         .filter(|item| item.metadata().item_folder_id() == Some(folder_id))
         .map(|item| item.id().to_string())
         .collect();
+    items.zeroize();
     for id in filed {
         if let Some(item) = next_payload.item_metadata_mut(&id) {
             item.set_item_folder_id(None);
@@ -813,4 +821,99 @@ pub fn atomic_replace(destination: &Path, bytes: &[u8]) -> VaultResult<()> {
         return Err(error);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::api::{create_vault, open_vault_with_password, open_vault_with_recovery_kit};
+
+    fn test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("sesame-{name}-{}", random_id()))
+    }
+
+    fn unlocked_at(path: PathBuf, password: &str) -> UnlockedVault {
+        let (opened, _) = create_vault(password, "Fictional vault").expect("created test vault");
+        let mut unlocked = UnlockedVault::from_opened(path, &opened).expect("unlocked vault");
+        unlocked.setup_complete = true;
+        unlocked
+    }
+
+    #[test]
+    fn persisted_session_stays_compatible_with_the_current_vault_format() {
+        let directory = test_path("record-format");
+        let path = directory.join("vault.sesame");
+        let password = "fictional master password";
+        let mut session = unlocked_at(path.clone(), password);
+        let mut payload = session.open_payload().expect("opened payload").clone();
+        payload.entries.push(VaultEntry {
+            id: "fictional-login".to_string(),
+            title: "Northwind".to_string(),
+            password: "fictional-secret".to_string(),
+            ..VaultEntry::default()
+        });
+
+        commit_payload_change(&mut session, payload).expect("persisted session");
+
+        let index = session.snapshot();
+        assert_eq!(index.revision, 2);
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.entries[0].id, "fictional-login");
+        let bytes = fs::read(&path).expect("vault bytes");
+        let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
+        let opened = open_vault_with_password(&file, password).expect("opened vault");
+        assert_eq!(file.format_version, VAULT_FORMAT_VERSION);
+        assert_eq!(opened.payload.entries.len(), 1);
+        assert_eq!(opened.payload.entries[0].password, "fictional-secret");
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn failed_write_keeps_the_previous_session_records() {
+        let directory = test_path("record-rollback");
+        fs::create_dir_all(&directory).expect("test directory");
+        let blocked_parent = directory.join("blocked");
+        fs::write(&blocked_parent, b"not a directory").expect("blocking file");
+        let mut session = unlocked_at(
+            blocked_parent.join("vault.sesame"),
+            "fictional master password",
+        );
+        let mut changed = session.open_payload().expect("opened payload").clone();
+        changed.vault_name = "Changed vault".to_string();
+
+        let result = commit_payload_change(&mut session, changed);
+
+        assert!(result.is_err());
+        let index = session.snapshot();
+        assert_eq!(index.vault_name, "Fictional vault");
+        assert_eq!(index.revision, 1);
+        let current = session.open_payload().expect("previous payload");
+        assert_eq!(current.vault_name, "Fictional vault");
+        assert_eq!(current.revision, 1);
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_rewraps_the_same_records_for_password_and_recovery() {
+        let directory = test_path("record-rotation");
+        let path = directory.join("vault.sesame");
+        let old_password = "fictional old password";
+        let new_password = "fictional new password";
+        let mut session = unlocked_at(path.clone(), old_password);
+        persist_session(&mut session).expect("initial persisted session");
+
+        let recovery_kit =
+            rotate_master_password_for_session(&mut session, old_password, new_password)
+                .expect("rotated password");
+
+        let bytes = fs::read(&path).expect("vault bytes");
+        let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
+        assert!(open_vault_with_password(&file, old_password).is_err());
+        assert!(open_vault_with_password(&file, new_password).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &recovery_kit).is_ok());
+        assert!(!path.with_extension("sesame.prev").exists());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
 }

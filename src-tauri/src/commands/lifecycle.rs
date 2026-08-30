@@ -5,7 +5,6 @@ use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::vault::crypto::decrypt_bytes;
-use crate::vault::snapshot::snapshot_for;
 use crate::vault::storage::{
     check_supported_vault_format, clear_pin_throttle_state, complete_recovery_setup_for_session,
     derive_pin_wrapping_key, persist_session, read_pin_throttle_state, remove_hello_for_session,
@@ -51,16 +50,16 @@ pub fn get_vault_status(app: AppHandle, state: State<'_, VaultState>) -> VaultRe
         .lock()
         .map_err(|_| "Sesame could not read the vault state.".to_string())?;
     let unlocked = session.is_some();
-    let (vault_id, revision, onboarding_required) = session
-        .as_ref()
-        .map(|s| {
-            (
-                s.payload.vault_id.clone(),
-                s.payload.revision,
-                !s.setup_complete,
-            )
-        })
-        .unwrap_or_default();
+    let (vault_id, revision, onboarding_required) = if let Some(session) = session.as_ref() {
+        let snapshot = session.snapshot();
+        (
+            snapshot.vault_id,
+            snapshot.revision,
+            !session.setup_complete,
+        )
+    } else {
+        Default::default()
+    };
     drop(session);
 
     Ok(VaultStatus {
@@ -134,21 +133,10 @@ pub fn create_vault(
     state.cache_hello_unlock(false);
     let _ = establish_pin_throttle_state(&app, &state);
 
-    let snapshot = snapshot_for(&opened.payload);
     // `OpenedVault` zeroizes on drop, so clone and let it drop rather than moving fields out.
-    *session = Some(UnlockedVault {
-        path,
-        key: opened.key.clone(),
-        kdf: opened.file.kdf.clone(),
-        key_wrap: opened.file.key_wrap.clone(),
-        legacy_device_wrap: None,
-        recovery_kdf: opened.file.recovery_kdf.clone(),
-        recovery_wrap: opened.file.recovery_wrap.clone(),
-        pin_wrap: None,
-        hello_wrap: None,
-        setup_complete: opened.file.setup_complete,
-        payload: opened.payload.clone(),
-    });
+    let unlocked = UnlockedVault::from_opened(path, &opened)?;
+    let snapshot = unlocked.snapshot();
+    *session = Some(unlocked);
     state.advance_session_epoch();
     Ok(VaultSetup {
         snapshot,
@@ -167,21 +155,8 @@ fn install_unlocked_session(
     let opened = sesame_core::api::open_vault_with_key(&file, key_array)?;
     let pin_unlock_available = opened.file.pin_wrap.is_some();
     let hello_unlock_available = opened.file.hello_wrap.is_some();
-    let snapshot = snapshot_for(&opened.payload);
     // Same zeroize-on-drop workaround `create_vault` uses.
-    let mut unlocked = UnlockedVault {
-        path,
-        key: opened.key.clone(),
-        kdf: opened.file.kdf.clone(),
-        key_wrap: opened.file.key_wrap.clone(),
-        legacy_device_wrap: opened.file.legacy_device_wrap.clone(),
-        recovery_kdf: opened.file.recovery_kdf.clone(),
-        recovery_wrap: opened.file.recovery_wrap.clone(),
-        pin_wrap: opened.file.pin_wrap.clone(),
-        hello_wrap: opened.file.hello_wrap.clone(),
-        setup_complete: opened.file.setup_complete,
-        payload: opened.payload.clone(),
-    };
+    let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
     if opened.migrated {
         if let Err(error) = persist_session(&mut unlocked) {
             return Err(format!(
@@ -189,6 +164,7 @@ fn install_unlocked_session(
             ));
         }
     }
+    let snapshot = unlocked.snapshot();
     *session = Some(unlocked);
     // Fresh session epoch invalidates approvals bound to the previous one.
     state.advance_session_epoch();
