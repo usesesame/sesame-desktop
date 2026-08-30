@@ -20,7 +20,7 @@ impl VaultKey {
     pub fn expose<T>(&self, operation: impl FnOnce(&[u8; 32]) -> VaultResult<T>) -> VaultResult<T> {
         self.inner
             .lock()
-            .map_err(|_| "Sesame could not read the protected vault key.".to_string())?
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .expose(operation)
     }
 }
@@ -231,6 +231,18 @@ mod tests {
         assert!(key.expose(|bytes| Ok(bytes[0] == 7)).expect("reopened key"));
     }
 
+    #[test]
+    fn operation_panics_do_not_block_later_key_access() {
+        let key = VaultKey::new([7_u8; 32]).expect("protected key");
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = key.expose::<()>(|_| panic!("fictional operation panic"));
+        }));
+
+        assert!(panicked.is_err());
+        assert!(key.expose(|bytes| Ok(bytes[0] == 7)).expect("reopened key"));
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_storage_is_not_plaintext_between_operations() {
@@ -253,7 +265,13 @@ mod tests {
         }));
 
         assert!(panicked.is_err());
-        let stored = key.inner.lock().expect("key lock");
+        assert!(key
+            .expose(|bytes| Ok(bytes == &expected))
+            .expect("reopened key"));
+        let stored = key
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert!(!stored.is_plaintext(&expected));
     }
 }
