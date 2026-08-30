@@ -135,12 +135,28 @@ fn lookup_linux_device_key_within(
     secret_tool: &Path,
     budget: std::time::Duration,
 ) -> VaultResult<std::process::Output> {
+    lookup_linux_device_key_within_using(
+        budget,
+        |timeout| run_linux_device_key_lookup(secret_tool, timeout),
+        start_wallet_daemons,
+    )
+}
+
+fn lookup_linux_device_key_within_using<F, R>(
+    budget: std::time::Duration,
+    mut lookup: F,
+    remediate: R,
+) -> VaultResult<std::process::Output>
+where
+    F: FnMut(std::time::Duration) -> VaultResult<std::process::Output>,
+    R: FnOnce(),
+{
     let deadline = std::time::Instant::now() + budget;
-    let mut output = run_linux_device_key_lookup(secret_tool, SECRET_SERVICE_TIMEOUT.min(budget))?;
+    let mut output = lookup(SECRET_SERVICE_TIMEOUT.min(budget))?;
     if device_key_lookup_settled(&output) {
         return Ok(output);
     }
-    start_wallet_daemons();
+    remediate();
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() {
@@ -151,12 +167,10 @@ fn lookup_linux_device_key_within(
         if remaining.is_zero() {
             return Ok(output);
         }
-        output =
-            match run_linux_device_key_lookup(secret_tool, remaining.min(SECRET_SERVICE_TIMEOUT)) {
-                Ok(output) => output,
-                Err(_) if std::time::Instant::now() >= deadline => return Ok(output),
-                Err(error) => return Err(error),
-            };
+        output = match lookup(remaining.min(SECRET_SERVICE_TIMEOUT)) {
+            Ok(output) => output,
+            Err(_) => return Ok(output),
+        };
         if device_key_lookup_settled(&output) {
             return Ok(output);
         }
@@ -423,28 +437,33 @@ mod tests {
 
     #[test]
     fn a_wallet_that_keeps_failing_gives_up_inside_the_total_budget() -> VaultResult<()> {
-        let directory = std::env::temp_dir().join(format!("sesame-budget-{}", std::process::id()));
-        fs::create_dir_all(&directory)
-            .map_err(|_| "could not create the probe directory".to_string())?;
-        let binary = directory.join("secret-tool");
-        fs::write(
-            &binary,
-            b"#!/bin/sh\nmarker=\"$0.count\"\nif [ -e \"$marker\" ]; then exec sleep 5; fi\n: > \"$marker\"\necho 'not activatable' >&2\nexit 1\n",
-        )
-        .map_err(|_| "could not write the probe binary".to_string())?;
-        fs::set_permissions(&binary, PermissionsExt::from_mode(0o755))
-            .map_err(|_| "could not make the probe binary executable".to_string())?;
+        use std::os::unix::process::ExitStatusExt;
 
         let budget = std::time::Duration::from_millis(250);
+        let mut calls = 0;
         let started = std::time::Instant::now();
-        let output = lookup_linux_device_key_within(&binary, budget)?;
+        let output = lookup_linux_device_key_within_using(
+            budget,
+            |timeout| {
+                calls += 1;
+                if calls == 1 {
+                    return Ok(std::process::Output {
+                        status: std::process::ExitStatus::from_raw(256),
+                        stdout: Vec::new(),
+                        stderr: b"not activatable".to_vec(),
+                    });
+                }
+                std::thread::sleep(timeout);
+                Err("retry interrupted".into())
+            },
+            || {},
+        )?;
         let elapsed = started.elapsed();
 
+        assert_eq!(calls, 2);
         assert!(!output.status.success());
         assert!(elapsed >= budget);
         assert!(elapsed < budget + std::time::Duration::from_secs(10));
-
-        let _ = fs::remove_dir_all(&directory);
         Ok(())
     }
 
