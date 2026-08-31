@@ -35,7 +35,7 @@ struct CandidateReceipt {
 }
 
 async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
-    if !cfg!(windows) {
+    if !(cfg!(windows) || cfg!(target_os = "linux")) {
         return Err("Desktop updates are not available on this operating system.".into());
     }
     if option_env!("SESAME_UPDATER_PUBLIC_KEY").is_none_or(|key| key.trim().is_empty()) {
@@ -56,7 +56,7 @@ async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
                 &update.signature,
                 candidate_public_key,
                 candidate_key_id,
-                "windows",
+                updater_platform()?,
                 updater_architecture()?,
             )?;
             Ok(VerifiedDesktopUpdate {
@@ -126,6 +126,14 @@ fn updater_architecture() -> VaultResult<&'static str> {
         "x86_64" => Ok("x86_64"),
         "aarch64" => Ok("aarch64"),
         _ => Err("This architecture is not supported by the Sesame updater.".into()),
+    }
+}
+
+fn updater_platform() -> VaultResult<&'static str> {
+    match std::env::consts::OS {
+        "windows" => Ok("windows"),
+        "linux" => Ok("linux"),
+        _ => Err("This operating system is not supported by the Sesame updater.".into()),
     }
 }
 

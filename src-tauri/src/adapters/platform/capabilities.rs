@@ -30,7 +30,7 @@ pub fn get_platform_capabilities() -> PlatformCapabilities {
         session_auto_lock: crate::session_guard::idle_auto_lock_available(),
         quick_access_shortcut: crate::desktop_shell::global_shortcut_available(),
         account_linking: cfg!(windows),
-        desktop_updates: cfg!(windows),
+        desktop_updates: cfg!(windows) || cfg!(target_os = "linux"),
         window_controls: cfg!(windows),
     }
 }
