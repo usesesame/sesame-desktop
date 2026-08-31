@@ -45,7 +45,7 @@ totp-rs = { version = "5", features = ["otpauth"] }
 url = "2.5"
 zeroize = "1.8"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
-hkdf = "0.12"
+hkdf = "0.13"
 ts-rs = "12.0.1"
 
 [target.'cfg(windows)'.dependencies]
