@@ -175,50 +175,44 @@ fn verify_candidate_receipt(
         .map_err(|_| "Sesame rejected an update with an invalid release receipt.".to_string())?;
 
     let claims: Vec<&str> = receipt.payload.split('\n').collect();
-    let expected_sigstore_identity = format!(
-        "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v{announced_version}"
-    );
-    // Claim 7 is the download URL the publisher signed. Comparing it to the URL
+    // Claim 11 is the download URL the publisher signed. Comparing it to the URL
     // this manifest actually points at is what stops a tampered manifest from
     // redirecting an otherwise genuine receipt at a different file.
     let manifest_url = manifest
         .get("url")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    if claims.len() != 23
-        || claims[0] != "sesame-release-candidate-v3"
+    let expected_format = match expected_platform {
+        "windows" => "nsis",
+        "linux" => "appimage",
+        _ => "",
+    };
+    if claims.len() != 17
+        || claims[0] != "sesame-release-set-candidate-v1"
         || claims[1] != announced_version
         || claims[3] != expected_platform
         || claims[4] != expected_architecture
-        || claims[7].is_empty()
-        || claims[7] != manifest_url
-        || claims[8].is_empty()
-        || !valid_sha256(claims[9])
-        || claims[10]
+        || !valid_sha256(claims[7])
+        || claims[8] != "updater"
+        || claims[9] != expected_format
+        || claims[10] != expected_architecture
+        || claims[11].is_empty()
+        || claims[11] != manifest_url
+        || claims[12].is_empty()
+        || !valid_sha256(claims[13])
+        || claims[14]
             .parse::<u64>()
             .ok()
             .is_none_or(|bytes| bytes == 0)
-        || claims[11] != updater_signature
-        || claims[12].is_empty()
-        || (claims[13] != "early_access" && claims[13] != "production")
-        || claims[14] != "true"
-        || claims[15] != "https://token.actions.githubusercontent.com"
-        || claims[16] != expected_sigstore_identity
-        || !valid_sha256(claims[17])
-        || !valid_base64url_sha256(claims[18])
-        || (claims[19] != "true" && claims[19] != "false")
-        || (claims[13] == "early_access" && claims[19] != "false")
-        || (claims[13] == "production" && claims[19] != "true")
-        || (claims[19] == "true" && (claims[20].is_empty() || claims[21].is_empty()))
-        || (claims[19] == "true" && !valid_base64url_sha256(claims[22]))
-        || (claims[19] == "false" && !claims[22].is_empty())
+        || claims[15] != updater_signature
+        || claims[16].is_empty()
     {
         return Err(
             "Sesame rejected an update whose manifest did not match its signed release receipt."
                 .into(),
         );
     }
-    Ok(claims[9].to_owned())
+    Ok(claims[13].to_owned())
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -228,8 +222,91 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn valid_base64url_sha256(value: &str) -> bool {
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .is_ok_and(|decoded| decoded.len() == 32)
+#[cfg(test)]
+mod tests {
+    use super::verify_candidate_receipt;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    use ed25519_dalek::{Signer, SigningKey};
+    use serde_json::json;
+
+    fn signed_manifest() -> (serde_json::Value, String, String) {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let artifact_sha256 = "a".repeat(64);
+        let updater_signature = "s".repeat(64);
+        let payload = [
+            "sesame-release-set-candidate-v1".to_owned(),
+            "1.2.3".to_owned(),
+            "beta".to_owned(),
+            "windows".to_owned(),
+            "x86_64".to_owned(),
+            "Windows 10,Windows 11".to_owned(),
+            "https://example.invalid/releases/1.2.3".to_owned(),
+            "b".repeat(64),
+            "updater".to_owned(),
+            "nsis".to_owned(),
+            "x86_64".to_owned(),
+            "https://downloads.example.invalid/Sesame.exe".to_owned(),
+            "windows/1.2.3/Sesame.exe".to_owned(),
+            artifact_sha256.clone(),
+            "42".to_owned(),
+            updater_signature.clone(),
+            "fictional-updater-key".to_owned(),
+        ]
+        .join("\n");
+        let signature = URL_SAFE_NO_PAD.encode(signing_key.sign(payload.as_bytes()).to_bytes());
+        let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
+        let manifest = json!({
+            "url": "https://downloads.example.invalid/Sesame.exe",
+            "candidateReceipt": {
+                "payload": payload,
+                "signingKeyId": "fictional-candidate-key",
+                "signature": signature,
+            }
+        });
+        (manifest, public_key, updater_signature)
+    }
+
+    #[test]
+    fn verifies_the_signed_updater_binding() {
+        let (manifest, public_key, updater_signature) = signed_manifest();
+        let digest = verify_candidate_receipt(
+            &manifest,
+            "1.2.3",
+            &updater_signature,
+            &public_key,
+            "fictional-candidate-key",
+            "windows",
+            "x86_64",
+        )
+        .expect("verify receipt");
+        assert_eq!(digest, "a".repeat(64));
+    }
+
+    #[test]
+    fn rejects_a_redirected_or_relabelled_updater() {
+        let (mut manifest, public_key, updater_signature) = signed_manifest();
+        manifest["url"] = json!("https://downloads.example.invalid/other.exe");
+        assert!(verify_candidate_receipt(
+            &manifest,
+            "1.2.3",
+            &updater_signature,
+            &public_key,
+            "fictional-candidate-key",
+            "windows",
+            "x86_64",
+        )
+        .is_err());
+        let (manifest, _, _) = signed_manifest();
+        assert!(verify_candidate_receipt(
+            &manifest,
+            "9.9.9",
+            &updater_signature,
+            &public_key,
+            "fictional-candidate-key",
+            "windows",
+            "x86_64",
+        )
+        .is_err());
+    }
 }

@@ -40,20 +40,19 @@ if (existsSync(updaterVerifier)) {
 }
 const claims = good.candidateReceipt.payload.split('\n')
 if (
-  claims.length !== 23 ||
-  claims[0] !== 'sesame-release-candidate-v3' ||
+  claims.length !== 17 ||
+  claims[0] !== 'sesame-release-set-candidate-v1' ||
   claims[1] !== good.version ||
   claims[3] !== 'windows' ||
   claims[4] !== 'x86_64' ||
-  claims[7] !== good.url ||
-  claims[9] !== hash(artifact) ||
-  claims[10] !== String(artifact.length) ||
-  claims[11] !== detachedSignature ||
-  claims[13] !== 'early_access' ||
-  claims[14] !== 'true' ||
-  claims[15] !== 'https://token.actions.githubusercontent.com' ||
-  claims[16] !== 'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1' ||
-  claims[19] !== 'false' ||
+  claims[7] !== 'd'.repeat(64) ||
+  claims[8] !== 'updater' ||
+  claims[9] !== 'nsis' ||
+  claims[10] !== 'x86_64' ||
+  claims[11] !== good.url ||
+  claims[13] !== hash(artifact) ||
+  claims[14] !== String(artifact.length) ||
+  claims[15] !== detachedSignature ||
   good.signature !== detachedSignature ||
   good.candidateReceipt.signingKeyId !== keys.candidateKeyID
 ) {
@@ -136,7 +135,7 @@ async function probe(mode) {
     const served = await manifestResponse.json()
     if (served.version !== (mode === 'good' ? '0.1.1' : '9.9.9')) throw new Error(`Wrong ${mode} manifest served.`)
     const artifactResponse = await fetch(served.url)
-    if (!artifactResponse.ok || hash(Buffer.from(await artifactResponse.arrayBuffer())) !== claims[8]) {
+    if (!artifactResponse.ok || hash(Buffer.from(await artifactResponse.arrayBuffer())) !== claims[13]) {
       throw new Error('Lab artifact delivery changed the signed bytes.')
     }
     await fetch(`${base}/shutdown`, { method: 'POST', headers: authorization })

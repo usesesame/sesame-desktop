@@ -121,29 +121,23 @@ try {
   const archiveBytes = await readFile(archive)
   const updaterSignature = (await readFile(signaturePath, 'utf8')).trim()
   const receiptPayload = [
-    'sesame-release-candidate-v3',
+    'sesame-release-set-candidate-v1',
     '0.1.1',
     'beta',
     'windows',
     'x86_64',
     'Windows 10,Windows 11',
     'https://releases.example.invalid/rel003-updater-lab',
+    'd'.repeat(64),
+    'updater',
+    'nsis',
+    'x86_64',
     `http://${host}:${port}/artifact`,
     'windows/0.1.1/Sesame_0.1.1_x64-setup.exe',
     sha256(archiveBytes),
     String(archiveBytes.length),
     updaterSignature,
     'rel003-lab-updater-20260812',
-    'early_access',
-    'true',
-    'https://token.actions.githubusercontent.com',
-    'https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v0.1.1',
-    'b'.repeat(64),
-    Buffer.alloc(32, 0xcc).toString('base64url'),
-    'false',
-    '',
-    '',
-    '',
   ].join('\n')
   const candidateSignature = sign(null, Buffer.from(receiptPayload), candidate.privateKey).toString('base64url')
   const receipt = { payload: receiptPayload, signingKeyId: keyID, signature: candidateSignature }

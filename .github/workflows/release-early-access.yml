@@ -104,13 +104,14 @@ jobs:
         name: Freeze the installer, updater signature, manifest, and SBOM
         shell: pwsh
         run: |
-          $installer = Get-ChildItem -LiteralPath src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-          if ($null -eq $installer) { throw 'The NSIS installer was not produced.' }
-          $signature = "$($installer.FullName).sig"
-          if (-not (Test-Path -LiteralPath $signature -PathType Leaf)) { throw 'The mandatory Tauri updater signature was not produced.' }
+          $discovery = Join-Path $env:RUNNER_TEMP 'sesame-release-packages.json'
+          node tools/release-set-cli.mjs discover windows src-tauri/target/release/bundle $env:SESAME_RELEASE_ARCHITECTURE $discovery
+          $packageSet = Get-Content -Raw -LiteralPath $discovery | ConvertFrom-Json
+          $installer = $packageSet.packages[0].path
+          $signature = $packageSet.packages[0].updaterSignaturePath
           $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
           $sbom = "release-evidence/sesame-$version.cdx.json"
-          $manifest = (node tools/prepare-release-evidence.mjs $installer.FullName $signature $sbom release-handoff).Trim()
+          $manifest = (node tools/prepare-release-evidence.mjs $installer $signature $sbom release-handoff).Trim()
           Copy-Item -LiteralPath tools/verify-sesame-release.ps1 -Destination release-handoff/verify-sesame-release.ps1
           "manifest=$manifest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
@@ -152,6 +153,7 @@ jobs:
           $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
           node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
           $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
+          node tools/release-set-cli.mjs verify $candidate
           Copy-Item -LiteralPath $candidate -Destination release-handoff/
           node tools/create-static-update-manifest.mjs $candidate release-handoff/latest.json
 
