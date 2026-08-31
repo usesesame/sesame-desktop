@@ -97,7 +97,7 @@ pub async fn get_service_connection_status(app: AppHandle) -> VaultResult<Servic
         .header("Authorization", format!("Sesame {token}"))
         .json(&serde_json::json!({
             "appVersion": env!("CARGO_PKG_VERSION"),
-            "platform": "windows",
+            "platform": std::env::consts::OS,
             "architecture": std::env::consts::ARCH,
             "updateChannel": "beta",
             "protocolVersion": 1,

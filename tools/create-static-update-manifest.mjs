@@ -27,8 +27,9 @@ const lineValue = (value) => typeof value === 'string' && value !== '' && !value
 if (
   candidate?.schemaVersion !== 2 || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(candidate.version) ||
   !lineValue(candidate.channel) ||
-  candidate.platform !== 'windows' || !['x86_64', 'aarch64'].includes(candidate.architecture) ||
-  !lineValue(candidate.supportedWindows) || !lineValue(candidate.releaseNotesURL) ||
+  !['windows', 'linux'].includes(candidate.platform) || !['x86_64', 'aarch64'].includes(candidate.architecture) ||
+  (candidate.platform === 'windows' ? !lineValue(candidate.supportedWindows) : candidate.supportedWindows !== '') ||
+  !lineValue(candidate.releaseNotesURL) ||
   !lineValue(artifact?.objectKey) || !lineValue(artifact?.updaterSignature) ||
   artifact.updaterSignature.length < 64 || !/^[0-9a-f]{64}$/.test(artifact.sha256) ||
   !Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 ||
@@ -42,7 +43,7 @@ if (
   !lineValue(candidate.candidateSigningKeyId) || !lineValue(candidate.candidateSignature) ||
   Buffer.from(candidate.candidateSignature, 'base64url').length !== 64
 ) {
-  throw new Error('The candidate is not a complete schema-v2 Windows updater record.')
+  throw new Error('The candidate is not a complete schema-v2 desktop updater record.')
 }
 try {
   const releaseNotes = new URL(candidate.releaseNotesURL)
@@ -97,7 +98,7 @@ if (candidatePublicKey) {
   }
 }
 
-const target = `windows-${candidate.architecture}-nsis`
+const target = candidate.platform === 'linux' ? `linux-${candidate.architecture}-appimage` : `windows-${candidate.architecture}-nsis`
 const manifest = {
   version: candidate.version,
   notes: `Verification and release notes: ${candidate.releaseNotesURL}`,
