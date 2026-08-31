@@ -4,6 +4,17 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.2.2
+
+- The release chain carries Linux end to end. The desktop app reports its real
+  operating system when it registers with the account service, the updater
+  runs on Linux, and update receipts are verified against the running
+  platform. The release pipeline accepts Linux candidates and writes
+  linux-appimage updater manifest targets, the server ingests them, serves
+  update checks for the asking platform, and answers per-platform
+  latest-release lookups, and the admin release controls and the website's
+  builds page show both channels.
+
 ## 0.2.1
 
 - Revealing a saved password now asks for the master password in a proper
