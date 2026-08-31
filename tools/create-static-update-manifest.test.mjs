@@ -10,7 +10,7 @@ import test from 'node:test'
 const run = promisify(execFile)
 const script = resolve('tools/create-static-update-manifest.mjs')
 
-function fictionalCandidate() {
+function fictionalCandidate(overrides = {}) {
   const candidate = {
     schemaVersion: 2,
     version: '1.2.3',
@@ -40,6 +40,9 @@ function fictionalCandidate() {
     candidateSigningKeyId: 'candidate-1',
     candidateSignature: '',
   }
+  const { artifact: artifactOverrides, ...candidateOverrides } = overrides
+  Object.assign(candidate, candidateOverrides)
+  if (artifactOverrides) candidate.artifact = { ...candidate.artifact, ...artifactOverrides }
   const stableJSON = (value) => {
     if (value === null || typeof value !== 'object') return JSON.stringify(value)
     if (Array.isArray(value)) return `[${value.map(stableJSON).join(',')}]`
@@ -54,7 +57,7 @@ function fictionalCandidate() {
     artifact.distributionClass, String(artifact.sigstoreVerified), artifact.sigstoreIssuer,
     artifact.sigstoreIdentity, artifact.sigstoreBundleSha256, digest(artifact.sigstoreEvidence),
     String(artifact.authenticodeVerified), artifact.authenticodeSubject,
-    artifact.authenticodeThumbprint, digest(artifact.authenticodeEvidence),
+    artifact.authenticodeThumbprint, artifact.authenticodeEvidence ? digest(artifact.authenticodeEvidence) : '',
   ].join('\n')
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   candidate.candidateSignature = sign(null, Buffer.from(payload), privateKey).toString('base64url')
@@ -84,6 +87,44 @@ test('static updater manifest carries the public artifact and exact signed recei
     assert.equal(manifest.candidateReceipt.payload.split('\n').length, 23)
     assert.equal(manifest.candidateReceipt.payload.split('\n')[9], 'a'.repeat(64))
     assert.equal(manifest.candidateReceipt.payload.split('\n')[7], 'https://releases.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest carries Linux AppImage targets without Windows fields', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate, candidatePublicKey } = fictionalCandidate({
+      channel: 'beta',
+      platform: 'linux',
+      supportedWindows: '',
+      artifact: {
+        url: 'https://releases.example.test/v1.2.3/Sesame_1.2.3_amd64.AppImage',
+        objectKey: 'linux/v1.2.3/Sesame_1.2.3_amd64.AppImage',
+        distributionClass: 'early_access',
+        authenticodeVerified: false,
+        authenticodeSubject: undefined,
+        authenticodeThumbprint: undefined,
+        authenticodeEvidence: undefined,
+      },
+    })
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    await run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: 'https://github.com/usesesame/sesame-desktop/releases/download/v1.2.3/Sesame_1.2.3_amd64.AppImage',
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+      },
+    })
+    const manifest = JSON.parse(await readFile(outputPath, 'utf8'))
+    assert.equal(manifest.version, '1.2.3')
+    assert.deepEqual(Object.keys(manifest.platforms), ['linux-x86_64-appimage'])
+    const claims = manifest.candidateReceipt.payload.split('\n')
+    assert.equal(claims[3], 'linux')
+    assert.equal(claims[5], '')
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
