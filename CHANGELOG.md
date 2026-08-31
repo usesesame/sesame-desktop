@@ -4,7 +4,7 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
-## 0.2.0
+## 0.2.1
 
 - Revealing a saved password now asks for the master password in a proper
   dialog instead of an unstyled inline row. The login editor can also show the
@@ -13,6 +13,9 @@ release cannot be published without saying what changed in it.
 - Copy and reveal prompts no longer stack notifications: opening the master
   password dialog does not also raise a "Nothing to copy" notice, and a wrong
   master password reports its error once, inside the dialog that asked for it.
+
+## 0.2.0
+
 - Sesame now runs on Linux. The same vault, record types, unlock methods,
   auto-lock, quick access, backups, and browser integration work on Linux, and
   the build produces deb, rpm, and AppImage packages. Device protection keeps
