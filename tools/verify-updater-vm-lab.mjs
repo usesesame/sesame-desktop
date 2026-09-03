@@ -45,7 +45,7 @@ if (
   claims[1] !== good.version ||
   claims[3] !== 'windows' ||
   claims[4] !== 'x86_64' ||
-  claims[7] !== 'd'.repeat(64) ||
+  claims[7] !== config.releaseSetDigest ||
   claims[8] !== 'updater' ||
   claims[9] !== 'nsis' ||
   claims[10] !== 'x86_64' ||

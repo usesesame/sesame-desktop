@@ -68,6 +68,15 @@ test('prepare and verify bind every immutable package field into one set digest'
   assert.throws(() => verifyReleaseSet(changed), /digest does not match/)
 })
 
+test('release URLs reject unsigned query parameters', () => {
+  const notesQuery = structuredClone(windowsSet())
+  notesQuery.releaseNotesUrl += '?channel=other'
+  assert.throws(() => verifyReleaseSet(notesQuery), /credential-free HTTPS URL/)
+  const artifactQuery = structuredClone(windowsSet())
+  artifactQuery.artifacts[0].url += '?download=other'
+  assert.throws(() => verifyReleaseSet(artifactQuery), /credential-free HTTPS URL/)
+})
+
 test('release set digest matches the server candidate contract', () => {
   const nsis = artifact('nsis', 'a')
   nsis.url = 'https://downloads.example.invalid/Sesame.exe'
@@ -114,6 +123,11 @@ test('reconciliation reports missing and conflicting immutable records', () => {
   const conflicting = structuredClone(expected)
   conflicting.artifacts[0].sha256 = 'c'.repeat(64)
   assert.deepEqual(reconcileReleaseSet(expected, conflicting).conflicts, ['nsis:x86_64'])
+  assert.deepEqual(reconcileReleaseSet(expected, null), {
+    complete: false,
+    missing: ['nsis:x86_64'],
+    conflicts: ['release-set'],
+  })
 })
 
 test('platform adapters own exact Windows and Linux package discovery', async () => {
@@ -131,6 +145,8 @@ test('platform adapters own exact Windows and Linux package discovery', async ()
       { format: 'deb', updaterCapable: false },
       { format: 'rpm', updaterCapable: false },
     ])
+    await rm(path.join(root, 'nsis', 'Sesame-setup.exe.sig'))
+    await assert.rejects(discoverWindowsPackages(root, architecture), /did not find the NSIS updater signature/)
     await writeFile(path.join(root, 'rpm', 'Sesame-copy.rpm'), 'conflicting fictional RPM package')
     await assert.rejects(discoverLinuxPackages(root, architecture), /found 2 rpm packages/)
   } finally {

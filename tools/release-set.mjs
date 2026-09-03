@@ -24,7 +24,7 @@ export function applicableReleaseFormats(platform) {
 function validateURL(value, label) {
   let parsed
   try { parsed = new URL(value) } catch { throw new Error(`${label} must be a credential-free HTTPS URL.`) }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || !parsed.hostname) {
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || parsed.search || !parsed.hostname) {
     throw new Error(`${label} must be a credential-free HTTPS URL.`)
   }
 }
@@ -145,7 +145,7 @@ export function reconcileReleaseSet(expected, actual) {
   for (const artifact of actualArtifacts) {
     if (!expected.artifacts.some((item) => recordKey(item) === recordKey(artifact))) conflicts.push(recordKey(artifact))
   }
-  if (expected.version !== actual.version || expected.channel !== actual.channel || expected.platform !== actual.platform || expected.architecture !== actual.architecture || expected.supportedWindows !== actual.supportedWindows || expected.releaseNotesUrl !== actual.releaseNotesUrl || expected.setDigest !== actual.setDigest) {
+  if (expected.version !== actual?.version || expected.channel !== actual?.channel || expected.platform !== actual?.platform || expected.architecture !== actual?.architecture || expected.supportedWindows !== actual?.supportedWindows || expected.releaseNotesUrl !== actual?.releaseNotesUrl || expected.setDigest !== actual?.setDigest) {
     conflicts.unshift('release-set')
   }
   return { complete: missing.length === 0 && conflicts.length === 0, missing, conflicts: [...new Set(conflicts)] }

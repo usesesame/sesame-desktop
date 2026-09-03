@@ -11,6 +11,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { calculateReleaseSetDigest } from './release-set.mjs'
+
 const run = promisify(execFile)
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const artifactsRoot = resolve(workspace, 'release-artifacts')
@@ -120,6 +122,38 @@ try {
 
   const archiveBytes = await readFile(archive)
   const updaterSignature = (await readFile(signaturePath, 'utf8')).trim()
+  const artifactSha256 = sha256(archiveBytes)
+  const artifactUrl = `http://${host}:${port}/artifact`
+  const artifactObjectKey = 'windows/0.1.1/Sesame_0.1.1_x64-setup.exe'
+  const releaseSetDigest = calculateReleaseSetDigest({
+    version: '0.1.1',
+    channel: 'beta',
+    platform: 'windows',
+    architecture: 'x86_64',
+    supportedWindows: 'Windows 10,Windows 11',
+    releaseNotesUrl: 'https://releases.example.invalid/rel003-updater-lab',
+    artifacts: [{
+      format: 'nsis',
+      architecture: 'x86_64',
+      url: artifactUrl,
+      objectKey: artifactObjectKey,
+      sha256: artifactSha256,
+      bytes: archiveBytes.length,
+      updaterCapable: true,
+      updaterSignature,
+      updaterSigningKeyId: 'rel003-lab-updater-20260812',
+      distributionClass: 'lab',
+      sigstoreEvidence: null,
+      sigstoreVerified: false,
+      sigstoreIssuer: '',
+      sigstoreIdentity: '',
+      sigstoreBundleSha256: '',
+      authenticodeEvidence: null,
+      authenticodeVerified: false,
+      authenticodeSubject: '',
+      authenticodeThumbprint: '',
+    }],
+  })
   const receiptPayload = [
     'sesame-release-set-candidate-v1',
     '0.1.1',
@@ -128,13 +162,13 @@ try {
     'x86_64',
     'Windows 10,Windows 11',
     'https://releases.example.invalid/rel003-updater-lab',
-    'd'.repeat(64),
+    releaseSetDigest,
     'updater',
     'nsis',
     'x86_64',
-    `http://${host}:${port}/artifact`,
-    'windows/0.1.1/Sesame_0.1.1_x64-setup.exe',
-    sha256(archiveBytes),
+    artifactUrl,
+    artifactObjectKey,
+    artifactSha256,
     String(archiveBytes.length),
     updaterSignature,
     'rel003-lab-updater-20260812',
@@ -183,6 +217,7 @@ try {
       goodManifest: 'PUBLIC/manifest-good.json',
       relabelledManifest: 'PUBLIC/manifest-relabelled.json',
       updaterArtifact: 'UPDATER/Sesame_0.1.1_x64-setup.exe',
+      releaseSetDigest,
     }, null, 2)}\n`,
   )
   await writeFile(

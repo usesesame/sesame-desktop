@@ -35,9 +35,7 @@ struct CandidateReceipt {
 }
 
 async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
-    if !(cfg!(windows) || cfg!(target_os = "linux")) {
-        return Err("Desktop updates are not available on this operating system.".into());
-    }
+    let platform = updater_platform()?;
     if option_env!("SESAME_UPDATER_PUBLIC_KEY").is_none_or(|key| key.trim().is_empty()) {
         return Err("This Sesame build does not include an updater public key.".into());
     }
@@ -56,7 +54,7 @@ async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
                 &update.signature,
                 candidate_public_key,
                 candidate_key_id,
-                updater_platform()?,
+                platform,
                 updater_architecture()?,
             )?;
             Ok(VerifiedDesktopUpdate {
@@ -130,9 +128,12 @@ fn updater_architecture() -> VaultResult<&'static str> {
 }
 
 fn updater_platform() -> VaultResult<&'static str> {
-    match std::env::consts::OS {
+    updater_platform_for(std::env::consts::OS)
+}
+
+fn updater_platform_for(os: &str) -> VaultResult<&'static str> {
+    match os {
         "windows" => Ok("windows"),
-        "linux" => Ok("linux"),
         _ => Err("This operating system is not supported by the Sesame updater.".into()),
     }
 }
@@ -224,7 +225,7 @@ fn valid_sha256(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::verify_candidate_receipt;
+    use super::{updater_platform_for, verify_candidate_receipt};
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
     use ed25519_dalek::{Signer, SigningKey};
@@ -308,5 +309,11 @@ mod tests {
             "x86_64",
         )
         .is_err());
+    }
+
+    #[test]
+    fn updater_support_matches_the_release_pipeline() {
+        assert_eq!(updater_platform_for("windows").ok(), Some("windows"));
+        assert!(updater_platform_for("linux").is_err());
     }
 }
