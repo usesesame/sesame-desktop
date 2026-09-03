@@ -147,7 +147,7 @@ pub fn history_summaries(payload: &VaultPayload) -> Vec<HistorySummary> {
         .iter()
         .filter(|entry| entry.captured_at > cutoff)
         .collect();
-    entries.sort_by(|left, right| right.captured_at.cmp(&left.captured_at));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.captured_at));
 
     let mut summaries = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {

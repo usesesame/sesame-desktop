@@ -106,7 +106,10 @@ pub async fn download_and_install_desktop_update(app: AppHandle) -> VaultResult<
         )
         .await
         .map_err(|_| "Sesame could not download or verify the update.".to_string())?;
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     if digest != verified.artifact_sha256 {
         return Err(
             "Sesame rejected an update that did not match its signed release receipt.".into(),

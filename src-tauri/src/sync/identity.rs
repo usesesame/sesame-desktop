@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
-use rand::rngs::OsRng;
-use rand::TryRngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
@@ -38,7 +38,7 @@ pub struct DeviceIdentity {
 impl DeviceIdentity {
     pub fn generate() -> VaultResult<Self> {
         let mut seed = [0u8; SIGNING_SEED_BYTES];
-        OsRng
+        SysRng
             .try_fill_bytes(&mut seed)
             .map_err(|_| "Sesame could not generate device keys.".to_string())?;
         let signing = SigningKey::from_bytes(&seed);
@@ -238,7 +238,7 @@ pub fn identity_path(app_local_data_dir: &Path) -> PathBuf {
 /// Opaque 16-byte identifier; the service must not relate it to the vault.
 pub fn random_opaque_id() -> VaultResult<String> {
     let mut raw = [0u8; OPAQUE_ID_BYTES];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut raw)
         .map_err(|_| "Sesame could not generate a device identifier.".to_string())?;
     Ok(URL_SAFE_NO_PAD.encode(raw))

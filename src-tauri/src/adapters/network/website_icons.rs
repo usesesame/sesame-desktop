@@ -120,7 +120,10 @@ fn cache_dir(app: &AppHandle) -> VaultResult<PathBuf> {
 }
 
 fn cache_paths(cache_dir: &Path, host: &str) -> CachePaths {
-    let key = format!("{:x}", Sha256::digest(host.as_bytes()));
+    let key = Sha256::digest(host.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     CachePaths {
         metadata: cache_dir.join(format!("{key}.json")),
         image: cache_dir.join(format!("{key}.img")),

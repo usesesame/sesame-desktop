@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use totp_rs::{Algorithm as TotpAlgorithm, Secret, TOTP};
+use totp_rs::{Algorithm as TotpAlgorithm, Builder as TotpBuilder, Secret, Totp};
 use zeroize::Zeroize;
 
 use crate::{
@@ -47,10 +47,10 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
         items.push(item_summary_for(payload, item));
     }
     active_items.zeroize();
-    entries.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
-    items.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+    entries.sort_by_key(|entry| entry.title.to_lowercase());
+    items.sort_by_key(|item| item.title.to_lowercase());
     let mut trash = crate::trash::trash_summaries(payload);
-    trash.sort_by(|left, right| right.deleted_at.cmp(&left.deleted_at));
+    trash.sort_by_key(|entry| std::cmp::Reverse(entry.deleted_at));
     let history = crate::history::history_summaries(payload);
     VaultSnapshot {
         vault_name: payload.vault_name.clone(),
@@ -333,38 +333,39 @@ pub fn duplicate_groups_from_summaries(summaries: Vec<LoginSummary>) -> Vec<Dupl
 /// Returns the code, the seconds left in the window, and the window length.
 pub fn current_totp(value: &str) -> Option<(String, u64, u64)> {
     let totp = totp_from_value(value)?;
-    let code = totp.generate_current().ok()?;
-    let remaining = totp.step - (unix_timestamp() % totp.step);
-    Some((code, remaining, totp.step))
+    let code = totp.generate_current().to_string();
+    let step = totp.step();
+    let remaining = step - (unix_timestamp() % step);
+    Some((code, remaining, step))
 }
 
 // Real sites issue 80-bit secrets; the RFC's 128-bit floor would reject ordinary 2FA.
 const MIN_TOTP_SECRET_BYTES: usize = 10;
 
-pub fn totp_from_value(value: &str) -> Option<TOTP> {
+pub fn totp_from_value(value: &str) -> Option<Totp> {
     let value = value.trim();
     if value.starts_with("otpauth://") {
         // `from_url_unchecked` skips the stricter length floor, holding otpauth URLs to the same minimum as pasted secrets.
-        let totp = TOTP::from_url_unchecked(value).ok()?;
-        if totp.secret.len() < MIN_TOTP_SECRET_BYTES {
+        let totp = Totp::from_url_unchecked(value).ok()?;
+        if totp.secret().as_bytes().len() < MIN_TOTP_SECRET_BYTES {
             return None;
         }
         return Some(totp);
     }
     let secret = value.replace([' ', '-'], "").to_ascii_uppercase();
-    let secret = Secret::Encoded(secret).to_bytes().ok()?;
-    if secret.len() < MIN_TOTP_SECRET_BYTES {
+    let secret = Secret::try_from_base32(secret).ok()?;
+    if secret.as_bytes().len() < MIN_TOTP_SECRET_BYTES {
         return None;
     }
-    Some(TOTP::new_unchecked(
-        TotpAlgorithm::SHA1,
-        6,
-        1,
-        30,
-        secret,
-        None,
-        String::new(),
-    ))
+    Some(
+        TotpBuilder::new()
+            .with_algorithm(TotpAlgorithm::SHA1)
+            .with_digits(6)
+            .with_skew(1)
+            .with_step_duration(30)
+            .with_secret(secret)
+            .build_noncompliant(),
+    )
 }
 
 pub fn duplicate_key_counts(payload: &VaultPayload) -> HashMap<String, usize> {

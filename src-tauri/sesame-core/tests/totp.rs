@@ -10,10 +10,10 @@ fn codes_match_the_rfc_6238_reference_vectors() {
     let Some(totp) = totp_from_value(RFC_KEY) else {
         panic!("the reference key was rejected");
     };
-    assert_eq!(totp.generate(59), "287082");
-    assert_eq!(totp.generate(1_111_111_109), "081804");
-    assert_eq!(totp.generate(1_111_111_111), "050471");
-    assert_eq!(totp.generate(1_234_567_890), "005924");
+    assert_eq!(totp.generate(59).to_string(), "287082");
+    assert_eq!(totp.generate(1_111_111_109).to_string(), "081804");
+    assert_eq!(totp.generate(1_111_111_111).to_string(), "050471");
+    assert_eq!(totp.generate(1_234_567_890).to_string(), "005924");
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn a_secret_is_read_however_the_site_printed_it() {
             panic!("{name} secret was rejected");
         };
         assert_eq!(
-            totp.generate(59),
+            totp.generate(59).to_string(),
             "287082",
             "{name} produced a different code"
         );
@@ -39,7 +39,7 @@ fn an_otpauth_url_is_accepted_and_agrees_with_the_bare_secret() {
     let Some(totp) = totp_from_value(&url) else {
         panic!("an otpauth URL was rejected");
     };
-    assert_eq!(totp.generate(59), "287082");
+    assert_eq!(totp.generate(59).to_string(), "287082");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn surrounding_whitespace_does_not_stop_a_secret_being_read() {
     let Some(totp) = totp_from_value(&format!("  {RFC_KEY}  ")) else {
         panic!("a padded secret was rejected");
     };
-    assert_eq!(totp.generate(59), "287082");
+    assert_eq!(totp.generate(59).to_string(), "287082");
 }
 
 #[test]
