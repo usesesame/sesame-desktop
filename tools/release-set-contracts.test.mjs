@@ -146,7 +146,9 @@ test('platform adapters own exact Windows and Linux package discovery', async ()
       { format: 'rpm', updaterCapable: false },
     ])
     await rm(path.join(root, 'nsis', 'Sesame-setup.exe.sig'))
-    await assert.rejects(discoverWindowsPackages(root, architecture), /did not find the NSIS updater signature/)
+    await assert.rejects(discoverWindowsPackages(root, architecture), /did not find a regular NSIS updater signature file/)
+    await mkdir(path.join(root, 'nsis', 'Sesame-setup.exe.sig'))
+    await assert.rejects(discoverWindowsPackages(root, architecture), /did not find a regular NSIS updater signature file/)
     await writeFile(path.join(root, 'rpm', 'Sesame-copy.rpm'), 'conflicting fictional RPM package')
     await assert.rejects(discoverLinuxPackages(root, architecture), /found 2 rpm packages/)
   } finally {

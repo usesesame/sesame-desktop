@@ -1,4 +1,4 @@
-import { access, readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 export const windowsFormats = ['nsis']
@@ -15,9 +15,9 @@ export async function discoverWindowsPackages(bundleRoot, architecture) {
   }
   const updaterSignaturePath = `${installers[0]}.sig`
   try {
-    await access(updaterSignaturePath)
+    if (!(await stat(updaterSignaturePath)).isFile()) throw new Error()
   } catch {
-    throw new Error('Windows release discovery did not find the NSIS updater signature.')
+    throw new Error('Windows release discovery did not find a regular NSIS updater signature file.')
   }
   return [{
     format: 'nsis',
