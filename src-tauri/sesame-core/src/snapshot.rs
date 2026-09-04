@@ -347,7 +347,10 @@ pub fn totp_from_value(value: &str) -> Option<Totp> {
     if value.starts_with("otpauth://") {
         // `from_url_unchecked` skips the stricter length floor, holding otpauth URLs to the same minimum as pasted secrets.
         let totp = Totp::from_url_unchecked(value).ok()?;
-        if totp.secret().as_bytes().len() < MIN_TOTP_SECRET_BYTES {
+        if totp.secret().as_bytes().len() < MIN_TOTP_SECRET_BYTES
+            || totp.step() == 0
+            || totp.digits() >= 10
+        {
             return None;
         }
         return Some(totp);

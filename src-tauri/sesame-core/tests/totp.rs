@@ -43,6 +43,14 @@ fn an_otpauth_url_is_accepted_and_agrees_with_the_bare_secret() {
 }
 
 #[test]
+fn unsafe_otpauth_parameters_are_refused() {
+    for parameter in ["period=0", "digits=10"] {
+        let url = format!("otpauth://totp/Example?secret={RFC_KEY}&{parameter}");
+        assert!(totp_from_value(&url).is_none(), "accepted {parameter}");
+    }
+}
+
+#[test]
 fn a_secret_too_short_to_be_a_real_one_is_refused() {
     assert!(totp_from_value("GEZDGNBV").is_none());
     assert!(totp_from_value("").is_none());
