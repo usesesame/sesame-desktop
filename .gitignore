@@ -71,6 +71,8 @@ backend/deploy/compose/.env
 *.sesame.prev
 *.sesame.tmp
 sesame-diagnostics-*.jsonl
+# The compatibility corpus holds fictional digest-bound fixtures, not vaults.
+!src-tauri/sesame-core/tests/fixtures/compatibility/*.sesame
 
 # Password-manager exports can contain readable credentials
 bitwarden_export*

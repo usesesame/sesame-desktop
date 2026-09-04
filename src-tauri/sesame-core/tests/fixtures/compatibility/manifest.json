@@ -1,0 +1,558 @@
+{
+  "corpusSchema": "sesame.compatibility-corpus/1",
+  "digestAlgorithm": "sha256",
+  "generatedAt": "2026-09-02",
+  "method": "Each fixture was written by that release's own sesame-core code: a git worktree at the tag ran tests/generate_fixtures.rs, which drives create_vault, payload population, and complete_recovery_setup_for_session, then records the bytes the release wrote. No fixture was hand-edited or produced by relabelling a newer file.",
+  "publishedVersions": [
+    {
+      "tag": "v0.1.0",
+      "commit": "cd8062eae660a5a1ff04723801e40038d0ea8949",
+      "writerGeneration": "legacy"
+    },
+    {
+      "tag": "v0.1.1",
+      "commit": "0bf94b71681a41d8dbb5d4679428f5a69c1a35f7",
+      "writerGeneration": "legacy"
+    },
+    {
+      "tag": "v0.2.0",
+      "commit": "70420cb69d674fb67725f244cd9ca831827b9a87",
+      "writerGeneration": "current"
+    },
+    {
+      "tag": "v0.2.1",
+      "commit": "ad4339a2e07ecb8216da81a5d5cf72a70444e000",
+      "writerGeneration": "current"
+    },
+    {
+      "tag": "v0.2.2",
+      "commit": "39984ed621a5c1fef3d56b94d55f3ee1901a0543",
+      "writerGeneration": "current"
+    }
+  ],
+  "writerGenerations": [
+    {
+      "id": "legacy",
+      "versions": [
+        "v0.1.0",
+        "v0.1.1"
+      ],
+      "generator": "generator/generate_fixtures_legacy.rs",
+      "note": "sesame-core is byte-identical between v0.1.0 and v0.1.1. Non-login items carry no tags, folderId, favourite, or lastUsedAt fields."
+    },
+    {
+      "id": "current",
+      "versions": [
+        "v0.2.0",
+        "v0.2.1",
+        "v0.2.2"
+      ],
+      "generator": "generator/generate_fixtures_current.rs",
+      "note": "sesame-core is byte-identical from v0.2.0 through v0.2.2 and to the current HEAD writer path."
+    }
+  ],
+  "provenFormats": [
+    {
+      "format": 10,
+      "setupStates": [
+        "complete"
+      ],
+      "fixtures": [
+        "v0.1.0",
+        "v0.1.1",
+        "v0.2.0",
+        "v0.2.1",
+        "v0.2.2"
+      ]
+    }
+  ],
+  "unprovenFormats": [
+    {
+      "formats": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "reason": "No writer for these formats exists in this repository. The initial public commit ec9dc8d already declared format 10 with the current authentication labels, and no commit reachable from any ref ever wrote a lower format. The current reader still accepts formats 2 through 9, so the compatibility promise for them has no writer evidence.",
+      "evidence": "git log -S 'VAULT_FORMAT_VERSION: u8 = ' over all refs shows exactly one code state; every published tag v0.1.0 through v0.2.2 declares format 10.",
+      "decision": {
+        "status": "supportRetained",
+        "recordedBy": "owner",
+        "date": "2026-09-02",
+        "note": "The owner kept the upgrade path: readers for formats 2 through 9 stay, so an old file can always be upgraded into the current format instead of being refused. Support for these formats is enforced by the authenticated format-bound construction and adversarial reader tests, not by genuine writer fixtures. Every public release wrote format 10, so public-release users are covered by the proven fixtures; formats 2 through 9 only matter for backups from builds that never shipped."
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "v0.1.0",
+      "writerTag": "v0.1.0",
+      "writerCommit": "cd8062eae660a5a1ff04723801e40038d0ea8949",
+      "writerGeneration": "legacy",
+      "fileName": "v0.1.0.sesame",
+      "digestSha256": "ed93141d119b912d3aa3fe283f19d300c1526d0eb08728890f1640305cc9f02c",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "QCSZU-SRJ6G-WP527-YRKXJ-GBS8A"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "7oMh8xiwvNf1Oa63",
+        "revision": 2
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": false,
+        "identityHasTags": false
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
+    },
+    {
+      "id": "v0.1.1",
+      "writerTag": "v0.1.1",
+      "writerCommit": "0bf94b71681a41d8dbb5d4679428f5a69c1a35f7",
+      "writerGeneration": "legacy",
+      "fileName": "v0.1.1.sesame",
+      "digestSha256": "1aa1f7a664d9610217342c82ac453c19ee288cff376f4df8e57c576f8213b8cc",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "2ZTVK-M4DAU-WL5MF-8EYBP-KDE5N"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "rHnRERX5ZKtpnJgu",
+        "revision": 2
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": false,
+        "identityHasTags": false
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
+    },
+    {
+      "id": "v0.2.0",
+      "writerTag": "v0.2.0",
+      "writerCommit": "70420cb69d674fb67725f244cd9ca831827b9a87",
+      "writerGeneration": "current",
+      "fileName": "v0.2.0.sesame",
+      "digestSha256": "f5482b79c66ac7c0cfc8c18f8f35b94db84197751a3dc58604b53e95183d93f6",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "HMPCX-52HSA-3Q2BQ-79SME-NGUYF"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "8Uh9ntYhUf7LVueK",
+        "revision": 3
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": true,
+        "identityHasTags": true
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
+    },
+    {
+      "id": "v0.2.1",
+      "writerTag": "v0.2.1",
+      "writerCommit": "ad4339a2e07ecb8216da81a5d5cf72a70444e000",
+      "writerGeneration": "current",
+      "fileName": "v0.2.1.sesame",
+      "digestSha256": "601df899c54c0b188e0933e2c89da0654e375e15aaaeaf45f7756be938d4dadb",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "SBX94-KGFNA-QUBKT-JW9VP-Q7VLN"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "qUuRU-EJxuGctomO",
+        "revision": 3
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": true,
+        "identityHasTags": true
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
+    },
+    {
+      "id": "v0.2.2",
+      "writerTag": "v0.2.2",
+      "writerCommit": "39984ed621a5c1fef3d56b94d55f3ee1901a0543",
+      "writerGeneration": "current",
+      "fileName": "v0.2.2.sesame",
+      "digestSha256": "f370940f8d475490d1a39ef85c7a1bb7e5e7bbc9ec04f216d75a398ebb26cd32",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "HVGU9-M4WJ3-WZCLY-XRCJV-KKV5U"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "-Tpz12uuvOeUjteG",
+        "revision": 3
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": true,
+        "identityHasTags": true
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
+    }
+  ]
+}
