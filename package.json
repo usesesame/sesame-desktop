@@ -9,7 +9,7 @@
     "desktop:build": "vite build",
     "desktop:build:wdio": "vite build --mode wdio",
     "desktop:version:check": "node tools/version-contract.mjs check",
-    "desktop:lint:js": "eslint src vite.config.ts vitest.config.ts tools/version-contract.mjs tools/desktop-boundary-contracts.test.mjs",
+    "desktop:lint:js": "eslint src vite.config.ts vitest.config.ts tools/version-contract.mjs tools/desktop-boundary-contracts.test.mjs tools/release-set.mjs tools/release-set-cli.mjs tools/release-platforms tools/release-set-contracts.test.mjs tools/create-updater-artifacts.mjs tools/create-static-update-manifest.mjs tools/create-static-update-manifest.test.mjs tools/prepare-updater-vm-lab.mjs tools/verify-updater-vm-lab.mjs",
     "desktop:contracts": "npm run contracts",
     "desktop:host:stage": "node tools/stage-browser-host.mjs",
     "desktop:lint:rust": "npm run desktop:host:stage && cargo fmt --manifest-path src-tauri/Cargo.toml --all --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets",

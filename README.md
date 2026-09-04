@@ -78,6 +78,9 @@ npm run desktop:linux:dev
 
 `npm run release:bundle:windows:unsigned` builds the NSIS installer.
 `npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage.
+Release tooling records Windows NSIS or the complete Linux AppImage, DEB, and
+RPM group as one digest-bound artifact set. Linux packages explicitly record
+that automatic updates are unavailable.
 Linux packaging also requires `patchelf`, `dpkg-deb`, and `rpmbuild`. On Arch,
 install them with `sudo pacman -S --needed patchelf dpkg rpm-tools`. The Linux
 bundle command checks these tools before building.

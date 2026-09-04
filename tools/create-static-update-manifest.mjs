@@ -1,6 +1,8 @@
-import { createHash, createPublicKey, verify } from 'node:crypto'
+import { createPublicKey, verify } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
+
+import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
 
 const [candidatePath, outputPath] = process.argv.slice(2)
 if (!candidatePath || !outputPath) {
@@ -22,14 +24,11 @@ if (
 }
 
 const candidate = JSON.parse(await readFile(resolve(candidatePath), 'utf8'))
-const artifact = candidate?.artifact
+verifyReleaseSet(candidate)
+const artifact = candidate.artifacts.find((item) => item.updaterCapable)
 const lineValue = (value) => typeof value === 'string' && value !== '' && !value.includes('\n') && !value.includes('\r')
 if (
-  candidate?.schemaVersion !== 2 || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(candidate.version) ||
-  !lineValue(candidate.channel) ||
-  !['windows', 'linux'].includes(candidate.platform) || !['x86_64', 'aarch64'].includes(candidate.architecture) ||
-  (candidate.platform === 'windows' ? !lineValue(candidate.supportedWindows) : candidate.supportedWindows !== '') ||
-  !lineValue(candidate.releaseNotesURL) ||
+  !artifact || !lineValue(candidate.channel) ||
   !lineValue(artifact?.objectKey) || !lineValue(artifact?.updaterSignature) ||
   artifact.updaterSignature.length < 64 || !/^[0-9a-f]{64}$/.test(artifact.sha256) ||
   !Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 ||
@@ -43,10 +42,10 @@ if (
   !lineValue(candidate.candidateSigningKeyId) || !lineValue(candidate.candidateSignature) ||
   Buffer.from(candidate.candidateSignature, 'base64url').length !== 64
 ) {
-  throw new Error('The candidate is not a complete schema-v2 desktop updater record.')
+  throw new Error('The candidate is not a complete updater-capable desktop release set.')
 }
 try {
-  const releaseNotes = new URL(candidate.releaseNotesURL)
+  const releaseNotes = new URL(candidate.releaseNotesUrl)
   if (releaseNotes.protocol !== 'https:' || releaseNotes.username || releaseNotes.password || releaseNotes.hash) throw new Error()
 } catch {
   throw new Error('The candidate release-notes URL is not safe for a public updater manifest.')
@@ -58,29 +57,7 @@ if (!objectFilename || publicFilename !== objectFilename) {
   throw new Error('The public update URL must name the exact candidate artifact filename.')
 }
 
-const stableJSON = (value) => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableJSON).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJSON(value[key])}`).join(',')}}`
-}
-const evidenceDigest = (value) => value === undefined
-  ? ''
-  : createHash('sha256').update(stableJSON(value)).digest('base64url')
-const sigstoreEvidenceDigest = evidenceDigest(artifact.sigstoreEvidence)
-const authenticodeEvidenceDigest = evidenceDigest(artifact.authenticodeEvidence)
-if (!sigstoreEvidenceDigest || (artifact.authenticodeVerified && !authenticodeEvidenceDigest)) {
-  throw new Error('The candidate lacks the evidence needed to reconstruct its signed receipt.')
-}
-
-const candidatePayload = [
-  'sesame-release-candidate-v3', candidate.version, candidate.channel, candidate.platform,
-  candidate.architecture, candidate.supportedWindows, candidate.releaseNotesURL, artifact.url, artifact.objectKey,
-  artifact.sha256, String(artifact.bytes), artifact.updaterSignature, artifact.updaterSigningKeyId,
-  artifact.distributionClass, String(artifact.sigstoreVerified), artifact.sigstoreIssuer,
-  artifact.sigstoreIdentity, artifact.sigstoreBundleSha256, sigstoreEvidenceDigest,
-  String(artifact.authenticodeVerified), artifact.authenticodeSubject ?? '',
-  artifact.authenticodeThumbprint ?? '', authenticodeEvidenceDigest,
-].join('\n')
+const candidatePayload = releaseSetSigningPayload(candidate)
 
 const candidatePublicKey = process.env.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY?.trim()
 if (candidatePublicKey) {
@@ -98,10 +75,10 @@ if (candidatePublicKey) {
   }
 }
 
-const target = candidate.platform === 'linux' ? `linux-${candidate.architecture}-appimage` : `windows-${candidate.architecture}-nsis`
+const target = `${candidate.platform}-${candidate.architecture}-${artifact.format}`
 const manifest = {
   version: candidate.version,
-  notes: `Verification and release notes: ${candidate.releaseNotesURL}`,
+  notes: `Verification and release notes: ${candidate.releaseNotesUrl}`,
   platforms: {
     [target]: {
       url: artifactURL.toString(),

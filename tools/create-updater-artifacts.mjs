@@ -5,6 +5,8 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { prepareReleaseSet, releaseSetSigningPayload } from './release-set.mjs'
+
 const [artifactPath, signaturePath, sigstorePath, authenticodePath] = process.argv.slice(2)
 if (!artifactPath || !signaturePath || !sigstorePath) {
   throw new Error('Usage: node tools/create-updater-artifacts.mjs <artifact> <tauri-signature> <sigstore-evidence.json> [authenticode-evidence.json]')
@@ -58,18 +60,12 @@ if (authenticode !== null && (typeof authenticode !== 'object' || Array.isArray(
   throw new Error('Authenticode evidence must be a JSON object produced by the signing job.')
 }
 
-const stableJSON = (value) => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableJSON).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJSON(value[key])}`).join(',')}}`
-}
 const authenticodeVerified = authenticode?.verified === true
 const authenticodeSubject = typeof authenticode?.subject === 'string' ? authenticode.subject : ''
 const authenticodeThumbprint = typeof authenticode?.thumbprint === 'string' ? authenticode.thumbprint : ''
 if (authenticodeVerified && (!authenticodeSubject || !authenticodeThumbprint)) {
   throw new Error('Verified Authenticode evidence must include both subject and thumbprint.')
 }
-const authenticodeEvidenceDigest = authenticode === null ? '' : createHash('sha256').update(stableJSON(authenticode)).digest('base64url')
 const artifactSHA256 = createHash('sha256').update(artifact).digest('hex')
 if (
   sigstore === null || typeof sigstore !== 'object' || Array.isArray(sigstore) ||
@@ -80,7 +76,6 @@ if (
 ) {
   throw new Error('Sigstore evidence must be a verified, transparency-logged record for the exact artifact.')
 }
-const sigstoreEvidenceDigest = createHash('sha256').update(stableJSON(sigstore)).digest('base64url')
 const distributionClass = authenticodeVerified ? 'production' : 'early_access'
 
 // Minisign-verify the exact artifact before the CI key signs a receipt, so a receipt can never turn a merely present .sig file into trusted evidence.
@@ -89,19 +84,24 @@ await run('cargo', ['run', '--quiet', '--manifest-path', 'src-tauri/Cargo.toml',
   env: { ...process.env, SESAME_UPDATER_PUBLIC_KEY: updaterPublicKey },
 })
 
-const candidate = {
-  schemaVersion: 2,
+if (!validHTTPSURL(publicArtifactURL)) {
+  throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')
+}
+const candidate = prepareReleaseSet({
   version: packageJSON.version,
   channel,
   platform: 'windows',
   architecture,
   supportedWindows,
-  releaseNotesURL,
-  artifact: {
+  releaseNotesUrl: releaseNotesURL,
+  artifacts: [{
+    format: 'nsis',
+    architecture,
     url: publicArtifactURL,
     objectKey: artifactObjectKey,
     sha256: artifactSHA256,
     bytes: artifact.length,
+    updaterCapable: true,
     updaterSignature,
     updaterSigningKeyId: signingKeyID,
     distributionClass,
@@ -117,18 +117,9 @@ const candidate = {
       authenticodeSubject,
       authenticodeThumbprint,
     }),
-  },
-}
-const signingPayload = [
-  'sesame-release-candidate-v3', candidate.version, candidate.channel, candidate.platform, candidate.architecture,
-  candidate.supportedWindows, candidate.releaseNotesURL, candidate.artifact.url, candidate.artifact.objectKey, candidate.artifact.sha256,
-  String(candidate.artifact.bytes), candidate.artifact.updaterSignature, candidate.artifact.updaterSigningKeyId,
-  distributionClass, 'true', sigstore.issuer, sigstore.certificateIdentity, sigstore.artifactBundleSha256, sigstoreEvidenceDigest,
-  String(authenticodeVerified), authenticodeSubject, authenticodeThumbprint, authenticodeEvidenceDigest,
-].join('\n')
-if (!validHTTPSURL(publicArtifactURL)) {
-  throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')
-}
+  }],
+})
+const signingPayload = releaseSetSigningPayload(candidate)
 const candidateSeed = Buffer.from(candidateSigningKey, 'base64url')
 if (candidateSeed.length !== 32) throw new Error('SESAME_RELEASE_CANDIDATE_SIGNING_KEY must be a base64url 32-byte Ed25519 seed.')
 const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), candidateSeed])
