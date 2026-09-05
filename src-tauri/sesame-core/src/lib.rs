@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod ffi;
 pub mod history;
 pub mod imports;
+pub mod loader;
 pub mod migration;
 pub mod password_analysis;
 pub mod pending_import;

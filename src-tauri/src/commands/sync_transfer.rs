@@ -249,13 +249,18 @@ pub async fn sync_download_vault(
             );
         }
 
-        let plaintext = vault.expose_vault_key(|key| {
-            crate::vault::crypto::decrypt_bytes(key, &blob, &snapshot_aad_for(&envelope))
+        let authenticated = vault.expose_vault_key(|key| {
+            sesame_core::loader::VaultLoader::open_snapshot(
+                envelope.version,
+                key,
+                &blob,
+                &snapshot_aad_for(&envelope),
+            )
+            .map_err(Into::into)
         })?;
-        let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&plaintext)
-            .map_err(|_| "The synced vault could not be read.".to_string())?;
+        let payload = authenticated.payload().clone();
         let count = payload.entries.len();
-        let digest = crate::sync::state::payload_digest(&plaintext);
+        let digest = crate::sync::state::payload_digest(authenticated.bytes());
         crate::vault::storage::commit_payload_change(vault, payload)?;
         // Session epoch bumps before the lock releases: approvals must not release stale credentials.
         state.advance_session_epoch();
@@ -592,8 +597,7 @@ pub async fn sync_conflict_details(
     let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
     let local_payload = vault.open_payload()?;
     let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
-    let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
-        .map_err(|_| "The synced vault could not be read.".to_string())?;
+    let remote_payload = remote.payload();
 
     Ok(SyncConflictView {
         this_device: SyncConflictSideView {
@@ -660,8 +664,7 @@ pub async fn sync_resolve_conflict(
         let local = serde_json::to_vec(&*local_payload)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
         let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
-        let remote_payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote)
-            .map_err(|_| "The synced vault could not be read.".to_string())?;
+        let remote_payload = remote.payload();
         let remote_entries = remote_payload.entries.len();
         let local_entries = local_payload.entries.len();
 
@@ -672,12 +675,12 @@ pub async fn sync_resolve_conflict(
             (
                 crate::sync::conflict_backup::Side::ThisDevice,
                 base_revision,
-                &local,
+                local.as_slice(),
             ),
             (
                 crate::sync::conflict_backup::Side::OtherDevice,
                 current.revision,
-                &remote,
+                remote.bytes(),
             ),
         ] {
             let path = crate::sync::conflict_backup::write_verified(
@@ -763,8 +766,7 @@ pub async fn sync_resolve_conflict(
         });
     }
 
-    let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&remote_plaintext)
-        .map_err(|_| "The synced vault could not be read.".to_string())?;
+    let payload = remote_plaintext.payload().clone();
     {
         let mut session = state
             .session
@@ -782,7 +784,7 @@ pub async fn sync_resolve_conflict(
             &current.vault_id,
             current.revision,
             current.vault_epoch,
-            &remote_plaintext,
+            remote_plaintext.bytes(),
         )
         .with_head(&crate::sync::envelope::digest(&envelope), &current.receipt),
     )?;
@@ -811,12 +813,18 @@ fn confirm_unchanged(vault: &crate::vault::UnlockedVault, captured: &str) -> Res
 fn decrypt_snapshot(
     key: &[u8; 32],
     envelope: &crate::sync::envelope::Envelope,
-) -> VaultResult<Vec<u8>> {
+) -> VaultResult<sesame_core::loader::AuthenticatedPayload> {
     let blob = crate::vault::types::CipherBlob {
         nonce: envelope.nonce.clone(),
         ciphertext: envelope.ciphertext.clone(),
     };
-    crate::vault::crypto::decrypt_bytes(key, &blob, &snapshot_aad_for(envelope))
+    sesame_core::loader::VaultLoader::open_snapshot(
+        envelope.version,
+        key,
+        &blob,
+        &snapshot_aad_for(envelope),
+    )
+    .map_err(Into::into)
 }
 
 fn backup_stamp() -> String {

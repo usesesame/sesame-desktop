@@ -4,79 +4,31 @@ use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::crypto::{decrypt_bytes, derive_key};
+use crate::loader::{Credential, VaultLoader};
 use crate::platform::unprotect_for_device;
 use crate::storage::write_vault_file;
-use crate::{
-    payload_aad_for_file, VaultFile, VaultPayload, VaultResult, MAX_BACKUP_BYTES,
-    RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
-};
 use crate::{
     types::*,
     util::{random_id, unix_timestamp},
 };
+use crate::{VaultFile, VaultPayload, VaultResult};
 
-/// Master password or recovery kit; the format-2 kit-as-primary-wrap case is tried too.
 pub fn unwrap_vault_key(file: &VaultFile, secret: &str) -> VaultResult<Zeroizing<[u8; 32]>> {
-    let attempts: Vec<(&KdfParams, &CipherBlob, &[u8], String)> = {
-        let mut attempts: Vec<(&KdfParams, &CipherBlob, &[u8], String)> =
-            vec![(&file.kdf, &file.key_wrap, WRAP_AAD, secret.to_string())];
-        let kit = secret.trim().to_ascii_uppercase();
-        match (&file.recovery_kdf, &file.recovery_wrap) {
-            (Some(recovery_kdf), Some(recovery_wrap)) => {
-                attempts.push((recovery_kdf, recovery_wrap, RECOVERY_WRAP_AAD, kit));
-            }
-            // Gated on the stored format: a stripped current-format file must not guess at the master wrap.
-            _ if file.format_version < crate::VAULT_FORMAT_VERSION => {
-                attempts.push((&file.kdf, &file.key_wrap, WRAP_AAD, kit))
-            }
-            _ => {}
-        }
-        attempts
-    };
-
-    for (kdf, wrap, aad, candidate) in attempts {
-        let Ok(wrapping_key) = derive_key(&candidate, kdf) else {
-            continue;
-        };
-        let mut wrapping_key = Zeroizing::new(wrapping_key);
-        if let Ok(mut vault_key) = decrypt_bytes(&wrapping_key, wrap, aad) {
-            let key: Result<[u8; 32], _> = vault_key.as_slice().try_into();
-            vault_key.zeroize();
-            wrapping_key.zeroize();
-            return key
-                .map(Zeroizing::new)
-                .map_err(|_| "That backup contains an invalid vault key.".to_string());
-        }
-        wrapping_key.zeroize();
-    }
-    Err("That master password or recovery kit does not open this backup.".into())
+    VaultLoader::unwrap_key(file, Credential::PasswordOrRecoveryKit(secret)).map_err(Into::into)
 }
 
-/// The secret must unwrap the key, and the key must authenticate the payload.
 pub fn authenticate_vault_file(file: &VaultFile, secret: &str) -> VaultResult<()> {
-    let key = unwrap_vault_key(file, secret)?;
-    let payload_aad = payload_aad_for_file(file.format_version, file.setup_complete)?;
-    let payload_bytes = Zeroizing::new(decrypt_bytes(&key, &file.payload, payload_aad).map_err(
-        |_| "That backup is damaged. Its contents could not be authenticated.".to_string(),
-    )?);
-    let mut payload: VaultPayload = serde_json::from_slice(payload_bytes.as_slice())
-        .map_err(|_| "That backup is damaged. Its contents could not be read.".to_string())?;
-    payload.zeroize();
-    Ok(())
+    VaultLoader::authenticate(file, Credential::PasswordOrRecoveryKit(secret))
+        .map(|_| ())
+        .map_err(Into::into)
 }
 
-/// Non-destructive; only display-safe metadata leaves this function.
 pub fn verify_backup_file(path: &Path, secret: &str) -> VaultResult<BackupVerification> {
     let file = read_backup_file(path)?;
-    let key = unwrap_vault_key(&file, secret)?;
-    let payload_aad = payload_aad_for_file(file.format_version, file.setup_complete)?;
-    let payload_bytes = Zeroizing::new(decrypt_bytes(&key, &file.payload, payload_aad).map_err(
-        |_| "That backup is damaged. Its contents could not be authenticated.".to_string(),
-    )?);
-    let mut payload: VaultPayload = serde_json::from_slice(payload_bytes.as_slice())
-        .map_err(|_| "That backup is damaged. Its contents could not be read.".to_string())?;
-    let verification = BackupVerification {
+    let authenticated =
+        VaultLoader::authenticate(&file, Credential::PasswordOrRecoveryKit(secret))?;
+    let payload = authenticated.payload();
+    Ok(BackupVerification {
         file_name: path
             .file_name()
             .and_then(|name| name.to_str())
@@ -87,9 +39,7 @@ pub fn verify_backup_file(path: &Path, secret: &str) -> VaultResult<BackupVerifi
         entry_count: payload.entries.len(),
         vault_id: payload.vault_id.clone(),
         revision: payload.revision,
-    };
-    payload.zeroize();
-    Ok(verification)
+    })
 }
 
 /// Device-bound material on another profile can never be used again.
@@ -415,49 +365,9 @@ pub fn read_backup_file(path: &Path) -> VaultResult<VaultFile> {
     if path.extension().and_then(|extension| extension.to_str()) != Some("sesame") {
         return Err("Choose a Sesame backup with a .sesame extension.".into());
     }
-    let bytes = crate::util::require_file_with_limit(
-        path,
-        MAX_BACKUP_BYTES,
-        "Sesame could not read that backup file.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes)
-        .map_err(|_| "That file is not a valid Sesame encrypted backup.".to_string())?;
-    validate_backup_file(&file)?;
-    Ok(file)
+    VaultLoader::read(path).map_err(Into::into)
 }
 
 pub fn validate_backup_file(file: &VaultFile) -> VaultResult<()> {
-    if file.format_version == 0 || file.format_version > VAULT_FORMAT_VERSION {
-        return Err("That backup uses a Sesame format this version cannot restore.".into());
-    }
-    crate::crypto::validate_kdf_params(&file.kdf)
-        .map_err(|_| "That backup has invalid key-derivation settings.".to_string())?;
-    if let Some(recovery_kdf) = &file.recovery_kdf {
-        crate::crypto::validate_kdf_params(recovery_kdf)
-            .map_err(|_| "That backup has invalid recovery key-derivation settings.".to_string())?;
-    }
-    validate_cipher_blob(&file.key_wrap)?;
-    if let Some(recovery_wrap) = &file.recovery_wrap {
-        validate_cipher_blob(recovery_wrap)?;
-    }
-    if let Some(pin_wrap) = &file.pin_wrap {
-        crate::crypto::validate_kdf_params(&pin_wrap.kdf)
-            .map_err(|_| "That backup has invalid PIN key-derivation settings.".to_string())?;
-        validate_cipher_blob(&pin_wrap.key_wrap)?;
-    }
-    validate_cipher_blob(&file.payload)?;
-    Ok(())
-}
-
-fn validate_cipher_blob(blob: &CipherBlob) -> VaultResult<()> {
-    let nonce = URL_SAFE_NO_PAD
-        .decode(&blob.nonce)
-        .map_err(|_| "That backup contains invalid encrypted data.".to_string())?;
-    let ciphertext = URL_SAFE_NO_PAD
-        .decode(&blob.ciphertext)
-        .map_err(|_| "That backup contains invalid encrypted data.".to_string())?;
-    if nonce.len() != 24 || ciphertext.len() < 16 {
-        return Err("That backup contains invalid encrypted data.".into());
-    }
-    Ok(())
+    VaultLoader::validate(file).map_err(Into::into)
 }

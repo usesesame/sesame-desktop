@@ -12,11 +12,11 @@ use crate::vault::backup::{
 };
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health;
-use crate::vault::storage::{check_supported_vault_format, vault_path, write_export_file};
+use crate::vault::storage::{vault_path, write_export_file};
 use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
 use crate::vault::{
-    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultFile,
-    VaultResult, VaultState, MAX_VAULT_FILE_BYTES,
+    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultResult,
+    VaultState,
 };
 
 #[tauri::command]
@@ -189,15 +189,7 @@ pub fn delete_local_vault(
     // unattended unlocked window cannot destroy the vault and its backups, and so
     // a locked window cannot either.
     let master_password = Zeroizing::new(master_password);
-    let bytes = crate::vault::util::require_file_with_limit(
-        &vault,
-        MAX_VAULT_FILE_BYTES,
-        "Sesame could not find a local vault to remove.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
+    let file = sesame_core::loader::VaultLoader::read(&vault)?;
     let mut key =
         sesame_core::api::unwrap_key_with_password(&file, &master_password).map_err(|_| {
             "That master password is not correct. The vault was not removed.".to_string()

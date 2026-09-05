@@ -30,13 +30,7 @@ pub const PIN_THROTTLE_FILE: &str = "pin-throttle.sesame";
 
 /// Every unlock path runs this before deriving a key from the file's parameters.
 pub fn check_supported_vault_format(file: &VaultFile) -> VaultResult<()> {
-    if file.format_version == 0
-        || file.format_version > VAULT_FORMAT_VERSION
-        || file.kdf.algorithm != "argon2id"
-    {
-        return Err("This vault uses a format Sesame does not understand yet.".into());
-    }
-    Ok(())
+    crate::loader::VaultLoader::validate(file).map_err(Into::into)
 }
 
 /// Absent reads as tampering, not a fresh count: setting a PIN always writes it.

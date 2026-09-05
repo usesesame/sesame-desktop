@@ -2,12 +2,9 @@
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::backup::unwrap_vault_key;
-use crate::crypto::{
-    decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
-};
-use crate::migration::{fresh_vault_id, migrate_payload, migrate_vault_file};
-use crate::storage::check_supported_vault_format;
+use crate::crypto::{default_kdf_params, derive_key, encrypt_bytes, serialize_payload};
+use crate::loader::{Credential, MigrationPlan, VaultLoader};
+use crate::migration::fresh_vault_id;
 use crate::types::{Folder, VaultEntry, VaultFile, VaultPayload};
 use crate::util::{fill_random, generate_recovery_kit};
 use crate::{
@@ -22,6 +19,7 @@ pub struct OpenedVault {
     pub file: VaultFile,
     /// True when opening upgraded file/payload in memory; the caller decides when to persist.
     pub migrated: bool,
+    pub migration: MigrationPlan,
 }
 
 impl Drop for OpenedVault {
@@ -30,102 +28,41 @@ impl Drop for OpenedVault {
     }
 }
 
-/// Rejects a format this version cannot safely open, before any key derivation.
 pub fn parse_vault_file(bytes: &[u8]) -> VaultResult<VaultFile> {
-    let file: VaultFile = serde_json::from_slice(bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
-    Ok(file)
+    VaultLoader::parse(bytes).map_err(Into::into)
 }
 
-/// Either secret unlocks; the desktop commands stay strictly single-secret-type.
 pub fn open_vault(file: &VaultFile, secret: &str) -> VaultResult<OpenedVault> {
-    let key = unwrap_vault_key(file, secret)?;
-    open_vault_with_key(file, key_array_from(key.as_slice())?)
+    VaultLoader::open(file, Credential::PasswordOrRecoveryKit(secret)).map_err(Into::into)
 }
 
-/// Master password only; never falls back to treating the input as a recovery kit.
 pub fn open_vault_with_password(file: &VaultFile, password: &str) -> VaultResult<OpenedVault> {
-    open_vault_with_key(file, unwrap_key_with_password(file, password)?)
+    VaultLoader::open(file, Credential::MasterPassword(password)).map_err(Into::into)
 }
 
-/// Recovery kit only; the format-2 fallback applies only to a genuinely legacy stored format.
-pub fn open_vault_with_recovery_kit(
-    file: &VaultFile,
-    recovery_kit: &str,
-) -> VaultResult<OpenedVault> {
-    open_vault_with_key(file, unwrap_key_with_recovery_kit(file, recovery_kit)?)
+pub fn open_vault_with_recovery_kit(file: &VaultFile, kit: &str) -> VaultResult<OpenedVault> {
+    VaultLoader::open(file, Credential::RecoveryKit(kit)).map_err(Into::into)
 }
 
-/// Unwraps the key without decrypting the payload; avoids a double decrypt in full-open callers.
 pub fn unwrap_key_with_password(file: &VaultFile, password: &str) -> VaultResult<[u8; 32]> {
-    let wrapping_key = Zeroizing::new(derive_key(password, &file.kdf)?);
-    let key = Zeroizing::new(
-        decrypt_bytes(&wrapping_key, &file.key_wrap, WRAP_AAD).map_err(|_| {
-            "Sesame could not unlock this vault. Check your master password.".to_string()
-        })?,
-    );
-    key_array_from(key.as_slice())
+    VaultLoader::unwrap_key(file, Credential::MasterPassword(password))
+        .map(|key| *key)
+        .map_err(Into::into)
 }
 
-pub fn unwrap_key_with_recovery_kit(file: &VaultFile, recovery_kit: &str) -> VaultResult<[u8; 32]> {
-    let normalized_kit = recovery_kit.trim().to_ascii_uppercase();
-    let (recovery_kdf, recovery_wrap, aad) = match (&file.recovery_kdf, &file.recovery_wrap) {
-        (Some(recovery_kdf), Some(recovery_wrap)) => {
-            (recovery_kdf, recovery_wrap, RECOVERY_WRAP_AAD)
-        }
-        // Fallback only for a genuinely legacy envelope; a stripped current-format file must say so.
-        _ if file.format_version < VAULT_FORMAT_VERSION => {
-            (&file.kdf, &file.key_wrap, WRAP_AAD)
-        }
-        _ => {
-            return Err(
-                "This vault file has no recovery wrapper. It has been changed or damaged since Sesame wrote it. Restore a known-good encrypted backup."
-                    .into(),
-            )
-        }
-    };
-    let wrapping_key = Zeroizing::new(derive_key(&normalized_kit, recovery_kdf)?);
-    let key = Zeroizing::new(
-        decrypt_bytes(&wrapping_key, recovery_wrap, aad)
-            .map_err(|_| "That recovery kit is not correct.".to_string())?,
-    );
-    key_array_from(key.as_slice())
+pub fn unwrap_key_with_recovery_kit(file: &VaultFile, kit: &str) -> VaultResult<[u8; 32]> {
+    VaultLoader::unwrap_key(file, Credential::RecoveryKit(kit))
+        .map(|key| *key)
+        .map_err(Into::into)
 }
 
-fn key_array_from(key: &[u8]) -> VaultResult<[u8; 32]> {
-    key.try_into().map_err(|_| {
-        "The local vault key is invalid. Restore a known-good encrypted backup.".to_string()
-    })
-}
-
-/// For keys already known by some other means, such as a PIN or Hello wrap.
 pub fn open_vault_with_key(file: &VaultFile, key: [u8; 32]) -> VaultResult<OpenedVault> {
-    let mut file = file.clone();
-    let stored_payload_aad = payload_aad_for_file(file.format_version, file.setup_complete)?;
-    let file_migrated = migrate_vault_file(&mut file)?;
-    let payload_bytes = Zeroizing::new(
-        decrypt_bytes(&key, &file.payload, stored_payload_aad).map_err(|_| {
-            "The vault data could not be authenticated. Restore a known-good encrypted backup."
-                .to_string()
-        })?,
-    );
-    let mut payload: VaultPayload =
-        serde_json::from_slice(payload_bytes.as_slice()).map_err(|_| {
-            "The vault data could not be read. Restore a known-good encrypted backup.".to_string()
-        })?;
-    let payload_migrated = migrate_payload(&mut payload);
-    Ok(OpenedVault {
-        key: Zeroizing::new(key),
-        payload,
-        file,
-        migrated: file_migrated || payload_migrated,
-    })
+    let key = Zeroizing::new(key);
+    VaultLoader::open(file, Credential::VaultKey(&key)).map_err(Into::into)
 }
 
 pub fn open_vault_bytes(bytes: &[u8], secret: &str) -> VaultResult<OpenedVault> {
-    open_vault(&parse_vault_file(bytes)?, secret)
+    VaultLoader::load(bytes, Credential::PasswordOrRecoveryKit(secret)).map_err(Into::into)
 }
 
 /// Fresh vault; the recovery kit returns in plain text exactly once.
@@ -169,6 +106,12 @@ pub fn create_vault(password: &str, vault_name: &str) -> VaultResult<(OpenedVaul
             payload,
             file,
             migrated: false,
+            migration: MigrationPlan {
+                source_format: VAULT_FORMAT_VERSION,
+                target_format: VAULT_FORMAT_VERSION,
+                envelope_changed: false,
+                payload_changed: false,
+            },
         },
         recovery_kit_for_display,
     ))

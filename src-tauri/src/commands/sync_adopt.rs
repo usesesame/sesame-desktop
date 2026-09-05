@@ -95,10 +95,13 @@ pub async fn sync_adopt_vault(
         nonce: envelope.nonce.clone(),
         ciphertext: envelope.ciphertext.clone(),
     };
-    let mut plaintext = decrypt_bytes(&key, &blob, &snapshot_aad_for(&envelope))?;
-    let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&plaintext)
-        .map_err(|_| "The synced vault could not be read.".to_string())?;
-    plaintext.zeroize();
+    let authenticated = sesame_core::loader::VaultLoader::open_snapshot(
+        envelope.version,
+        &key,
+        &blob,
+        &snapshot_aad_for(&envelope),
+    )?;
+    let payload = authenticated.payload().clone();
     let entry_count = payload.entries.len();
 
     let recovery_kit = {
