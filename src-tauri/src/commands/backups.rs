@@ -297,24 +297,21 @@ pub fn restore_backup(
     // Authenticate before invalidating anything: a failure must not lock the user out.
     let prepared = prepare_backup_for_restore(&source, &destination, &secret);
     secret.zeroize();
-    let file = prepared?;
+    let prepared = prepared?;
 
-    // Guard held through replacement so a concurrent save cannot overwrite it.
-    let session = state.begin_destructive_lifecycle_change()?;
-    let outcome = apply_restored_vault_file(&destination, &file);
-    drop(session);
-    let (safety_backup_name, pin_unlock_available, hello_unlock_available) = outcome?;
-    state.cache_pin_unlock(pin_unlock_available);
-    state.cache_hello_unlock(hello_unlock_available);
-    if pin_unlock_available {
+    let installed =
+        state.apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
+    state.cache_pin_unlock(installed.pin_unlock_available);
+    state.cache_hello_unlock(installed.hello_unlock_available);
+    if installed.pin_unlock_available {
         let _ = establish_pin_throttle_state(&app, &state);
     } else {
         discard_pin_throttle_state(&app, &state);
     }
     Ok(RestoreBackupResult {
-        safety_backup_name,
-        pin_unlock_available,
-        hello_unlock_available,
+        safety_backup_name: installed.safety_backup_name,
+        pin_unlock_available: installed.pin_unlock_available,
+        hello_unlock_available: installed.hello_unlock_available,
     })
 }
 

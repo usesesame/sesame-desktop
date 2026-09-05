@@ -189,14 +189,33 @@ impl VaultState {
     pub fn begin_destructive_lifecycle_change(
         &self,
     ) -> VaultResult<std::sync::MutexGuard<'_, Option<UnlockedVault>>> {
-        let mut session = self
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not close the current vault session.".to_string())?;
+        let mut session = self.begin_lifecycle_change()?;
         *session = None;
         self.discard_pending_import();
         self.advance_session_epoch();
         Ok(session)
+    }
+
+    fn begin_lifecycle_change(
+        &self,
+    ) -> VaultResult<std::sync::MutexGuard<'_, Option<UnlockedVault>>> {
+        self.session
+            .lock()
+            .map_err(|_| "Sesame could not close the current vault session.".to_string())
+    }
+
+    pub fn apply_lifecycle_replacement<T>(
+        &self,
+        replace: impl FnOnce() -> VaultResult<T>,
+    ) -> VaultResult<T> {
+        let mut session = self.begin_lifecycle_change()?;
+        let result = replace();
+        if result.is_ok() {
+            *session = None;
+            self.discard_pending_import();
+            self.advance_session_epoch();
+        }
+        result
     }
 
     pub fn lock_for_lifecycle(&self) -> VaultResult<()> {

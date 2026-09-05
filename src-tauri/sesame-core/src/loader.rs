@@ -111,16 +111,23 @@ pub struct VaultLoader;
 
 impl VaultLoader {
     pub fn read(path: &Path) -> LoadResult<VaultFile> {
+        let bytes = Self::read_bytes(path)?;
+        Self::parse(&bytes)
+    }
+
+    pub fn read_bytes(path: &Path) -> LoadResult<Zeroizing<Vec<u8>>> {
         let file = std::fs::File::open(path).map_err(|_| LoadFailure::LocalIo)?;
         if file.metadata().map_err(|_| LoadFailure::LocalIo)?.len() > MAX_VAULT_FILE_BYTES {
             return Err(LoadFailure::SizeLimit);
         }
-        // Bound the read itself: the file can grow after its metadata was checked.
         let mut bytes = Vec::new();
         file.take(MAX_VAULT_FILE_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|_| LoadFailure::LocalIo)?;
-        Self::parse(&bytes)
+        if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
+            return Err(LoadFailure::SizeLimit);
+        }
+        Ok(Zeroizing::new(bytes))
     }
 
     pub fn parse(bytes: &[u8]) -> LoadResult<VaultFile> {
