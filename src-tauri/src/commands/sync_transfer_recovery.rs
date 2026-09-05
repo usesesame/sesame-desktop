@@ -17,7 +17,7 @@ pub async fn sync_restore_conflict_backup(app: AppHandle, state: tauri::State<'_
     let mut session = state.session.lock().map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
     let vault = session.as_mut().ok_or("Unlock Sesame before restoring a recovery copy.")?;
     let contents = vault.expose_vault_key(|key| crate::sync::conflict_backup::read_verified(&path, key))?;
-    let payload: crate::vault::types::VaultPayload = serde_json::from_slice(&contents.payload).map_err(|_| "That recovery copy could not be read.".to_string())?;
+    let payload = contents.payload.payload().clone();
     let entry_count = payload.entries.len();
     let current = vault.open_payload()?;
     let current_payload = serde_json::to_vec(&*current).map_err(|_| "Sesame could not read the local vault.".to_string())?;

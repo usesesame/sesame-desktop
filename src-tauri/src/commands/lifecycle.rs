@@ -6,11 +6,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::vault::crypto::decrypt_bytes;
 use crate::vault::storage::{
-    check_supported_vault_format, clear_pin_throttle_state, complete_recovery_setup_for_session,
-    derive_pin_wrapping_key, persist_session, read_pin_throttle_state, remove_hello_for_session,
-    remove_pin_for_session, resume_recovery_setup_for_session, set_hello_for_session,
-    set_pin_for_session, validate_new_unlock_pin, validate_unlock_pin, vault_path,
-    write_pin_throttle_state, write_vault_file,
+    clear_pin_throttle_state, complete_recovery_setup_for_session, derive_pin_wrapping_key,
+    persist_session, read_pin_throttle_state, remove_hello_for_session, remove_pin_for_session,
+    resume_recovery_setup_for_session, set_hello_for_session, set_pin_for_session,
+    validate_new_unlock_pin, validate_unlock_pin, vault_path, write_pin_throttle_state,
+    write_vault_file,
 };
 use crate::vault::util::random_id;
 use crate::vault::windows_hello;
@@ -217,15 +217,7 @@ pub fn unlock_recovery_vault(
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
     let path = vault_path(&app)?;
-    let bytes = crate::vault::util::require_file_with_limit(
-        &path,
-        MAX_VAULT_FILE_BYTES,
-        "Sesame could not find a local vault to unlock.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
+    let file = sesame_core::loader::VaultLoader::read(&path)?;
     let supplied_kit = Zeroizing::new(request.recovery_kit);
     let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &supplied_kit)?;
     install_unlocked_session(&state, &mut session, path, key_array, file)
@@ -320,15 +312,7 @@ pub fn unlock_with_windows_hello(
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
     let path = vault_path(&app)?;
-    let bytes = crate::vault::util::require_file_with_limit(
-        &path,
-        MAX_VAULT_FILE_BYTES,
-        "Sesame could not find a local vault to unlock.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
+    let file = sesame_core::loader::VaultLoader::read(&path)?;
     let wrap = file
         .hello_wrap
         .as_ref()
@@ -392,15 +376,7 @@ fn unlock_pin_vault_inner(
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
     let path = vault_path(&app)?;
-    let bytes = crate::vault::util::require_file_with_limit(
-        &path,
-        MAX_VAULT_FILE_BYTES,
-        "Sesame could not find a local vault to unlock.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
+    let file = sesame_core::loader::VaultLoader::read(&path)?;
     let pin_wrap = file
         .pin_wrap
         .as_ref()
@@ -476,15 +452,7 @@ pub fn unlock_vault(
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
     let path = vault_path(&app)?;
-    let bytes = crate::vault::util::require_file_with_limit(
-        &path,
-        MAX_VAULT_FILE_BYTES,
-        "Sesame could not find a local vault to unlock.",
-    )?;
-    let file: VaultFile = serde_json::from_slice(&bytes).map_err(|_| {
-        "This vault file is not valid. Restore a known-good encrypted backup.".to_string()
-    })?;
-    check_supported_vault_format(&file)?;
+    let file = sesame_core::loader::VaultLoader::read(&path)?;
     let master_password = Zeroizing::new(request.master_password);
     let key_array = sesame_core::api::unwrap_key_with_password(&file, &master_password)?;
     let result = install_unlocked_session(&state, &mut session, path, key_array, file);

@@ -13,7 +13,7 @@ pub fn fresh_vault_id() -> String {
 pub const MIN_SUPPORTED_VAULT_FORMAT: u8 = 2;
 
 /// Removes the dead format-2 device wrap; returns whether the caller must rewrite the file.
-pub fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
+pub(crate) fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
     if file.format_version < MIN_SUPPORTED_VAULT_FORMAT
         || file.format_version > VAULT_FORMAT_VERSION
     {
@@ -34,7 +34,7 @@ pub fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
 }
 
 /// Pre-metadata creation times are stamped at migration, never invented.
-pub fn migrate_payload(payload: &mut VaultPayload) -> bool {
+pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
     let now = unix_timestamp();
     let mut changed = false;
 

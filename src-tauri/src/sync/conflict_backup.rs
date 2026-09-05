@@ -6,11 +6,9 @@ use std::path::{Path, PathBuf};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 
-use crate::vault::crypto::{decrypt_bytes, encrypt_bytes};
-use crate::vault::types::VaultPayload;
-use crate::vault::{
-    payload_aad_for_file, UnlockedVault, VaultFile, VaultResult, PAYLOAD_AAD, VAULT_FORMAT_VERSION,
-};
+use crate::vault::crypto::encrypt_bytes;
+use crate::vault::{UnlockedVault, VaultFile, VaultResult, PAYLOAD_AAD, VAULT_FORMAT_VERSION};
+use sesame_core::loader::{AuthenticatedPayload, Credential, VaultLoader};
 
 pub const BACKUP_DIR_NAME: &str = "sync-conflict-backups";
 
@@ -68,7 +66,7 @@ pub fn write_verified(
     let path = create_new_file(directory, side, revision, stamp, &body)?;
 
     let recovered = vault.expose_vault_key(|key| read_verified(&path, key))?;
-    if recovered.payload != payload_bytes || recovered.revision != revision {
+    if recovered.payload.bytes() != payload_bytes || recovered.revision != revision {
         // Remove it rather than leave an artifact that claims to hold a vault it does not.
         let _ = std::fs::remove_file(&path);
         return Err("Sesame could not verify the recovery copy.".to_string());
@@ -117,20 +115,13 @@ fn create_new_file(
 pub struct RecoveredBackup {
     pub revision: i64,
     pub entry_count: usize,
-    pub payload: Vec<u8>,
+    pub payload: AuthenticatedPayload,
 }
 
 /// Fast-path read with the raw session key; the same file opens by master password or kit like any backup.
 pub fn read_verified(path: &Path, key: &[u8; 32]) -> VaultResult<RecoveredBackup> {
-    let body =
-        std::fs::read(path).map_err(|_| "Sesame could not read the recovery copy.".to_string())?;
-    let file: VaultFile = serde_json::from_slice(&body)
-        .map_err(|_| "That file is not a valid Sesame encrypted backup.".to_string())?;
-    let payload_aad = payload_aad_for_file(file.format_version, file.setup_complete)?;
-    let payload_bytes = decrypt_bytes(key, &file.payload, payload_aad)
-        .map_err(|_| "Sesame could not read the recovery copy.".to_string())?;
-    let payload: VaultPayload = serde_json::from_slice(&payload_bytes)
-        .map_err(|_| "Sesame could not read the recovery copy.".to_string())?;
+    let file = VaultLoader::read(path)?;
+    let payload = VaultLoader::authenticate(&file, Credential::VaultKey(key))?;
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -139,8 +130,8 @@ pub fn read_verified(path: &Path, key: &[u8; 32]) -> VaultResult<RecoveredBackup
         .ok_or("Sesame could not read the recovery copy.".to_string())?;
     Ok(RecoveredBackup {
         revision,
-        entry_count: payload.entries.len(),
-        payload: payload_bytes,
+        entry_count: payload.payload().entries.len(),
+        payload,
     })
 }
 

@@ -96,6 +96,68 @@ pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
         .map_err(|_| "Sesame could not write the vault copy.".to_string())
 }
 
+#[cfg(windows)]
+pub fn same_file_identity(source: &Path, destination: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
+    };
+
+    // std keeps Windows file identity unstable, so two open handles are
+    // compared by volume serial number and file index.
+    fn file_identity(path: &Path) -> Option<(u32, u64)> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        let queried = unsafe { GetFileInformationByHandle(handle, &mut information) };
+        unsafe { CloseHandle(handle) };
+        if queried == 0 {
+            return None;
+        }
+        Some((
+            information.dwVolumeSerialNumber,
+            ((information.nFileIndexHigh as u64) << 32) | information.nFileIndexLow as u64,
+        ))
+    }
+
+    match (file_identity(source), file_identity(destination)) {
+        (Some(source), Some(destination)) => source == destination,
+        _ => false,
+    }
+}
+
+#[cfg(unix)]
+pub fn same_file_identity(source: &Path, destination: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (fs::metadata(source), fs::metadata(destination)) {
+        (Ok(source), Ok(destination)) => {
+            source.dev() == destination.dev() && source.ino() == destination.ino()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn same_file_identity(_source: &Path, _destination: &Path) -> bool {
+    false
+}
+
 /// Best-effort secure deletion: overwrites with random bytes; wear-leveled storage cannot be guaranteed.
 pub fn securely_delete(path: &Path) -> VaultResult<()> {
     if path.is_dir() {

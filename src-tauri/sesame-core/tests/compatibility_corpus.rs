@@ -3,11 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde_json::Value;
-use sesame_core::api::{
-    open_vault, open_vault_with_recovery_kit, parse_vault_file, unwrap_key_with_password,
-};
-use sesame_core::backup::{authenticate_vault_file, read_backup_file};
-use sesame_core::{decrypt_bytes, migrate_vault_file, payload_aad_for_file, VAULT_FORMAT_VERSION};
+use sesame_core::loader::{Credential, VaultLoader};
+use sesame_core::VAULT_FORMAT_VERSION;
 use sha2::{Digest, Sha256};
 
 const PUBLISHED_RELEASES: [&str; 5] = ["v0.1.0", "v0.1.1", "v0.2.0", "v0.2.1", "v0.2.2"];
@@ -127,7 +124,7 @@ fn open_fixture(tag: &str) {
         "{tag} no longer matches its recorded digest"
     );
 
-    let file = read_backup_file(&path).expect("the current reader accepts the fixture");
+    let file = VaultLoader::read(&path).expect("the current reader accepts the fixture");
     assert_eq!(file.format_version, VAULT_FORMAT_VERSION);
     assert!(file.setup_complete);
 
@@ -137,24 +134,10 @@ fn open_fixture(tag: &str) {
     let recovery_kit = entry["secrets"]["recoveryKit"]
         .as_str()
         .expect("recovery kit");
-    authenticate_vault_file(&file, master_password)
-        .expect("master password authenticates the fixture");
-
-    let mut migrated_file = file.clone();
-    let file_changed = migrate_vault_file(&mut migrated_file).expect("file migration runs");
-    assert_eq!(
-        file_changed,
-        entry["expectedMigration"]["fileChanged"]
-            .as_bool()
-            .expect("fileChanged"),
-        "{tag} file migration did not match its recorded expectation"
-    );
-
-    let key = unwrap_key_with_password(&file, master_password).expect("unwrapped the vault key");
-    let payload_aad = payload_aad_for_file(file.format_version, file.setup_complete)
-        .expect("payload label for the recorded format");
-    let payload_bytes =
-        decrypt_bytes(&key, &file.payload, payload_aad).expect("decrypted the recorded payload");
+    let authenticated =
+        VaultLoader::authenticate(&file, Credential::MasterPassword(master_password))
+            .expect("master password authenticates the fixture");
+    let payload_bytes = authenticated.bytes();
     let raw_payload: Value =
         serde_json::from_slice(&payload_bytes).expect("parsed the decrypted payload");
     let items = raw_payload["items"].as_array().expect("tagged items shape");
@@ -177,7 +160,20 @@ fn open_fixture(tag: &str) {
         "{tag} identity tags key presence did not match its recorded payload shape"
     );
 
-    let opened = open_vault(&file, master_password).expect("opened the fixture");
+    let opened = VaultLoader::open(&file, Credential::MasterPassword(master_password))
+        .expect("opened the fixture");
+    assert_eq!(
+        opened.migration.envelope_changed,
+        entry["expectedMigration"]["fileChanged"]
+            .as_bool()
+            .expect("fileChanged")
+    );
+    assert_eq!(
+        opened.migration.payload_changed,
+        entry["expectedMigration"]["payloadChanged"]
+            .as_bool()
+            .expect("payloadChanged")
+    );
     assert!(
         opened.migrated,
         "{tag} authenticated payload must report its migration state"
@@ -245,8 +241,8 @@ fn open_fixture(tag: &str) {
     assert_eq!(backfilled.password_updated_at, backfilled.updated_at);
     assert_eq!(backfilled.revision, 1);
 
-    let reparsed = parse_vault_file(&bytes).expect("reparsed the fixture bytes");
-    let with_kit = open_vault_with_recovery_kit(&reparsed, recovery_kit)
+    let reparsed = VaultLoader::parse(&bytes).expect("reparsed the fixture bytes");
+    let with_kit = VaultLoader::open(&reparsed, Credential::RecoveryKit(recovery_kit))
         .expect("recovery kit opens the fixture");
     assert_eq!(with_kit.payload.vault_id, opened.payload.vault_id);
 
