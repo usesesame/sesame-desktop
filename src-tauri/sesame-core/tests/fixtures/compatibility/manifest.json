@@ -7,27 +7,72 @@
     {
       "tag": "v0.1.0",
       "commit": "cd8062eae660a5a1ff04723801e40038d0ea8949",
-      "writerGeneration": "legacy"
+      "writerGeneration": "legacy",
+      "publishedAt": "2026-08-18T17:39:37Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.1.0",
+      "packages": [
+        {
+          "digest": "sha256:85e1adf61290b4771c3f3ad8744e28d61db50939057e1637e7eb22b27e3efa90",
+          "name": "Sesame_0.1.0_x64-setup.exe",
+          "size": 6179098
+        }
+      ]
     },
     {
       "tag": "v0.1.1",
       "commit": "0bf94b71681a41d8dbb5d4679428f5a69c1a35f7",
-      "writerGeneration": "legacy"
+      "writerGeneration": "legacy",
+      "publishedAt": "2026-08-19T08:25:41Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.1.1",
+      "packages": [
+        {
+          "digest": "sha256:7123941ea6b92e8095c51d31f761101cb9ee31d2176f66741b71bcdd0e9edd52",
+          "name": "Sesame_0.1.1_x64-setup.exe",
+          "size": 6241309
+        }
+      ]
     },
     {
       "tag": "v0.2.0",
       "commit": "70420cb69d674fb67725f244cd9ca831827b9a87",
-      "writerGeneration": "current"
+      "writerGeneration": "current",
+      "publishedAt": "2026-08-30T15:35:29Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.2.0",
+      "packages": [
+        {
+          "digest": "sha256:4517fcdf3bcc16db76a7db4459c75d1ad0a859162dae2b6f32d89f98cdd6107a",
+          "name": "Sesame_0.2.0_x64-setup.exe",
+          "size": 6241236
+        }
+      ]
     },
     {
       "tag": "v0.2.1",
       "commit": "ad4339a2e07ecb8216da81a5d5cf72a70444e000",
-      "writerGeneration": "current"
+      "writerGeneration": "current",
+      "publishedAt": "2026-08-31T07:57:42Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.2.1",
+      "packages": [
+        {
+          "digest": "sha256:4e9cc735f0810e9f7462f6d7c5a9c35135fde77c89c8e11e5231115653a6d2d1",
+          "name": "Sesame_0.2.1_x64-setup.exe",
+          "size": 6242103
+        }
+      ]
     },
     {
       "tag": "v0.2.2",
       "commit": "39984ed621a5c1fef3d56b94d55f3ee1901a0543",
-      "writerGeneration": "current"
+      "writerGeneration": "current",
+      "publishedAt": "2026-08-31T12:22:21Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.2.2",
+      "packages": [
+        {
+          "digest": "sha256:fd91d0ed65f1e1ff346784666bcee3b414a1238419cb490ca6dc7addd3c32a22",
+          "name": "Sesame_0.2.2_x64-setup.exe",
+          "size": 6239692
+        }
+      ]
     }
   ],
   "writerGenerations": [
@@ -85,6 +130,16 @@
         "recordedBy": "owner",
         "date": "2026-09-02",
         "note": "The owner kept the upgrade path: readers for formats 2 through 9 stay, so an old file can always be upgraded into the current format instead of being refused. Support for these formats is enforced by the authenticated format-bound construction and adversarial reader tests, not by genuine writer fixtures. Every public release wrote format 10, so public-release users are covered by the proven fixtures; formats 2 through 9 only matter for backups from builds that never shipped."
+      },
+      "recoveryPath": {
+        "status": "requiresHistoricalWriter",
+        "steps": [
+          "Recover the original pre-public source revision and lockfile, or original executable and its provenance, from maintainer archives for each format 2 through 9. The public tags and reachable format-constant history do not contain these writers.",
+          "Identify the exact envelope, payload schema, KDF parameters, wrapper construction, authentication labels, and setup states from that writer. Do not infer them by relabelling a format 10 file or trying alternate authentication labels.",
+          "Run the recovered writer in an isolated environment with fictional data for every available record type, folders, trash, history, Unicode, empty optionals, and each supported recovery path. Record the writer digest, fixture digest, fictional credentials, stable identifiers, and expected decoded contents.",
+          "Require those genuine fixtures to authenticate and preserve their expected contents through the compatibility tests before describing that format as proven. If its reader must be retired, obtain owner approval for a separately retained read-only recovery build or converter and test it against the same fixtures first."
+        ],
+        "limitation": "Keeping existing readers does not establish historical compatibility. No recovered writer, tested standalone converter, or approved removal from the compatibility promise is recorded for formats 2 through 9."
       }
     }
   ],
@@ -554,5 +609,52 @@
         }
       }
     }
-  ]
+  ],
+  "releaseInventory": {
+    "checkedAt": "2026-09-05",
+    "source": "https://api.github.com/repos/usesesame/sesame-desktop/releases",
+    "scope": "All public releases and installable assets returned by the paginated release API. Package digests are GitHub metadata, not locally verified downloads. Fixtures use tagged source writers, not installed packages."
+  },
+  "writerInventory": {
+    "scope": "Tagged source writers for the five published releases; installed-package execution was not repeated in this review.",
+    "sourcePaths": [
+      "src-tauri/sesame-core/src/lib.rs",
+      "src-tauri/sesame-core/src/api.rs",
+      "src-tauri/sesame-core/src/crypto.rs",
+      "src-tauri/sesame-core/src/storage.rs",
+      "src-tauri/sesame-core/src/types.rs"
+    ],
+    "formatVersion": 10,
+    "envelope": "JSON VaultFile with formatVersion, kdf, keyWrap, optional deviceWrap, recoveryKdf, recoveryWrap, pinWrap, helloWrap, setupComplete, and payload.",
+    "payload": "JSON PersistedVaultPayloadV8 with tagged items, folders, trash, history, vaultName, vaultId, and revision. Record-field differences are recorded in writerGenerations and each fixture payloadShape.",
+    "cipher": "XChaCha20-Poly1305 with 32-byte keys and 24-byte random nonces; base64url without padding for encoded bytes.",
+    "passwordAndRecoveryKdf": {
+      "algorithm": "argon2id",
+      "version": 19,
+      "memoryKib": 65536,
+      "iterations": 3,
+      "parallelism": 4,
+      "saltBytes": 32,
+      "outputBytes": 32
+    },
+    "authenticationLabels": {
+      "passwordWrap": "sesame:wrapped-vault-key:v1",
+      "recoveryWrap": "sesame:recovery-wrapped-vault-key:v1",
+      "pinWrap": "sesame:pin-wrapped-vault-key:v1",
+      "pendingPayload": "sesame:vault-payload:format:10:setup:pending",
+      "completePayload": "sesame:vault-payload:format:10:setup:complete"
+    },
+    "fixtureWrappers": [
+      "masterPassword",
+      "recoveryKit"
+    ],
+    "fixtureSetupStates": [
+      "complete"
+    ],
+    "coverageLimits": [
+      "No pending-setup fixture is committed.",
+      "No PIN, Windows Hello, or legacy device wrapper fixture is committed.",
+      "No installed-package execution or restore/restart round trip is established by the read-only corpus tests."
+    ]
+  }
 }

@@ -53,6 +53,14 @@ test('the corpus records every published desktop release', () => {
   )
   for (const version of manifest.publishedVersions) {
     assert.match(version.commit, /^[0-9a-f]{40}$/)
+    assert.ok(Number.isFinite(Date.parse(version.publishedAt)))
+    assert.equal(version.releaseUrl, `https://github.com/usesesame/sesame-desktop/releases/tag/${version.tag}`)
+    assert.ok(version.packages.length > 0)
+    for (const asset of version.packages) {
+      assert.equal(asset.name, `Sesame_${version.tag.slice(1)}_x64-setup.exe`)
+      assert.match(asset.digest, /^sha256:[0-9a-f]{64}$/)
+      assert.ok(Number.isSafeInteger(asset.size) && asset.size > 0)
+    }
   }
 })
 
@@ -103,6 +111,17 @@ test('every fixture matches its recorded digest and is a genuine sealed envelope
     }
     assert.equal(envelope.formatVersion, fixture.formatVersion, fixture.fileName)
     assert.equal(envelope.setupComplete, fixture.setupComplete, fixture.fileName)
+    for (const params of [envelope.kdf, envelope.recoveryKdf]) {
+      for (const key of ['algorithm', 'memoryKib', 'iterations', 'parallelism']) {
+        assert.equal(params[key], fixture.kdf[key], `${fixture.fileName} ${key}`)
+        assert.equal(params[key], loadManifest().writerInventory.passwordAndRecoveryKdf[key])
+      }
+      assert.equal(Buffer.from(params.salt, 'base64url').length, 32, fixture.fileName)
+    }
+    assert.ok(envelope.recoveryWrap, fixture.fileName)
+    assert.equal(envelope.pinWrap, null, fixture.fileName)
+    assert.equal(envelope.helloWrap, null, fixture.fileName)
+    assert.equal(envelope.deviceWrap, undefined, fixture.fileName)
     const nonce = Buffer.from(envelope.keyWrap.nonce, 'base64url')
     const ciphertext = Buffer.from(envelope.keyWrap.ciphertext, 'base64url')
     assert.equal(nonce.length, 24, fixture.fileName)
@@ -127,6 +146,10 @@ test('formats without a recoverable writer stay recorded as unproven', () => {
   assert.ok(unproven.evidence.length > 0)
   assert.equal(unproven.decision.status, 'supportRetained')
   assert.ok(unproven.decision.note.length > 0)
+  assert.equal(unproven.recoveryPath.status, 'requiresHistoricalWriter')
+  assert.ok(unproven.recoveryPath.steps.length > 0)
+  assert.ok(unproven.recoveryPath.steps.every((step) => typeof step === 'string' && step.length > 0))
+  assert.ok(unproven.recoveryPath.limitation.length > 0)
 })
 
 test('each declared writer generation ships its generator driver', () => {
