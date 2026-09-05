@@ -6,8 +6,8 @@ use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use rand::rngs::OsRng;
-use rand::TryRngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
@@ -32,7 +32,7 @@ pub struct EncryptionKeypair {
 impl EncryptionKeypair {
     pub fn generate() -> VaultResult<Self> {
         let mut seed = [0u8; X25519_KEY_BYTES];
-        OsRng
+        SysRng
             .try_fill_bytes(&mut seed)
             .map_err(|_| "Sesame could not generate device keys.".to_string())?;
         let secret = StaticSecret::from(seed);
@@ -103,7 +103,7 @@ pub fn seal_vault_key(
     let ephemeral_public = ephemeral.public_key();
 
     let mut nonce_bytes = [0u8; KEY_PACKAGE_NONCE_BYTES];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut nonce_bytes)
         .map_err(|_| "Sesame could not prepare the device key package.".to_string())?;
 
@@ -121,7 +121,7 @@ pub fn seal_vault_key(
         .map_err(|_| "Sesame could not prepare the device key package.".to_string())?;
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce_bytes),
+            &XNonce::from(nonce_bytes),
             Payload {
                 msg: vault_key,
                 aad: &info,
@@ -154,6 +154,9 @@ pub fn open_vault_key(
     }
     let (ephemeral_public, rest) = package.split_at(X25519_KEY_BYTES);
     let (nonce_bytes, ciphertext) = rest.split_at(KEY_PACKAGE_NONCE_BYTES);
+    let nonce: [u8; KEY_PACKAGE_NONCE_BYTES] = nonce_bytes
+        .try_into()
+        .map_err(|_| "This device key package could not be read.".to_string())?;
 
     let ephemeral_array: [u8; X25519_KEY_BYTES] = ephemeral_public
         .try_into()
@@ -174,7 +177,7 @@ pub fn open_vault_key(
         .map_err(|_| "This device key package could not be read.".to_string())?;
     let plaintext = cipher
         .decrypt(
-            XNonce::from_slice(nonce_bytes),
+            &XNonce::from(nonce),
             Payload {
                 msg: ciphertext,
                 aad: &info,

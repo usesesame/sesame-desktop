@@ -71,7 +71,7 @@ pub fn encrypt_bytes(key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> VaultResul
     fill_random(&mut nonce);
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: plaintext,
                 aad,
@@ -98,7 +98,7 @@ pub fn decrypt_bytes(key: &[u8; 32], blob: &CipherBlob, aad: &[u8]) -> VaultResu
         .map_err(|_| "The encrypted vault data is invalid.".to_string())?;
     cipher
         .decrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: &ciphertext,
                 aad,

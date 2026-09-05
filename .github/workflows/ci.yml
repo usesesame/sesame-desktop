@@ -99,7 +99,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
         with:
           components: rustfmt, clippy
 
@@ -132,7 +132,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@96d8491b80fc26e2ab48ff0c3928c002176297c8 # 1.93.1
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
         with:
           components: rustfmt, clippy
 

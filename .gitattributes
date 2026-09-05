@@ -16,3 +16,4 @@
 *.md text eol=lf
 *.sql text eol=lf
 *.ps1 text eol=crlf
+src-tauri/vendor/glib/LICENSE whitespace=-blank-at-eof

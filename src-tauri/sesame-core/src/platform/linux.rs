@@ -204,7 +204,7 @@ fn read_linux_device_key(secret_tool: &Path) -> VaultResult<Option<zeroize::Zero
 
 fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    use rand::RngCore;
+    use rand::Rng;
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -276,7 +276,7 @@ fn protect_with_linux_key(data: &[u8], key: &[u8; 32], nonce: &[u8; 24]) -> Vaul
     let cipher = XChaCha20Poly1305::new(key.into());
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::from(*nonce),
             Payload {
                 msg: data,
                 aad: DEVICE_KEY_AAD,
@@ -303,9 +303,12 @@ fn unprotect_with_linux_key(data: &[u8], key: &[u8; 32]) -> VaultResult<Vec<u8>>
     let (nonce, ciphertext) = payload
         .split_at_checked(24)
         .ok_or("The Linux device-protected value is invalid.")?;
+    let nonce: [u8; 24] = nonce
+        .try_into()
+        .map_err(|_| "The Linux device-protected value is invalid.")?;
     XChaCha20Poly1305::new(key.into())
         .decrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: ciphertext,
                 aad: DEVICE_KEY_AAD,
@@ -315,7 +318,7 @@ fn unprotect_with_linux_key(data: &[u8], key: &[u8; 32]) -> VaultResult<Vec<u8>>
 }
 
 pub fn protect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
-    use rand::RngCore;
+    use rand::Rng;
 
     let key = linux_device_key(true)?;
     let mut nonce = [0_u8; 24];

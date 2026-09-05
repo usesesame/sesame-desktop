@@ -117,7 +117,7 @@ pub fn securely_delete(path: &Path) -> VaultResult<()> {
 }
 
 fn overwrite_file(path: &Path) -> VaultResult<()> {
-    use rand::RngCore;
+    use rand::Rng;
     use std::io::Write;
 
     let metadata = fs::metadata(path)

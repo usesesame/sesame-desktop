@@ -1622,7 +1622,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         urls.push(canonical_url.clone());
     }
     for raw_url in &input.urls {
-        let url = normalise_url(&raw_url);
+        let url = normalise_url(raw_url);
         if url.is_empty() {
             continue;
         }

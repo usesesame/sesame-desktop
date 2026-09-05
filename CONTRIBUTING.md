@@ -24,7 +24,7 @@ file from different directions.
 
 ## Getting set up
 
-You need Node.js 24.13 and Rust 1.93.1. Windows also needs WebView2. Linux
+You need Node.js 24.20 and Rust 1.98.0. Windows also needs WebView2. Linux
 needs the WebKitGTK, tray, and packaging dependencies listed in
 [README.md](README.md).
 

@@ -41,7 +41,7 @@ rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Run it
 
-Requirements: Node.js 24.13 and Rust 1.93.1. Windows also needs WebView2.
+Requirements: Node.js 24.20 and Rust 1.98.0. Windows also needs WebView2.
 Linux needs WebKitGTK 4.1 and the tray libraries:
 
 Debian and Ubuntu:

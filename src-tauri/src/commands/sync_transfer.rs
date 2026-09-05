@@ -874,8 +874,6 @@ pub async fn sync_now(
     state: tauri::State<'_, VaultState>,
     coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
 ) -> Result<SyncCoordinatorView, String> {
-    use crate::sync::coordinator::{Halt, Outcome};
-
     if !coordinator.begin() {
         return sync_coordinator_status(coordinator).await;
     }
@@ -916,7 +914,7 @@ async fn run_one_transfer(
     match base.as_ref() {
         // Never synced: joining is deliberate, with a master password, not background work.
         None => Ok(Outcome::AlreadyCurrent),
-        Some(entry) if has_local_changes => {
+        Some(_) if has_local_changes => {
             let result = sync_upload_vault(app.clone(), state.clone()).await?;
             Ok(Outcome::Uploaded {
                 revision: result.revision,

@@ -284,10 +284,8 @@ pub fn rotate_master_password_for_session(
     let previous_key = session.replace_vault_key(protected_new_key);
     let previous_kdf = std::mem::replace(&mut session.kdf, new_kdf);
     let previous_key_wrap = std::mem::replace(&mut session.key_wrap, new_key_wrap);
-    let previous_recovery_kdf =
-        std::mem::replace(&mut session.recovery_kdf, Some(new_recovery_kdf));
-    let previous_recovery_wrap =
-        std::mem::replace(&mut session.recovery_wrap, Some(new_recovery_wrap));
+    let previous_recovery_kdf = session.recovery_kdf.replace(new_recovery_kdf);
+    let previous_recovery_wrap = session.recovery_wrap.replace(new_recovery_wrap);
     let previous_pin_wrap = session.pin_wrap.take();
     let previous_hello_wrap = session.hello_wrap.take();
 
