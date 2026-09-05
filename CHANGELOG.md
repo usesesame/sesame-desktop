@@ -4,6 +4,16 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.2.3
+
+- Restoring a backup from an older Sesame release now upgrades it to the current
+  format instead of installing it as it was written. Backups written by 0.1.0
+  through 0.2.2 are covered, and the selected backup file is never modified.
+- Restore makes a safety copy of your current vault and only replaces it at the
+  last step. If any step fails, your vault and the backup are left as they were.
+- Restore errors now say what went wrong: a wrong master password, a damaged
+  file, or a vault that needs a newer Sesame.
+
 ## 0.2.2
 
 - The release chain carries Linux end to end. The desktop app reports its real
