@@ -9,7 +9,8 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::crypto::{encrypt_bytes, serialize_payload};
 use crate::loader::{Credential, VaultLoader};
 use crate::platform::{
-    copy_private_file, create_private_dir, open_private_file, replace_file, unprotect_for_device,
+    copy_private_file, create_private_dir, open_private_file, replace_file, same_file_identity,
+    unprotect_for_device,
 };
 use crate::{
     types::*,
@@ -480,43 +481,13 @@ fn same_file(source: &Path, destination: &Path) -> bool {
     if source == destination {
         return true;
     }
-    let same_metadata = match (fs::metadata(source), fs::metadata(destination)) {
-        (Ok(source), Ok(destination)) => same_file_metadata(&source, &destination),
-        _ => false,
-    };
-    if same_metadata {
+    if same_file_identity(source, destination) {
         return true;
     }
     match (fs::canonicalize(source), fs::canonicalize(destination)) {
         (Ok(source), Ok(destination)) => source == destination,
         _ => false,
     }
-}
-
-#[cfg(unix)]
-fn same_file_metadata(source: &fs::Metadata, destination: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    source.dev() == destination.dev() && source.ino() == destination.ino()
-}
-
-#[cfg(windows)]
-fn same_file_metadata(source: &fs::Metadata, destination: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    match (
-        (source.volume_serial_number(), source.file_index()),
-        (destination.volume_serial_number(), destination.file_index()),
-    ) {
-        (
-            (Some(source_volume), Some(source_index)),
-            (Some(destination_volume), Some(destination_index)),
-        ) => source_volume == destination_volume && source_index == destination_index,
-        _ => false,
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn same_file_metadata(_source: &fs::Metadata, _destination: &fs::Metadata) -> bool {
-    false
 }
 
 fn validate_migrated_payload(payload: &VaultPayload, source_format: u8) -> VaultResult<()> {
