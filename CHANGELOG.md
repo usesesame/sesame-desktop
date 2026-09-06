@@ -4,6 +4,15 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.2.4
+
+- Updating from 0.1.1 through 0.2.2 to 0.2.3 failed with a receipt mismatch:
+  the 0.2.3 update receipt used a format those versions cannot verify. The
+  update manifest again carries the receipt format every released client
+  verifies, and the updater accepts both formats from this release on. Update
+  to 0.2.4 from any earlier release; an install already on 0.2.3 updates
+  manually once.
+
 ## 0.2.3
 
 - Restoring a backup from an older Sesame release now upgrades it to the current
