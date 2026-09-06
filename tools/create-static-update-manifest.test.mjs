@@ -113,6 +113,8 @@ test('static updater manifest carries the updater-capable package and exact set 
     const claims = manifest.candidateReceipt.payload.split('\n')
     assert.equal(claims[11], candidate.artifacts[0].url)
     assert.equal(claims[13], candidate.artifacts[0].sha256)
+    assert.equal(manifest.url, manifest.platforms['windows-x86_64-nsis'].url)
+    assert.equal(manifest.url, claims[11])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -151,6 +153,7 @@ test('static updater manifest ships the v3 receipt released clients verify when 
       `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
     )
     assert.equal(claims[11], manifest.platforms['windows-x86_64-nsis'].signature)
+    assert.equal(manifest.url, claims[7])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

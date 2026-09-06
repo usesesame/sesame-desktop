@@ -113,6 +113,7 @@ if (receiptFile) {
 const target = `${candidate.platform}-${candidate.architecture}-${artifact.format}`
 const manifest = {
   version: candidate.version,
+  url: artifactURL.toString(),
   notes: `Verification and release notes: ${candidate.releaseNotesUrl}`,
   platforms: {
     [target]: {
