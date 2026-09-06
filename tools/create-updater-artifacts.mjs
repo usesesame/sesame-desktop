@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { prepareReleaseSet, releaseSetSigningPayload } from './release-set.mjs'
+import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3 } from './release-set.mjs'
 
 const [artifactPath, signaturePath, sigstorePath, authenticodePath] = process.argv.slice(2)
 if (!artifactPath || !signaturePath || !sigstorePath) {
@@ -130,3 +130,16 @@ await mkdir(outputDirectory, { recursive: true })
 const outputPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.candidate.json`)
 await writeFile(outputPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf8')
 console.log(`Created verified-candidate input: ${outputPath}`)
+
+// Released clients before 0.2.3 verify the static update manifest against the
+// v3 receipt layout rather than the release-set payload the server ingests.
+// Both receipts bind the same artifact and are signed by the same key.
+const signingKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
+const updateReceipt = {
+  payload: updateReceiptV3(candidate),
+  signingKeyId: candidate.candidateSigningKeyId,
+  signature: sign(null, Buffer.from(updateReceiptV3(candidate)), signingKey).toString('base64url'),
+}
+const receiptPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.update-receipt.json`)
+await writeFile(receiptPath, `${JSON.stringify(updateReceipt, null, 2)}\n`, 'utf8')
+console.log(`Created legacy-format update receipt: ${receiptPath}`)

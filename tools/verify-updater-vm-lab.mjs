@@ -39,20 +39,20 @@ if (existsSync(updaterVerifier)) {
   })
 }
 const claims = good.candidateReceipt.payload.split('\n')
+// The lab manifest carries the release-set receipt; the verifier also accepts
+// the v3 receipt clients before 0.2.3 require, matching the desktop verifier.
+const setReceipt = claims[0] === 'sesame-release-set-candidate-v1' && claims.length === 17
+const v3Receipt = claims[0] === 'sesame-release-candidate-v3' && claims.length === 23
 if (
-  claims.length !== 17 ||
-  claims[0] !== 'sesame-release-set-candidate-v1' ||
+  (!setReceipt && !v3Receipt) ||
   claims[1] !== good.version ||
   claims[3] !== 'windows' ||
   claims[4] !== 'x86_64' ||
-  claims[7] !== config.releaseSetDigest ||
-  claims[8] !== 'updater' ||
-  claims[9] !== 'nsis' ||
-  claims[10] !== 'x86_64' ||
-  claims[11] !== good.url ||
-  claims[13] !== hash(artifact) ||
-  claims[14] !== String(artifact.length) ||
-  claims[15] !== detachedSignature ||
+  (setReceipt && (claims[7] !== config.releaseSetDigest || claims[8] !== 'updater' || claims[9] !== 'nsis' || claims[10] !== 'x86_64' || claims[11] !== good.url)) ||
+  (v3Receipt && claims[7] !== good.url) ||
+  claims[setReceipt ? 15 : 11] !== detachedSignature ||
+  claims[setReceipt ? 13 : 9] !== hash(artifact) ||
+  claims[setReceipt ? 14 : 10] !== String(artifact.length) ||
   good.signature !== detachedSignature ||
   good.candidateReceipt.signingKeyId !== keys.candidateKeyID
 ) {

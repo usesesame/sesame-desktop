@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import test from 'node:test'
 
 import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
-import { prepareReleaseSet, releaseSetSigningPayload } from './release-set.mjs'
+import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3 } from './release-set.mjs'
 
 const run = promisify(execFile)
 const script = resolve('tools/create-static-update-manifest.mjs')
@@ -56,7 +56,7 @@ function signCandidate(candidate) {
   candidate.candidateSigningKeyId = 'candidate-1'
   candidate.candidateSignature = sign(null, Buffer.from(releaseSetSigningPayload(candidate)), privateKey).toString('base64url')
   const spki = publicKey.export({ format: 'der', type: 'spki' })
-  return { candidate, candidatePublicKey: spki.subarray(spki.length - 32).toString('base64url') }
+  return { candidate, candidatePublicKey: spki.subarray(spki.length - 32).toString('base64url'), privateKey }
 }
 
 function fictionalWindowsCandidate() {
@@ -68,7 +68,7 @@ function fictionalWindowsCandidate() {
     supportedWindows: 'Windows 10,Windows 11',
     releaseNotesUrl: `https://releases.example.test/v${version}`,
     artifacts: [fictionalArtifact('nsis', 'a', {
-      url: `https://releases.example.test/v${version}/Sesame_${version}_x64-setup.exe`,
+      url: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
       objectKey: `windows/v${version}/Sesame_${version}_x64-setup.exe`,
     })],
   }))
@@ -113,6 +113,67 @@ test('static updater manifest carries the updater-capable package and exact set 
     const claims = manifest.candidateReceipt.payload.split('\n')
     assert.equal(claims[11], candidate.artifacts[0].url)
     assert.equal(claims[13], candidate.artifacts[0].sha256)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest ships the v3 receipt released clients verify when it is provided', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const receiptPath = join(directory, 'update-receipt.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate, candidatePublicKey, privateKey } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    const receipt = {
+      payload: updateReceiptV3(candidate),
+      signingKeyId: candidate.candidateSigningKeyId,
+      signature: sign(null, Buffer.from(updateReceiptV3(candidate)), privateKey).toString('base64url'),
+    }
+    await writeFile(receiptPath, JSON.stringify(receipt))
+    await run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+        SESAME_UPDATE_RECEIPT_V3_FILE: receiptPath,
+      },
+    })
+    const manifest = JSON.parse(await readFile(outputPath, 'utf8'))
+    assert.equal(manifest.candidateReceipt.signingKeyId, 'candidate-1')
+    assert.equal(manifest.candidateReceipt.payload, receipt.payload)
+    const claims = manifest.candidateReceipt.payload.split('\n')
+    assert.equal(claims[0], 'sesame-release-candidate-v3')
+    assert.equal(claims.length, 23)
+    assert.equal(
+      claims[7],
+      `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+    )
+    assert.equal(claims[11], manifest.platforms['windows-x86_64-nsis'].signature)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest refuses an update receipt that does not describe the release set', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const receiptPath = join(directory, 'update-receipt.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    const claims = updateReceiptV3(candidate).split('\n')
+    claims[1] = '9.9.9'
+    await writeFile(receiptPath, JSON.stringify({ payload: claims.join('\n'), signingKeyId: 'candidate-1', signature: 'A'.repeat(64) }))
+    await assert.rejects(run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+        SESAME_UPDATE_RECEIPT_V3_FILE: receiptPath,
+      },
+    }), /does not describe this release set/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

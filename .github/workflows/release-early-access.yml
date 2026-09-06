@@ -155,6 +155,8 @@ jobs:
           $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
           node tools/release-set-cli.mjs verify $candidate
           Copy-Item -LiteralPath $candidate -Destination release-handoff/
+          $env:SESAME_UPDATE_RECEIPT_V3_FILE = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).update-receipt.json"
+          if (-not (Test-Path -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE)) { throw "The v3 update receipt was not produced: $($env:SESAME_UPDATE_RECEIPT_V3_FILE)." }
           node tools/create-static-update-manifest.mjs $candidate release-handoff/latest.json
 
       - name: Prepare and audit the public-only evidence set

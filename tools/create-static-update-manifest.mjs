@@ -2,7 +2,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
-import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
+import { releaseSetSigningPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
 
 const [candidatePath, outputPath] = process.argv.slice(2)
 if (!candidatePath || !outputPath) {
@@ -75,6 +75,41 @@ if (candidatePublicKey) {
   }
 }
 
+// The manifest receipt must be verifiable by every released client. Clients
+// before 0.2.3 only understand the v3 receipt layout, so the release pipeline
+// provides the separately signed v3 receipt and this manifest ships that.
+const receiptFile = process.env.SESAME_UPDATE_RECEIPT_V3_FILE?.trim()
+let candidateReceipt
+if (receiptFile) {
+  const receipt = JSON.parse(await readFile(resolve(receiptFile), 'utf8'))
+  if (
+    typeof receipt?.payload !== 'string' || receipt.payload !== updateReceiptV3(candidate) ||
+    receipt.signingKeyId !== candidate.candidateSigningKeyId ||
+    typeof receipt.signature !== 'string' || Buffer.from(receipt.signature, 'base64url').length !== 64
+  ) {
+    throw new Error('The provided update receipt does not describe this release set.')
+  }
+  if (candidatePublicKey && !verify(
+    null,
+    Buffer.from(receipt.payload),
+    createPublicKey({
+      key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(candidatePublicKey, 'base64url')]),
+      format: 'der',
+      type: 'spki',
+    }),
+    Buffer.from(receipt.signature, 'base64url'),
+  )) {
+    throw new Error('The update receipt signature does not verify.')
+  }
+  candidateReceipt = { payload: receipt.payload, signingKeyId: receipt.signingKeyId, signature: receipt.signature }
+} else {
+  candidateReceipt = {
+    payload: candidatePayload,
+    signingKeyId: candidate.candidateSigningKeyId,
+    signature: candidate.candidateSignature,
+  }
+}
+
 const target = `${candidate.platform}-${candidate.architecture}-${artifact.format}`
 const manifest = {
   version: candidate.version,
@@ -85,11 +120,7 @@ const manifest = {
       signature: artifact.updaterSignature,
     },
   },
-  candidateReceipt: {
-    payload: candidatePayload,
-    signingKeyId: candidate.candidateSigningKeyId,
-    signature: candidate.candidateSignature,
-  },
+  candidateReceipt,
 }
 
 await writeFile(resolve(outputPath), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
