@@ -65,6 +65,25 @@ export function releaseSetSigningPayload(releaseSet) {
   ].join('\n')
 }
 
+// Clients released before 0.2.3 verify the static update manifest against this
+// receipt layout, and the 0.2.3 client verifies only the release-set payload.
+// The manifest keeps carrying this format until the installed base is past the
+// client that understands both.
+export function updateReceiptV3(releaseSet) {
+  const artifact = releaseSet.artifacts.find((item) => item.updaterCapable)
+  if (!artifact) throw new Error('An update receipt requires an updater-capable package.')
+  return [
+    'sesame-release-candidate-v3', releaseSet.version, releaseSet.channel, releaseSet.platform,
+    releaseSet.architecture, releaseSet.supportedWindows ?? '', releaseSet.releaseNotesUrl,
+    artifact.url, artifact.objectKey, artifact.sha256, String(artifact.bytes),
+    artifact.updaterSignature ?? '', artifact.updaterSigningKeyId ?? '',
+    artifact.distributionClass, 'true', artifact.sigstoreIssuer, artifact.sigstoreIdentity,
+    artifact.sigstoreBundleSha256, evidenceDigest(artifact.sigstoreEvidence),
+    String(artifact.authenticodeVerified), artifact.authenticodeSubject ?? '',
+    artifact.authenticodeThumbprint ?? '', evidenceDigest(artifact.authenticodeEvidence),
+  ].join('\n')
+}
+
 export function verifyReleaseSet(releaseSet) {
   if (releaseSet?.schemaVersion !== 3 || !versionPattern.test(releaseSet.version) || !channelSet.has(releaseSet.channel)) {
     throw new Error('Release set identity is invalid.')
