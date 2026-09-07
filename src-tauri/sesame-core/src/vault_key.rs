@@ -218,6 +218,7 @@ mod platform {
                 }
                 Err(_) => {
                     let stored = Zeroizing::new(key);
+                    key.zeroize();
                     Ok(Self {
                         storage: Storage::Zeroized(stored),
                         locked: false,
