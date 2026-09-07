@@ -74,7 +74,6 @@ pub(super) async fn approve_frozen_device(
         )
         .await
         .map_err(present)?;
-    // The person just compared these keys aloud; pin them so later releases detect substitution.
     crate::sync::peers::record_approved(
         &crate::sync::peers::peers_path(&local_data_dir(&app)?),
         &current.vault_id,
@@ -328,7 +327,6 @@ async fn fetch_verified_snapshot(
         ed25519_dalek::VerifyingKey::from_bytes(&decode_key(&sender.signing_public_key)?)
             .map_err(|_| "The synced vault could not be verified.".to_string())?;
     crate::sync::envelope::verify(&envelope, &verifying)?;
-    // The sender's own signature just proved this signing key; remember it for later key releases.
     crate::sync::peers::record_verified(
         &crate::sync::peers::peers_path(&local_data_dir(app)?),
         &current.vault_id,
@@ -407,8 +405,6 @@ pub async fn sync_remove_device(
     let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
     let new_epoch = current.vault_epoch.max(1) as u64 + 1;
 
-    // Key release compares against remembered trust, never the listing alone: a compromised
-    // service can relist any device with its own encryption key and otherwise read the package.
     let peers = crate::sync::peers::peers_path(&local_data_dir(&app)?);
     for survivor in &survivors {
         crate::sync::peers::require_releasable(

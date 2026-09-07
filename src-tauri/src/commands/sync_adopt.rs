@@ -78,7 +78,6 @@ pub async fn sync_adopt_vault(
         &package.ciphertext,
         &package.signature,
     )?;
-    // The approver's signature just proved this signing key; remember it for later key releases.
     crate::sync::peers::record_verified(
         &crate::sync::peers::peers_path(&local_data_dir(&app)?),
         &current.vault_id,
@@ -97,7 +96,6 @@ pub async fn sync_adopt_vault(
         ed25519_dalek::VerifyingKey::from_bytes(&decode_key(&sender.signing_public_key)?)
             .map_err(|_| "The synced vault could not be verified.".to_string())?;
     crate::sync::envelope::verify(&envelope, &verifying)?;
-    // The uploader's own signature just proved this signing key; remember it for later key releases.
     crate::sync::peers::record_verified(
         &crate::sync::peers::peers_path(&local_data_dir(&app)?),
         &current.vault_id,
@@ -152,8 +150,6 @@ pub async fn sync_adopt_vault(
     crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
     crate::browser_fill::cancel_pending_approvals(&app);
 
-    // The adopted snapshot is this device's compare-and-swap base: without it every upload
-    // conflicts and every download orders a re-join.
     crate::sync::state::write_protected(
         &crate::sync::state::state_path(&local_data_dir(&app)?),
         &crate::sync::state::SyncBase {
@@ -174,7 +170,7 @@ pub async fn sync_adopt_vault(
     })
 }
 
-/// Old-key wraps are rebuilt or dropped; a stale PIN or Hello wrap would unlock a vault this one cannot read.
+/// Old-key wraps are rebuilt or dropped; a stale PIN wrap would unlock a vault this one cannot read.
 pub(super) fn adopt(
     vault: &mut crate::vault::UnlockedVault,
     mut key: [u8; 32],
@@ -194,8 +190,6 @@ pub(super) fn adopt(
 
     let protected_key = crate::vault::VaultKey::new(key)?;
     key.zeroize();
-    // A stale Hello wrap would wrap the old key; cleared with everything else and only
-    // persisted as part of this same replacement.
     let stale_hello = vault.hello_wrap.take();
     let previous = (
         std::mem::replace(&mut vault.kdf, kdf),
@@ -220,7 +214,6 @@ pub(super) fn adopt(
         vault.replace_vault_key(previous.6);
         return Err(error);
     }
-    // The obsolete platform key goes only after the file no longer references it.
     if let Some(old) = previous.5 {
         crate::vault::windows_hello::delete_key(&old.key_name);
     }
