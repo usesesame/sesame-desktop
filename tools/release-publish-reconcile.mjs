@@ -26,7 +26,15 @@ export async function collectPublishAssets(handoffDirectory, publicDirectory, ma
     const filePath = path.join(path.resolve(publicDirectory), name)
     const fileStat = await stat(filePath)
     if (!fileStat.isFile()) throw new Error(`Public release evidence entry ${name} is not a regular file.`)
-    assets.push({ role: 'public-evidence', name, path: filePath, sha256: await fileSha256(filePath), bytes: fileStat.size })
+    const publicSha256 = await fileSha256(filePath)
+    const handoffPath = path.join(path.resolve(handoffDirectory), name)
+    const handoffStat = await stat(handoffPath).then((value) => value, () => null)
+    if (!handoffStat?.isFile()) throw new Error(`Public release evidence entry ${name} has no canonical handoff copy.`)
+    const handoffSha256 = await fileSha256(handoffPath)
+    if (publicSha256 !== handoffSha256 || fileStat.size !== handoffStat.size) {
+      throw new Error(`Public release evidence entry ${name} does not match its handoff copy.`)
+    }
+    assets.push({ role: 'public-evidence', name, path: filePath, sha256: publicSha256, bytes: fileStat.size })
   }
   const names = new Set()
   for (const asset of assets) {
@@ -36,15 +44,15 @@ export async function collectPublishAssets(handoffDirectory, publicDirectory, ma
   return { manifest, assets }
 }
 
-export function latestReceiptBindsInstaller(latest, { version, url, sha256 }) {
+export function latestReceiptBindsInstaller(latest, { version, url, sha256, bytes }) {
   if (latest?.version !== version || typeof latest?.candidateReceipt?.payload !== 'string') {
     throw new Error('The static update manifest does not carry this release set.')
   }
   const lines = latest.candidateReceipt.payload.split('\n')
-  if (lines[0] !== 'sesame-release-candidate-v3' || lines.length < 11) {
+  if (lines[0] !== 'sesame-release-candidate-v3' || lines.length !== 23) {
     throw new Error('The static update manifest receipt is not the v3 layout this pipeline ships.')
   }
-  if (lines[7] !== url || lines[9] !== sha256) {
+  if (lines[1] !== version || lines[7] !== url || lines[9] !== sha256 || lines[10] !== String(bytes)) {
     throw new Error('The static update manifest points at different installer bytes than the verified candidate.')
   }
   for (const target of Object.values(latest.platforms ?? {})) {
@@ -69,7 +77,7 @@ export function assertCandidateMatchesAssets(candidate, assets, { repository, ta
   if (updater.url !== expectedURL) {
     throw new Error(`The candidate download URL (${updater.url}) is not the exact release asset URL (${expectedURL}).`)
   }
-  return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256 })
+  return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256, bytes: installer.bytes })
 }
 
 export function planReleasePublication({ release, expectedAssets, setDigest }) {
@@ -100,7 +108,9 @@ export function planReleasePublication({ release, expectedAssets, setDigest }) {
     .find((line) => line.startsWith(`${RELEASE_SET_DIGEST_LABEL}: `))
     ?.slice(`${RELEASE_SET_DIGEST_LABEL}: `.length)
     .trim()
-  if (declared && declared !== setDigest) {
+  if (!declared) {
+    conflicts.push(`The release notes omit the ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} anchor this pipeline ships.`)
+  } else if (declared !== setDigest) {
     conflicts.push(`The release notes declare ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} ${declared} instead of ${setDigest}.`)
   }
   return { action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete', upload, conflicts }

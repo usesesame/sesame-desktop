@@ -98,13 +98,13 @@ async function publishFixture() {
   const publicRoot = `${evidence.root}-public`
   await mkdir(publicRoot)
   for (const name of ['SHA256SUMS', `${evidence.files.artifact}.sigstore.json`, `${evidence.files.manifest}.sigstore.json`, evidence.files.sbom, evidence.files.manifest, 'sigstore-evidence.json', 'verify-sesame-release.ps1']) {
-    await writeFile(path.join(publicRoot, name), `${name} public evidence bytes\n`)
+    await writeFile(path.join(publicRoot, name), await readFile(path.join(evidence.root, name)))
   }
   const { assets } = await collectPublishAssets(evidence.root, publicRoot, evidence.files.manifest)
   return { assets, candidate, evidence, latest, publicRoot, updater }
 }
 
-const releaseWith = (assets, extra = {}) => ({ isDraft: false, body: 'notes', assets, ...extra })
+const releaseWith = (assets, extra = {}) => ({ isDraft: false, body: `${RELEASE_SET_DIGEST_LABEL}: ${setDigest}`, assets, ...extra })
 const remoteAsset = (asset, override = {}) => ({ name: asset.name, size: asset.bytes, sha256: asset.sha256, ...override })
 
 test('the publish set is exactly the installer, updater signature, static manifest, and audited public evidence', async () => {
@@ -202,7 +202,8 @@ test('conflicting digests, sizes, extra assets, drafts, and a foreign set digest
     assert.ok(foreignDigest.conflicts.some((line) => line.includes('d'.repeat(64))))
 
     const anchorTolerated = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { body: `older notes without the anchor\n` }), expectedAssets: value.assets, setDigest })
-    assert.equal(anchorTolerated.action, 'complete')
+    assert.equal(anchorTolerated.action, 'conflict')
+    assert.ok(anchorTolerated.conflicts.some((line) => line.includes('anchor')))
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
@@ -228,11 +229,23 @@ test('the candidate, static manifest, and installer bytes must describe the same
 
     const retargetedReceipt = structuredClone(value.latest)
     retargetedReceipt.candidateReceipt.payload = retargetedReceipt.candidateReceipt.payload.replace(value.updater.sha256, 'd'.repeat(64))
-    assert.throws(() => latestReceiptBindsInstaller(retargetedReceipt, { version, url: value.updater.url, sha256: value.updater.sha256 }), /different installer bytes/)
+    assert.throws(() => latestReceiptBindsInstaller(retargetedReceipt, { version, url: value.updater.url, sha256: value.updater.sha256, bytes: value.updater.bytes }), /different installer bytes/)
 
     const retargetedPlatform = structuredClone(value.latest)
     retargetedPlatform.platforms['windows-x86_64-nsis'].url = 'https://attacker.invalid/Sesame.exe'
-    assert.throws(() => latestReceiptBindsInstaller(retargetedPlatform, { version, url: value.updater.url, sha256: value.updater.sha256 }), /platform URL/)
+    assert.throws(() => latestReceiptBindsInstaller(retargetedPlatform, { version, url: value.updater.url, sha256: value.updater.sha256, bytes: value.updater.bytes }), /platform URL/)
+
+    const truncatedReceipt = structuredClone(value.latest)
+    truncatedReceipt.candidateReceipt.payload = truncatedReceipt.candidateReceipt.payload.split('\n').slice(0, 11).join('\n')
+    assert.throws(() => latestReceiptBindsInstaller(truncatedReceipt, { version, url: value.updater.url, sha256: value.updater.sha256, bytes: value.updater.bytes }), /not the v3 layout/)
+
+    const relabelledReceipt = structuredClone(value.latest)
+    relabelledReceipt.candidateReceipt.payload = relabelledReceipt.candidateReceipt.payload.replace(`${version}\nbeta`, '9.9.9\nbeta')
+    assert.throws(() => latestReceiptBindsInstaller(relabelledReceipt, { version, url: value.updater.url, sha256: value.updater.sha256, bytes: value.updater.bytes }), /different installer bytes/)
+
+    const resizedReceipt = structuredClone(value.latest)
+    resizedReceipt.candidateReceipt.payload = resizedReceipt.candidateReceipt.payload.replace(`\n${value.updater.bytes}\n`, `\n${value.updater.bytes + 1}\n`)
+    assert.throws(() => latestReceiptBindsInstaller(resizedReceipt, { version, url: value.updater.url, sha256: value.updater.sha256, bytes: value.updater.bytes }), /different installer bytes/)
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
@@ -255,6 +268,20 @@ test('the public evidence directory stays free of the installer and its signatur
     const names = await readdir(value.publicRoot)
     assert.ok(!names.includes(value.evidence.files.artifact))
     assert.ok(!names.includes(value.evidence.files.updaterSignature))
+  } finally {
+    await rm(value.evidence.root, { recursive: true, force: true })
+    await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('public evidence must match its handoff copy byte for byte', async () => {
+  const value = await publishFixture()
+  try {
+    await writeFile(path.join(value.publicRoot, 'SHA256SUMS'), 'tampered summary\n')
+    await assert.rejects(() => collectPublishAssets(value.evidence.root, value.publicRoot, value.evidence.files.manifest), /does not match its handoff copy/)
+    await writeFile(path.join(value.publicRoot, 'SHA256SUMS'), await readFile(path.join(value.evidence.root, 'SHA256SUMS')))
+    await writeFile(path.join(value.publicRoot, 'stray-operator-notes.txt'), 'not part of the release set\n')
+    await assert.rejects(() => collectPublishAssets(value.evidence.root, value.publicRoot, value.evidence.files.manifest), /no canonical handoff copy/)
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
