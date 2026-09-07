@@ -1,7 +1,3 @@
-//! Remembered Sync peer keys this profile has already trusted. The service directory is not a
-//! trust anchor: a compromised service can relist any device with its own keys, so key release
-//! compares against what this device verified itself, never against the listing alone.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +12,6 @@ pub const PEERS_FILE_NAME: &str = "sync-peers.json";
 #[serde(rename_all = "camelCase")]
 pub struct TrustedPeer {
     pub signing_public_key: String,
-    /// Empty unless a person compared this device's approval fingerprint on this profile.
     pub encryption_public_key: String,
     pub approved_here: bool,
 }
@@ -44,7 +39,6 @@ fn peers_tag(body: &[u8]) -> Vec<u8> {
     digest.finalize().to_vec()
 }
 
-/// Unreadable or foreign files read as no remembered trust; every later decision fails closed.
 fn read_store(path: &Path) -> Option<StoredPeers> {
     let body = std::fs::read(path).ok()?;
     let protected = std::fs::read(tag_path(path)).ok()?;
@@ -84,7 +78,6 @@ fn write_store(path: &Path, store: &StoredPeers) -> VaultResult<()> {
 fn load_or_init(path: &Path, vault_id: &str) -> StoredPeers {
     match read_store(path) {
         Some(store) if store.vault_id == vault_id => store,
-        // A deliberate vault switch starts trust over; pins never carry between vaults.
         _ => StoredPeers {
             version: 1,
             vault_id: vault_id.to_string(),
@@ -93,7 +86,6 @@ fn load_or_init(path: &Path, vault_id: &str) -> StoredPeers {
     }
 }
 
-/// Remembers a signing key this device just authenticated with the peer's own signature.
 pub fn record_verified(
     path: &Path,
     vault_id: &str,
@@ -121,7 +113,6 @@ pub fn record_verified(
     write_store(path, &store)
 }
 
-/// Remembers both keys of a device whose fingerprint a person compared on this profile.
 pub fn record_approved(
     path: &Path,
     vault_id: &str,
@@ -151,7 +142,6 @@ pub fn record_approved(
     write_store(path, &store)
 }
 
-/// Guards one key release: the listing must agree with what this device remembers trusting.
 pub fn require_releasable(
     path: &Path,
     vault_id: &str,
