@@ -788,4 +788,68 @@ mod tests {
         );
         assert!(!extra_field.validate_for(&request));
     }
+
+    #[test]
+    fn native_message_payloads_survive_mutations_without_panicking() {
+        use rand::rngs::StdRng;
+        use rand::RngExt;
+        use rand::SeedableRng;
+
+        let seed_request = request(CARD_PROTOCOL_VERSION, "card");
+        let mut rng = StdRng::seed_from_u64(4096);
+        let mut bytes = serde_json::to_vec(&seed_request).expect("the seed request serializes");
+        for _ in 0..900 {
+            let mut payload = bytes.clone();
+            for _ in 0..rng.random_range(1..=4) {
+                if payload.is_empty() {
+                    break;
+                }
+                match rng.random_range(0..6) {
+                    0 => {
+                        let index = rng.random_range(0..payload.len());
+                        payload[index] ^= 1 << rng.random_range(0..8);
+                    }
+                    1 => {
+                        let cut = rng.random_range(0..payload.len());
+                        payload.truncate(cut);
+                    }
+                    2 => {
+                        let extra: Vec<u8> = (0..rng.random_range(1..=32))
+                            .map(|_| rng.random())
+                            .collect();
+                        payload.extend_from_slice(&extra);
+                    }
+                    3 => {
+                        let index = rng.random_range(0..payload.len());
+                        payload[index] = rng.random();
+                    }
+                    4 => {
+                        let start = rng.random_range(0..payload.len());
+                        let end = rng.random_range(start..payload.len());
+                        payload[start..end].fill(0);
+                    }
+                    _ => {
+                        let at = rng.random_range(0..=payload.len());
+                        let extra: &[u8] = br#","type":"fill","origin":"javascript:alert(1)""#;
+                        payload.splice(at..at, extra.iter().copied());
+                    }
+                }
+            }
+            bytes = payload;
+            if let Ok(request) = serde_json::from_slice::<BrowserRequest>(&bytes) {
+                let _ = request.validate();
+            }
+        }
+        assert!(serde_json::from_slice::<BrowserRequest>(&[]).is_err());
+        for payload in [
+            br#"{"version":"2","type":"card","request_id":"r1"}"#.as_slice(),
+            br#"{"version":2,"type":["card"],"request_id":{"r":1}}"#.as_slice(),
+            br#"[1,2,3]"#.as_slice(),
+            br#""a string""#.as_slice(),
+        ] {
+            if let Ok(request) = serde_json::from_slice::<BrowserRequest>(payload) {
+                let _ = request.validate();
+            }
+        }
+    }
 }
