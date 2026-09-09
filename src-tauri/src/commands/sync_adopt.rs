@@ -78,6 +78,12 @@ pub async fn sync_adopt_vault(
         &package.ciphertext,
         &package.signature,
     )?;
+    crate::sync::peers::record_verified(
+        &crate::sync::peers::peers_path(&local_data_dir(&app)?),
+        &current.vault_id,
+        &signer.device_id,
+        &signer.signing_public_key,
+    )?;
 
     let mut vault_key = identity.open_key_package(&sealed, &current.vault_id)?;
     let key: [u8; 32] = vault_key
@@ -90,6 +96,12 @@ pub async fn sync_adopt_vault(
         ed25519_dalek::VerifyingKey::from_bytes(&decode_key(&sender.signing_public_key)?)
             .map_err(|_| "The synced vault could not be verified.".to_string())?;
     crate::sync::envelope::verify(&envelope, &verifying)?;
+    crate::sync::peers::record_verified(
+        &crate::sync::peers::peers_path(&local_data_dir(&app)?),
+        &current.vault_id,
+        &sender.device_id,
+        &sender.signing_public_key,
+    )?;
 
     let blob = crate::vault::types::CipherBlob {
         nonce: envelope.nonce.clone(),
@@ -103,6 +115,11 @@ pub async fn sync_adopt_vault(
     )?;
     let payload = authenticated.payload().clone();
     let entry_count = payload.entries.len();
+    let applied_digest = {
+        let plaintext = serde_json::to_vec(&payload)
+            .map_err(|_| "The synced vault could not be prepared.".to_string())?;
+        crate::sync::state::payload_digest(&plaintext)
+    };
 
     let recovery_kit = {
         let mut session = state
@@ -129,8 +146,22 @@ pub async fn sync_adopt_vault(
         recovery_kit
     };
     state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
     crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
     crate::browser_fill::cancel_pending_approvals(&app);
+
+    crate::sync::state::write_protected(
+        &crate::sync::state::state_path(&local_data_dir(&app)?),
+        &crate::sync::state::SyncBase {
+            version: 1,
+            vault_id: current.vault_id.clone(),
+            revision: current.revision,
+            vault_epoch: current.vault_epoch,
+            payload_digest: applied_digest,
+            head_digest: crate::sync::envelope::digest(&envelope),
+            receipt: current.receipt.clone(),
+        },
+    )?;
 
     Ok(SyncAdoptResult {
         entry_count,
@@ -159,12 +190,14 @@ pub(super) fn adopt(
 
     let protected_key = crate::vault::VaultKey::new(key)?;
     key.zeroize();
+    let stale_hello = vault.hello_wrap.take();
     let previous = (
         std::mem::replace(&mut vault.kdf, kdf),
         std::mem::replace(&mut vault.key_wrap, key_wrap),
         std::mem::replace(&mut vault.recovery_kdf, Some(recovery_kdf)),
         std::mem::replace(&mut vault.recovery_wrap, Some(recovery_wrap)),
         std::mem::replace(&mut vault.pin_wrap, None),
+        stale_hello,
         vault.replace_vault_key(protected_key),
     );
 
@@ -177,8 +210,12 @@ pub(super) fn adopt(
         vault.recovery_kdf = previous.2;
         vault.recovery_wrap = previous.3;
         vault.pin_wrap = previous.4;
-        vault.replace_vault_key(previous.5);
+        vault.hello_wrap = previous.5;
+        vault.replace_vault_key(previous.6);
         return Err(error);
+    }
+    if let Some(old) = previous.5 {
+        crate::vault::windows_hello::delete_key(&old.key_name);
     }
     Ok(shown)
 }

@@ -334,6 +334,7 @@ pub async fn sync_disable(app: AppHandle, force: Option<bool>) -> Result<(), Str
         }
     }
     crate::sync::identity::forget(&path)?;
+    crate::sync::peers::forget(&crate::sync::peers::peers_path(&local_data_dir(&app)?))?;
     crate::sync::state::forget_protected(&crate::sync::state::state_path(&local_data_dir(&app)?))
 }
 

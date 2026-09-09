@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
+import { interpretCandidateSubmission } from './release-publish-reconcile.mjs'
+
 const [candidatePath] = process.argv.slice(2)
 const apiURL = process.env.SESAME_RELEASE_API_URL?.replace(/\/$/, '')
 const token = process.env.SESAME_RELEASE_CANDIDATE_TOKEN?.trim()
@@ -15,5 +17,8 @@ const response = await fetch(`${apiURL}/v1/release-candidates`, {
   body: JSON.stringify(candidate),
 })
 const body = await response.text()
-if (response.status !== 201) throw new Error(`Release candidate submission failed (${response.status}): ${body.slice(0, 500)}`)
+const verdict = interpretCandidateSubmission(response.status, body)
+if (verdict.outcome !== 'accepted') {
+  throw new Error(`Release candidate submission failed (${response.status}): ${verdict.message ?? body.slice(0, 500)}`)
+}
 console.log(`Release candidate accepted: ${body}`)

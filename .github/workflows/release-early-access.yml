@@ -240,6 +240,7 @@ jobs:
         run: |
           installer=$(jq -r '.artifact.filename' "release-handoff/$MANIFEST")
           sha256=$(jq -r '.artifact.sha256' "release-handoff/$MANIFEST")
+          setdigest=$(jq -r '.setDigest' release-handoff/*.candidate.json)
           changes=$(awk -v want="## ${GITHUB_REF_NAME#v}" '$0 == want { inside = 1; next } /^## / { if (inside) exit } inside' CHANGELOG.md)
           if [ -z "$(printf '%s' "$changes" | tr -d '[:space:]')" ]; then
             echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}." >&2
@@ -281,8 +282,10 @@ jobs:
             echo
             echo "SHA-256 of $installer"
             echo "    $sha256"
+            echo
+            echo "Release set digest: $setdigest"
           } > release-notes.md
-          gh release create "$GITHUB_REF_NAME"             --repo "$GITHUB_REPOSITORY"             --title "Sesame $GITHUB_REF_NAME"             --notes-file release-notes.md             "release-handoff/$installer"             "release-handoff/$installer.sig"             "release-handoff/latest.json"             public-release-evidence/*
+          node tools/reconcile-github-release.mjs release-handoff public-release-evidence "$MANIFEST" "$(ls release-handoff/*.candidate.json)" release-notes.md
 
       - name: Submit the cryptographically verified candidate
         env:
