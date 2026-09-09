@@ -74,6 +74,13 @@ pub(super) async fn approve_frozen_device(
         )
         .await
         .map_err(present)?;
+    crate::sync::peers::record_approved(
+        &crate::sync::peers::peers_path(&local_data_dir(&app)?),
+        &current.vault_id,
+        &device_id,
+        frozen_signing_key,
+        frozen_encryption_key,
+    )?;
     Ok(SyncDeviceView {
         is_this_device: false,
         // The frozen keys, not this response's: the person never confirmed those.
@@ -205,7 +212,7 @@ pub async fn sync_download_vault(
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
     let client = SyncClient::connect(&app)?;
-    let (current, envelope, _) = fetch_verified_snapshot(&client).await?;
+    let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
 
     let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
     let base = match crate::sync::state::read_protected(&state_file) {
@@ -289,6 +296,7 @@ pub async fn sync_download_vault(
 
 /// Downloads and verifies the snapshot: sender approval, signature, and response agreement.
 async fn fetch_verified_snapshot(
+    app: &AppHandle,
     client: &SyncClient,
 ) -> Result<
     (
@@ -319,6 +327,12 @@ async fn fetch_verified_snapshot(
         ed25519_dalek::VerifyingKey::from_bytes(&decode_key(&sender.signing_public_key)?)
             .map_err(|_| "The synced vault could not be verified.".to_string())?;
     crate::sync::envelope::verify(&envelope, &verifying)?;
+    crate::sync::peers::record_verified(
+        &crate::sync::peers::peers_path(&local_data_dir(app)?),
+        &current.vault_id,
+        &sender.device_id,
+        &sender.signing_public_key,
+    )?;
 
     if envelope.vault_id != current.vault_id
         || envelope.revision as i64 != current.revision
@@ -390,6 +404,17 @@ pub async fn sync_remove_device(
 
     let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
     let new_epoch = current.vault_epoch.max(1) as u64 + 1;
+
+    let peers = crate::sync::peers::peers_path(&local_data_dir(&app)?);
+    for survivor in &survivors {
+        crate::sync::peers::require_releasable(
+            &peers,
+            &current.vault_id,
+            &survivor.device_id,
+            &survivor.signing_public_key,
+            &survivor.encryption_public_key,
+        )?;
+    }
 
     // Old key never sent anywhere; it is dropped with the session.
     let mut new_key = [0_u8; 32];
@@ -500,6 +525,7 @@ pub async fn sync_remove_device(
         recovery_kit
     };
     state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
     crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
     crate::browser_fill::cancel_pending_approvals(&app);
 
@@ -586,7 +612,7 @@ pub async fn sync_conflict_details(
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncConflictView, String> {
     let client = SyncClient::connect(&app)?;
-    let (current, envelope, sender_label) = fetch_verified_snapshot(&client).await?;
+    let (current, envelope, sender_label) = fetch_verified_snapshot(&app, &client).await?;
     let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
     let base = crate::sync::state::read_protected(&state_file);
 
@@ -640,7 +666,7 @@ pub async fn sync_resolve_conflict(
 
     let client = SyncClient::connect(&app)?;
     let identity = this_identity(&app)?;
-    let (current, envelope, _) = fetch_verified_snapshot(&client).await?;
+    let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
     let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
     let data_dir = local_data_dir(&app)?;
     let state_file = crate::sync::state::state_path(&data_dir);

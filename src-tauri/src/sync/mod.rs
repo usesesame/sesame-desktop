@@ -14,3 +14,5 @@ pub(crate) use crate::adapters::network::sync as client;
 pub mod conflict_backup;
 #[cfg(feature = "sync-preview")]
 pub mod coordinator;
+#[cfg(feature = "sync-preview")]
+pub mod peers;
