@@ -525,6 +525,7 @@ pub async fn sync_remove_device(
         recovery_kit
     };
     state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
     crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
     crate::browser_fill::cancel_pending_approvals(&app);
 
