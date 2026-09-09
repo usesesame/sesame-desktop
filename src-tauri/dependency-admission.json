@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "name": "arboard",
+      "version": "3",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "argon2",
+      "version": "0.6",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "base64",
+      "version": "0.23",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "chacha20poly1305",
+      "version": "0.11",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "chrono",
+      "version": "0.4",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "csv",
+      "version": "1.3",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "ed25519-dalek",
+      "version": "3",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "hkdf",
+      "version": "0.13",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "libc",
+      "version": "0.2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "minisign-verify",
+      "version": "0.2.5",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "rand",
+      "version": "0.10",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "reqwest",
+      "version": "0.13",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "rustls",
+      "version": "0.23",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "serde",
+      "version": "1",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "serde_json",
+      "version": "1",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "sha1",
+      "version": "0.11",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "sha2",
+      "version": "0.11",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-autostart",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-clipboard-manager",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-dialog",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-global-shortcut",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-opener",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-single-instance",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-plugin-updater",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "totp-rs",
+      "version": "6",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "ts-rs",
+      "version": "12.0.1",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "url",
+      "version": "2.5",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "x25519-dalek",
+      "version": "3",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "zbus",
+      "version": "5",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "zeroize",
+      "version": "1.8",
+      "reason": "In use before this gate was adopted."
+    }
+  ]
+}

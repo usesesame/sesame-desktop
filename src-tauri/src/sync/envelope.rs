@@ -280,3 +280,126 @@ pub fn snapshot_aad_for_draft(draft: &EnvelopeDraft<'_>) -> Vec<u8> {
         draft.operation,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::StdRng;
+    use rand::{RngExt, SeedableRng};
+
+    fn sealed_envelope() -> (SigningKey, Envelope) {
+        let signing = SigningKey::from_bytes(&[9_u8; 32]);
+        let envelope = seal(
+            &EnvelopeDraft {
+                vault_id: "vault-000000000001",
+                device_id: "device-00000000001",
+                revision: 3,
+                vault_epoch: 2,
+                device_epoch: 5,
+                operation: OPERATION_SNAPSHOT,
+                tombstone_id: "",
+                previous_digest: "c".repeat(64).as_str(),
+                nonce: &[0_u8; 24],
+                ciphertext: "fictional snapshot bytes".as_bytes(),
+            },
+            &signing,
+        )
+        .expect("the seed envelope seals");
+        (signing, envelope)
+    }
+
+    #[test]
+    fn mutated_envelopes_never_verify_or_panic() {
+        let (signing, envelope) = sealed_envelope();
+        let verifying = signing.verifying_key();
+        assert!(verify(&envelope, &verifying).is_ok());
+
+        let mut rng = StdRng::seed_from_u64(11);
+        let value = serde_json::to_value(&envelope).expect("the seed envelope serializes");
+        let keys: Vec<String> = value
+            .as_object()
+            .expect("the envelope is an object")
+            .keys()
+            .cloned()
+            .collect();
+        for _ in 0..600 {
+            let mut candidate = value.clone();
+            let candidate_object = candidate.as_object_mut().expect("still an object");
+            for _ in 0..rng.random_range(1..=3) {
+                let key = keys[rng.random_range(0..keys.len())].clone();
+                match rng.random_range(0..5) {
+                    0 => {
+                        let corrupted = rng.random::<bool>();
+                        candidate_object.insert(key, serde_json::Value::Bool(corrupted));
+                    }
+                    1 => {
+                        let length = rng.random_range(0..=96);
+                        let bytes: Vec<u8> = (0..length).map(|_| rng.random()).collect();
+                        candidate_object.insert(
+                            key,
+                            serde_json::Value::String(URL_SAFE_NO_PAD.encode(bytes)),
+                        );
+                    }
+                    2 => {
+                        let number = rng.random_range(0..u64::MAX);
+                        candidate_object.insert(key, serde_json::Value::Number(number.into()));
+                    }
+                    3 => {
+                        candidate_object.remove(&key);
+                    }
+                    _ => {
+                        let index = rng.random_range(0..keys.len());
+                        if let Some(source) = value.get(&keys[index]) {
+                            candidate_object.insert(key, source.clone());
+                        }
+                    }
+                }
+            }
+            if let Ok(parsed) = serde_json::from_value::<Envelope>(candidate) {
+                let _ = verify(&parsed, &verifying);
+            }
+        }
+    }
+
+    #[test]
+    fn every_field_bound_into_the_signature_is_enforced() {
+        let (signing, envelope) = sealed_envelope();
+        let verifying = signing.verifying_key();
+        let serialized = serde_json::to_value(&envelope).expect("serializes");
+        let fields = [
+            "vaultId",
+            "deviceId",
+            "revision",
+            "previousRevision",
+            "vaultEpoch",
+            "deviceEpoch",
+            "deviceEpoch",
+            "operation",
+            "previousDigest",
+            "nonce",
+            "ciphertext",
+            "signature",
+        ];
+        for field in fields {
+            let mut tampered = serialized.clone();
+            if let Some(object) = tampered.as_object_mut() {
+                if let Some(value) = object.get_mut(field) {
+                    match value {
+                        serde_json::Value::String(text) => *text = format!("tampered-{field}"),
+                        serde_json::Value::Number(number) => {
+                            *number = serde_json::Number::from(number.as_u64().unwrap_or(0) + 1)
+                        }
+                        other => *other = serde_json::Value::Null,
+                    }
+                }
+            }
+            if let Ok(parsed) = serde_json::from_value::<Envelope>(tampered) {
+                assert!(
+                    verify(&parsed, &verifying).is_err(),
+                    "{field} is not bound into the signature"
+                );
+            }
+        }
+    }
+}
