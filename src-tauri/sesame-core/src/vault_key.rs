@@ -241,6 +241,14 @@ mod platform {
         pub fn is_locked(&self) -> bool {
             self.locked
         }
+
+        #[cfg(test)]
+        pub fn plaintext(key: [u8; KEY_BYTES]) -> Self {
+            Self {
+                storage: Storage::Zeroized(Zeroizing::new(key)),
+                locked: false,
+            }
+        }
     }
 
     impl Drop for StoredKey {
@@ -298,9 +306,15 @@ mod platform {
                 }
                 return Err("Linux could not keep the vault key out of the page file.".into());
             }
-            unsafe {
-                libc::madvise(address.cast::<c_void>(), length, libc::MADV_DONTDUMP);
-                libc::madvise(address.cast::<c_void>(), length, libc::MADV_WIPEONFORK);
+            for advice in [libc::MADV_DONTDUMP, libc::MADV_WIPEONFORK] {
+                if unsafe { libc::madvise(address.cast::<c_void>(), length, advice) } != 0 {
+                    unsafe {
+                        std::slice::from_raw_parts_mut(address, length).zeroize();
+                        libc::munlock(address.cast::<c_void>(), length);
+                        libc::munmap(address.cast::<c_void>(), length);
+                    }
+                    return Err("Linux could not shield the vault key memory.".into());
+                }
             }
             Ok(Self { address, length })
         }
@@ -537,6 +551,18 @@ mod tests {
                 let flags = platform::mapping_flags(address, length).expect("mapped");
                 assert!(flags.split_whitespace().any(|flag| flag == "lo"));
             }
+        }
+
+        #[test]
+        fn linux_zeroized_storage_exposes_the_key_without_locking() {
+            let _guard = lock_counter();
+            let mut stored = platform::StoredKey::plaintext([7_u8; 32]);
+            assert!(!stored.is_locked());
+            assert!(stored.is_plaintext(&[7_u8; 32]));
+            assert!(stored
+                .expose(|bytes| Ok(bytes == &[7_u8; 32]))
+                .expect("exposed key"));
+            assert!(stored.locked_region().is_none());
         }
 
         #[test]
