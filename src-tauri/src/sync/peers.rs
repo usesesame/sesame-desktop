@@ -69,9 +69,22 @@ fn write_store(path: &Path, store: &StoredPeers) -> VaultResult<()> {
         std::fs::create_dir_all(parent)
             .map_err(|_| "Sesame could not record the trusted Sync devices.".to_string())?;
     }
-    let protected = protect(&peers_tag(&body))?;
-    crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
-    crate::vault::storage::atomic_replace(path, &body)
+    let previous_body = std::fs::read(path).ok();
+    let previous_tag = std::fs::read(tag_path(path)).ok();
+    let replace_pair = |body: &[u8], tag: &[u8]| -> VaultResult<()> {
+        let protected = protect(tag)?;
+        crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
+        crate::vault::storage::atomic_replace(path, body)
+    };
+    if let Err(error) = replace_pair(&body, &peers_tag(&body)) {
+        // A half-written pair reads as absent, and the next write would then drop
+        // the remembered pins; put the previous pair back before giving up.
+        if let (Some(body), Some(tag)) = (&previous_body, &previous_tag) {
+            let _ = replace_pair(body, tag);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -200,11 +213,15 @@ pub fn require_releasable(
 }
 
 pub fn forget(path: &Path) -> VaultResult<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(_) => Err("Sesame could not remove the trusted Sync devices.".to_string()),
+    let mut result = Ok(());
+    for target in [path.to_path_buf(), tag_path(path)] {
+        match std::fs::remove_file(&target) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => result = Err("Sesame could not remove the trusted Sync devices.".to_string()),
+        }
     }
+    result
 }
 
 #[cfg(test)]
@@ -224,6 +241,37 @@ mod tests {
     const SIGNING_OTHER: &str = "signing-key-other";
     const ENCRYPTION: &str = "encryption-key-b64";
     const ENCRYPTION_OTHER: &str = "encryption-key-other";
+
+    #[test]
+    fn forget_removes_the_store_and_its_tag() {
+        let dir = std::env::temp_dir().join(format!("sesame-peers-forget-{}", std::process::id()));
+        let path = path_for(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        record_approved(&path, VAULT, "device-a", SIGNING, ENCRYPTION).unwrap();
+        assert!(path.exists());
+        forget(&path).unwrap();
+        assert!(!path.exists());
+        assert!(!tag_path(&path).exists());
+        forget(&path).unwrap();
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_previous_pins() {
+        let dir =
+            std::env::temp_dir().join(format!("sesame-peers-failed-write-{}", std::process::id()));
+        let path = path_for(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        record_approved(&path, VAULT, "device-a", SIGNING, ENCRYPTION).unwrap();
+        let tag = std::fs::read(tag_path(&path)).unwrap();
+        std::fs::remove_file(tag_path(&path)).unwrap();
+        std::fs::create_dir(tag_path(&path)).unwrap();
+        assert!(record_verified(&path, VAULT, "device-b", SIGNING).is_err());
+        std::fs::remove_dir_all(tag_path(&path)).unwrap();
+        std::fs::write(tag_path(&path), &tag).unwrap();
+        require_releasable(&path, VAULT, "device-a", SIGNING, ENCRYPTION).unwrap();
+        cleanup(&dir);
+    }
 
     #[test]
     fn verified_pins_accumulate_and_refuse_substitution() {
