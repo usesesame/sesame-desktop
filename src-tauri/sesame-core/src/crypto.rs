@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     types::*, util::fill_random, VaultResult, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB,
-    MAX_KDF_PARALLELISM,
+    MAX_KDF_PARALLELISM, MAX_KDF_TOTAL_WORK,
 };
 
 pub fn default_kdf_params() -> KdfParams {
@@ -53,6 +53,9 @@ pub fn validate_kdf_params(params: &KdfParams) -> VaultResult<()> {
         || params.parallelism == 0
         || params.parallelism > MAX_KDF_PARALLELISM
     {
+        return Err("The vault KDF settings are outside Sesame's safe limits.".into());
+    }
+    if u64::from(params.memory_kib) * u64::from(params.iterations) > MAX_KDF_TOTAL_WORK {
         return Err("The vault KDF settings are outside Sesame's safe limits.".into());
     }
     let salt = URL_SAFE_NO_PAD

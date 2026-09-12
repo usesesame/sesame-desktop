@@ -93,7 +93,11 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
         .parent()
         .ok_or("Sesame could not find the local vault folder.")?;
     create_private_dir(parent)?;
-    let tmp_path = path.with_extension("sesame.tmp");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("Sesame could not read the local vault file name.")?;
+    let tmp_path = parent.join(format!(".{name}.{}.tmp", random_id()));
     let mut tmp = open_private_file(&tmp_path)?;
     tmp.write_all(&bytes)
         .and_then(|_| tmp.sync_all())
