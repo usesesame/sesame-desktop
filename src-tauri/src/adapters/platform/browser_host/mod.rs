@@ -2,6 +2,7 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use zeroize::Zeroizing;
 
 use crate::browser_protocol::{
     supported_protocol_version, BrowserRequest, BrowserResponse, MAX_NATIVE_MESSAGE_BYTES,
@@ -444,7 +445,7 @@ where
                 "invalid native message size",
             ));
         }
-        let mut payload = vec![0_u8; size];
+        let mut payload = Zeroizing::new(vec![0_u8; size]);
         input.read_exact(&mut payload)?;
         let request = match serde_json::from_slice::<BrowserRequest>(&payload) {
             Ok(request) => request,
@@ -486,7 +487,7 @@ where
 }
 
 fn desktop_response(request: &BrowserRequest) -> BrowserResponse {
-    let request_bytes = match serde_json::to_vec(request) {
+    let request_bytes = match request.to_zeroizing_bytes() {
         Ok(bytes) if !bytes.is_empty() && bytes.len() <= MAX_NATIVE_MESSAGE_BYTES => bytes,
         _ => return unavailable_without_desktop(request),
     };
@@ -501,16 +502,15 @@ fn desktop_response(request: &BrowserRequest) -> BrowserResponse {
 }
 
 fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
-    if request.message_type == "capabilities" {
-        BrowserResponse::capabilities(&request.request_id, false, true)
-    } else if request.message_type == "activate" {
-        BrowserResponse::activated(&request.request_id, launch_desktop_app())
-    } else {
-        if request.message_type == "card" {
-            BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable")
-        } else {
-            BrowserResponse::unavailable(&request.request_id, "desktopUnavailable")
+    match request.message_type.as_str() {
+        "capabilities" => BrowserResponse::capabilities(&request.request_id, false, true),
+        "activate" => BrowserResponse::activated(&request.request_id, launch_desktop_app()),
+        "identity" => {
+            BrowserResponse::identity_unavailable(&request.request_id, "desktopUnavailable")
         }
+        "save" => BrowserResponse::save_unavailable(&request.request_id, "desktopUnavailable"),
+        "card" => BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable"),
+        _ => BrowserResponse::unavailable(&request.request_id, "desktopUnavailable"),
     }
 }
 
@@ -675,5 +675,75 @@ mod lifecycle_tests {
             Some(std::ffi::OsStr::new("unregister")),
             None
         ));
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    fn request(message_type: &str) -> BrowserRequest {
+        let card = message_type == "card";
+        BrowserRequest {
+            version: if card { 2 } else { 1 },
+            message_type: message_type.to_string(),
+            request_id: "request-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: if message_type == "identity" {
+                Some("email".to_string())
+            } else if card {
+                Some("number".to_string())
+            } else {
+                None
+            },
+            username: None,
+            password: (message_type == "save").then(|| "fictional-password".to_string()),
+            title: None,
+            kind: (message_type == "save").then(|| "new".to_string()),
+        }
+    }
+
+    #[test]
+    fn unavailable_fallbacks_carry_the_request_type() {
+        for (message_type, expected) in [
+            ("identity", "identity-unavailable"),
+            ("save", "save-unavailable"),
+            ("fill", "fill-unavailable"),
+            ("card", "card-unavailable"),
+        ] {
+            let request = request(message_type);
+            assert!(request.validate(), "{message_type} request validates");
+            let response = unavailable_without_desktop(&request);
+            assert_eq!(response.message_type, expected);
+            assert!(
+                response.validate_for(&request),
+                "{expected} binds to its request"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_frames_end_the_host_without_a_response() {
+        let mut zero_size: &[u8] = &[0, 0, 0, 0];
+        let mut output = Vec::new();
+        let error = serve_with_relay(&mut zero_size, &mut output, |_| unreachable!())
+            .expect_err("a zero size frame fails");
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+
+        let oversize = (MAX_NATIVE_MESSAGE_BYTES as u32 + 1).to_le_bytes();
+        let mut oversize_reader: &[u8] = &oversize;
+        let mut output = Vec::new();
+        let error = serve_with_relay(&mut oversize_reader, &mut output, |_| unreachable!())
+            .expect_err("an oversize frame fails");
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+
+        let payload = b"{";
+        let mut invalid: Vec<u8> = (payload.len() as u32).to_le_bytes().to_vec();
+        invalid.extend_from_slice(payload);
+        let mut invalid_reader: &[u8] = &invalid;
+        let mut output = Vec::new();
+        let error = serve_with_relay(&mut invalid_reader, &mut output, |_| unreachable!())
+            .expect_err("invalid JSON fails");
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
     }
 }
