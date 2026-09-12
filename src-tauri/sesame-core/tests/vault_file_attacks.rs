@@ -7,9 +7,9 @@ use sesame_core::api::{
 };
 use sesame_core::{
     default_kdf_params, derive_key, encrypt_bytes, random_id, serialize_payload,
-    verify_backup_file, CipherBlob, KdfParams, VaultEntry, VaultFile, VaultPayload,
-    MAX_BACKUP_BYTES, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB, MAX_KDF_PARALLELISM, PAYLOAD_AAD,
-    PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
+    validate_kdf_params, verify_backup_file, CipherBlob, KdfParams, VaultEntry, VaultFile,
+    VaultPayload, MAX_BACKUP_BYTES, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB, MAX_KDF_PARALLELISM,
+    MAX_KDF_TOTAL_WORK, PAYLOAD_AAD, PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
 };
 
 const PASSWORD_A: &str = "fictional master password one";
@@ -274,6 +274,10 @@ fn kdf_parameters_outside_the_limits_are_refused_before_any_work() {
     let mut wrong_algorithm = default_kdf_params();
     wrong_algorithm.algorithm = "argon2i".to_string();
     hostile_params.push(wrong_algorithm);
+    let mut work_over = default_kdf_params();
+    work_over.memory_kib = MAX_KDF_MEMORY_KIB;
+    work_over.iterations = MAX_KDF_ITERATIONS;
+    hostile_params.push(work_over);
 
     for params in &hostile_params {
         assert!(derive_key(PASSWORD_A, params).is_err());
@@ -283,6 +287,25 @@ fn kdf_parameters_outside_the_limits_are_refused_before_any_work() {
     let mut hostile_file = file.clone();
     hostile_file.kdf.memory_kib = MAX_KDF_MEMORY_KIB + 1;
     assert!(open_vault_with_password(&hostile_file, PASSWORD_A).is_err());
+}
+
+#[test]
+fn kdf_work_above_the_aggregate_cap_is_refused() {
+    assert!(validate_kdf_params(&default_kdf_params()).is_ok());
+
+    let mut at_cap = default_kdf_params();
+    at_cap.memory_kib = (MAX_KDF_TOTAL_WORK / u64::from(MAX_KDF_ITERATIONS)) as u32;
+    at_cap.iterations = MAX_KDF_ITERATIONS;
+    assert!(validate_kdf_params(&at_cap).is_ok());
+
+    let mut over_cap = at_cap.clone();
+    over_cap.memory_kib += 1;
+    assert!(validate_kdf_params(&over_cap).is_err());
+
+    let mut high_memory = default_kdf_params();
+    high_memory.memory_kib = MAX_KDF_MEMORY_KIB;
+    high_memory.iterations = 5;
+    assert!(validate_kdf_params(&high_memory).is_err());
 }
 
 #[test]
