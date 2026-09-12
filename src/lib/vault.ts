@@ -1196,7 +1196,7 @@ export async function deleteLocalVault(masterPassword: string): Promise<void> {
 
 export async function chooseBackupForRestore(): Promise<BackupSelection | null> {
   if (previewMode) {
-    return { source: 'preview.sesame', fileName: 'preview.sesame', formatVersion: 3 }
+    return { source: 'preview.sesame', fileName: 'preview.sesame', formatVersion: 3, compatibility: 'upgrade', setupComplete: true }
   }
   const source = await open({
     multiple: false,
@@ -1219,7 +1219,7 @@ export async function restoreBackup(source: string, secret: string): Promise<Res
 }
 
 export async function verifyBackup(source: string, secret: string): Promise<BackupVerification> {
-  if (previewMode) return { fileName: 'preview.sesame', formatVersion: 4, vaultName: previewSnapshot.vaultName, entryCount: previewSnapshot.entries.length, vaultId: 'preview-vault', revision: 1 }
+  if (previewMode) return { fileName: 'preview.sesame', formatVersion: 3, compatibility: 'upgrade', vaultName: previewSnapshot.vaultName, entryCount: previewSnapshot.entries.length, vaultId: 'preview-vault', revision: 1 }
   return invoke<BackupVerification>('verify_backup', { request: { source, secret } })
 }
 

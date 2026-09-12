@@ -570,12 +570,24 @@ pub enum ExistingImportRelation {
     AccountConflict,
 }
 
+/// What the interface can safely say about a backup before it is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BackupCompatibility {
+    Current,
+    Upgrade,
+    Newer,
+    Unsupported,
+}
+
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInspection {
     pub file_name: String,
     pub format_version: u8,
+    pub compatibility: BackupCompatibility,
+    pub setup_complete: bool,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -594,6 +606,7 @@ pub struct RestoreBackupResult {
 pub struct BackupVerification {
     pub file_name: String,
     pub format_version: u8,
+    pub compatibility: BackupCompatibility,
     pub vault_name: String,
     pub entry_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]

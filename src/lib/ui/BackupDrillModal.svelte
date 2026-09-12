@@ -1,11 +1,12 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
-  import type { BackupSelection } from '../types'
+  import { describeBackupCompatibility } from '../backup-compatibility'
+  import type { BackupSelection, BackupVerification } from '../types'
   import ModalShell from './ModalShell.svelte'
 
   export let selection: BackupSelection | null = null
   export let secret = ''
-  export let verification: { fileName: string; formatVersion: number; vaultName: string; entryCount: number } | null = null
+  export let verification: BackupVerification | null = null
   export let working = false
   export let restoring = false
   export let error = ''
@@ -17,6 +18,11 @@
   let secretInput: HTMLInputElement
 
   $: step = verification ? 3 : selection ? 2 : 1
+  $: formatCopy = selection ? describeBackupCompatibility(selection.compatibility, selection.formatVersion) : null
+  $: verifiedCopy = verification ? describeBackupCompatibility(verification.compatibility, verification.formatVersion) : null
+  $: restoreNote = verification?.compatibility === 'upgrade'
+    ? 'Restoring upgrades a copy to the current format and leaves the selected backup unchanged. Sesame first keeps a safety copy of the vault currently open, then locks so you can open the restored vault yourself.'
+    : 'For a complete drill, restore this verified copy. Sesame first keeps a safety copy of the vault currently open, then locks so you can open the restored vault yourself.'
 
   function focusInitial() {
     if (selection && !verification) secretInput?.focus()
@@ -50,7 +56,7 @@
       <button type="button" class="primary-button" on:click={onChoose}>Choose backup</button>
     </div>
   {:else if !verification}
-    <div class="drill-file"><Icon name="archive" size={17} /><div><strong>{selection.fileName}</strong><small>Vault format {selection.formatVersion}</small></div><button type="button" class="text-button" disabled={working} on:click={onChoose}>Change</button></div>
+    <div class="drill-file"><Icon name="archive" size={17} /><div><strong>{selection.fileName}</strong><small>{formatCopy?.label}</small></div><button type="button" class="text-button" disabled={working} on:click={onChoose}>Change</button></div>
     <label class="drill-secret">Master password or recovery kit<input bind:this={secretInput} name="backup-drill-secret" bind:value={secret} type="password" autocomplete="off" spellcheck="false" disabled={working} /></label>
     <p class="drill-privacy"><Icon name="shield" size={14} /> Used locally for this check and cleared when the drill closes.</p>
     {#if error}<p class="field-error" role="alert">{error}</p>{/if}
@@ -58,9 +64,9 @@
   {:else}
     <div class="drill-result" role="status">
       <span><Icon name="check" size={19} /></span>
-      <div><strong>This backup opened successfully.</strong><p><b>{verification.vaultName}</b> · {verification.entryCount} {verification.entryCount === 1 ? 'login' : 'logins'} · format {verification.formatVersion}</p></div>
+      <div><strong>This backup opened successfully.</strong><p><b>{verification.vaultName}</b> · {verification.entryCount} {verification.entryCount === 1 ? 'login' : 'logins'} · {verifiedCopy?.label}</p></div>
     </div>
-    <div class="drill-restore-note"><strong>Verification is enough for a routine check.</strong><p>For a complete drill, restore this verified copy. Sesame first keeps a safety copy of the vault currently open, then locks so you can open the restored vault yourself.</p></div>
+    <div class="drill-restore-note"><strong>Verification is enough for a routine check.</strong><p>{restoreNote}</p></div>
     {#if error}<p class="field-error" role="alert">{error}</p>{/if}
     <div class="confirm-actions"><button type="button" class="secondary-button" disabled={restoring} on:click={onClose}>Done</button><button type="button" class="danger-button" disabled={restoring} on:click={onRestore}>{restoring ? 'Restoring…' : 'Restore verified backup'}</button></div>
   {/if}

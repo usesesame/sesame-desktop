@@ -7,8 +7,8 @@ use super::lifecycle::{discard_pin_throttle_state, establish_pin_throttle_state}
 use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
-    apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, managed_vault_paths,
-    prepare_backup_for_restore, read_backup_file, stage_managed_vault_files, verify_backup_file,
+    apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, inspect_backup_file,
+    managed_vault_paths, prepare_backup_for_restore, stage_managed_vault_files, verify_backup_file,
 };
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health;
@@ -258,11 +258,7 @@ pub fn inspect_backup(
         return Err("Unlock your vault before inspecting a backup.".into());
     }
     let source = PathBuf::from(source);
-    let file = read_backup_file(&source)?;
-    Ok(BackupInspection {
-        file_name: backup_file_name(&source)?,
-        format_version: file.format_version,
-    })
+    inspect_backup_file(&source)
 }
 
 #[tauri::command]
