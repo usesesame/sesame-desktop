@@ -18,7 +18,8 @@ use crate::{
     payload_aad_for_file,
     record_store::VaultRecordStore,
     throttle::{PersistedPinThrottle, PinAttemptGuard},
-    UnlockedVault, VaultResult, PIN_WRAP_AAD, RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
+    UnlockedVault, VaultResult, MAX_VAULT_FILE_BYTES, PIN_WRAP_AAD, RECOVERY_WRAP_AAD,
+    VAULT_FORMAT_VERSION, WRAP_AAD,
 };
 use crate::{
     types::*,
@@ -79,22 +80,19 @@ pub fn write_vault_file(path: &Path, file: &VaultFile) -> VaultResult<()> {
 
 /// No `.prev` copy: one would sit decryptable under the old password.
 pub fn write_vault_file_without_previous(path: &Path, file: &VaultFile) -> VaultResult<()> {
-    let previous = path.with_extension("sesame.prev");
-    match fs::remove_file(previous) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("Sesame could not remove the previous vault wrapper.".into()),
-    }
     write_vault_file_inner(path, file, false)
 }
 
 fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) -> VaultResult<()> {
+    let bytes = serde_json::to_vec(file)
+        .map_err(|_| "Sesame could not save the local vault.".to_string())?;
+    if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
+        return Err("This change would exceed the vault's 64 MiB storage limit. Remove unneeded attachments or records and try again. Your saved vault has not changed.".into());
+    }
     let parent = path
         .parent()
         .ok_or("Sesame could not find the local vault folder.")?;
     create_private_dir(parent)?;
-    let bytes = serde_json::to_vec(file)
-        .map_err(|_| "Sesame could not save the local vault.".to_string())?;
     let tmp_path = path.with_extension("sesame.tmp");
     let mut tmp = open_private_file(&tmp_path)?;
     tmp.write_all(&bytes)
@@ -106,6 +104,12 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
         let previous = path.with_extension("sesame.prev");
         copy_private_file(path, &previous)
             .map_err(|_| "Sesame could not protect the previous vault copy.".to_string())?;
+    } else if !retain_previous {
+        match fs::remove_file(path.with_extension("sesame.prev")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("Sesame could not remove the previous vault wrapper.".into()),
+        }
     }
     replace_file(&tmp_path, path)
 }
