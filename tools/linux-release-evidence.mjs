@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
-import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, SIGSTORE_ISSUER, assertSafeReleaseFilename, fileSha256, releaseIdentity, sha256 } from './release-evidence-lib.mjs'
+import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, SIGSTORE_ISSUER, assertSafeReleaseFilename, fileSha256, releaseIdentity } from './release-evidence-lib.mjs'
 import { applicableReleaseFormats } from './release-set.mjs'
 
 export const LINUX_RELEASE_KIND = 'unsigned-linux-early-access'
@@ -114,5 +114,3 @@ export async function validateLinuxEvidenceDirectory(directory, manifestFilename
   }
   return { manifest, evidence, paths, manifestSha256: manifestRecord.sha256 }
 }
-
-export const linuxEvidenceDigest = (value) => sha256(JSON.stringify(value))

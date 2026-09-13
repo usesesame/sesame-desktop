@@ -19,7 +19,6 @@ env:
   SESAME_RELEASE_ARCHITECTURE: x86_64
   SESAME_RELEASE_CHANNEL: beta
   SESAME_RELEASE_NOTES_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
-  SESAME_RELEASE_CANDIDATE_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
 
 jobs:
   # The three packages are built once, then the shipped deb and the
