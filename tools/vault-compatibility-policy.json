@@ -1,0 +1,15 @@
+{
+  "schema": "sesame.vault-compatibility-policy/1",
+  "platforms": [
+    "linux",
+    "windows"
+  ],
+  "minimumSupportedFormat": 2,
+  "rollback": "Restoring an older build after this release is a binary rollback only; it does not lower the vault format. The older build may refuse a vault this release has resealed. Keep the pre-upgrade backup and the recorded compatibility decision, and restore that backup or run the recovery path before rolling back.",
+  "minimumFormatDecision": {
+    "status": "recorded",
+    "recordedBy": "owner",
+    "date": "2026-09-05",
+    "note": "The compatibility promise covers the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 stay outside the promise as unproven recovery attempts with their exact labels retained. Raising the minimum supported format requires a new recorded decision in this file, and removing a fixture requires a replacement fixture or a new recovery decision."
+  }
+}

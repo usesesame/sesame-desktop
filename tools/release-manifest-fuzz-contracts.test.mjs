@@ -20,6 +20,12 @@ function manifestFixture() {
     artifact: { filename: 'Sesame_1.2.3_x64-setup.exe', sha256: 'b'.repeat(64), bytes: 48213 },
     updaterSignature: { filename: 'Sesame_1.2.3_x64-setup.exe.sig', sha256: 'c'.repeat(64), bytes: 128, signingKeyId: 'updater-1' },
     sbom: { filename: 'sesame-1.2.3.cdx.json', sha256: 'd'.repeat(64), bytes: 2048 },
+    vaultCompatibility: {
+      schemaVersion: 1, fixtureManifestSha256: 'e'.repeat(64), matrixDigest: 'f'.repeat(64), minimumSupportedFormat: 2,
+      platforms: ['linux', 'windows'], rollback: 'Fictional rollback rule for the fuzz suite.',
+      matrix: { filename: 'vault-compatibility-matrix.json', sha256: 'b'.repeat(64), bytes: 2048 },
+      evidence: { filename: 'vault-compatibility.json', sha256: 'a'.repeat(64), bytes: 4096 },
+    },
     sigstore: { issuer: SIGSTORE_ISSUER, certificateIdentity: identity, transparencyLogRequired: true },
     windowsTrust: { authenticodeVerified: false, smartScreenReputationPromised: false, label: 'Unsigned Windows early-access build' },
     supportedWindows: 'Windows 10,Windows 11',

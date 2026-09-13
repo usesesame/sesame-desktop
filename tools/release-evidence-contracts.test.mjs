@@ -24,12 +24,19 @@ async function fixture() {
   await writeFile(path.join(root, files.updaterSignature), 'A'.repeat(64))
   await writeFile(path.join(root, files.sbom), '{"bomFormat":"CycloneDX"}\n')
   const describe = async (filename) => ({ filename, sha256: await fileSha256(path.join(root, filename)), bytes: (await readFile(path.join(root, filename))).length })
+  await writeFile(path.join(root, 'vault-compatibility.json'), '{"fictional":true,"result":"passed"}\n')
+  await writeFile(path.join(root, 'vault-compatibility-matrix.json'), '{"fictional":true,"schema":"sesame.vault-compatibility-matrix/1"}\n')
   const manifest = {
     schemaVersion: 1, product: 'Sesame', releaseKind: 'unsigned-windows-early-access', version, channel: 'beta', platform: 'windows', architecture: 'x86_64',
     source: { repository: RELEASE_REPOSITORY, workflow: RELEASE_WORKFLOW, ref, commit: 'a'.repeat(40) },
     artifact: await describe(files.artifact),
     updaterSignature: { ...await describe(files.updaterSignature), signingKeyId: 'updater-1' },
     sbom: await describe(files.sbom),
+    vaultCompatibility: {
+      schemaVersion: 1, fixtureManifestSha256: 'b'.repeat(64), matrixDigest: 'c'.repeat(64), minimumSupportedFormat: 2,
+      platforms: ['linux', 'windows'], rollback: 'Fictional rollback rule for the contract test.',
+      matrix: await describe('vault-compatibility-matrix.json'), evidence: await describe('vault-compatibility.json'),
+    },
     sigstore: { issuer: SIGSTORE_ISSUER, certificateIdentity: releaseIdentity(RELEASE_REPOSITORY, RELEASE_WORKFLOW, ref), transparencyLogRequired: true },
     windowsTrust: { authenticodeVerified: false, smartScreenReputationPromised: false, label: 'Unsigned Windows early-access build' },
     supportedWindows: 'Windows 10,Windows 11', releaseNotesUrl: 'https://usesesame.app/releases/1.2.3',
@@ -68,6 +75,29 @@ test('release evidence rejects changed installer bytes and substituted Sigstore 
     await writeFile(path.join(bundle.root, `${bundle.files.artifact}.sigstore.json`), '{"substituted":true}\n')
     await assert.rejects(validateEvidenceDirectory(bundle.root, bundle.files.manifest), /bundle was substituted/)
   } finally { await rm(bundle.root, { recursive: true, force: true }) }
+})
+
+test('release evidence requires a passing vault compatibility record for both platforms', async () => {
+  const missing = await fixture()
+  try {
+    const manifest = structuredClone(missing.manifest)
+    delete manifest.vaultCompatibility
+    assert.throws(() => validateReleaseManifest(manifest), /vault compatibility/)
+    const onePlatform = structuredClone(missing.manifest)
+    onePlatform.vaultCompatibility.platforms = ['windows']
+    assert.throws(() => validateReleaseManifest(onePlatform), /missing linux/)
+    const noRollback = structuredClone(missing.manifest)
+    delete noRollback.vaultCompatibility.rollback
+    assert.throws(() => validateReleaseManifest(noRollback), /no rollback rule/)
+  } finally { await rm(missing.root, { recursive: true, force: true }) }
+})
+
+test('release evidence rejects a vault compatibility record swapped after verification', async () => {
+  const value = await fixture()
+  try {
+    await writeFile(path.join(value.root, 'vault-compatibility.json'), '{"fictional":true,"result":"failed"}\n')
+    await assert.rejects(validateEvidenceDirectory(value.root, value.files.manifest), /vaultCompatibility does not match/)
+  } finally { await rm(value.root, { recursive: true, force: true }) }
 })
 
 test('release manifest rejects branch builds, forks, and a different workflow identity', async () => {

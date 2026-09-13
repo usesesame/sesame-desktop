@@ -31,10 +31,39 @@ export function assertSafeReleaseFilename(value, label = 'filename') {
   return value
 }
 
+const compatibilityPlatforms = new Set(['linux', 'windows'])
+
+function validateVaultCompatibility(record) {
+  if (record?.schemaVersion !== 1 || !sha256Pattern.test(record.fixtureManifestSha256 ?? '') || !sha256Pattern.test(record.matrixDigest ?? '')) {
+    throw new Error('Release manifest vault compatibility identity is invalid.')
+  }
+  if (!Number.isInteger(record.minimumSupportedFormat) || record.minimumSupportedFormat < 1) {
+    throw new Error('Release manifest vault compatibility has no minimum supported format.')
+  }
+  if (typeof record.rollback !== 'string' || record.rollback.length === 0) {
+    throw new Error('Release manifest vault compatibility has no rollback rule.')
+  }
+  for (const [label, file] of Object.entries({ matrix: record.matrix, evidence: record.evidence })) {
+    assertSafeReleaseFilename(file?.filename, `vault compatibility ${label} filename`)
+    if (!sha256Pattern.test(file?.sha256 ?? '') || !Number.isSafeInteger(file?.bytes) || file.bytes <= 0) {
+      throw new Error(`Release manifest vault compatibility ${label} is invalid.`)
+    }
+  }
+  if (!Array.isArray(record.platforms) || record.platforms.length === 0 || record.platforms.some((platform) => !compatibilityPlatforms.has(platform))) {
+    throw new Error('Release manifest vault compatibility platforms are invalid.')
+  }
+  for (const platform of compatibilityPlatforms) {
+    if (!record.platforms.includes(platform)) {
+      throw new Error(`Release manifest vault compatibility is missing ${platform}.`)
+    }
+  }
+}
+
 export function validateReleaseManifest(manifest) {
   if (manifest?.schemaVersion !== 1 || manifest.product !== 'Sesame' || manifest.releaseKind !== 'unsigned-windows-early-access') {
     throw new Error('Release manifest identity is invalid.')
   }
+  validateVaultCompatibility(manifest.vaultCompatibility)
   if (!versionPattern.test(manifest.version) || !architectureSet.has(manifest.architecture) || !channelSet.has(manifest.channel)) {
     throw new Error('Release manifest version, architecture, or channel is invalid.')
   }
@@ -105,11 +134,15 @@ export async function validateEvidenceDirectory(directory, manifestFilename) {
     artifactBundle: path.join(root, `${manifest.artifact.filename}.sigstore.json`),
     manifestBundle: path.join(root, `${manifestFilename}.sigstore.json`),
     manifest: manifestPath,
+    vaultCompatibility: path.join(root, manifest.vaultCompatibility.evidence.filename),
+    vaultCompatibilityMatrix: path.join(root, manifest.vaultCompatibility.matrix.filename),
   }
   const expected = {
     artifact: manifest.artifact,
     updaterSignature: manifest.updaterSignature,
     sbom: manifest.sbom,
+    vaultCompatibility: manifest.vaultCompatibility.evidence,
+    vaultCompatibilityMatrix: manifest.vaultCompatibility.matrix,
   }
   for (const key of Object.keys(expected)) {
     const size = (await stat(paths[key])).size

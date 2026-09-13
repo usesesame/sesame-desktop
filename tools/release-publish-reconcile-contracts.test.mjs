@@ -32,6 +32,8 @@ async function evidenceFixture() {
   await writeFile(path.join(root, files.artifact), 'fictional installer bytes')
   await writeFile(path.join(root, files.updaterSignature), 'A'.repeat(64))
   await writeFile(path.join(root, files.sbom), '{"bomFormat":"CycloneDX"}\n')
+  await writeFile(path.join(root, 'vault-compatibility.json'), '{"fictional":true,"result":"passed"}\n')
+  await writeFile(path.join(root, 'vault-compatibility-matrix.json'), '{"fictional":true,"schema":"sesame.vault-compatibility-matrix/1"}\n')
   const describe = async (filename) => ({ filename, sha256: await fileSha256(path.join(root, filename)), bytes: (await readFile(path.join(root, filename))).length })
   const manifest = {
     schemaVersion: 1, product: 'Sesame', releaseKind: 'unsigned-windows-early-access', version, channel: 'beta', platform: 'windows', architecture: 'x86_64',
@@ -39,6 +41,11 @@ async function evidenceFixture() {
     artifact: await describe(files.artifact),
     updaterSignature: { ...await describe(files.updaterSignature), signingKeyId: 'updater-1' },
     sbom: await describe(files.sbom),
+    vaultCompatibility: {
+      schemaVersion: 1, fixtureManifestSha256: 'b'.repeat(64), matrixDigest: 'c'.repeat(64), minimumSupportedFormat: 2,
+      platforms: ['linux', 'windows'], rollback: 'Fictional rollback rule for the contract test.',
+      matrix: await describe('vault-compatibility-matrix.json'), evidence: await describe('vault-compatibility.json'),
+    },
     sigstore: { issuer: SIGSTORE_ISSUER, certificateIdentity: identity, transparencyLogRequired: true },
     windowsTrust: { authenticodeVerified: false, smartScreenReputationPromised: false, label: 'Unsigned Windows early-access build' },
     supportedWindows: 'Windows 10,Windows 11', releaseNotesUrl: 'https://usesesame.app/releases/1.2.3',
