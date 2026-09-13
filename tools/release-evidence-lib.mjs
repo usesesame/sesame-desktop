@@ -5,6 +5,7 @@ import path from 'node:path'
 export const SIGSTORE_ISSUER = 'https://token.actions.githubusercontent.com'
 export const RELEASE_REPOSITORY = 'usesesame/sesame-desktop'
 export const RELEASE_WORKFLOW = '.github/workflows/release-early-access.yml'
+export const LINUX_RELEASE_WORKFLOW = '.github/workflows/release-linux-early-access.yml'
 
 const sha256Pattern = /^[0-9a-f]{64}$/
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/
