@@ -2,13 +2,39 @@
    Sesame design tokens
 ========================================================================= */
 
+@font-face {
+  font-family: "Fraunces Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./fonts/fraunces-latin-full-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Schibsted Grotesk Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 900;
+  src: url("./fonts/schibsted-grotesk-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@font-face {
+  font-family: "Spline Sans Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url("./fonts/spline-sans-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
 :root {
   color-scheme: light;
 
   /* ---- Type ---------------------------------------------------------- */
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  --font-display: var(--font-ui);
-  --font-code: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --font-ui: "Schibsted Grotesk Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-display: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-code: "Spline Sans Mono Variable", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  --font-display-settings: "SOFT" 60, "WONK" 0;
 
   --type-1: 0.75rem;   /* 12px */
   --type-2: 0.8125rem; /* 13px */
@@ -30,7 +56,8 @@
   --radius-sm: 0.25rem;  /* 4px */
   --radius-md: 0.5rem;   /* 8px */
   --radius-lg: 0.75rem;  /* 12px */
-  --radius-xl: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.125rem;
   --radius-pill: 999px;
 
   /* ---- Base and surfaces ------------------------------------------------ */
@@ -64,8 +91,8 @@
   --text: #334136;
   --text-2: #536154;
   --text-muted: #667267;
-  --text-faint: #727d72;
-  --eyebrow: #728071;
+  --text-faint: #677166;
+  --eyebrow: #667463;
 
   /* ---- Green accent --accent is the button; --accent-link stays readable as text. */
   --accent: #2e4735;
@@ -93,7 +120,7 @@
   --gold-border: #ecd497;
 
   /* ---- Warn ------------------------------------------------------------- */
-  --warn-text: #a5663e;
+  --warn-text: #9a5e38;
   --warn-bg: #fff0da;
 
   /* ---- Danger ----------------------------------------------------------- */
@@ -121,6 +148,7 @@
   --control-active-bg: linear-gradient(rgba(0, 0, 0, .055), rgba(0, 0, 0, .03));
   --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .8);
   --control-active-lift: 0 1px 3px rgba(45, 55, 45, .12);
+  --button-edge: rgba(255, 255, 255, .14);
 
   /* ---- Effects */
   --focus-ring: #27613a;
@@ -132,7 +160,7 @@
   --shadow-panel: none;
   --shadow-card: none;
   /* The website's two-layer card shadow */
-  --shadow-raised: 0 1px 2px rgba(45, 55, 45, .05), 0 8px 24px rgba(45, 55, 45, .06);
+  --shadow-raised: inset 0 1px 0 var(--edge-top), 0 1px 2px rgba(45, 55, 45, .05), 0 8px 24px rgba(45, 55, 45, .06);
   --shadow-lift: 0 2px 4px rgba(45, 55, 45, .05), 0 18px 44px rgba(45, 55, 45, .11);
   --shadow-btn: 0 1px 2px rgba(0, 0, 0, .08), 0 2px 6px rgba(45, 55, 45, .1);
   --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent), 0 12px 30px rgba(45, 55, 45, .07);
@@ -152,6 +180,7 @@
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
+  font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -238,6 +267,7 @@
     --control-active-bg: linear-gradient(rgba(255, 255, 255, .12), rgba(255, 255, 255, .07));
     --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .09);
     --control-active-lift: 0 1px 3px rgba(0, 0, 0, .25);
+  --button-edge: rgba(255, 255, 255, .08);
 
     --edge-highlight: rgba(255, 255, 255, .05);
     --scrollbar-thumb: rgba(200, 214, 196, .18);
@@ -246,7 +276,7 @@
 
     --shadow-panel: none;
     --shadow-card: none;
-    --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
+    --shadow-raised: inset 0 1px 0 var(--edge-top), 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
     --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
     --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);
     --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent), 0 14px 34px rgba(0, 0, 0, .34);
@@ -318,9 +348,19 @@
 
   --ring-track: #2c3527;
   --ring-fill: #5c8c66;
-  --score-ring: #2f4030;
   --spinner-track: #2a3227;
   --dash-border: #4a5c46;
+  --edge-top: rgba(255, 255, 255, .06);
+  --shadow-raise:
+    inset 0 1px 0 var(--edge-top),
+    0 1px 2px rgba(0, 0, 0, .35),
+    0 10px 28px rgba(0, 0, 0, .4);
+
+  --control-hover: rgba(255, 255, 255, .045);
+  --control-active-bg: linear-gradient(rgba(255, 255, 255, .12), rgba(255, 255, 255, .07));
+  --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .09);
+  --control-active-lift: 0 1px 3px rgba(0, 0, 0, .25);
+  --button-edge: rgba(255, 255, 255, .08);
 
   --edge-highlight: rgba(255, 255, 255, .05);
   --scrollbar-thumb: rgba(200, 214, 196, .18);
@@ -329,7 +369,7 @@
 
   --shadow-panel: none;
   --shadow-card: none;
-  --shadow-raised: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
+  --shadow-raised: inset 0 1px 0 var(--edge-top), 0 1px 2px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .32);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, .34), 0 22px 50px rgba(0, 0, 0, .42);
   --shadow-btn: 0 1px 2px rgba(0, 0, 0, .3), 0 3px 8px rgba(0, 0, 0, .28);
   --shadow-header: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent), 0 14px 34px rgba(0, 0, 0, .34);

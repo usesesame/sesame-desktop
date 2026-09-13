@@ -265,7 +265,6 @@
   onDestroy(clearPasswordRevealTimer)
 
   function keyboardContextMenu(event: KeyboardEvent, item: VaultItem) {
-    if (item.kind !== 'login') return
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
     event.preventDefault()
     const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -451,13 +450,13 @@
       {#if visibleItems.length}
         <div class="entry-list" role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
-            <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && item.kind === 'login' && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
+            <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
               {#if multiSelect}<input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />{/if}
               <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => !multiSelect && keyboardContextMenu(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
                 </span>
-                <span class="entry-title"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
+                <span class="entry-title"><strong>{item.title}</strong><small><span class="entry-subtitle">{item.subtitle || itemKindLabel(item.kind)}</span>{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
                 {#if item.securityLevel === 'needs-work'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
               </button>
               {#if !multiSelect}<button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>{/if}
@@ -525,7 +524,7 @@
             <div class="checkup-fix-copy"><strong id="checkup-fix-title">{issueKindLabels[activeIssue].title}</strong>
               {#if activePasswordIssues.length}
                 {#each activePasswordIssues as issue (issue.kind)}<p>{issue.explanation}</p>{/each}
-                <span class="password-score">Password score: {selectedEntry.passwordScore}/100</span>
+                <span class="password-score"><span class="password-score-track"><span class="password-score-fill" style="width: {selectedEntry.passwordScore}%"></span></span>Password score {selectedEntry.passwordScore}/100</span>
               {:else if activeIssue === 'duplicate'}<p>Compare matching records and keep the values you trust.</p>
               {:else if activeIssue === 'url'}<p>Add the sign-in page so Sesame can open and match this login.</p>
               {:else if activeIssue === 'totp'}<p>Add the site's authenticator secret if it supports app-based 2FA.</p>

@@ -30,6 +30,13 @@ interface UnlockControllerOptions {
   modal: ModalController
 }
 
+function nextPaint(): Promise<void> {
+  if (document.visibilityState === 'hidden') return Promise.resolve()
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
 export function createUnlockController(options: UnlockControllerOptions) {
   const { stores, feedback, onboarding, modal } = options
   const { selection, vault } = stores
@@ -126,6 +133,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       const selectedId = selection.value().activeItemId
       try {
         const snapshot = await unlockVault({ masterPassword: '' }, true)
+        await nextPaint()
         vault.patch({ snapshot })
         const selected = selectedId ? vaultItems(snapshot).find((item) => item.id === selectedId) : undefined
         if (selected) await options.selectItem(selected.id, selected.kind)
@@ -146,6 +154,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       if (!status.exists && current.masterPassword !== current.confirmPassword) return feedback.setErrorMessage('Those master passwords do not match.')
 
       state.patch({ isWorking: true })
+      await nextPaint()
       try {
         if (!status.exists) {
           const setup = await createVault({ masterPassword: current.masterPassword })
@@ -170,6 +179,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
           snapshot = await unlockVault({ masterPassword: current.masterPassword })
         }
         state.patch({ masterPassword: '', confirmPassword: '', recoveryUnlockOpen: false, restoreMessage: '' })
+        await nextPaint()
         const ready = await installExistingUnlock(snapshot)
         if (ready) feedback.showNotice('Vault unlocked', status.preview ? 'Preview mode does not create a vault file.' : 'Your logins are ready.')
       } catch (error) {
@@ -186,6 +196,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       try {
         const snapshot = await unlockWithPin(current.unlockPin)
         state.patch({ unlockPin: '', restoreMessage: '' })
+        await nextPaint()
         await installExistingUnlock(snapshot)
       } catch (error) {
         state.patch({ unlockPin: '' })
@@ -202,6 +213,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       try {
         const snapshot = await unlockWithWindowsHello()
         state.patch({ restoreMessage: '' })
+        await nextPaint()
         await installExistingUnlock(snapshot)
       } catch (error) {
         feedback.setError(error)
