@@ -155,7 +155,8 @@ jobs:
             libsecret-tools \
             patchelf \
             xdg-utils \
-            rpm
+            rpm \
+            xvfb
 
       - run: npm ci
 
@@ -184,6 +185,25 @@ jobs:
         run: >-
           npm run tauri -- build --bundles deb,rpm,appimage
           --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      # The shipped binary has no test bridge, so the package that installs
+      # here is the test-featured build. It exercises the real deb layout,
+      # dpkg install, launch, vault operations, restart, and removal.
+      - name: Prove the installed package lifecycle
+        env:
+          VITE_SESAME_WDIO: 'true'
+        run: |
+          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb
+          xvfb-run -a node tools/linux-installed-package-gate.mjs \
+            --package "$(ls src-tauri/target/release/bundle/deb/Sesame_*_amd64.deb)" \
+            --out linux-package-evidence
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-package-evidence
+          path: linux-package-evidence
+          if-no-files-found: error
+          retention-days: 30
 
   # ---------------------------------------------------------------------
   # Supply chain. Independent of the product jobs, so a new advisory does
