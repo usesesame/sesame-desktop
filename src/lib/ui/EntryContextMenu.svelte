@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
   import Icon from '../Icon.svelte'
-  import type { Folder, VaultEntry } from '../types'
+  import type { Folder, ItemKind, VaultEntry } from '../types'
+  import { itemKindIcon, itemKindLabel } from '../vault-items'
 
-  export let entry: VaultEntry
+  export let entry: Pick<VaultEntry, 'id' | 'title' | 'site' | 'initials' | 'folderId' | 'folder' | 'favourite' | 'issueKinds'>
+  export let kind: ItemKind = 'login'
   export let x = 0
   export let y = 0
   export let folders: Folder[] = []
@@ -18,6 +20,8 @@
   export let onMove: (folderId?: string) => void
   export let onNewFolder: () => void
   export let onToggleFavourite: () => void
+
+  $: kindLabel = itemKindLabel(kind)
 
   let menu: HTMLDivElement
   let left = x
@@ -121,11 +125,13 @@
 <svelte:window on:mousedown={outside} on:keydown={keydown} />
 
 <div bind:this={menu} class="entry-context-menu" role="menu" aria-label={`Actions for ${entry.title}`} style={`left:${left}px;top:${top}px`}>
-  <div class="context-menu-heading"><span class="entry-avatar">{entry.initials}</span><span><strong>{entry.title}</strong><small>{entry.site}</small></span></div>
-  <button type="button" role="menuitem" disabled={entry.issueKinds.includes('url') || working} on:click={onOpen}><Icon name="external" size={15} /><span>Open site</span></button>
-  <button type="button" role="menuitem" disabled={working} on:click={onCopyUsername}><Icon name="user" size={15} /><span>Copy username</span></button>
-  <button type="button" role="menuitem" disabled={working} on:click={onCopyEmail}><Icon name="mail" size={15} /><span>Copy email</span></button>
-  <button type="button" role="menuitem" disabled={working} on:click={onCopyPassword}><Icon name="key" size={15} /><span>Copy password</span></button>
+  <div class="context-menu-heading"><span class="entry-avatar">{#if kind === 'login'}{entry.initials}{:else}<Icon name={itemKindIcon(kind)} size={15} />{/if}</span><span><strong>{entry.title}</strong><small>{kind === 'login' ? entry.site : kindLabel}</small></span></div>
+  {#if kind === 'login'}
+    <button type="button" role="menuitem" disabled={entry.issueKinds.includes('url') || working} on:click={onOpen}><Icon name="external" size={15} /><span>Open site</span></button>
+    <button type="button" role="menuitem" disabled={working} on:click={onCopyUsername}><Icon name="user" size={15} /><span>Copy username</span></button>
+    <button type="button" role="menuitem" disabled={working} on:click={onCopyEmail}><Icon name="mail" size={15} /><span>Copy email</span></button>
+    <button type="button" role="menuitem" disabled={working} on:click={onCopyPassword}><Icon name="key" size={15} /><span>Copy password</span></button>
+  {/if}
   <button type="button" role="menuitemcheckbox" aria-checked={entry.favourite} disabled={working} on:click={onToggleFavourite}><span class="context-favourite" aria-hidden="true">{entry.favourite ? '★' : '☆'}</span><span>{entry.favourite ? 'Remove from favourites' : 'Add to favourites'}</span></button>
   <div class="context-menu-separator" role="separator"></div>
   <button bind:this={folderTrigger} type="button" role="menuitem" aria-haspopup="menu" aria-controls="entry-folder-submenu" aria-expanded={foldersOpen} disabled={working} on:click={() => (foldersOpen = !foldersOpen)}><Icon name="folder" size={15} /><span>Move to folder</span><Icon name="chevron-right" size={14} /></button>
@@ -139,6 +145,6 @@
     </div>
   {/if}
   <div class="context-menu-separator" role="separator"></div>
-  <button type="button" role="menuitem" disabled={working} on:click={onEdit}><Icon name="pencil" size={15} /><span>Edit login</span></button>
-  <button type="button" role="menuitem" class="danger" disabled={working} on:click={onDelete}><Icon name="trash" size={15} /><span>Delete login</span></button>
+  <button type="button" role="menuitem" disabled={working} on:click={onEdit}><Icon name="pencil" size={15} /><span>Edit {kindLabel}</span></button>
+  <button type="button" role="menuitem" class="danger" disabled={working} on:click={onDelete}><Icon name="trash" size={15} /><span>Delete {kindLabel}</span></button>
 </div>

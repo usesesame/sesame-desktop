@@ -208,7 +208,7 @@
 
 <style>
   :global(body) { min-width: 0; background: transparent; }
-  .quick-access { animation: view-enter .16s var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise), var(--shadow-panel); overflow: hidden; }
+  .quick-access { animation: view-enter .16s var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise); overflow: hidden; }
   .quick-access-status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; color: var(--text-muted); font-size: var(--type-2); text-align: center; }
   .quick-access-search { display: flex; align-items: center; gap: var(--space-2); flex: none; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); }
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }

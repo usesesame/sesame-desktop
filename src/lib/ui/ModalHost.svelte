@@ -15,9 +15,5 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    display: grid;
-    place-items: center;
-    background: rgba(0, 0, 0, 0.35);
-    backdrop-filter: blur(2px);
   }
 </style>

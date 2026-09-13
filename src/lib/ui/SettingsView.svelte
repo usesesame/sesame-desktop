@@ -395,6 +395,7 @@
               {#if diagnosticStatus.recent.length > 0}
                 <details class="diagnostics-detail">
                   <summary><Icon name="chevron-right" size={14} />Recent activity</summary>
+                  <div class="diagnostics-columns">
                   {#if diagnosticStatus.byOperation.length > 0}
                     <div class="diagnostics-breakdown">
                       <strong>By area</strong>
@@ -415,6 +416,7 @@
                       </ul>
                     </div>
                   {/if}
+                  </div>
                   <div class="diagnostics-breakdown">
                     <strong>Recent events</strong>
                     <ul>
