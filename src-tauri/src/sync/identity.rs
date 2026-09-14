@@ -295,3 +295,74 @@ impl DeviceIdentity {
         Ok(URL_SAFE_NO_PAD.encode(self.signing.sign(&payload).to_bytes()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repeated_key(byte: u64, length: usize) -> String {
+        URL_SAFE_NO_PAD.encode(vec![
+            u8::try_from(byte).expect("fixture byte fits a byte");
+            length
+        ])
+    }
+
+    #[test]
+    fn enrollment_signing_payload_matches_the_cross_language_fixture() {
+        let fixture = crate::sync::contract_fixture("enrollment-signing-payload.json");
+        let input = &fixture["input"];
+        let length = input["keyLength"].as_u64().expect("fixture keyLength") as usize;
+        let payload = enrollment_signing_payload(
+            input["vaultId"].as_str().expect("fixture vaultId"),
+            input["deviceId"].as_str().expect("fixture deviceId"),
+            &repeated_key(
+                input["signingPublicKeyByte"]
+                    .as_u64()
+                    .expect("fixture signingPublicKeyByte"),
+                length,
+            ),
+            &repeated_key(
+                input["encryptionPublicKeyByte"]
+                    .as_u64()
+                    .expect("fixture encryptionPublicKeyByte"),
+                length,
+            ),
+            &repeated_key(
+                input["challengeByte"]
+                    .as_u64()
+                    .expect("fixture challengeByte"),
+                length,
+            ),
+        )
+        .expect("the fixture enrollment proof builds");
+        assert_eq!(
+            std::str::from_utf8(&payload).expect("the enrollment payload is UTF-8"),
+            fixture["signingPayload"]
+                .as_str()
+                .expect("fixture signingPayload"),
+        );
+    }
+
+    #[test]
+    fn key_package_signing_payload_matches_the_cross_language_fixture() {
+        let fixture = crate::sync::contract_fixture("key-package-signing-payload.json");
+        let input = &fixture["input"];
+        let payload = key_package_signing_payload(
+            input["vaultId"].as_str().expect("fixture vaultId"),
+            input["senderDeviceId"]
+                .as_str()
+                .expect("fixture senderDeviceId"),
+            input["recipientDeviceId"]
+                .as_str()
+                .expect("fixture recipientDeviceId"),
+            input["ciphertext"].as_str().expect("fixture ciphertext"),
+        )
+        .expect("the fixture key package payload builds");
+        assert_eq!(
+            std::str::from_utf8(&payload).expect("the key package payload is UTF-8"),
+            fixture["signingPayload"]
+                .as_str()
+                .expect("fixture signingPayload"),
+        );
+    }
+}
