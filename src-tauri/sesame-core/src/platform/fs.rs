@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::util::random_id;
 use crate::VaultResult;
 
 #[cfg(windows)]
@@ -54,9 +55,8 @@ pub fn create_private_dir(path: &Path) -> VaultResult<()> {
 pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     std::fs::OpenOptions::new()
-        .create(true)
+        .create_new(true)
         .write(true)
-        .truncate(true)
         .mode(0o600)
         .open(path)
         .map_err(|_| "Sesame could not prepare the file.".to_string())
@@ -65,35 +65,37 @@ pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
 #[cfg(not(unix))]
 pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
     std::fs::OpenOptions::new()
-        .create(true)
+        .create_new(true)
         .write(true)
-        .truncate(true)
         .open(path)
         .map_err(|_| "Sesame could not prepare the file.".to_string())
 }
 
-#[cfg(unix)]
+/// A temp file in the destination folder plus a rename, so a planted link is
+/// replaced rather than followed.
 pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut output = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(destination)
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())?;
-    let mut input = std::fs::File::open(source)
-        .map_err(|_| "Sesame could not read the vault copy.".to_string())?;
-    std::io::copy(&mut input, &mut output)
-        .and_then(|_| output.sync_all())
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())
-}
-
-#[cfg(not(unix))]
-pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
-    fs::copy(source, destination)
-        .map(|_| ())
-        .map_err(|_| "Sesame could not write the vault copy.".to_string())
+    let parent = destination
+        .parent()
+        .ok_or("Sesame could not find the destination folder.")?;
+    let temporary = parent.join(format!(".{}.tmp", random_id()));
+    let write: VaultResult<()> = (|| {
+        let mut output = open_private_file(&temporary)?;
+        let mut input = std::fs::File::open(source)
+            .map_err(|_| "Sesame could not read the vault copy.".to_string())?;
+        std::io::copy(&mut input, &mut output)
+            .and_then(|_| output.sync_all())
+            .map_err(|_| "Sesame could not write the vault copy.".to_string())?;
+        Ok(())
+    })();
+    if let Err(error) = write {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if let Err(error) = replace_file(&temporary, destination) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -160,7 +162,16 @@ pub fn same_file_identity(_source: &Path, _destination: &Path) -> bool {
 
 /// Best-effort secure deletion: overwrites with random bytes; wear-leveled storage cannot be guaranteed.
 pub fn securely_delete(path: &Path) -> VaultResult<()> {
-    if path.is_dir() {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Sesame could not inspect a staged vault entry.".to_string()),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        fs::remove_file(path)
+            .map_err(|_| "Sesame could not remove a staged vault link.".to_string())?;
+    } else if file_type.is_dir() {
         for entry in fs::read_dir(path)
             .map_err(|_| "Sesame could not read a staged vault directory.".to_string())?
         {
@@ -170,21 +181,62 @@ pub fn securely_delete(path: &Path) -> VaultResult<()> {
         }
         fs::remove_dir(path)
             .map_err(|_| "Sesame could not remove a staged vault directory.".to_string())?;
-    } else if path.is_file() {
-        overwrite_file(path)?;
-        fs::remove_file(path)
-            .map_err(|_| "Sesame could not remove a staged vault file.".to_string())?;
+    } else if file_type.is_file() {
+        overwrite_and_remove(path)?;
     }
     Ok(())
 }
 
-fn overwrite_file(path: &Path) -> VaultResult<()> {
-    use rand::Rng;
-    use std::io::Write;
-
-    let metadata = fs::metadata(path)
+/// Opens the file once, validates what the path points at, then removes the
+/// entry before overwriting the held descriptor. A link swapped into the path
+/// after the caller's check is removed, never written through.
+fn overwrite_and_remove(path: &Path) -> VaultResult<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        options.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|_| "Sesame could not open a staged vault file for deletion.".to_string())?;
+    let opened = file
+        .metadata()
         .map_err(|_| "Sesame could not inspect a staged vault file.".to_string())?;
-    let len = metadata.len() as usize;
+    let entry = fs::symlink_metadata(path)
+        .map_err(|_| "Sesame could not inspect a staged vault entry.".to_string())?;
+    fs::remove_file(path)
+        .map_err(|_| "Sesame could not remove a staged vault file.".to_string())?;
+    if !entry_matches_open_file(&entry, &opened) {
+        return Ok(());
+    }
+    overwrite_open_file(&mut file, opened.len())
+}
+
+fn entry_matches_open_file(entry: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    if !entry.file_type().is_file() || !opened.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        entry.dev() == opened.dev() && entry.ino() == opened.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn overwrite_open_file(file: &mut fs::File, len: u64) -> VaultResult<()> {
+    use rand::Rng;
+    use std::io::{Seek, SeekFrom, Write};
+
+    let len = len as usize;
     if len == 0 {
         return Ok(());
     }
@@ -202,10 +254,8 @@ fn overwrite_file(path: &Path) -> VaultResult<()> {
             chunk.fill(0x00);
         }
 
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|_| "Sesame could not open a staged vault file for deletion.".to_string())?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|_| "Sesame could not rewind a staged vault file.".to_string())?;
         let mut remaining = len;
         while remaining > 0 {
             let to_write = chunk.len().min(remaining);

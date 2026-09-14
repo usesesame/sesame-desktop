@@ -106,6 +106,15 @@
   const loginState = loginController.state
   const folderOptions = loginController.folderOptions
   const contextEntry = loginController.contextEntry
+  $: contextItem = $loginState.entryMenu
+    ? vaultItems($vault.snapshot).find((item) => item.id === $loginState.entryMenu?.id) ?? null
+    : null
+
+  function openContextMenu(position: { x: number; y: number }, id: string) {
+    const item = vaultItems($vault.snapshot).find((candidate) => candidate.id === id)
+    if (item && item.kind !== 'login') void itemController.select(item.id, item.kind)
+    loginController.openEntryMenu(position, id)
+  }
 
   const settingsController = createSettingsController({
     stores: appStores,
@@ -570,7 +579,7 @@
         onSetCategory={itemController.setCategory}
         onShowCollection={itemController.showCollection}
         onOrganizeFolders={loginController.openFolderManager}
-        onOpenContextMenu={loginController.openEntryMenu}
+        onOpenContextMenu={openContextMenu}
         onOpenLoginEditor={loginController.openEditor}
         onOpenItemEditor={() => void itemController.openEditor()}
         onDeleteItem={itemController.requestDelete}
@@ -710,23 +719,24 @@
   </WorkspaceShell>
 {/if}
 
-  {#if $loginState.entryMenu && $contextEntry}
+  {#if $loginState.entryMenu && contextItem}
     <EntryContextMenu
-      entry={$contextEntry}
+      kind={contextItem.kind}
+      entry={contextItem.kind === 'login' && $contextEntry ? $contextEntry : { ...contextItem, site: '' }}
       x={$loginState.entryMenu.x}
       y={$loginState.entryMenu.y}
       folders={$folderOptions}
       working={$loginState.folderWorking}
       onClose={loginController.closeEntryMenu}
-      onOpen={() => void loginController.openContextSite($contextEntry.id)}
-      onCopyUsername={() => void loginController.copyContextField($contextEntry.id, 'username')}
-      onCopyEmail={() => void loginController.copyContextField($contextEntry.id, 'email')}
-      onCopyPassword={() => void loginController.copyContextField($contextEntry.id, 'password')}
-      onEdit={() => void loginController.editContext($contextEntry.id)}
-      onDelete={() => loginController.deleteContext($contextEntry)}
-      onMove={(folder) => void loginController.moveContext(folder)}
+      onOpen={() => { if (contextItem) void loginController.openContextSite(contextItem.id) }}
+      onCopyUsername={() => { if (contextItem) void loginController.copyContextField(contextItem.id, 'username') }}
+      onCopyEmail={() => { if (contextItem) void loginController.copyContextField(contextItem.id, 'email') }}
+      onCopyPassword={() => { if (contextItem) void loginController.copyContextField(contextItem.id, 'password') }}
+      onEdit={() => { if (!contextItem) return; if (contextItem.kind === 'login') void loginController.editContext(contextItem.id); else void itemController.openEditorFor(contextItem.id, contextItem.kind) }}
+      onDelete={() => { if (!contextItem) return; if (contextItem.kind === 'login') { if ($contextEntry) loginController.deleteContext($contextEntry) } else itemController.requestDeleteFor(contextItem.id, contextItem.kind, contextItem.title) }}
+      onMove={(folder) => { if (!contextItem) return; if (contextItem.kind === 'login') void loginController.moveContext(folder); else void itemController.moveToFolder(contextItem.id, folder).then(() => loginController.closeEntryMenu()) }}
       onNewFolder={loginController.startNewFolderForContext}
-      onToggleFavourite={() => void loginController.toggleContextFavourite($contextEntry.id, !$contextEntry.favourite)}
+      onToggleFavourite={() => { if (!contextItem) return; loginController.closeEntryMenu(); void itemController.toggleFavourite(contextItem.id, !contextItem.favourite) }}
     />
   {/if}
 

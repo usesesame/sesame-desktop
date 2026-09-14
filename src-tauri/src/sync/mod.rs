@@ -16,3 +16,14 @@ pub mod conflict_backup;
 pub mod coordinator;
 #[cfg(feature = "sync-preview")]
 pub mod peers;
+
+#[cfg(test)]
+pub(crate) fn contract_fixture(name: &str) -> serde_json::Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("contracts")
+        .join("sync")
+        .join("v2")
+        .join(name);
+    let bytes = std::fs::read(&path).expect("read the cross-language Sync fixture");
+    serde_json::from_slice(&bytes).expect("parse the cross-language Sync fixture")
+}

@@ -184,6 +184,17 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
       if (!activeItemId || !activeItemKind || activeItemKind === 'login' || !detail) return
       editors[activeItemKind].requestDelete(activeItemId, detail.title)
     },
+    async openEditorFor(id: string, kind: ItemKind) {
+      if (kind === 'login') {
+        login.openEditor()
+        return
+      }
+      await editors[kind].openEditor(id)
+    },
+    requestDeleteFor(id: string, kind: ItemKind, title: string) {
+      if (kind === 'login' || !title) return
+      editors[kind].requestDelete(id, title)
+    },
     async toggleFavourite(id: string, favourite: boolean) {
       try {
         vault.patch({ snapshot: await setItemFavourite(id, favourite) })

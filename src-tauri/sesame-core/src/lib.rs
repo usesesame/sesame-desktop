@@ -77,9 +77,11 @@ pub const PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:complete";
 pub const HELLO_KEY_NAME_PREFIX: &str = "sesame-vault-hello-";
 pub const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_VAULT_FILE_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_KDF_MEMORY_KIB: u32 = 1_048_576;
-pub const MAX_KDF_ITERATIONS: u32 = 20;
+pub const MAX_KDF_MEMORY_KIB: u32 = 262_144;
+pub const MAX_KDF_ITERATIONS: u32 = 10;
 pub const MAX_KDF_PARALLELISM: u32 = 16;
+/// KiB multiplied by iterations; bounds the worst-case Argon2 cost an untrusted file can request.
+pub const MAX_KDF_TOTAL_WORK: u64 = 1_048_576;
 pub const SERVICE_CONNECTION_FORMAT_VERSION: u8 = 1;
 
 pub type VaultResult<T> = Result<T, String>;
