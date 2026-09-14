@@ -509,7 +509,7 @@ mod tests {
         }
 
         #[test]
-        fn linux_locked_region_is_pinned_and_unmapped_after_drop() {
+        fn linux_locked_region_is_pinned_and_released_after_drop() {
             let _guard = lock_counter();
             let key = VaultKey::new([7_u8; 32]).expect("stored key");
             let Some((address, length)) = key
@@ -525,7 +525,15 @@ mod tests {
             assert!(flags.split_whitespace().any(|flag| flag == "lo"));
 
             drop(key);
-            assert!(platform::mapping_flags(address, length).is_none());
+            // A parallel test can map an unrelated page over the released address before smaps is read;
+            // the pinned, wipe-on-fork key mapping must not survive the drop.
+            if let Some(flags) = platform::mapping_flags(address, length) {
+                let flags: Vec<&str> = flags.split_whitespace().collect();
+                assert!(
+                    !flags.iter().any(|flag| ["lo", "wf", "dd"].contains(flag)),
+                    "the vault key mapping survived the drop: {flags:?}"
+                );
+            }
         }
 
         #[test]
