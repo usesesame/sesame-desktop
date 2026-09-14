@@ -582,7 +582,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
           snapshot = await bulkAssignFolder(action.ids, folder.id)
           vault.patch({ snapshot })
           if (selection.value().collectionFilter !== null) selection.patch({ collectionFilter: folder.id })
-          feedback.showNotice('Folder created', `Login moved to ${folder.name}.`)
+          feedback.showNotice('Folder created', `Item moved to ${folder.name}.`)
         }
         modal.close('folder-name')
         state.patch({ folderAction: null })

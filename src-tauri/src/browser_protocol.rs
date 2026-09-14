@@ -165,6 +165,10 @@ impl BrowserRequest {
             _ => false,
         }
     }
+
+    pub fn to_zeroizing_bytes(&self) -> Result<Zeroizing<Vec<u8>>, serde_json::Error> {
+        serde_json::to_vec(self).map(Zeroizing::new)
+    }
 }
 
 /// Only the subset the page asked for and the approval granted.
@@ -536,7 +540,7 @@ impl BrowserResponse {
         if request.message_type != "card" && !no_card {
             return false;
         }
-        match (request.message_type.as_str(), self.message_type.as_str()) {
+        let allowed = match (request.message_type.as_str(), self.message_type.as_str()) {
             ("capabilities", "capabilities") => {
                 self.installed == Some(true)
                     && self.desktop_available.is_some()
@@ -672,7 +676,15 @@ impl BrowserResponse {
                     && self.message.as_deref().is_some_and(valid_error_message)
             }
             _ => false,
-        }
+        };
+        allowed && self.within_message_budget()
+    }
+
+    /// Every accepted response must fit the frame the host can write.
+    fn within_message_budget(&self) -> bool {
+        self.to_zeroizing_bytes()
+            .map(|bytes| !bytes.is_empty() && bytes.len() <= MAX_NATIVE_MESSAGE_BYTES)
+            .unwrap_or(false)
     }
 
     pub fn to_zeroizing_bytes(&self) -> Result<Zeroizing<Vec<u8>>, serde_json::Error> {
@@ -851,5 +863,60 @@ mod tests {
                 let _ = request.validate();
             }
         }
+    }
+
+    #[test]
+    fn an_identity_response_over_the_message_budget_is_refused() {
+        let mut identity_request = request(PROTOCOL_VERSION, "identity");
+        identity_request.fields = Some(IDENTITY_FIELD_KEYS.join(","));
+        assert!(identity_request.validate());
+
+        let big = "x".repeat(MAX_CREDENTIAL_FIELD_BYTES);
+        let oversize = BrowserResponse::identity_for(
+            &identity_request,
+            IdentityFillFields {
+                full_name: Some(big.clone()),
+                email: Some(big.clone()),
+                phone: Some(big.clone()),
+                address_line1: Some(big.clone()),
+                address_line2: Some(big.clone()),
+                city: Some(big.clone()),
+                region: Some(big.clone()),
+                postal_code: Some(big.clone()),
+                country: Some(big),
+            },
+        );
+        assert!(!oversize.validate_for(&identity_request));
+
+        let mut small_request = request(PROTOCOL_VERSION, "identity");
+        small_request.fields = Some("fullName,email".to_string());
+        assert!(small_request.validate());
+        let typical = BrowserResponse::identity_for(
+            &small_request,
+            IdentityFillFields {
+                full_name: Some("Fictional Person".to_string()),
+                email: Some("fictional@example.test".to_string()),
+                ..IdentityFillFields::default()
+            },
+        );
+        assert!(typical.validate_for(&small_request));
+    }
+
+    #[test]
+    fn the_largest_save_request_fits_the_frame_budget() {
+        let save = BrowserRequest {
+            version: PROTOCOL_VERSION,
+            message_type: "save".to_string(),
+            request_id: "request-1".to_string(),
+            origin: Some(format!("https://{}.example.test", "a".repeat(2000))),
+            fields: None,
+            username: Some("u".repeat(MAX_CREDENTIAL_FIELD_BYTES)),
+            password: Some("p".repeat(MAX_CREDENTIAL_FIELD_BYTES)),
+            title: Some("t".repeat(512)),
+            kind: Some("new".to_string()),
+        };
+        assert!(save.validate());
+        let bytes = save.to_zeroizing_bytes().expect("the request encodes");
+        assert!(bytes.len() <= MAX_NATIVE_MESSAGE_BYTES);
     }
 }

@@ -402,4 +402,133 @@ mod tests {
             }
         }
     }
+
+    struct FixtureDraft {
+        vault_id: String,
+        device_id: String,
+        revision: u64,
+        vault_epoch: u64,
+        device_epoch: u64,
+        previous_digest: String,
+        nonce: Vec<u8>,
+        ciphertext: Vec<u8>,
+    }
+
+    impl FixtureDraft {
+        fn from_fixture(fixture: &serde_json::Value) -> Self {
+            let input = &fixture["input"];
+            let nonce_byte = u8::try_from(input["nonceByte"].as_u64().expect("fixture nonceByte"))
+                .expect("fixture nonceByte fits a byte");
+            let nonce_length = input["nonceLength"].as_u64().expect("fixture nonceLength") as usize;
+            Self {
+                vault_id: input["vaultId"]
+                    .as_str()
+                    .expect("fixture vaultId")
+                    .to_string(),
+                device_id: input["deviceId"]
+                    .as_str()
+                    .expect("fixture deviceId")
+                    .to_string(),
+                revision: input["revision"].as_u64().expect("fixture revision"),
+                vault_epoch: input["vaultEpoch"].as_u64().expect("fixture vaultEpoch"),
+                device_epoch: input["deviceEpoch"].as_u64().expect("fixture deviceEpoch"),
+                previous_digest: input["previousDigest"]
+                    .as_str()
+                    .expect("fixture previousDigest")
+                    .to_string(),
+                nonce: vec![nonce_byte; nonce_length],
+                ciphertext: input["ciphertextUtf8"]
+                    .as_str()
+                    .expect("fixture ciphertextUtf8")
+                    .as_bytes()
+                    .to_vec(),
+            }
+        }
+
+        fn draft(&self) -> EnvelopeDraft<'_> {
+            EnvelopeDraft {
+                vault_id: &self.vault_id,
+                device_id: &self.device_id,
+                revision: self.revision,
+                vault_epoch: self.vault_epoch,
+                device_epoch: self.device_epoch,
+                operation: OPERATION_SNAPSHOT,
+                tombstone_id: "",
+                previous_digest: &self.previous_digest,
+                nonce: &self.nonce,
+                ciphertext: &self.ciphertext,
+            }
+        }
+    }
+
+    #[test]
+    fn envelope_signing_payload_matches_the_cross_language_fixture() {
+        let fixture = crate::sync::contract_fixture("envelope-signing-payload.json");
+        let input = &fixture["input"];
+        let draft = FixtureDraft::from_fixture(&fixture);
+
+        assert_eq!(input["version"].as_u64(), Some(u64::from(PROTOCOL_VERSION)));
+        assert_eq!(input["previousRevision"].as_u64(), Some(draft.revision - 1));
+
+        let payload =
+            signing_bytes(&draft.draft()).expect("the fixture draft produces a signing payload");
+        assert_eq!(
+            std::str::from_utf8(&payload).expect("the signing payload is UTF-8"),
+            fixture["snapshotSigningPayload"]
+                .as_str()
+                .expect("fixture snapshotSigningPayload"),
+        );
+    }
+
+    #[test]
+    fn a_rust_signature_reproduces_the_cross_language_fixture() {
+        let fixture = crate::sync::contract_fixture("envelope-signing-payload.json");
+        let draft = FixtureDraft::from_fixture(&fixture);
+        let recorded = &fixture["rustSignedSnapshot"];
+        let seed = u8::try_from(
+            recorded["signingKeySeedByte"]
+                .as_u64()
+                .expect("fixture signingKeySeedByte"),
+        )
+        .expect("fixture signingKeySeedByte fits a byte");
+        let signing = SigningKey::from_bytes(&[seed; 32]);
+
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(signing.verifying_key().to_bytes()),
+            recorded["verifyingKey"]
+                .as_str()
+                .expect("fixture verifyingKey"),
+        );
+
+        let sealed = seal(&draft.draft(), &signing).expect("the fixture draft seals");
+        assert_eq!(
+            sealed.signature,
+            recorded["signature"].as_str().expect("fixture signature"),
+        );
+    }
+
+    #[test]
+    fn snapshot_aead_context_matches_the_cross_language_fixture() {
+        let fixture = crate::sync::contract_fixture("snapshot-aad.json");
+        let input = &fixture["input"];
+        let context = snapshot_aad(
+            input["vaultId"].as_str().expect("fixture vaultId"),
+            input["deviceId"].as_str().expect("fixture deviceId"),
+            input["revision"].as_u64().expect("fixture revision"),
+            input["previousRevision"]
+                .as_u64()
+                .expect("fixture previousRevision"),
+            input["vaultEpoch"].as_u64().expect("fixture vaultEpoch"),
+            input["deviceEpoch"].as_u64().expect("fixture deviceEpoch"),
+            input["operation"].as_str().expect("fixture operation"),
+        );
+        let expected = URL_SAFE_NO_PAD
+            .decode(
+                fixture["contextBase64"]
+                    .as_str()
+                    .expect("fixture contextBase64"),
+            )
+            .expect("fixture contextBase64 decodes");
+        assert_eq!(context, expected);
+    }
 }
