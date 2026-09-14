@@ -101,6 +101,27 @@ fn state_tag(body: &[u8]) -> Vec<u8> {
     digest.finalize().to_vec()
 }
 
+#[cfg(test)]
+fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    Ok(bytes.to_vec())
+}
+
+#[cfg(not(test))]
+fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    crate::vault::platform::protect_for_device(bytes)
+        .map_err(|_| "Sesame could not record the Sync state.".to_string())
+}
+
+#[cfg(not(test))]
+fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    crate::vault::platform::unprotect_for_device(bytes)
+}
+
 pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
     let body = serde_json::to_vec(base)
         .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
@@ -109,8 +130,7 @@ pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
     // Tag first: a crash leaves a mismatch that reads as absent, which fails closed.
-    let protected = crate::vault::platform::protect_for_device(&state_tag(&body))
-        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
+    let protected = protect(&state_tag(&body))?;
     crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
     crate::vault::storage::atomic_replace(path, &body)
 }
@@ -119,7 +139,7 @@ pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
 pub fn read_protected(path: &Path) -> Option<SyncBase> {
     let body = std::fs::read(path).ok()?;
     let protected = std::fs::read(tag_path(path)).ok()?;
-    let expected = crate::vault::platform::unprotect_for_device(&protected).ok()?;
+    let expected = unprotect(&protected).ok()?;
     let actual = state_tag(&body);
     // Constant-time compare: an attacker who can write the state file controls both sides.
     if actual.len() != expected.len()
@@ -166,5 +186,98 @@ pub fn decide_upload(base_revision: i64, server_revision: i64) -> UploadDecision
     }
     UploadDecision::Offer {
         revision: base_revision.max(0) + 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dir_for(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("sesame-sync-state-{name}-{}", std::process::id()))
+    }
+
+    fn path_for(dir: &Path) -> PathBuf {
+        dir.join(STATE_FILE_NAME)
+    }
+
+    fn sample_base(revision: i64) -> SyncBase {
+        SyncBase::new("vault-1", revision, 2, b"payload-bytes").with_head("head-digest", "receipt")
+    }
+
+    #[test]
+    fn protected_state_round_trips_and_refuses_edits() {
+        let dir = dir_for("roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        let base = sample_base(3);
+        write_protected(&path, &base).unwrap();
+        assert_eq!(read_protected(&path), Some(base.clone()));
+
+        let body = std::fs::read(&path).unwrap();
+        let mut edited = body.clone();
+        edited[0] ^= 0xff;
+        std::fs::write(&path, &edited).unwrap();
+        assert_eq!(read_protected(&path), None);
+
+        std::fs::write(&path, &body).unwrap();
+        std::fs::write(tag_path(&path), b"not-a-real-tag").unwrap();
+        assert_eq!(read_protected(&path), None);
+
+        std::fs::write(tag_path(&path), protect(&state_tag(&body)).unwrap()).unwrap();
+        assert_eq!(read_protected(&path), Some(base));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn authenticated_garbage_reads_as_absent() {
+        let dir = dir_for("garbage");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(1)).unwrap();
+        let garbage = b"{broken";
+        std::fs::write(&path, garbage).unwrap();
+        std::fs::write(tag_path(&path), protect(&state_tag(garbage)).unwrap()).unwrap();
+        assert_eq!(read_protected(&path), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forget_is_idempotent_and_missing_state_reads_as_absent() {
+        let dir = dir_for("forget");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        assert_eq!(read_protected(&path), None);
+        write_protected(&path, &sample_base(1)).unwrap();
+        forget_protected(&path).unwrap();
+        assert_eq!(read_protected(&path), None);
+        assert!(!path.exists());
+        forget_protected(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writes_replace_the_recorded_base() {
+        let dir = dir_for("replace");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(1)).unwrap();
+        write_protected(&path, &sample_base(2)).unwrap();
+        assert_eq!(read_protected(&path).map(|base| base.revision), Some(2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upload_decisions_compare_against_the_recorded_base() {
+        assert_eq!(decide_upload(0, 0), UploadDecision::Offer { revision: 1 });
+        assert_eq!(decide_upload(3, 3), UploadDecision::Offer { revision: 4 });
+        assert_eq!(
+            decide_upload(3, 4),
+            UploadDecision::Conflict { server_revision: 4 }
+        );
+        assert_eq!(
+            decide_upload(3, 2),
+            UploadDecision::Conflict { server_revision: 2 }
+        );
     }
 }
