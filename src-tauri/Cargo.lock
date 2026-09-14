@@ -3975,6 +3975,7 @@ dependencies = [
  "csv",
  "ed25519-dalek",
  "hkdf",
+ "libc",
  "minisign-verify",
  "rand",
  "serde",
