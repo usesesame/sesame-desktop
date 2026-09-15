@@ -25,9 +25,9 @@ export function windowsLaneAssetPatterns(version) {
     /^verify-sesame-release\.ps1$/,
     new RegExp(`^sesame-${escaped}\\.cdx\\.json$`),
     new RegExp(`^sesame-${escaped}-windows-[^/]+\\.release\\.json(\\.sigstore\\.json)?$`),
-    /^Sesame_.*\.exe$/,
-    /^Sesame_.*\.exe\.sig$/,
-    /^Sesame_.*\.exe\.sigstore\.json$/,
+    new RegExp(`^Sesame_${escaped}_[^/]+\\.exe$`),
+    new RegExp(`^Sesame_${escaped}_[^/]+\\.exe\\.sig$`),
+    new RegExp(`^Sesame_${escaped}_[^/]+\\.exe\\.sigstore\\.json$`),
   ]
 }
 

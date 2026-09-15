@@ -261,12 +261,19 @@ test('the counterpart lane shares the release without weakening asset checks', (
   assert.deepEqual(sharingLinux.conflicts, [])
   assert.equal(sharingLinux.action, 'complete')
 
-  const wrongVersion = planReleasePublication({
+  const wrongVersionLinux = planReleasePublication({
     release: releaseWith([foreign('Sesame_1.2.4_amd64.deb'), foreign('Sesame-1.2.3.dmg')], { body: `${digestLine}\n` }),
     expectedAssets: [], setDigest, foreignAssets: linuxLaneAssetPatterns(version),
   })
-  assert.ok(wrongVersion.conflicts.some((line) => line.includes('Sesame_1.2.4_amd64.deb')))
-  assert.ok(wrongVersion.conflicts.some((line) => line.includes('Sesame-1.2.3.dmg')))
+  assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame_1.2.4_amd64.deb')))
+  assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame-1.2.3.dmg')))
+
+  const wrongVersionWindows = planReleasePublication({
+    release: releaseWith([foreign('Sesame_1.2.4_x64-setup.exe'), foreign('Sesame_1.2.4_x64-setup.exe.sig')], { body: `${digestLine}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: windowsLaneAssetPatterns(version),
+  })
+  assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe')))
+  assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe.sig')))
 })
 
 test('the digest anchor appends for a shared release and rejects malformed lines', () => {
