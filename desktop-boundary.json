@@ -30,6 +30,8 @@
     "vite.config.ts",
     "vitest.config.ts",
     ".github/workflows/ci.yml",
+    ".github/workflows/release-early-access.yml",
+    ".github/workflows/release-linux-early-access.yml",
     "tools/desktop-boundary-contracts.test.mjs",
     "tools/version-contract.mjs",
     "tools/dependency-admission.mjs",
