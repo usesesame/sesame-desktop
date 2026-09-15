@@ -6,7 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evidence-lib.mjs'
-import { LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
+import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
 
@@ -143,6 +143,31 @@ test('the Linux candidate is a signed release set with no updater artifact', asy
     assert.equal(deb.sha256, value.artifacts.find((artifact) => artifact.format === 'deb').sha256)
     assert.equal(deb.url, `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${version}/${debFilename}`)
     assert.equal(verify(null, Buffer.from(releaseSetSigningPayload(candidate)), createPublicKey(privateKey), Buffer.from(candidate.candidateSignature, 'base64url')), true)
+  } finally { await rm(value.root, { recursive: true, force: true }) }
+})
+
+test('the candidate binds the verified package bytes by its asset URLs', async () => {
+  const value = await evidenceFixture()
+  try {
+    const seed = randomBytes(32)
+    const candidate = buildLinuxCandidate({
+      manifest: value.manifest,
+      evidence: value.evidence,
+      signingKey: seed.toString('base64url'),
+      signingKeyId: 'candidate-1',
+      assetBase: `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${version}`,
+      objectKeyPrefix: `linux/v${version}`,
+    })
+    const assets = value.manifest.artifacts.map((artifact) => ({ name: artifact.filename, sha256: artifact.sha256, bytes: artifact.bytes }))
+    assertCandidateArtifactsBindAssets(candidate, assets, { repository: RELEASE_REPOSITORY, tag: `v${version}` })
+
+    const tampered = structuredClone(candidate)
+    tampered.artifacts[0] = { ...tampered.artifacts[0], sha256: 'f'.repeat(64) }
+    assert.throws(() => assertCandidateArtifactsBindAssets(tampered, assets, { repository: RELEASE_REPOSITORY, tag: `v${version}` }), /does not bind the verified package bytes/)
+
+    const wrongUrl = structuredClone(candidate)
+    wrongUrl.artifacts[0] = { ...wrongUrl.artifacts[0], url: wrongUrl.artifacts[0].url.replace(`v${version}`, 'v1.2.2') }
+    assert.throws(() => assertCandidateArtifactsBindAssets(wrongUrl, assets, { repository: RELEASE_REPOSITORY, tag: `v${version}` }), /does not bind the verified package bytes/)
   } finally { await rm(value.root, { recursive: true, force: true }) }
 })
 

@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 
 import { assertSafeReleaseFilename, fileSha256 } from './release-evidence-lib.mjs'
 import { RELEASE_SET_DIGEST_LABEL, planReleasePublication, windowsLaneAssetPatterns } from './release-publish-reconcile.mjs'
-import { validateLinuxEvidenceDirectory } from './linux-release-evidence.mjs'
+import { assertCandidateArtifactsBindAssets, validateLinuxEvidenceDirectory } from './linux-release-evidence.mjs'
 
 const [handoffInput, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
 if (!handoffInput || !manifestFilename || !candidateFilename) {
@@ -55,13 +55,7 @@ const candidate = JSON.parse(await readFile(path.resolve(candidateFilename), 'ut
 if (candidate?.platform !== 'linux' || candidate?.version !== manifest.version || !/^[0-9a-f]{64}$/.test(candidate?.setDigest ?? '')) {
   throw new Error('The candidate does not describe this Linux release.')
 }
-for (const artifact of candidate.artifacts ?? []) {
-  const asset = assets.find((entry) => entry.name === artifact.filename)
-  const expectedURL = `https://github.com/${repository}/releases/download/${tag}/${artifact.filename}`
-  if (!asset || artifact.sha256 !== asset.sha256 || artifact.url !== expectedURL) {
-    throw new Error(`The candidate ${artifact.format} record does not bind the verified package bytes.`)
-  }
-}
+assertCandidateArtifactsBindAssets(candidate, assets, { repository, tag })
 
 const gh = async (args) => promisify(execFile)('gh', args, { env: process.env, maxBuffer: 16 * 1024 * 1024 })
 const fetchRelease = async () => {
