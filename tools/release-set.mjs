@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { linuxFormats } from './release-platforms/linux.mjs'
 import { windowsFormats } from './release-platforms/windows.mjs'
-import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity, stableJSON } from './release-evidence-lib.mjs'
+import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity, stableJSON } from './release-evidence-lib.mjs'
 
 const sha256Pattern = /^[0-9a-f]{64}$/
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/
@@ -122,8 +122,9 @@ export function verifyReleaseSet(releaseSet) {
       throw new Error(`${key} claims updater evidence without updater capability.`)
     }
     const expectedRef = `refs/tags/v${releaseSet.version}`
-    const expectedIdentity = releaseIdentity(RELEASE_REPOSITORY, RELEASE_WORKFLOW, expectedRef)
-    if (artifact.sigstoreVerified !== true || artifact.sigstoreIssuer !== SIGSTORE_ISSUER || artifact.sigstoreIdentity !== expectedIdentity || artifact.sigstoreEvidence?.verified !== true || artifact.sigstoreEvidence?.transparencyLogVerified !== true || artifact.sigstoreEvidence?.artifactSha256 !== artifact.sha256 || artifact.sigstoreEvidence?.issuer !== SIGSTORE_ISSUER || artifact.sigstoreEvidence?.certificateIdentity !== expectedIdentity || artifact.sigstoreEvidence?.repository !== RELEASE_REPOSITORY || artifact.sigstoreEvidence?.workflow !== RELEASE_WORKFLOW || artifact.sigstoreEvidence?.ref !== expectedRef || artifact.sigstoreBundleSha256 !== artifact.sigstoreEvidence?.artifactBundleSha256) {
+    const expectedWorkflow = releaseSet.platform === 'linux' ? LINUX_RELEASE_WORKFLOW : RELEASE_WORKFLOW
+    const expectedIdentity = releaseIdentity(RELEASE_REPOSITORY, expectedWorkflow, expectedRef)
+    if (artifact.sigstoreVerified !== true || artifact.sigstoreIssuer !== SIGSTORE_ISSUER || artifact.sigstoreIdentity !== expectedIdentity || artifact.sigstoreEvidence?.verified !== true || artifact.sigstoreEvidence?.transparencyLogVerified !== true || artifact.sigstoreEvidence?.artifactSha256 !== artifact.sha256 || artifact.sigstoreEvidence?.issuer !== SIGSTORE_ISSUER || artifact.sigstoreEvidence?.certificateIdentity !== expectedIdentity || artifact.sigstoreEvidence?.repository !== RELEASE_REPOSITORY || artifact.sigstoreEvidence?.workflow !== expectedWorkflow || artifact.sigstoreEvidence?.ref !== expectedRef || artifact.sigstoreBundleSha256 !== artifact.sigstoreEvidence?.artifactBundleSha256) {
       throw new Error(`${key} Sigstore evidence does not verify the exact package.`)
     }
     if (!sha256Pattern.test(artifact.sigstoreBundleSha256)) throw new Error(`${key} Sigstore bundle digest is invalid.`)

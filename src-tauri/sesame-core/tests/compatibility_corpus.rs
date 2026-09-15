@@ -306,8 +306,16 @@ fn corpus_covers_every_published_release_and_records_unproven_formats() {
         .is_empty());
     assert_eq!(
         unproven[0]["decision"]["status"].as_str(),
-        Some("supportRetained"),
-        "the recorded owner decision for formats 2 through 9 must keep the upgrade path"
+        Some("excludedFromCompatibilityPromise"),
+        "unproven formats must remain outside the compatibility promise"
+    );
+    assert_eq!(
+        unproven[0]["decision"]["readersRetained"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        unproven[0]["recoveryPath"]["status"].as_str(),
+        Some("approvedUnprovenRecovery")
     );
     assert!(!unproven[0]["decision"]["note"]
         .as_str()

@@ -11,6 +11,12 @@ default-members = [".", "sesame-core"]
 [patch.crates-io]
 glib = { path = "vendor/glib" }
 
+[profile.test.package.argon2]
+opt-level = 3
+
+[profile.test.package.blake2]
+opt-level = 3
+
 [package]
 name = "sesame"
 version = "0.2.4"

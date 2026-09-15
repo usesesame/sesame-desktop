@@ -28,6 +28,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri -> ${{ runner.temp }}/sesame-desktop-boundary-target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Install the webview and tray libraries
         run: |
           sudo apt-get update
@@ -41,4 +46,6 @@ jobs:
             librsvg2-dev
 
       - name: Verify the desktop boundary
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: npm run desktop:boundary:verify

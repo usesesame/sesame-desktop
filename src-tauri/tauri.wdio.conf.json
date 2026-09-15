@@ -3,6 +3,9 @@
   "build": {
     "beforeBuildCommand": "npm run desktop:build:wdio"
   },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [

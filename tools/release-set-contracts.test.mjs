@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { discoverLinuxPackages } from './release-platforms/linux.mjs'
 import { discoverWindowsPackages } from './release-platforms/windows.mjs'
-import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
+import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
 import { prepareReleaseSet, reconcileReleaseSet, verifyReleaseSet } from './release-set.mjs'
 
 const version = '1.2.3'
@@ -100,6 +100,13 @@ test('release set digest matches the server candidate contract', () => {
 })
 
 test('verification rejects missing, duplicate, and inapplicable package records', () => {
+  const linuxIdentity = releaseIdentity(RELEASE_REPOSITORY, LINUX_RELEASE_WORKFLOW, ref)
+  const linuxArtifact = (format, character) => {
+    const record = artifact(format, character)
+    record.sigstoreIdentity = linuxIdentity
+    record.sigstoreEvidence = { ...record.sigstoreEvidence, certificateIdentity: linuxIdentity, workflow: LINUX_RELEASE_WORKFLOW }
+    return record
+  }
   const linux = {
     version,
     channel: 'beta',
@@ -107,7 +114,7 @@ test('verification rejects missing, duplicate, and inapplicable package records'
     architecture,
     supportedWindows: '',
     releaseNotesUrl: `https://example.invalid/releases/${version}`,
-    artifacts: [artifact('appimage', 'a'), artifact('deb', 'd')],
+    artifacts: [linuxArtifact('appimage', 'a'), linuxArtifact('deb', 'd')],
   }
   assert.throws(() => prepareReleaseSet(linux), /missing required formats: rpm/)
   const duplicate = structuredClone(windowsSet())

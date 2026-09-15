@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, fileSha256, releaseIdentity } from './release-evidence-lib.mjs'
+import { assertRepositoryCompatibility, validateCompatibilityEvidence } from './vault-compatibility-gate.mjs'
 
 const [artifactInput, updaterSignatureInput, sbomInput, outputInput] = process.argv.slice(2)
 if (!artifactInput || !updaterSignatureInput || !sbomInput || !outputInput) {
@@ -37,6 +38,35 @@ const describe = async (key) => ({ filename: filenames[key], sha256: await fileS
 const artifact = await describe('artifact')
 const updaterSignature = await describe('updaterSignature')
 const sbom = await describe('sbom')
+
+const { matrix, policy, matrixDigest } = await assertRepositoryCompatibility()
+const compatibilityEvidence = JSON.parse(await readFile(path.resolve(required('SESAME_VAULT_COMPATIBILITY_FILE')), 'utf8'))
+validateCompatibilityEvidence(compatibilityEvidence, { matrix, policy, matrixDigest })
+const compatibilityFilename = 'vault-compatibility.json'
+const compatibilityPath = path.join(output, compatibilityFilename)
+await writeFile(compatibilityPath, `${JSON.stringify(compatibilityEvidence, null, 2)}\n`)
+const matrixFilename = 'vault-compatibility-matrix.json'
+const matrixPath = path.join(output, matrixFilename)
+await writeFile(matrixPath, `${JSON.stringify({ ...matrix, matrixDigest }, null, 2)}\n`)
+const vaultCompatibility = {
+  schemaVersion: 1,
+  fixtureManifestSha256: matrix.fixtureManifestSha256,
+  matrixDigest,
+  minimumSupportedFormat: compatibilityEvidence.minimumSupportedFormat,
+  platforms: compatibilityEvidence.platforms.map((entry) => entry.platform),
+  rollback: matrix.rollback,
+  matrix: {
+    filename: matrixFilename,
+    sha256: await fileSha256(matrixPath),
+    bytes: (await stat(matrixPath)).size,
+  },
+  evidence: {
+    filename: compatibilityFilename,
+    sha256: await fileSha256(compatibilityPath),
+    bytes: (await stat(compatibilityPath)).size,
+  },
+}
+
 const manifest = {
   schemaVersion: 1,
   product: 'Sesame',
@@ -49,6 +79,7 @@ const manifest = {
   artifact,
   updaterSignature: { ...updaterSignature, signingKeyId: required('SESAME_UPDATER_SIGNING_KEY_ID') },
   sbom,
+  vaultCompatibility,
   sigstore: {
     issuer: SIGSTORE_ISSUER,
     certificateIdentity: releaseIdentity(repository, RELEASE_WORKFLOW, ref),
@@ -64,6 +95,6 @@ const manifest = {
 }
 const manifestFilename = `sesame-${version}-windows-${architecture}.release.json`
 await writeFile(path.join(output, manifestFilename), `${JSON.stringify(manifest, null, 2)}\n`)
-const sums = [artifact, updaterSignature, sbom].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
+const sums = [artifact, updaterSignature, sbom, vaultCompatibility.matrix, vaultCompatibility.evidence].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
 await writeFile(path.join(output, 'SHA256SUMS'), `${sums}\n`)
 process.stdout.write(`${manifestFilename}\n`)

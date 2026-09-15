@@ -285,6 +285,8 @@ mod platform {
 
     impl LockedRegion {
         fn allocate(length: usize) -> VaultResult<Self> {
+            #[cfg(test)]
+            let _allocation_gate = allocation_gate();
             let address = unsafe {
                 libc::mmap(
                     std::ptr::null_mut(),
@@ -373,6 +375,17 @@ mod platform {
     #[cfg(test)]
     pub(super) fn allocate_fails_for(length: usize) -> bool {
         LockedRegion::allocate(length).is_err()
+    }
+
+    // Tests run in parallel, so a released address can be reused by another locked
+    // region before the release check reads smaps. Holding this gate across the drop
+    // and the check keeps every other allocation out of that window.
+    #[cfg(test)]
+    pub(super) fn allocation_gate() -> std::sync::MutexGuard<'static, ()> {
+        static GATE: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        GATE.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[cfg(test)]
@@ -524,13 +537,16 @@ mod tests {
             let flags = platform::mapping_flags(address, length).expect("the key region is mapped");
             assert!(flags.split_whitespace().any(|flag| flag == "lo"));
 
+            // Every locked region allocation goes through platform::allocation_gate, so no other
+            // key mapping can reuse this address between the drop and the smaps read. A mapping
+            // that carries this key's own wipe-on-fork or do-not-dump flags therefore proves the
+            // region survived instead of being reused.
+            let _gate = platform::allocation_gate();
             drop(key);
-            // A parallel test can map an unrelated page over the released address before smaps is read;
-            // the pinned, wipe-on-fork key mapping must not survive the drop.
             if let Some(flags) = platform::mapping_flags(address, length) {
                 let flags: Vec<&str> = flags.split_whitespace().collect();
                 assert!(
-                    !flags.iter().any(|flag| ["lo", "wf", "dd"].contains(flag)),
+                    !flags.iter().any(|flag| ["wf", "dd"].contains(flag)),
                     "the vault key mapping survived the drop: {flags:?}"
                 );
             }

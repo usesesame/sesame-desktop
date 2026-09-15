@@ -12,7 +12,9 @@ import {
   collectPublishAssets,
   interpretCandidateSubmission,
   latestReceiptBindsInstaller,
+  linuxLaneAssetPatterns,
   planReleasePublication,
+  windowsLaneAssetPatterns,
 } from './release-publish-reconcile.mjs'
 
 const version = '1.2.3'
@@ -32,6 +34,8 @@ async function evidenceFixture() {
   await writeFile(path.join(root, files.artifact), 'fictional installer bytes')
   await writeFile(path.join(root, files.updaterSignature), 'A'.repeat(64))
   await writeFile(path.join(root, files.sbom), '{"bomFormat":"CycloneDX"}\n')
+  await writeFile(path.join(root, 'vault-compatibility.json'), '{"fictional":true,"result":"passed"}\n')
+  await writeFile(path.join(root, 'vault-compatibility-matrix.json'), '{"fictional":true,"schema":"sesame.vault-compatibility-matrix/1"}\n')
   const describe = async (filename) => ({ filename, sha256: await fileSha256(path.join(root, filename)), bytes: (await readFile(path.join(root, filename))).length })
   const manifest = {
     schemaVersion: 1, product: 'Sesame', releaseKind: 'unsigned-windows-early-access', version, channel: 'beta', platform: 'windows', architecture: 'x86_64',
@@ -39,6 +43,11 @@ async function evidenceFixture() {
     artifact: await describe(files.artifact),
     updaterSignature: { ...await describe(files.updaterSignature), signingKeyId: 'updater-1' },
     sbom: await describe(files.sbom),
+    vaultCompatibility: {
+      schemaVersion: 1, fixtureManifestSha256: 'b'.repeat(64), matrixDigest: 'c'.repeat(64), minimumSupportedFormat: 2,
+      platforms: ['linux', 'windows'], rollback: 'Fictional rollback rule for the contract test.',
+      matrix: await describe('vault-compatibility-matrix.json'), evidence: await describe('vault-compatibility.json'),
+    },
     sigstore: { issuer: SIGSTORE_ISSUER, certificateIdentity: identity, transparencyLogRequired: true },
     windowsTrust: { authenticodeVerified: false, smartScreenReputationPromised: false, label: 'Unsigned Windows early-access build' },
     supportedWindows: 'Windows 10,Windows 11', releaseNotesUrl: 'https://usesesame.app/releases/1.2.3',
@@ -171,7 +180,7 @@ test('retrying after a partial publish uploads exactly the missing assets', asyn
   }
 })
 
-test('conflicting digests, sizes, extra assets, drafts, and a foreign set digest stop the run before any mutation', async () => {
+test('conflicting digests, sizes, extra assets, and drafts stop the run before any mutation', async () => {
   const value = await publishFixture()
   try {
     const installer = value.assets.find((asset) => asset.role === 'installer')
@@ -198,9 +207,6 @@ test('conflicting digests, sizes, extra assets, drafts, and a foreign set digest
     const draft = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { isDraft: true }), expectedAssets: value.assets, setDigest })
     assert.ok(draft.conflicts.some((line) => line.includes('draft')))
 
-    const foreignDigest = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { body: `${RELEASE_SET_DIGEST_LABEL}: ${'d'.repeat(64)}` }), expectedAssets: value.assets, setDigest })
-    assert.ok(foreignDigest.conflicts.some((line) => line.includes('d'.repeat(64))))
-
     const anchorTolerated = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { body: `older notes without the anchor\n` }), expectedAssets: value.assets, setDigest })
     assert.equal(anchorTolerated.action, 'conflict')
     assert.ok(anchorTolerated.conflicts.some((line) => line.includes('anchor')))
@@ -208,6 +214,81 @@ test('conflicting digests, sizes, extra assets, drafts, and a foreign set digest
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
   }
+})
+
+test('the counterpart lane shares the release without weakening asset checks', () => {
+  const linuxNames = [
+    'Sesame-1.2.3-x86_64.AppImage',
+    'Sesame-1.2.3-x86_64.AppImage.sigstore.json',
+    'Sesame_1.2.3_amd64.deb',
+    'Sesame_1.2.3_amd64.deb.sigstore.json',
+    'Sesame-1.2.3-1.x86_64.rpm',
+    'Sesame-1.2.3-1.x86_64.rpm.sigstore.json',
+    'sesame-1.2.3-linux-x86_64.release.json',
+    'sesame-1.2.3-linux-x86_64.release.json.sigstore.json',
+    'linux-sigstore-evidence.json',
+    'linux-shipped-package.json',
+    'linux-installed-package.json',
+    'sesame-linux.cdx.json',
+    'SHA256SUMS-linux',
+  ]
+  const windowsNames = [
+    'Sesame_1.2.3_x64-setup.exe',
+    'Sesame_1.2.3_x64-setup.exe.sig',
+    'Sesame_1.2.3_x64-setup.exe.sigstore.json',
+    'sesame-1.2.3-windows-x86_64.release.json',
+    'sesame-1.2.3-windows-x86_64.release.json.sigstore.json',
+    'sesame-1.2.3.cdx.json',
+    LATEST_MANIFEST_FILENAME,
+    'SHA256SUMS',
+    'sigstore-evidence.json',
+    'verify-sesame-release.ps1',
+  ]
+  const foreign = (name) => remoteAsset({ name, bytes: 1, sha256: 'd'.repeat(64) })
+  const digestLine = `${RELEASE_SET_DIGEST_LABEL}: ${setDigest}`
+
+  const sharingWindows = planReleasePublication({
+    release: releaseWith(linuxNames.map(foreign), { body: `${digestLine}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: linuxLaneAssetPatterns(version),
+  })
+  assert.deepEqual(sharingWindows.conflicts, [])
+  assert.equal(sharingWindows.action, 'complete')
+
+  const sharingLinux = planReleasePublication({
+    release: releaseWith(windowsNames.map(foreign), { body: `${digestLine}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: windowsLaneAssetPatterns(version),
+  })
+  assert.deepEqual(sharingLinux.conflicts, [])
+  assert.equal(sharingLinux.action, 'complete')
+
+  const wrongVersionLinux = planReleasePublication({
+    release: releaseWith([foreign('Sesame_1.2.4_amd64.deb'), foreign('Sesame-1.2.3.dmg')], { body: `${digestLine}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: linuxLaneAssetPatterns(version),
+  })
+  assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame_1.2.4_amd64.deb')))
+  assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame-1.2.3.dmg')))
+
+  const wrongVersionWindows = planReleasePublication({
+    release: releaseWith([foreign('Sesame_1.2.4_x64-setup.exe'), foreign('Sesame_1.2.4_x64-setup.exe.sig')], { body: `${digestLine}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: windowsLaneAssetPatterns(version),
+  })
+  assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe')))
+  assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe.sig')))
+})
+
+test('the digest anchor appends for a shared release and rejects malformed lines', () => {
+  const counterpart = `${RELEASE_SET_DIGEST_LABEL}: ${'d'.repeat(64)}`
+  const own = `${RELEASE_SET_DIGEST_LABEL}: ${setDigest}`
+  const appendPlan = planReleasePublication({ release: releaseWith([], { body: `notes\n${counterpart}\n` }), expectedAssets: [], setDigest })
+  assert.equal(appendPlan.action, 'complete')
+  assert.equal(appendPlan.anchor, 'append')
+
+  const presentPlan = planReleasePublication({ release: releaseWith([], { body: `notes\n${counterpart}\n${own}\n` }), expectedAssets: [], setDigest })
+  assert.equal(presentPlan.anchor, 'present')
+
+  const malformedPlan = planReleasePublication({ release: releaseWith([], { body: `notes\n${RELEASE_SET_DIGEST_LABEL}: not-a-digest\n` }), expectedAssets: [], setDigest })
+  assert.equal(malformedPlan.action, 'conflict')
+  assert.ok(malformedPlan.conflicts.some((line) => line.includes('malformed')))
 })
 
 test('the candidate, static manifest, and installer bytes must describe the same release asset', async () => {

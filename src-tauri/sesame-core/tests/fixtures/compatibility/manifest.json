@@ -123,23 +123,25 @@
         8,
         9
       ],
-      "reason": "No writer for these formats exists in this repository. The initial public commit ec9dc8d already declared format 10 with the current authentication labels, and no commit reachable from any ref ever wrote a lower format. The current reader still accepts formats 2 through 9, so the compatibility promise for them has no writer evidence.",
-      "evidence": "git log -S 'VAULT_FORMAT_VERSION: u8 = ' over all refs shows exactly one code state; every published tag v0.1.0 through v0.2.2 declares format 10.",
+      "reason": "No historical writer for formats 2 through 9 was recovered. Existing readers accept these formats, but they are outside the compatibility promise until genuine writer fixtures establish their behavior.",
+      "evidence": "All discovered VAULT_FORMAT_VERSION declarations in reachable and unreachable commits in the two local Sesame repositories, and in the additional sesame-desktop source snapshot, declare format 10. Every published tag v0.1.0 through v0.2.2 declares format 10.",
       "decision": {
-        "status": "supportRetained",
+        "status": "excludedFromCompatibilityPromise",
         "recordedBy": "owner",
-        "date": "2026-09-02",
-        "note": "The owner kept the upgrade path: readers for formats 2 through 9 stay, so an old file can always be upgraded into the current format instead of being refused. Support for these formats is enforced by the authenticated format-bound construction and adversarial reader tests, not by genuine writer fixtures. Every public release wrote format 10, so public-release users are covered by the proven fixtures; formats 2 through 9 only matter for backups from builds that never shipped."
+        "date": "2026-09-05",
+        "readersRetained": true,
+        "note": "Owner approved limiting the compatibility promise to the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 remain available as unproven recovery attempts, without a promise that historical files authenticate or migrate. This compatibility and recovery decision resolves the missing-writer acceptance dependency for VAULT-02; it does not establish historical compatibility or complete the later restore and release gates."
       },
       "recoveryPath": {
-        "status": "requiresHistoricalWriter",
+        "status": "approvedUnprovenRecovery",
         "steps": [
+          "Preserve the original backup unchanged. Retain existing exact-format readers as unproven recovery attempts; never guess authentication labels or weaken integrity checks. If authentication or decoding fails, preserve the source and recover the original writer using the following steps before promising recovery.",
           "Recover the original pre-public source revision and lockfile, or original executable and its provenance, from maintainer archives for each format 2 through 9. The public tags and reachable format-constant history do not contain these writers.",
           "Identify the exact envelope, payload schema, KDF parameters, wrapper construction, authentication labels, and setup states from that writer. Do not infer them by relabelling a format 10 file or trying alternate authentication labels.",
           "Run the recovered writer in an isolated environment with fictional data for every available record type, folders, trash, history, Unicode, empty optionals, and each supported recovery path. Record the writer digest, fixture digest, fictional credentials, stable identifiers, and expected decoded contents.",
           "Require those genuine fixtures to authenticate and preserve their expected contents through the compatibility tests before describing that format as proven. If its reader must be retired, obtain owner approval for a separately retained read-only recovery build or converter and test it against the same fixtures first."
         ],
-        "limitation": "Keeping existing readers does not establish historical compatibility. No recovered writer, tested standalone converter, or approved removal from the compatibility promise is recorded for formats 2 through 9."
+        "limitation": "Formats 2 through 9 are owner-approved exclusions from the compatibility promise. Their existing readers remain available, but no genuine historical fixture or tested standalone converter establishes recovery. Original-writer recovery and fixture validation are required before adding any of these formats to the compatibility promise."
       }
     }
   ],

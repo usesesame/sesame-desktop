@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import test from 'node:test'
 
-import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
+import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
 import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3 } from './release-set.mjs'
 
 const run = promisify(execFile)
@@ -15,6 +15,14 @@ const script = resolve('tools/create-static-update-manifest.mjs')
 const version = '1.2.3'
 const ref = `refs/tags/v${version}`
 const sigstoreIdentity = releaseIdentity(RELEASE_REPOSITORY, RELEASE_WORKFLOW, ref)
+const linuxSigstoreIdentity = releaseIdentity(RELEASE_REPOSITORY, LINUX_RELEASE_WORKFLOW, ref)
+
+function fictionalLinuxArtifact(format, character) {
+  const record = fictionalArtifact(format, character)
+  record.sigstoreIdentity = linuxSigstoreIdentity
+  record.sigstoreEvidence = { ...record.sigstoreEvidence, certificateIdentity: linuxSigstoreIdentity, workflow: LINUX_RELEASE_WORKFLOW }
+  return record
+}
 
 function fictionalArtifact(format, character, overrides = {}) {
   const updaterCapable = format === 'nsis'
@@ -83,9 +91,9 @@ function fictionalLinuxCandidate() {
     supportedWindows: '',
     releaseNotesUrl: `https://releases.example.test/v${version}`,
     artifacts: [
-      fictionalArtifact('appimage', 'a'),
-      fictionalArtifact('deb', 'd'),
-      fictionalArtifact('rpm', 'e'),
+      fictionalLinuxArtifact('appimage', 'a'),
+      fictionalLinuxArtifact('deb', 'd'),
+      fictionalLinuxArtifact('rpm', 'e'),
     ],
   }))
 }
