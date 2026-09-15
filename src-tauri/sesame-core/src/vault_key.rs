@@ -525,12 +525,13 @@ mod tests {
             assert!(flags.split_whitespace().any(|flag| flag == "lo"));
 
             drop(key);
-            // A parallel test can map an unrelated page over the released address before smaps is read;
-            // the pinned, wipe-on-fork key mapping must not survive the drop.
+            // A parallel test can map and even lock an unrelated page over the released address
+            // before smaps is read. Only this key's own wipe-on-fork and do-not-dump region proves
+            // survival, so the locked flag alone must not fail the check.
             if let Some(flags) = platform::mapping_flags(address, length) {
                 let flags: Vec<&str> = flags.split_whitespace().collect();
                 assert!(
-                    !flags.iter().any(|flag| ["lo", "wf", "dd"].contains(flag)),
+                    !flags.iter().any(|flag| ["wf", "dd"].contains(flag)),
                     "the vault key mapping survived the drop: {flags:?}"
                 );
             }
