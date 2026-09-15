@@ -4,6 +4,63 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.2.5
+
+### Security
+
+- On Linux the unlocked vault key is now held in memory the kernel has locked
+  against swap, and Sesame wipes and releases that page when it locks,
+  restores, or exits. If the kernel refuses the memory advice that keeps the
+  key out of crash dumps and forked children, Sesame wipes the key and falls
+  back to wiped-after-use memory instead of keeping it unlocked, and the copy
+  made for that fallback is wiped the moment it is created.
+- Vault files are safer to open and save. Opening never truncates a file that
+  is already there, saving writes a staged file that is validated and swapped
+  in by rename, and a link planted into the vault file's path is removed
+  rather than written through.
+- A save that would push the vault above its 64 MiB storage limit is refused
+  with a message that says the saved vault has not changed.
+- Replies to the browser extension must fit the message frame the host
+  writes, and request buffers are wiped after use, so an oversized reply is
+  refused and request bytes do not linger in memory.
+- The parsers that read untrusted bytes, the native browser protocol and the
+  sync envelope, run under seeded mutation tests: flipped bits, truncated
+  payloads, spliced injections, and type-swapped fields must fail validation
+  instead of panicking.
+- Every Rust dependency is admitted by name:
+  src-tauri/dependency-admission.json records each crate in the build and why
+  it is needed, and the gate fails the build when an unlisted crate appears.
+- rustls is updated to 0.23.45 for RUSTSEC-2026-0285, and the locked build and
+  development dependencies are refreshed.
+
+### Interface
+
+- The interface carries its design language end to end. Sesame now
+  self-hosts the display, interface, and code fonts, Fraunces, Schibsted
+  Grotesk, and Spline Sans Mono, and applies the refreshed tokens across the
+  shell, menus, and views. The entry context menu handles every item kind,
+  modals open at the app root so a view container cannot trap their backdrop,
+  and the copy is shorter while stating the same facts.
+
+### Update and release pipeline
+
+- The update chain binds the updater receipt to the exact installer. The
+  manifest carries the download URL at the top level, and publishing refuses
+  to continue when the manifest's URL, SHA-256, or byte count differs from
+  the verified candidate.
+- Publishing a release is resumable. If a publish is interrupted, the next
+  run reconciles what is already public against the verified release set and
+  uploads only what is missing, and a leftover asset is tolerated only when
+  it matches this release's version.
+- A release cannot publish until the packaged app opens every supported
+  historical backup, restores it, restarts, and backs up again on both
+  Windows and Linux. That restore evidence is produced by the release
+  workflow and attached to the release.
+- Linux packages ship from the same public release pipeline as the Windows
+  installer: deb, rpm, and AppImage builds, each installed, launched, and
+  uninstalled in the release gate before publication, and both platform
+  lanes publish one shared release instead of two.
+
 ## 0.2.4
 
 - Updating from 0.1.1 through 0.2.2 to 0.2.3 failed with a receipt mismatch:
