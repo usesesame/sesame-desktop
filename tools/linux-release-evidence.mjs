@@ -83,6 +83,19 @@ export function validateLinuxSigstoreEvidence(evidence, manifest) {
   return evidence
 }
 
+// The candidate artifact records carry url and objectKey, not filename, so each
+// record binds to the handoff asset named by its URL path.
+export function assertCandidateArtifactsBindAssets(candidate, assets, { repository, tag }) {
+  for (const artifact of candidate?.artifacts ?? []) {
+    const filename = path.basename(new URL(artifact.url).pathname)
+    const asset = assets.find((entry) => entry.name === filename)
+    const expectedURL = `https://github.com/${repository}/releases/download/${tag}/${filename}`
+    if (!asset || artifact.sha256 !== asset.sha256 || artifact.url !== expectedURL) {
+      throw new Error(`The candidate ${artifact.format} record does not bind the verified package bytes.`)
+    }
+  }
+}
+
 export async function validateLinuxEvidenceDirectory(directory, manifestFilename) {
   const root = path.resolve(directory)
   assertSafeReleaseFilename(manifestFilename, 'Linux manifest filename')
