@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
 import { fileSha256 } from './release-evidence-lib.mjs'
-import { assertCandidateMatchesAssets, collectPublishAssets, planReleasePublication } from './release-publish-reconcile.mjs'
+import { RELEASE_SET_DIGEST_LABEL, assertCandidateMatchesAssets, collectPublishAssets, linuxLaneAssetPatterns, planReleasePublication } from './release-publish-reconcile.mjs'
 
 const [handoffDirectory, publicDirectory, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
 if (!handoffDirectory || !publicDirectory || !manifestFilename || !candidateFilename) {
@@ -54,22 +54,19 @@ const downloadAssets = async (remoteAssets) => {
 
 const assetPaths = (names) => names.map((name) => assets.find((asset) => asset.name === name).path)
 
-const release = await fetchRelease()
-if (!release) {
-  if (!notesFilename) throw new Error('Creating the release requires a notes file.')
-  await gh([
-    'release', 'create', tag,
-    '--repo', repository,
-    '--title', `Sesame ${tag}`,
-    '--notes-file', notesFilename,
-    ...assetPaths(assets.map((asset) => asset.name)),
-  ])
-  process.stdout.write(`Created release ${tag} with ${assets.length} verified assets.\n`)
-} else {
+const appendSetDigest = async (body, directory) => {
+  const notes = `${body.replace(/\n*$/, '')}\n\n${RELEASE_SET_DIGEST_LABEL}: ${candidate.setDigest}\n`
+  const notesPath = path.join(directory, 'release-notes.md')
+  await writeFile(notesPath, notes)
+  await gh(['release', 'edit', tag, '--repo', repository, '--notes-file', notesPath])
+}
+
+const reconcile = async (release) => {
   const plan = planReleasePublication({
     release: { isDraft: release.draft === true, body: release.body, assets: await downloadAssets(release.assets ?? []) },
     expectedAssets: assets,
     setDigest: candidate.setDigest,
+    foreignAssets: linuxLaneAssetPatterns(manifest.version),
   })
   if (plan.action === 'conflict') {
     throw new Error([
@@ -79,5 +76,33 @@ if (!release) {
     ].join('\n'))
   }
   if (plan.upload.length > 0) await gh(['release', 'upload', tag, '--repo', repository, ...assetPaths(plan.upload)])
+  if (plan.anchor === 'append') {
+    const directory = await mkdtemp(path.join(tmpdir(), 'sesame-release-notes-'))
+    try {
+      await appendSetDigest(release.body ?? '', directory)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
   process.stdout.write(`Release ${tag} ${plan.action === 'complete' ? 'already carries' : 'now carries'} all ${assets.length} verified assets.\n`)
 }
+
+let release = await fetchRelease()
+if (!release) {
+  if (!notesFilename) throw new Error('Creating the release requires a notes file.')
+  try {
+    await gh([
+      'release', 'create', tag,
+      '--repo', repository,
+      '--title', `Sesame ${tag}`,
+      '--notes-file', notesFilename,
+      ...assetPaths(assets.map((asset) => asset.name)),
+    ])
+    process.stdout.write(`Created release ${tag} with ${assets.length} verified assets.\n`)
+  } catch (error) {
+    if (!/HTTP 422|already[_ ]exists|already exists/i.test(error.stderr ?? '')) throw error
+    release = await fetchRelease()
+    if (!release) throw error
+  }
+}
+if (release) await reconcile(release)

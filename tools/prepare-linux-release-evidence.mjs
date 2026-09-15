@@ -97,5 +97,5 @@ const manifest = {
 const manifestFilename = `sesame-${version}-linux-${architecture}.release.json`
 await writeFile(path.join(output, manifestFilename), `${JSON.stringify(manifest, null, 2)}\n`)
 const sums = [...artifacts, copies.sbom, copies.shipped, copies.vault].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
-await writeFile(path.join(output, 'SHA256SUMS'), `${sums}\n`)
+await writeFile(path.join(output, 'SHA256SUMS-linux'), `${sums}\n`)
 process.stdout.write(`${manifestFilename}\n`)

@@ -8,6 +8,44 @@ export const RELEASE_SET_DIGEST_LABEL = 'Release set digest'
 const sha256Pattern = /^[0-9a-f]{64}$/
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/
 
+// The Windows and Linux lanes publish into one release per tag. Each lane
+// reconciles its own asset set and ignores the other lane's assets by exact
+// version-bound name shape, so an unrelated file still stops the run.
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function windowsLaneAssetPatterns(version) {
+  const escaped = escapeRegExp(version)
+  return [
+    /^latest\.json$/,
+    /^SHA256SUMS$/,
+    /^sigstore-evidence\.json$/,
+    /^verify-sesame-release\.ps1$/,
+    new RegExp(`^sesame-${escaped}\\.cdx\\.json$`),
+    new RegExp(`^sesame-${escaped}-windows-[^/]+\\.release\\.json(\\.sigstore\\.json)?$`),
+    /^Sesame_.*\.exe$/,
+    /^Sesame_.*\.exe\.sig$/,
+    /^Sesame_.*\.exe\.sigstore\.json$/,
+  ]
+}
+
+export function linuxLaneAssetPatterns(version) {
+  const escaped = escapeRegExp(version)
+  return [
+    /^SHA256SUMS-linux$/,
+    /^sesame-linux\.cdx\.json$/,
+    /^linux-sigstore-evidence\.json$/,
+    /^linux-shipped-package\.json$/,
+    /^linux-installed-package\.json$/,
+    new RegExp(`^sesame-${escaped}-linux-[^/]+\\.release\\.json(\\.sigstore\\.json)?$`),
+    new RegExp(`^Sesame-${escaped}-.*\\.AppImage(\\.sigstore\\.json)?$`),
+    new RegExp(`^Sesame_${escaped}_.*\\.deb(\\.sigstore\\.json)?$`),
+    new RegExp(`^Sesame-${escaped}-.*\\.rpm(\\.sigstore\\.json)?$`),
+  ]
+}
+
 // A retry re-derives the whole plan from digests instead of trusting asset
 // names: a release that already exists must match byte for byte or the run
 // stops before touching anything.
@@ -80,8 +118,8 @@ export function assertCandidateMatchesAssets(candidate, assets, { repository, ta
   return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256, bytes: installer.bytes })
 }
 
-export function planReleasePublication({ release, expectedAssets, setDigest }) {
-  if (!release) return { action: 'create', upload: expectedAssets.map((asset) => asset.name), conflicts: [] }
+export function planReleasePublication({ release, expectedAssets, setDigest, foreignAssets = [] }) {
+  if (!release) return { action: 'create', upload: expectedAssets.map((asset) => asset.name), conflicts: [], anchor: 'create' }
   const conflicts = []
   if (release.isDraft) conflicts.push('The existing release is a draft: publish or delete it deliberately before this job can converge.')
   const remote = new Map((release.assets ?? []).map((asset) => [asset.name, asset]))
@@ -101,19 +139,25 @@ export function planReleasePublication({ release, expectedAssets, setDigest }) {
     }
   }
   for (const name of remote.keys()) {
-    if (!expectedAssets.some((asset) => asset.name === name)) conflicts.push(`The release carries unexpected asset ${name}.`)
+    if (expectedAssets.some((asset) => asset.name === name)) continue
+    if (foreignAssets.some((pattern) => pattern.test(name))) continue
+    conflicts.push(`The release carries unexpected asset ${name}.`)
   }
   const declared = (release.body ?? '')
     .split('\n')
-    .find((line) => line.startsWith(`${RELEASE_SET_DIGEST_LABEL}: `))
-    ?.slice(`${RELEASE_SET_DIGEST_LABEL}: `.length)
-    .trim()
-  if (!declared) {
+    .filter((line) => line.startsWith(`${RELEASE_SET_DIGEST_LABEL}: `))
+    .map((line) => line.slice(`${RELEASE_SET_DIGEST_LABEL}: `.length).trim())
+  let anchor
+  if (declared.includes(setDigest)) anchor = 'present'
+  else if (declared.length === 0) anchor = 'missing'
+  else if (declared.every((value) => sha256Pattern.test(value))) anchor = 'append'
+  else anchor = 'malformed'
+  if (anchor === 'missing') {
     conflicts.push(`The release notes omit the ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} anchor this pipeline ships.`)
-  } else if (declared !== setDigest) {
-    conflicts.push(`The release notes declare ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} ${declared} instead of ${setDigest}.`)
+  } else if (anchor === 'malformed') {
+    conflicts.push(`The release notes carry a malformed ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} line.`)
   }
-  return { action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete', upload, conflicts }
+  return { action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete', upload, conflicts, anchor }
 }
 
 // The server accepts an exact replay with 201, so the same POST is both the

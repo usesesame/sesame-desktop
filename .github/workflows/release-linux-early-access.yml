@@ -220,7 +220,7 @@ jobs:
             echo "The packages are not signed by a distribution key. Every file was built in"
             echo "public CI from tag $GITHUB_REF_NAME and signed keylessly with Sigstore."
             echo
-            echo "SHA-256 digests are in SHA256SUMS."
+            echo "SHA-256 digests are in SHA256SUMS-linux."
             echo
             echo "Release set digest: $setdigest"
           } > release-notes.md
