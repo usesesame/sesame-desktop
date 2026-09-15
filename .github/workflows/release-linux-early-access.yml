@@ -47,6 +47,7 @@ jobs:
         with:
           workspaces: src-tauri
           key: linux-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview, tray, and package tools
         run: |
@@ -152,7 +153,7 @@ jobs:
             release-handoff
             release-artifacts
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 14
 
   verify-fresh:
     needs: build-and-test

@@ -193,3 +193,33 @@ test('no npm script passes by announcing a skip', () => {
     `these scripts report a pass without checking anything: ${skippers.join(', ')}`,
   )
 })
+
+test('test acceleration preserves application checks and release profiles', () => {
+  const manifest = read('src-tauri', 'Cargo.toml')
+  const profiles = [...manifest.matchAll(/^\[(profile\.[^\]]+)\]\s*\n([^[]*)/gm)]
+  assert.deepEqual(profiles.map((match) => match[1]).sort(), [
+    'profile.test.package.argon2',
+    'profile.test.package.blake2',
+  ])
+  for (const [, , settings] of profiles) {
+    assert.equal(settings.trim(), 'opt-level = 3')
+  }
+})
+
+test('native CI waits for quick checks and still runs both feature configurations', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const windows = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  desktop-linux:'))
+  const linux = workflow.slice(workflow.indexOf('  desktop-linux:'), workflow.indexOf('  supply-chain:'))
+  for (const job of [windows, linux]) {
+    assert.match(job, /needs: \[lint, typecheck\]/)
+    assert.doesNotMatch(job, /continue-on-error:|^\s+if:/m)
+  }
+  assert.match(windows, /run: npm run desktop:ci/)
+  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml\n/)
+  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview/)
+  assert.match(linux, /linux-installed-package-gate\.mjs/)
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  const pkg = JSON.parse(read('package.json'))
+  assert.equal(config.build.beforeBuildCommand, 'npm run desktop:bundle:prepare')
+  assert.match(pkg.scripts['desktop:bundle:prepare'], /npm run desktop:build/)
+})

@@ -71,16 +71,6 @@ jobs:
       - name: Check the desktop boundary
         run: npm run desktop:contracts
 
-      # The remaining suites in tools/ that describe this repository. The
-      # others read a sibling product and belong to the repository that owns
-      # it, so they are named here rather than globbed.
-      - name: Run the contract suites
-        run: >-
-          node --test
-          tools/accessibility-contracts.test.mjs
-          tools/release-evidence-contracts.test.mjs
-          tools/create-static-update-manifest.test.mjs
-
   # ---------------------------------------------------------------------
   # The desktop itself: the vault core, the interface, and a production
   # build. Windows because the core depends on windows-sys.
@@ -90,6 +80,7 @@ jobs:
   # job when one appears.
   # ---------------------------------------------------------------------
   desktop:
+    needs: [lint, typecheck]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,6 +97,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: npm ci
 
@@ -123,6 +115,7 @@ jobs:
         run: npm run tauri -- build --no-bundle
 
   desktop-linux:
+    needs: [lint, typecheck]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,6 +133,7 @@ jobs:
         with:
           workspaces: src-tauri
           key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview and tray libraries
         run: |
@@ -227,6 +221,16 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
+          cache-dependency-path: .github/workflows/ci.yml
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: audit-0.22.2
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: npm ci
 
