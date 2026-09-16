@@ -220,6 +220,8 @@ test('the counterpart lane shares the release without weakening asset checks', (
   const linuxNames = [
     'Sesame-1.2.3-x86_64.AppImage',
     'Sesame-1.2.3-x86_64.AppImage.sigstore.json',
+    'Sesame_1.2.3_amd64.AppImage',
+    'Sesame_1.2.3_amd64.AppImage.sigstore.json',
     'Sesame_1.2.3_amd64.deb',
     'Sesame_1.2.3_amd64.deb.sigstore.json',
     'Sesame-1.2.3-1.x86_64.rpm',
@@ -262,10 +264,11 @@ test('the counterpart lane shares the release without weakening asset checks', (
   assert.equal(sharingLinux.action, 'complete')
 
   const wrongVersionLinux = planReleasePublication({
-    release: releaseWith([foreign('Sesame_1.2.4_amd64.deb'), foreign('Sesame-1.2.3.dmg')], { body: `${digestLine}\n` }),
+    release: releaseWith([foreign('Sesame_1.2.4_amd64.deb'), foreign('Sesame_1.2.4_amd64.AppImage'), foreign('Sesame-1.2.3.dmg')], { body: `${digestLine}\n` }),
     expectedAssets: [], setDigest, foreignAssets: linuxLaneAssetPatterns(version),
   })
   assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame_1.2.4_amd64.deb')))
+  assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame_1.2.4_amd64.AppImage')))
   assert.ok(wrongVersionLinux.conflicts.some((line) => line.includes('Sesame-1.2.3.dmg')))
 
   const wrongVersionWindows = planReleasePublication({
@@ -274,6 +277,30 @@ test('the counterpart lane shares the release without weakening asset checks', (
   })
   assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe')))
   assert.ok(wrongVersionWindows.conflicts.some((line) => line.includes('Sesame_1.2.4_x64-setup.exe.sig')))
+})
+
+test('the v0.2.5 Linux asset names shipped by CI are all tolerated by the Windows lane', () => {
+  const released = [
+    'linux-installed-package.json',
+    'linux-shipped-package.json',
+    'linux-sigstore-evidence.json',
+    'Sesame-0.2.5-1.x86_64.rpm',
+    'Sesame-0.2.5-1.x86_64.rpm.sigstore.json',
+    'sesame-0.2.5-linux-x86_64.release.json',
+    'sesame-0.2.5-linux-x86_64.release.json.sigstore.json',
+    'sesame-linux.cdx.json',
+    'Sesame_0.2.5_amd64.AppImage',
+    'Sesame_0.2.5_amd64.AppImage.sigstore.json',
+    'Sesame_0.2.5_amd64.deb',
+    'Sesame_0.2.5_amd64.deb.sigstore.json',
+    'SHA256SUMS-linux',
+  ]
+  const plan = planReleasePublication({
+    release: releaseWith(released.map((name) => remoteAsset({ name, bytes: 1, sha256: 'd'.repeat(64) })), { body: `${RELEASE_SET_DIGEST_LABEL}: ${'d'.repeat(64)}\n` }),
+    expectedAssets: [], setDigest, foreignAssets: linuxLaneAssetPatterns('0.2.5'),
+  })
+  assert.deepEqual(plan.conflicts, [])
+  assert.equal(plan.action, 'complete')
 })
 
 test('the digest anchor appends for a shared release and rejects malformed lines', () => {

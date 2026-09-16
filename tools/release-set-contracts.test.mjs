@@ -99,6 +99,44 @@ test('release set digest matches the server candidate contract', () => {
   assert.equal(releaseSet.setDigest, 'ace8b84e98af42c87ceab7694ac1a3b4e77679995809cd299e5110a93f3dd154')
 })
 
+test('the Linux set digest matches the server candidate contract', () => {
+  const identity = releaseIdentity(RELEASE_REPOSITORY, LINUX_RELEASE_WORKFLOW, 'refs/tags/v0.2.3')
+  const linuxArtifact = (format) => {
+    const filename = format === 'rpm' ? 'Sesame-0.2.3-1.x86_64.rpm' : `Sesame_0.2.3_amd64.${format}`
+    return {
+      format,
+      architecture,
+      url: `https://downloads.example.invalid/${filename}`,
+      objectKey: `releases/0.2.3/${filename}`,
+      sha256: 'a'.repeat(64),
+      bytes: 1,
+      updaterCapable: false,
+      updaterSignature: '',
+      updaterSigningKeyId: '',
+      distributionClass: 'early_access',
+      sigstoreEvidence: {
+        schemaVersion: 1, verified: true, transparencyLogVerified: true, issuer: SIGSTORE_ISSUER,
+        certificateIdentity: identity, repository: RELEASE_REPOSITORY, workflow: LINUX_RELEASE_WORKFLOW,
+        ref: 'refs/tags/v0.2.3', artifactSha256: 'a'.repeat(64), artifactBundleSha256: 'b'.repeat(64),
+      },
+      sigstoreVerified: true,
+      sigstoreIssuer: SIGSTORE_ISSUER,
+      sigstoreIdentity: identity,
+      sigstoreBundleSha256: 'b'.repeat(64),
+      authenticodeVerified: false,
+    }
+  }
+  const releaseSet = prepareReleaseSet({
+    version: '0.2.3',
+    channel: 'beta',
+    platform: 'linux',
+    architecture,
+    releaseNotesUrl: 'https://example.invalid/releases/0.2.3',
+    artifacts: [linuxArtifact('appimage'), linuxArtifact('deb'), linuxArtifact('rpm')],
+  })
+  assert.equal(releaseSet.setDigest, '7f7c954046391075bd87c546a0eee4d9528ea3f43b3c216f998a8b1c606c34a2')
+})
+
 test('verification rejects missing, duplicate, and inapplicable package records', () => {
   const linuxIdentity = releaseIdentity(RELEASE_REPOSITORY, LINUX_RELEASE_WORKFLOW, ref)
   const linuxArtifact = (format, character) => {
