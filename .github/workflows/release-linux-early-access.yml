@@ -95,6 +95,12 @@ jobs:
           cp src-tauri/target/release/bundle/rpm/*.rpm release-packages/
           node tools/release-set-cli.mjs discover linux src-tauri/target/release/bundle "$SESAME_RELEASE_ARCHITECTURE" release-packages.json
 
+      # Bundled libwayland-client and libwayland-cursor break WebKit's EGL
+      # display creation on hosts with a newer Wayland stack, so the shipped
+      # AppImage must resolve them from the host.
+      - name: Strip the host-provided Wayland libraries from the AppImage
+        run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"
+
       - name: Prove the shipped package installs, launches, and uninstalls
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \
