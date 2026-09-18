@@ -45,7 +45,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const tree = path.join(workspace, 'tree')
     await run('unsquashfs', ['-d', tree, payloadPath], { maxBuffer: 1024 * 1024 * 1024 })
     const libDirectory = path.join(tree, 'usr', 'lib')
-    const libNames = await readdir(libDirectory).catch(() => [])
+    const libNames = await readdir(libDirectory)
     const planned = planStrippedLibraries(libNames)
     if (planned.length === 0) {
       return { appImage, stripped: [], unchanged: true }
