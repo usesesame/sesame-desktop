@@ -9,6 +9,7 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
+import { planStrippedLibraries } from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -180,4 +181,16 @@ test('the Linux release workflow publishes only after both installed-package gat
   const publish = workflow.slice(workflow.indexOf('publish:'))
   assert.match(publish, /needs: \[build-and-test, verify-fresh\]/, 'publication does not wait for the gates')
   assert.match(publish, /submit-release-candidate\.mjs/, 'the lane does not submit the server candidate')
+})
+
+test('the AppImage keeps host-provided Wayland libraries out of the bundle', () => {
+  assert.deepEqual(planStrippedLibraries(['libwayland-client.so.0', 'libwayland-cursor.so.0', 'libwayland-egl.so.1', 'libwayland-server.so.0', 'libxkbcommon.so.0', 'libgtk-3.so.0']), ['libwayland-client.so.0', 'libwayland-cursor.so.0'])
+})
+
+test('the Linux release lane strips the AppImage before the gates bind its bytes', async () => {
+  const workflow = await readFile(path.join(process.cwd(), '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  const strip = workflow.indexOf('strip-appimage-host-libs.mjs')
+  assert.ok(strip >= 0, 'the lane does not strip the host-provided Wayland libraries from the AppImage')
+  assert.ok(strip < workflow.indexOf('linux-shipped-package-gate.mjs'), 'the lane must strip the AppImage before the package gates run')
+  assert.ok(strip < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the lane must strip the AppImage before the manifest freezes its bytes')
 })
