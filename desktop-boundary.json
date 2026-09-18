@@ -47,6 +47,7 @@
     "tools/linux-release-evidence.mjs",
     "tools/create-linux-sigstore-evidence.mjs",
     "tools/prepare-linux-release-evidence.mjs",
+    "tools/strip-appimage-host-libs.mjs",
     "tools/create-linux-release-candidate.mjs",
     "tools/publish-linux-release.mjs",
     "tools/verify-linux-release-evidence.mjs",
