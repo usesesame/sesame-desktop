@@ -88,7 +88,11 @@ pub fn encrypt_bytes(key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> VaultResul
     })
 }
 
-pub fn decrypt_bytes(key: &[u8; 32], blob: &CipherBlob, aad: &[u8]) -> VaultResult<Vec<u8>> {
+pub fn decrypt_bytes(
+    key: &[u8; 32],
+    blob: &CipherBlob,
+    aad: &[u8],
+) -> VaultResult<Zeroizing<Vec<u8>>> {
     let cipher = XChaCha20Poly1305::new_from_slice(key)
         .map_err(|_| "Sesame could not initialise local encryption.".to_string())?;
     let nonce_bytes = URL_SAFE_NO_PAD
@@ -108,6 +112,7 @@ pub fn decrypt_bytes(key: &[u8; 32], blob: &CipherBlob, aad: &[u8]) -> VaultResu
                 aad,
             },
         )
+        .map(Zeroizing::new)
         .map_err(|_| "The encrypted vault could not be authenticated.".to_string())
 }
 
