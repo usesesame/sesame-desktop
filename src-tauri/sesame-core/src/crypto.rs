@@ -5,11 +5,12 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
 };
 use serde_json;
+use std::io::{self, Write};
 use zeroize::Zeroizing;
 
 use crate::{
     types::*, util::fill_random, VaultResult, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB,
-    MAX_KDF_PARALLELISM, MAX_KDF_TOTAL_WORK,
+    MAX_KDF_PARALLELISM, MAX_KDF_TOTAL_WORK, MAX_VAULT_FILE_BYTES, VAULT_SIZE_LIMIT_MESSAGE,
 };
 
 pub fn default_kdf_params() -> KdfParams {
@@ -110,10 +111,45 @@ pub fn decrypt_bytes(key: &[u8; 32], blob: &CipherBlob, aad: &[u8]) -> VaultResu
         .map_err(|_| "The encrypted vault could not be authenticated.".to_string())
 }
 
+struct CappedBuffer {
+    bytes: Zeroizing<Vec<u8>>,
+    limit: u64,
+}
+
+impl Write for CappedBuffer {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if self.bytes.len() as u64 + data.len() as u64 > self.limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the encoded vault would exceed its size limit",
+            ));
+        }
+        self.bytes.extend_from_slice(data);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 pub fn serialize_payload(payload: &VaultPayload) -> VaultResult<Zeroizing<Vec<u8>>> {
-    serde_json::to_vec(payload)
-        .map(Zeroizing::new)
-        .map_err(|_| "Sesame could not prepare the local vault.".to_string())
+    serialize_payload_capped(payload, MAX_VAULT_FILE_BYTES)
+}
+
+fn serialize_payload_capped(payload: &VaultPayload, limit: u64) -> VaultResult<Zeroizing<Vec<u8>>> {
+    let mut buffer = CappedBuffer {
+        bytes: Zeroizing::new(Vec::new()),
+        limit,
+    };
+    serde_json::to_writer(&mut buffer, payload).map_err(|error| {
+        if error.is_io() {
+            VAULT_SIZE_LIMIT_MESSAGE.to_string()
+        } else {
+            "Sesame could not prepare the local vault.".to_string()
+        }
+    })?;
+    Ok(buffer.bytes)
 }
 
 pub fn bytes_match(left: &[u8], right: &[u8]) -> bool {
@@ -125,4 +161,45 @@ pub fn bytes_match(left: &[u8], right: &[u8]) -> bool {
         difference |= byte ^ right[index];
     }
     difference == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Attachment, DocumentMetadata};
+
+    #[test]
+    fn capped_buffer_keeps_only_bytes_under_the_limit() {
+        let mut buffer = CappedBuffer {
+            bytes: Zeroizing::new(Vec::new()),
+            limit: 4,
+        };
+        buffer.write_all(b"abc").expect("under the limit");
+        assert!(buffer.write_all(b"de").is_err());
+        assert_eq!(&*buffer.bytes, b"abc");
+    }
+
+    #[test]
+    fn payload_serialization_rejects_an_oversized_change_early() {
+        let payload = VaultPayload {
+            vault_name: "fictional oversized vault".into(),
+            documents: vec![DocumentMetadata {
+                id: "fictional-document".into(),
+                title: "Fictional document".into(),
+                attachments: vec![Attachment {
+                    id: "fictional-attachment".into(),
+                    filename: "fictional.bin".into(),
+                    content_type: "application/octet-stream".into(),
+                    size: 4096,
+                    data: vec![7; 4096],
+                }],
+                ..DocumentMetadata::default()
+            }],
+            ..VaultPayload::default()
+        };
+        let encoded = serialize_payload_capped(&payload, 256);
+        assert_eq!(encoded.err().as_deref(), Some(VAULT_SIZE_LIMIT_MESSAGE));
+        let accepted = serialize_payload_capped(&payload, 64 * 1024).expect("small limit passes");
+        assert!(serde_json::from_slice::<serde_json::Value>(&accepted).is_ok());
+    }
 }
