@@ -8,7 +8,7 @@ import test from 'node:test'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const scripts = new Set(Object.keys(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts ?? {}))
-const IGNORED = new Set(['node_modules', '.git', 'dist', 'target', 'test-results', 'release-artifacts', 'release-evidence'])
+const IGNORED = new Set(['node_modules', '.git', 'dist', 'target', 'test-results', 'release-artifacts', 'release-evidence', 'vendor', 'isolated-target', '.phase4-target'])
 
 function filesMatching(pattern, directory = root) {
   const found = []
