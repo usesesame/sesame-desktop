@@ -20,9 +20,15 @@ pub fn capture_history(payload: &mut VaultPayload, item: TaggedItem) {
 
 fn capture_history_for_operation(
     payload: &mut VaultPayload,
-    item: TaggedItem,
+    mut item: TaggedItem,
     operation: HistoryOperation,
 ) {
+    // Attachments only change through their own commands and can reach 25 MB
+    // per document, so a metadata-only history entry keeps versions cheap.
+    // Restores carry the live attachments forward.
+    if let TaggedItem::Document(document) = &mut item {
+        document.attachments.clear();
+    }
     payload.history.push(HistoryEntry {
         id: random_id(),
         item,
@@ -229,6 +235,48 @@ mod change_tests {
             username: username.to_string(),
             ..VaultEntry::default()
         })
+    }
+
+    #[test]
+    fn document_history_keeps_no_attachment_bytes_and_restore_keeps_live_ones() {
+        use crate::types::{Attachment, DocumentMetadata};
+
+        fn document(attachments: Vec<Attachment>) -> TaggedItem {
+            TaggedItem::Document(DocumentMetadata {
+                id: "doc".to_string(),
+                title: "Passport".to_string(),
+                attachments,
+                ..DocumentMetadata::default()
+            })
+        }
+
+        let attachment = Attachment {
+            id: "a1".to_string(),
+            filename: "scan.png".to_string(),
+            content_type: "image/png".to_string(),
+            size: 3,
+            data: vec![1, 2, 3],
+        };
+        let mut payload = VaultPayload::default();
+        payload
+            .documents
+            .push(match document(vec![attachment.clone()]) {
+                TaggedItem::Document(document) => document,
+                _ => unreachable!(),
+            });
+        capture_history(&mut payload, document(vec![attachment]));
+        let stored = match &payload.history[0].item {
+            TaggedItem::Document(document) => document,
+            _ => panic!("expected a document history entry"),
+        };
+        assert!(
+            stored.attachments.is_empty(),
+            "history must not duplicate attachment bytes"
+        );
+
+        let history_id = payload.history[0].id.clone();
+        let (restored, _) = restore_version(&payload, &history_id).expect("restored version");
+        assert_eq!(restored.documents[0].attachments.len(), 1);
     }
 
     #[test]

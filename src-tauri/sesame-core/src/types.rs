@@ -743,6 +743,20 @@ impl TaggedItem {
         }
     }
 
+    pub fn metadata_mut(&mut self) -> &mut dyn ItemMetadata {
+        match self {
+            TaggedItem::Login(item) => item,
+            TaggedItem::Identity(item) => item,
+            TaggedItem::SecureNote(item) => item,
+            TaggedItem::Card(item) => item,
+            TaggedItem::WifiNetwork(item) => item,
+            TaggedItem::SshKey(item) => item,
+            TaggedItem::SoftwareLicense(item) => item,
+            TaggedItem::Document(item) => item,
+            TaggedItem::CustomRecord(item) => item,
+        }
+    }
+
     /// Non-secret preview; never embedded in a bulk snapshot.
     pub fn preview(&self) -> ItemPreview {
         let kind = self.kind().to_string();
@@ -1725,6 +1739,35 @@ impl VaultPayload {
         items
     }
 
+    pub fn active_item_ids(&self) -> Vec<String> {
+        let mut ids = Vec::with_capacity(
+            self.entries.len()
+                + self.identities.len()
+                + self.secure_notes.len()
+                + self.cards.len()
+                + self.wifi_networks.len()
+                + self.ssh_keys.len()
+                + self.software_licenses.len()
+                + self.documents.len()
+                + self.custom_records.len(),
+        );
+        macro_rules! append_ids {
+            ($collection:expr) => {
+                ids.extend($collection.iter().map(|item| item.id.clone()));
+            };
+        }
+        append_ids!(self.entries);
+        append_ids!(self.identities);
+        append_ids!(self.secure_notes);
+        append_ids!(self.cards);
+        append_ids!(self.wifi_networks);
+        append_ids!(self.ssh_keys);
+        append_ids!(self.software_licenses);
+        append_ids!(self.documents);
+        append_ids!(self.custom_records);
+        ids
+    }
+
     pub fn item_metadata_mut(&mut self, id: &str) -> Option<&mut dyn ItemMetadata> {
         macro_rules! find_item {
             ($collection:expr) => {
@@ -1925,6 +1968,9 @@ impl TaggedItem {
                 restore!(restored, current, SoftwareLicense)
             }
             (TaggedItem::Document(mut restored), TaggedItem::Document(current)) => {
+                // History stores document metadata only, so the live
+                // attachments survive any restore of an older version.
+                restored.attachments = current.attachments.clone();
                 restore!(restored, current, Document)
             }
             (TaggedItem::CustomRecord(mut restored), TaggedItem::CustomRecord(current)) => {
@@ -2109,6 +2155,8 @@ pub struct BitwardenJsonItem {
     pub ssh_key: Option<BitwardenJsonSshKey>,
     #[serde(default)]
     pub fields: Vec<BitwardenJsonField>,
+    #[serde(default)]
+    pub attachments: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, Default)]
