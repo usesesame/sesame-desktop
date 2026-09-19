@@ -202,6 +202,9 @@ mod platform {
 
     pub struct StoredKey {
         storage: Storage,
+        /// Read through `is_locked`, which is test-only evidence that the
+        /// fallback storage is a recorded downgrade.
+        #[cfg_attr(not(test), allow(dead_code))]
         locked: bool,
     }
 
@@ -354,22 +357,6 @@ mod platform {
             let reported = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
             usize::try_from(reported).unwrap_or(4096).max(1)
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn vm_lck_kib() -> usize {
-        let status = std::fs::read_to_string("/proc/self/status")
-            .expect("Linux test needs /proc/self/status");
-        for line in status.lines() {
-            if let Some(rest) = line.strip_prefix("VmLck:") {
-                return rest
-                    .split_whitespace()
-                    .next()
-                    .and_then(|value| value.parse().ok())
-                    .expect("VmLck carries a size");
-            }
-        }
-        panic!("VmLck missing from /proc/self/status");
     }
 
     #[cfg(test)]

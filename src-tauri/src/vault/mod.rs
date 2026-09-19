@@ -76,8 +76,13 @@ pub use sesame_core::{
 
 /// The desktop event half of locking; every lock entry point calls this so the behavior cannot drift.
 pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResult<()> {
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
     state.lock_for_lifecycle()?;
+    // The epoch check already invalidates the grant; dropping it eagerly leaves
+    // no usable state behind for the locked vault.
+    if let Some(presence) = app.try_state::<crate::release::ReleasePresence>() {
+        presence.revoke();
+    }
     app.emit("vault-locked", ())
         .map_err(|_| "Sesame could not notify the interface that the vault locked.".to_string())?;
     Ok(())
