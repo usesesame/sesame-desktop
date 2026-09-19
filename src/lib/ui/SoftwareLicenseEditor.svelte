@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import type { SoftwareLicenseInput } from '../types'
 
@@ -59,7 +60,7 @@
       <label>Purchase date <span class="field-hint">Optional</span><input name="licence-purchase-date" bind:value={licenseDraft.purchaseDate} maxlength="32" autocomplete="off" /></label>
     </div>
     <label>Notes<textarea name="licence-notes" bind:value={licenseDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="licence-tags" value={licenseDraft.tags.join(', ')} on:input={(event) => (licenseDraft = { ...licenseDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, design…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="licence-tags" value={licenseDraft.tags.join(', ')} on:input={(event) => (licenseDraft = { ...licenseDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. work, design…" /></label>
   </div>
 
   {#if confirmingDiscard}

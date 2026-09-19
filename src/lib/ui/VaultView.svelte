@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte'
+  import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { issueChipLabel, issueChips, issueFilterLabel, issueKindLabels } from '../issue-kinds'
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
@@ -7,7 +7,7 @@
   import { useAppStores } from '../stores/app-stores'
   import type { BreachCheckResult, ItemKind, VaultPane } from '../types'
   import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels, tagFilter, tagFromFilter } from '../vault-collections'
-  import { itemKindIcon, itemKindLabel, itemKindMeta, itemTags, type VaultItem } from '../vault-items'
+  import { itemKindIcon, itemKindLabel, itemKindMeta, itemTags, uniqueTags, type VaultItem } from '../vault-items'
   import AddItemMenu from './AddItemMenu.svelte'
   import ItemFilterMenu from './ItemFilterMenu.svelte'
   import ItemDetail from './ItemDetail.svelte'
@@ -15,8 +15,6 @@
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { PANEL_WIDTH_LIMITS, readPanelWidths, storePanelWidths } from '../preferences'
-
-  const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
 
   export let allItems: VaultItem[] = []
   export let visibleItems: VaultItem[] = []
@@ -131,7 +129,6 @@
   }
 
   let searchInput: HTMLInputElement
-  let passwordRevealTimer: ReturnType<typeof setTimeout> | null = null
   let sortMenuOpen = false
   let sortContainer: HTMLElement
   let sortButton: HTMLButtonElement
@@ -241,28 +238,11 @@
     ? folders.find((folder) => folder.id === bulkFolderId)?.name ?? 'Unfiled'
     : 'Unfiled'
 
-  function clearPasswordRevealTimer() {
-    if (passwordRevealTimer) clearTimeout(passwordRevealTimer)
-    passwordRevealTimer = null
-  }
-
-  function setPasswordVisible(visible: boolean) {
-    clearPasswordRevealTimer()
-    passwordVisible = visible
-    if (visible) passwordRevealTimer = setTimeout(() => {
-      passwordVisible = false
-      passwordRevealTimer = null
-    }, PASSWORD_REVEAL_TIMEOUT_MS)
-  }
-
-  async function revealPassword() {
-    await onRevealPassword()
-    if (passwordVisible) setPasswordVisible(true)
+  function revealPassword() {
+    void onRevealPassword()
   }
 
   $: if ($selection.collectionFilter === RECENT_FILTER) sortMenuOpen = false
-  $: if ($selection.activeItemId) clearPasswordRevealTimer()
-  onDestroy(clearPasswordRevealTimer)
 
   function keyboardContextMenu(event: KeyboardEvent, item: VaultItem) {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
@@ -496,6 +476,7 @@
           <ItemDetail
             kind={$selection.activeItemKind}
             detail={itemDetail}
+            itemId={$selection.activeItemId ?? ''}
             {folders}
             onCopy={onItemCopy}
             onToggleFavourite={(favourite) => $selection.activeItemId && onToggleFavourite($selection.activeItemId, favourite)}
@@ -562,7 +543,7 @@
         {#if loginCard.tags?.length}
           <section class="details-section">
             <div class="section-heading"><h3>Tags</h3></div>
-            <div class="issue-chips">{#each loginCard.tags as tag (tag)}<button type="button" class="tag-chip" on:click={() => onShowCollection(tagFilter(tag))}>{tag}</button>{/each}</div>
+            <div class="issue-chips">{#each uniqueTags(loginCard.tags) as tag (tag)}<button type="button" class="tag-chip" on:click={() => onShowCollection(tagFilter(tag))}>{tag}</button>{/each}</div>
           </section>
         {/if}
 
@@ -595,7 +576,7 @@
         {#if loginCard.urls && loginCard.urls.length > 1}
           <section class="details-section">
             <div class="section-heading"><h3>Additional websites</h3></div>
-            {#each loginCard.urls.slice(1) as url (url)}<p><a href={url} target="_blank" rel="noreferrer noopener">{url}</a></p>{/each}
+            {#each loginCard.urls.slice(1) as url, index (index)}<p><a href={url} target="_blank" rel="noreferrer noopener">{url}</a></p>{/each}
           </section>
         {/if}
         {#if loginCard.legacyFields?.length}

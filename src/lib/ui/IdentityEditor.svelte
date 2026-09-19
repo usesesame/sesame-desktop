@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import LegacyDataPanel from './LegacyDataPanel.svelte'
   import type { IdentityInput, LegacyField } from '../types'
@@ -59,7 +60,7 @@
       <label>Email<input name="identity-email" type="email" bind:value={identityDraft.email} maxlength="320" autocomplete="email" spellcheck="false" /></label>
       <label>Phone<input name="identity-phone" type="tel" bind:value={identityDraft.phone} maxlength="64" autocomplete="tel" /></label>
     </div>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="identity-tags" value={identityDraft.tags.join(', ')} on:input={(event) => (identityDraft.tags = event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean))} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="identity-tags" value={identityDraft.tags.join(', ')} on:input={(event) => (identityDraft.tags = parseTags(event.currentTarget.value))} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel…" /></label>
 
     <section class="editor-section">
       <div><h3>Address</h3><p>Optional. Filled into signup forms that ask for one.</p></div>

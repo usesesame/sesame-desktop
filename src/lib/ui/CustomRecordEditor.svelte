@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
@@ -98,7 +99,7 @@
     </section>
 
     <label>Notes<textarea name="record-notes" bind:value={recordDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="record-tags" value={recordDraft.tags.join(', ')} on:input={(event) => (recordDraft = { ...recordDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="record-tags" value={recordDraft.tags.join(', ')} on:input={(event) => (recordDraft = { ...recordDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family…" /></label>
   </div>
 
   {#if confirmingDiscard}

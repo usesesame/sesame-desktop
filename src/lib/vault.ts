@@ -626,9 +626,23 @@ export async function lockVault(): Promise<void> {
   await invoke('lock_vault')
 }
 
+function safeWebUrl(value: string): string {
+  try {
+    const protocol = new URL(value).protocol
+    return protocol === 'http:' || protocol === 'https:' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+/** A vault file is untrusted input; never render a link the app would not save. */
+function normaliseLoginCard(card: LoginCard): LoginCard {
+  return { ...card, url: safeWebUrl(card.url), urls: (card.urls ?? []).filter((url) => safeWebUrl(url) !== '') }
+}
+
 export async function getLoginCard(id: string): Promise<LoginCard> {
   if (previewMode) return previewCards[id]
-  return invoke<LoginCard>('get_login_card', { id })
+  return normaliseLoginCard(await invoke<LoginCard>('get_login_card', { id }))
 }
 
 export async function getQuickAccessStatus(): Promise<QuickAccessStatus> {
