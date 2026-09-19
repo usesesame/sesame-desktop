@@ -194,7 +194,7 @@ button.no-totp, .credential-button, .more-button {
 .alert p { margin: 0; color: var(--danger); }
 .alert button:hover { color: var(--danger); background: var(--danger-tint); }
 
-.modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: var(--space-6); padding-top: calc(36px + var(--space-6)); background: var(--backdrop); backdrop-filter: blur(4px); animation: backdrop-in .18s ease-out both; }
+.modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: var(--space-6); padding-top: calc(36px + var(--space-6)); background: var(--backdrop); animation: backdrop-in .18s ease-out both; }
 
 /* Shared modal shell. Every dialog box (import, login editor, restore,
    cleanup/merge confirm, data controls, delete vault) starts here; each one

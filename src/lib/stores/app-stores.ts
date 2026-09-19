@@ -253,6 +253,8 @@ function createTotpStore() {
   let applyRefresh: ((result: TotpRefresh) => void) | undefined
   let reportRepeatedFailure: (() => void) | undefined
 
+  let lastRemaining = -1
+
   function stop() {
     token += 1
     if (timer) window.clearInterval(timer)
@@ -262,6 +264,7 @@ function createTotpStore() {
     failures = 0
     retryAt = 0
     activeId = ''
+    lastRemaining = -1
     applyRefresh = undefined
     reportRepeatedFailure = undefined
     store.set({ remaining: 0, progress: '0%', refreshIssue: false })
@@ -270,7 +273,12 @@ function createTotpStore() {
   function tick(currentToken: number) {
     if (currentToken !== token || !activeId) return
     const remaining = Math.max(0, Math.ceil((expiryAt - Date.now()) / 1_000))
-    store.update((state) => ({ ...state, remaining, progress: `${Math.min(100, Math.max(0, (remaining / 30) * 100))}%` }))
+    // The interval runs at 250 ms but the displayed second only changes four
+    // times less often; pushing the same value re-renders every subscriber.
+    if (remaining !== lastRemaining) {
+      lastRemaining = remaining
+      store.update((state) => ({ ...state, remaining, progress: `${Math.min(100, Math.max(0, (remaining / 30) * 100))}%` }))
+    }
     if (remaining === 0 && !refreshing && Date.now() >= retryAt) void refresh(currentToken)
   }
 
@@ -302,6 +310,7 @@ function createTotpStore() {
       stop()
       if (!card.totpCode) return
       activeId = id
+      lastRemaining = -1
       applyRefresh = onRefresh
       reportRepeatedFailure = onRepeatedFailure
       expiryAt = Date.now() + (card.totpRemaining ?? 30) * 1_000
