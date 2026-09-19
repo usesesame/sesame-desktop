@@ -12,6 +12,7 @@
 
   let dialog: HTMLDivElement
   let shell: HTMLDivElement
+  let portaledShell: HTMLDivElement | null = null
   let returnFocus: HTMLElement | null = null
 
   const focusableSelector = [
@@ -97,12 +98,21 @@
     const portalTarget = document.getElementById('app')
     if (portalTarget && shell && shell.parentElement !== portalTarget) {
       portalTarget.appendChild(shell)
+      portaledShell = shell
     }
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     void focusModal()
   })
 
-  onDestroy(restoreFocus)
+  onDestroy(() => {
+    // A portaled backdrop sits outside the node range this component's effect
+    // owns. When an ancestor effect removes its range, descendants are destroyed
+    // without touching their DOM, so the moved node must be removed here or it
+    // stays over the whole window and swallows every click.
+    portaledShell?.remove()
+    portaledShell = null
+    restoreFocus()
+  })
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
