@@ -164,6 +164,7 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
         && parsed.secure_notes.is_empty()
         && parsed.cards.is_empty()
         && parsed.identities.is_empty()
+        && parsed.ssh_keys.is_empty()
     {
         return Err("No login entries were found in that import file.".into());
     }
@@ -171,6 +172,7 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
         + parsed.secure_notes.len()
         + parsed.cards.len()
         + parsed.identities.len()
+        + parsed.ssh_keys.len()
         > 100_000
     {
         return Err("That import contains too many entries for Sesame to process safely.".into());
@@ -296,9 +298,15 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             .and_then(|id| folders.get(id))
             .cloned()
             .unwrap_or_default();
+        let attachment_count = item.attachments.len();
         let Some(login) = item.login else {
             continue;
         };
+        for _ in 0..attachment_count {
+            fidelity
+                .logins
+                .record(FieldDisposition::IntentionallyOmitted);
+        }
         for _ in 0..login.fido2_credentials.len() {
             passkeys_not_imported += 1;
             fidelity
@@ -373,6 +381,9 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
 }
 
 fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> Card {
+    for _ in 0..item.attachments.len() {
+        fidelity.record(FieldDisposition::IntentionallyOmitted);
+    }
     let card = item.card.unwrap_or_default();
     let notes = item.notes;
     if !notes.is_empty() {
@@ -423,6 +434,9 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
 }
 
 fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> SshKey {
+    for _ in 0..item.attachments.len() {
+        fidelity.record(FieldDisposition::IntentionallyOmitted);
+    }
     let key = item.ssh_key.unwrap_or_default();
     for value in [&key.private_key, &key.public_key] {
         if !value.trim().is_empty() {
@@ -477,6 +491,9 @@ fn bitwarden_json_secure_note(
     item: BitwardenJsonItem,
     fidelity: &mut FidelityCounts,
 ) -> SecureNote {
+    for _ in 0..item.attachments.len() {
+        fidelity.record(FieldDisposition::IntentionallyOmitted);
+    }
     let content = item.notes;
     if !content.is_empty() {
         fidelity.record(FieldDisposition::Imported);
@@ -508,6 +525,9 @@ fn bitwarden_json_secure_note(
 }
 
 fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> Identity {
+    for _ in 0..item.attachments.len() {
+        fidelity.record(FieldDisposition::IntentionallyOmitted);
+    }
     let identity = item.identity.unwrap_or_default();
     let mut legacy_fields = Vec::new();
 

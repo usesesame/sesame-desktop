@@ -151,6 +151,32 @@ fn a_bitwarden_ssh_key_is_no_longer_counted_as_unsupported() {
 }
 
 #[test]
+fn a_bitwarden_export_with_only_ssh_keys_is_accepted() {
+    let export = r#"{
+      "items": [
+        { "type": 5, "name": "Deploy key", "notes": "",
+          "sshKey": { "privateKey": "fictional-private", "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 deploy@build" } }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("SSH-only Bitwarden import");
+    assert_eq!(parsed.ssh_keys.len(), 1);
+}
+
+#[test]
+fn bitwarden_attachments_are_reported_rather_than_dropped_in_silence() {
+    let export = r#"{
+      "items": [
+        { "type": 1, "name": "Example", "notes": "",
+          "attachments": [ { "id": "a1", "fileName": "scan.pdf" } ],
+          "login": { "username": "person", "password": "secret", "uris": [ { "uri": "https://example.test" } ] } }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.fidelity.logins.intentionally_omitted, 1);
+}
+
+#[test]
 fn bitwarden_passkeys_are_reported_rather_than_dropped_in_silence() {
     let parsed = parse_import_entries(BITWARDEN_SSH_AND_PASSKEY, "bitwarden-json")
         .expect("Bitwarden JSON import");
