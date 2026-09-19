@@ -78,8 +78,6 @@ pub use sesame_core::{
 pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResult<()> {
     use tauri::{Emitter, Manager};
     state.lock_for_lifecycle()?;
-    // The epoch check already invalidates the grant; dropping it eagerly leaves
-    // no usable state behind for the locked vault.
     if let Some(presence) = app.try_state::<crate::release::ReleasePresence>() {
         presence.revoke();
     }

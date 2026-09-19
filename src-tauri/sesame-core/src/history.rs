@@ -23,9 +23,6 @@ fn capture_history_for_operation(
     mut item: TaggedItem,
     operation: HistoryOperation,
 ) {
-    // Attachments only change through their own commands and can reach 25 MB
-    // per document, so a metadata-only history entry keeps versions cheap.
-    // Restores carry the live attachments forward.
     if let TaggedItem::Document(document) = &mut item {
         document.attachments.clear();
     }

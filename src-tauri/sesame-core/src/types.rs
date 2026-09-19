@@ -1995,8 +1995,6 @@ impl TaggedItem {
                 restore!(restored, current, SoftwareLicense)
             }
             (TaggedItem::Document(mut restored), TaggedItem::Document(current)) => {
-                // History stores document metadata only, so the live
-                // attachments survive any restore of an older version.
                 restored.attachments = current.attachments.clone();
                 restore!(restored, current, Document)
             }

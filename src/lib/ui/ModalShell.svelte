@@ -105,10 +105,6 @@
   })
 
   onDestroy(() => {
-    // A portaled backdrop sits outside the node range this component's effect
-    // owns. When an ancestor effect removes its range, descendants are destroyed
-    // without touching their DOM, so the moved node must be removed here or it
-    // stays over the whole window and swallows every click.
     portaledShell?.remove()
     portaledShell = null
     restoreFocus()

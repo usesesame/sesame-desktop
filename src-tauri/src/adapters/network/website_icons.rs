@@ -46,8 +46,6 @@ pub struct WebsiteIconCacheStatus {
     size_bytes: u64,
 }
 
-/// Cache reads, writes, and pruning are filesystem work; keep them off the
-/// async runtime so a slow disk cannot occupy its workers.
 async fn run_cache_work<T: Send + 'static>(
     work: impl FnOnce() -> VaultResult<T> + Send + 'static,
 ) -> VaultResult<T> {

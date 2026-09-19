@@ -99,8 +99,6 @@ pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
         parent.join(RECOVERY_HEALTH_FILE),
         parent.join("backups"),
     ];
-    // The writer stages `.<name>.<random>.tmp` files; an interrupted write may
-    // leave one behind, and it must not survive a delete-local-vault.
     if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {
         let prefix = format!(".{name}.");
         if let Ok(entries) = fs::read_dir(parent) {

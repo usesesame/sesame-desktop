@@ -122,9 +122,6 @@ pub fn export_vault_csv(
         outputs.push((identities_destination, identities_csv_bytes(&payload)?));
     }
 
-    // The plaintext CSV must never be left behind as a silent partial export:
-    // remove any file this command created when a later write fails, and name
-    // any file it had to replace before the failure.
     let mut created: Vec<PathBuf> = Vec::new();
     let mut replaced: Vec<String> = Vec::new();
     let mut written = Vec::new();

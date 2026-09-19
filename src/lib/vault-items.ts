@@ -105,7 +105,6 @@ export function itemTags(items: VaultItem[]): string[] {
   return [...seen.values()].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
 }
 
-/** Drops empty and case-insensitively duplicate tags, which are keyed lists elsewhere. */
 export function uniqueTags(tags: readonly string[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []

@@ -202,8 +202,6 @@ mod platform {
 
     pub struct StoredKey {
         storage: Storage,
-        /// Read through `is_locked`, which is test-only evidence that the
-        /// fallback storage is a recorded downgrade.
         #[cfg_attr(not(test), allow(dead_code))]
         locked: bool,
     }

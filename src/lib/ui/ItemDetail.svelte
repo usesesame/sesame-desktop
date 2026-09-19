@@ -45,8 +45,6 @@
     revealTimers = { ...revealTimers, [index]: setTimeout(() => hide(index), SECRET_REVEAL_TIMEOUT_MS) }
   }
 
-  // A reveal must not survive the item it belongs to, but a favourite or folder
-  // refresh of the same item must keep it.
   let lastItemId = itemId
   $: if (itemId !== lastItemId) {
     lastItemId = itemId

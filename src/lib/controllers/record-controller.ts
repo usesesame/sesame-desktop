@@ -53,8 +53,6 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
     deleteWorking: false,
   })
 
-  // Bumped whenever the editor closes or opens so a late record load cannot
-  // overwrite the draft the user is looking at.
   let editorRequest = 0
 
   function closeEditor() {

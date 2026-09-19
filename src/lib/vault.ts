@@ -635,7 +635,6 @@ function safeWebUrl(value: string): string {
   }
 }
 
-/** A vault file is untrusted input; never render a link the app would not save. */
 function normaliseLoginCard(card: LoginCard): LoginCard {
   return { ...card, url: safeWebUrl(card.url), urls: (card.urls ?? []).filter((url) => safeWebUrl(url) !== '') }
 }

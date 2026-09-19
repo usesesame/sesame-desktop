@@ -128,9 +128,6 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
         }
     }
 
-    // The entries pass above only covers logins; clear dangling folder
-    // references on every other kind, and in trash and history where a later
-    // restore would carry them back into the active vault.
     for id in payload.active_item_ids() {
         if let Some(item) = payload.item_metadata_mut(&id) {
             if item
@@ -166,9 +163,6 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
         }
     }
 
-    // A corrupted or crafted payload can carry empty or duplicate ids. Keyed
-    // lists cannot render those and the save path refuses the whole vault, so
-    // regenerate the offenders instead of leaving it unsaveable.
     let mut item_ids = HashSet::new();
     macro_rules! repair_item_ids {
         ($collection:expr) => {

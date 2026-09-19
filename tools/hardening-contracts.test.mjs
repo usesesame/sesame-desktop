@@ -24,7 +24,6 @@ function filesMatching(pattern, from = root) {
   return found
 }
 
-// A name mentioned only in a comment does not count as a reference.
 function withoutComments(text) {
   return text
     .replace(/\/\*[\s\S]*?\*\//g, '')

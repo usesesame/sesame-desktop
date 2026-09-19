@@ -102,8 +102,6 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
     let written = tmp.write_all(&bytes).and_then(|_| tmp.sync_all());
     drop(tmp);
 
-    // Every failure below must remove the staged file: a full encrypted vault
-    // image left behind would survive "delete local vault".
     let outcome: VaultResult<()> = if written.is_err() {
         Err("Sesame could not write the local vault.".into())
     } else {
@@ -589,8 +587,6 @@ pub fn delete_folder_from_payload(
             item.mark_item_changed(now);
         }
     }
-    // Trash and history entries can be restored later, so a reference to a
-    // folder that no longer exists must not survive there either.
     for trashed in &mut next_payload.trash {
         if trashed.item.metadata().item_folder_id() == Some(folder_id) {
             trashed.item.metadata_mut().set_item_folder_id(None);
