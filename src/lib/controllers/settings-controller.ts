@@ -236,9 +236,18 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
+      let listenersDisposed = false
       let stopUpdateProgress = () => {}
-      void onDesktopUpdateProgress((progress) => state.patch({ updateProgress: progress })).then((stop) => { stopUpdateProgress = stop })
+      void onDesktopUpdateProgress((progress) => state.patch({ updateProgress: progress }))
+        .then((stop) => {
+          if (listenersDisposed) stop()
+          else stopUpdateProgress = stop
+        })
+        .catch(() => {
+          void recordDiagnostic('vault_save', 'failed')
+        })
       return () => {
+        listenersDisposed = true
         systemDark?.removeEventListener('change', onScheme)
         stopUpdateProgress()
       }

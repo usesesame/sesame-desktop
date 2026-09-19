@@ -59,8 +59,16 @@ export function createDocumentController(options: RecordControllerOptions) {
 
   async function fetchDocument(id: string): Promise<DocumentMetadata> {
     const document = await getDocument(id)
-    attachmentState.patch({ documentAttachments: document.attachments ?? [] })
+    // A late load for a document the editor no longer shows must not replace
+    // the attachments of the one it does.
+    if (base.state.value().draft.id === id) {
+      attachmentState.patch({ documentAttachments: document.attachments ?? [] })
+    }
     return document
+  }
+
+  function clearAttachmentState() {
+    attachmentState.patch({ documentAttachments: [], attachmentError: '', uploadingAttachment: false, removingAttachmentId: null })
   }
 
   const base = createRecordController<DocumentMetadata, DocumentMetadataInput>(options, {
@@ -90,7 +98,11 @@ export function createDocumentController(options: RecordControllerOptions) {
     },
     closeEditor() {
       base.closeEditor()
-      attachmentState.patch({ documentAttachments: [], attachmentError: '' })
+      clearAttachmentState()
+    },
+    async openEditor(id: string) {
+      clearAttachmentState()
+      await base.openEditor(id)
     },
     async addAttachment(file: File) {
       const documentId = base.state.value().draft.id
@@ -102,9 +114,11 @@ export function createDocumentController(options: RecordControllerOptions) {
         stores.vault.patch({ snapshot: result.snapshot })
         await fetchDocument(documentId)
       } catch (error) {
-        attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That file could not be attached.' })
+        if (base.state.value().draft.id === documentId) {
+          attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That file could not be attached.' })
+        }
       } finally {
-        attachmentState.patch({ uploadingAttachment: false })
+        if (base.state.value().draft.id === documentId) attachmentState.patch({ uploadingAttachment: false })
       }
     },
     async removeAttachment(attachmentId: string) {
@@ -116,9 +130,11 @@ export function createDocumentController(options: RecordControllerOptions) {
         stores.vault.patch({ snapshot: result.snapshot })
         await fetchDocument(documentId)
       } catch (error) {
-        attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That attachment could not be removed.' })
+        if (base.state.value().draft.id === documentId) {
+          attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That attachment could not be removed.' })
+        }
       } finally {
-        attachmentState.patch({ removingAttachmentId: null })
+        if (base.state.value().draft.id === documentId) attachmentState.patch({ removingAttachmentId: null })
       }
     },
     clearSecrets() {

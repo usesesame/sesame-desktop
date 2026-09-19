@@ -134,6 +134,7 @@
   }
 
   let stopFocusListener: (() => void) | undefined
+  let listenersDisposed = false
   onMount(() => {
     void refresh()
     if (!previewMode) {
@@ -145,11 +146,15 @@
           }
         })
         .then((stop) => {
-          stopFocusListener = stop
+          if (listenersDisposed) stop()
+          else stopFocusListener = stop
         })
     }
   })
-  onDestroy(() => stopFocusListener?.())
+  onDestroy(() => {
+    listenersDisposed = true
+    stopFocusListener?.()
+  })
 </script>
 
 <svelte:window on:keydown={onKeydown} />

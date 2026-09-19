@@ -27,6 +27,7 @@ import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
+const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
 
   function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
   return field === 'username' ? 'Username' : field === 'email' ? 'Email' : 'Password'
@@ -79,7 +80,22 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     bulkFolderId: '',
   })
   let selectionRequestToken = 0
+  let revealGeneration = 0
   let autoTypeTimer: ReturnType<typeof setTimeout> | null = null
+  let passwordHideTimer: ReturnType<typeof setTimeout> | null = null
+
+  function clearPasswordHideTimer() {
+    if (passwordHideTimer) clearTimeout(passwordHideTimer)
+    passwordHideTimer = null
+  }
+
+  function armPasswordHideTimer() {
+    clearPasswordHideTimer()
+    passwordHideTimer = setTimeout(() => {
+      passwordHideTimer = null
+      state.patch({ passwordVisible: false })
+    }, PASSWORD_REVEAL_TIMEOUT_MS)
+  }
 
   function stopAutoTypeCountdown() {
     if (autoTypeTimer) clearTimeout(autoTypeTimer)
@@ -95,11 +111,16 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     if (state.value().revealedFor === id && state.value().revealedPassword) {
       return state.value().revealedPassword
     }
+    const generation = revealGeneration
     try {
       const secret = await revealLoginSecret(id)
+      // A lock or an item change while the reveal was in flight must not leave
+      // plaintext in the store or satisfy a later reveal from cache.
+      if (generation !== revealGeneration || !vault.value().status.unlocked || selection.value().activeItemId !== id) return ''
       state.patch({ revealedPassword: secret, revealedFor: id, passwordPresenceRequired: false })
       return secret
     } catch (error) {
+      if (generation !== revealGeneration) return ''
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
         state.patch({ passwordPresenceRequired: true, revealedFor: id, passwordPresenceSecret: '', passwordPresenceError: '' })
       } else {
@@ -127,6 +148,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !vault.value().status.unlocked) return
       vault.patch({ loginCard: card })
       selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
+      clearPasswordHideTimer()
       state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
@@ -321,11 +343,15 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       const card = vault.value().loginCard
       if (!card?.hasPassword) return
       if (state.value().passwordVisible) {
+        clearPasswordHideTimer()
         state.patch({ passwordVisible: false })
         return
       }
       const secret = await ensureRevealed(card.id)
-      if (secret) state.patch({ passwordVisible: true })
+      if (secret) {
+        state.patch({ passwordVisible: true })
+        armPasswordHideTimer()
+      }
     },
     async confirmPasswordPresence() {
       const secret = state.value().passwordPresenceSecret
@@ -339,7 +365,10 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         return
       }
       const revealed = await ensureRevealed(id)
-      if (revealed) state.patch({ passwordPresenceRequired: false, passwordVisible: true, passwordPresenceError: '' })
+      if (revealed) {
+        state.patch({ passwordPresenceRequired: false, passwordVisible: true, passwordPresenceError: '' })
+        armPasswordHideTimer()
+      }
     },
     cancelPasswordPresence() {
       state.patch({ passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
@@ -355,16 +384,20 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     async runBreachCheck() {
       const card = vault.value().loginCard
       if (!card?.hasPassword || state.value().breachCheckWorking) return
-      const secret = await ensureRevealed(card.id)
+      const entryId = card.id
+      const secret = await ensureRevealed(entryId)
       if (!secret) return
       state.patch({ breachCheckWorking: true, breachCheckError: '' })
       try {
         const result = await checkPasswordBreach(secret)
+        // A verdict for one login must never render under another.
+        if (vault.value().loginCard?.id !== entryId || state.value().breachCheckEntryId !== entryId) return
         state.patch({ breachCheckResult: result })
       } catch (error) {
+        if (vault.value().loginCard?.id !== entryId) return
         state.patch({ breachCheckError: error instanceof Error ? error.message : 'Sesame could not reach the breach-check service. Try again.' })
       } finally {
-        state.patch({ breachCheckWorking: false })
+        if (vault.value().loginCard?.id === entryId) state.patch({ breachCheckWorking: false })
       }
     },
     startAutoType() {
@@ -599,6 +632,8 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     },
     clearSecrets() {
       selectionRequestToken += 1
+      revealGeneration += 1
+      clearPasswordHideTimer()
       totp.stop()
       modal.closeAll()
       // A countdown in flight must not fire after the lock it was racing against.
