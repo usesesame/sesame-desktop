@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -69,6 +70,82 @@ test('Windows executables use a safe DLL search order and install per-machine', 
   assert.match(desktop, /pub fn run_browser_host\(\) \{[\s\S]*?dll_search::harden_process\(\)[\s\S]*?browser_host::run\(\)/)
   assert.equal(config.bundle.windows.nsis.installMode, 'perMachine')
   assert.match(template, /!if "\$\{INSTALLMODE\}" == "perMachine"\s*\n {2}RequestExecutionLevel admin/)
+})
+
+test('the Windows uninstaller removes only Sesame native-host registration', () => {
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  assert.equal(config.bundle.windows.nsis.installerHooks, 'nsis/native-host-uninstall.nsh')
+  const hook = read('src-tauri', 'nsis', 'native-host-uninstall.nsh')
+  assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
+  assert.match(hook, /\$UpdateMode <> 1/)
+  assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|HKLM|RmDir|DeleteRegKey/i)
+})
+
+test('installer lifecycle evidence scripts emit and compare file rows', { timeout: 30_000 }, (t) => {
+  const collectorPath = join(root, 'tools', 'collect-installer-lifecycle-evidence.ps1')
+  const comparerPath = join(root, 'tools', 'compare-installer-lifecycle-evidence.ps1')
+  const collector = readFileSync(collectorPath, 'utf8')
+  const comparer = readFileSync(comparerPath, 'utf8')
+
+  assert.match(collector, /\[pscustomobject\]\[ordered\]@\{/)
+  assert.match(collector, /relativePath\s*=/)
+  assert.match(collector, /sha256\s*=/)
+  assert.match(comparer, /missing required column/)
+  assert.match(comparer, /\$changes = @\(foreach/)
+
+  if (process.platform !== 'win32') {
+    t.skip('PowerShell behavior contract runs on Windows')
+    return
+  }
+
+  const scratch = mkdtempSync(join(tmpdir(), 'sesame-evidence-contract-'))
+  try {
+    const localAppData = join(scratch, 'local-app-data')
+    const dataRoot = join(localAppData, 'app.usesesame.desktop')
+    const outputRoot = join(scratch, 'evidence')
+    mkdirSync(dataRoot, { recursive: true })
+    writeFileSync(join(dataRoot, 'vault.sesame'), 'fictional-vault-state-one')
+    mkdirSync(join(dataRoot, 'EBWebView'), { recursive: true })
+    mkdirSync(join(dataRoot, 'logs'), { recursive: true })
+    mkdirSync(join(dataRoot, 'native-messaging'), { recursive: true })
+    writeFileSync(join(dataRoot, 'EBWebView', 'volatile-cache'), 'changes while the app runs')
+    writeFileSync(join(dataRoot, 'logs', 'sesame.log'), 'fictional diagnostic')
+    writeFileSync(join(dataRoot, 'native-messaging', 'app.usesesame.browser.json'), '{}')
+
+    const collect = (label) => {
+      const output = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', collectorPath, '-Label', label, '-OutputRoot', outputRoot],
+        { cwd: root, encoding: 'utf8', env: { ...process.env, LOCALAPPDATA: localAppData } },
+      )
+      return output.trim().split(/\r?\n/).at(-1)
+    }
+
+    const before = collect('before')
+    const manifest = readFileSync(join(before, 'data-files.csv'), 'utf8')
+    assert.match(manifest, /"relativePath","length","lastWriteTimeUtc","sha256"/)
+    assert.match(manifest, /"vault\.sesame"/)
+    assert.match(manifest, /"native-messaging\\app\.usesesame\.browser\.json"/)
+    assert.doesNotMatch(manifest, /EBWebView|sesame\.log/)
+    assert.doesNotMatch(manifest, /"Count","Keys","Values"/)
+    const policy = JSON.parse(readFileSync(join(before, 'collector-policy.json'), 'utf8').replace(/^\uFEFF/, ''))
+    assert.deepEqual(policy.excludedTopLevelRoots, ['EBWebView', 'logs'])
+    const nativeHost = JSON.parse(readFileSync(join(before, 'native-host-state.json'), 'utf8').replace(/^\uFEFF/, ''))
+    assert.equal(nativeHost.manifestExists, true)
+
+    writeFileSync(join(dataRoot, 'vault.sesame'), 'fictional-vault-state-two')
+    const after = collect('after')
+    const comparison = join(scratch, 'comparison.csv')
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', comparerPath, '-Before', before, '-After', after, '-OutputPath', comparison],
+      { cwd: root, encoding: 'utf8' },
+    )
+    assert.match(readFileSync(comparison, 'utf8'), /"vault\.sesame","Changed"/)
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
 })
 
 test('the installer never launches an executable through an unquoted path', () => {

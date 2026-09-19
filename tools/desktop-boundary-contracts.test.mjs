@@ -44,6 +44,9 @@ test('the boundary carries every tool the standalone gate executes', () => {
     for (const match of read(suite).matchAll(/['"`](tools\/[A-Za-z0-9._/-]+\.mjs)['"`]/g)) {
       assert.ok(inBoundary(match[1]), `${suite} executes ${match[1]} but it is not in desktop-boundary.json`)
     }
+    for (const match of read(suite).matchAll(/['"]tools['"],\s*['"]([^'"]+)['"]/g)) {
+      assert.ok(inBoundary(`tools/${match[1]}`), `${suite} reads tools/${match[1]} but it is not in desktop-boundary.json`)
+    }
   }
 })
 
