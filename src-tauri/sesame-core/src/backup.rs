@@ -90,14 +90,29 @@ pub const RECOVERY_HEALTH_FILE: &str = "recovery-health.sesame";
 
 pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
     let parent = vault.parent().unwrap_or_else(|| Path::new(""));
-    vec![
+    let mut paths = vec![
         vault.to_path_buf(),
         vault.with_extension("sesame.prev"),
         vault.with_extension("sesame.tmp"),
         parent.join(crate::storage::PIN_THROTTLE_FILE),
         parent.join(RECOVERY_HEALTH_FILE),
         parent.join("backups"),
-    ]
+    ];
+    // The writer stages `.<name>.<random>.tmp` files; an interrupted write may
+    // leave one behind, and it must not survive a delete-local-vault.
+    if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {
+        let prefix = format!(".{name}.");
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                if file_name.starts_with(&prefix) && file_name.ends_with(".tmp") {
+                    paths.push(entry.path());
+                }
+            }
+        }
+    }
+    paths
 }
 
 pub fn stage_managed_vault_files(vault: &Path, parent: &Path) -> VaultResult<StagedVaultFiles> {
