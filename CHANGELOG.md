@@ -35,12 +35,11 @@ release cannot be published without saying what changed in it.
 
 ### Interface
 
-- The interface carries its design language end to end. Sesame now
-  self-hosts the display, interface, and code fonts, Fraunces, Schibsted
-  Grotesk, and Spline Sans Mono, and applies the refreshed tokens across the
-  shell, menus, and views. The entry context menu handles every item kind,
-  modals open at the app root so a view container cannot trap their backdrop,
-  and the copy is shorter while stating the same facts.
+- Sesame self-hosts the display, interface, and code fonts, Fraunces,
+  Schibsted Grotesk, and Spline Sans Mono, and applies the refreshed tokens
+  across the shell, menus, and views. The entry context menu handles every
+  item kind, modals open at the app root so a view container cannot trap
+  their backdrop, and the copy is shorter while stating the same facts.
 
 ### Update and release pipeline
 
@@ -83,13 +82,13 @@ release cannot be published without saying what changed in it.
 ## 0.2.2
 
 - The release chain carries Linux end to end. The desktop app reports its real
-  operating system when it registers with the account service, the updater
-  runs on Linux, and update receipts are verified against the running
-  platform. The release pipeline accepts Linux candidates and writes
-  linux-appimage updater manifest targets, the server ingests them, serves
-  update checks for the asking platform, and answers per-platform
-  latest-release lookups, and the admin release controls and the website's
-  builds page show both channels.
+  operating system when it registers with the account service, Linux clients
+  run update discovery and verify update receipts against the running
+  platform, and the release pipeline accepts Linux candidates. Linux packages
+  carry no updater manifest target and record that automatic updates are
+  unavailable. The server serves update checks for the asking platform and
+  answers per-platform latest-release lookups, and the admin release controls
+  and the website's builds page show both channels.
 
 ## 0.2.1
 
@@ -105,7 +104,8 @@ release cannot be published without saying what changed in it.
 
 - Sesame now runs on Linux. The same vault, record types, unlock methods,
   auto-lock, quick access, backups, and browser integration work on Linux, and
-  the build produces deb, rpm, and AppImage packages. Device protection keeps
+  the build produces deb, rpm, and AppImage packages. The README platform
+  table records current Linux validation status. Device protection keeps
   its key in the Secret Service, auto-lock follows logind and the desktop
   screensaver, and the browser integration answers over a Unix socket that
   checks the connecting process before serving it. Vault files on Unix carry
