@@ -127,5 +127,43 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
             changed = true;
         }
     }
+
+    // The entries pass above only covers logins; clear dangling folder
+    // references on every other kind, and in trash and history where a later
+    // restore would carry them back into the active vault.
+    for id in payload.active_item_ids() {
+        if let Some(item) = payload.item_metadata_mut(&id) {
+            if item
+                .item_folder_id()
+                .is_some_and(|folder_id| !ids.contains(folder_id))
+            {
+                item.set_item_folder_id(None);
+                item.mark_item_changed(now);
+                changed = true;
+            }
+        }
+    }
+    for trashed in &mut payload.trash {
+        if trashed
+            .item
+            .metadata()
+            .item_folder_id()
+            .is_some_and(|folder_id| !ids.contains(folder_id))
+        {
+            trashed.item.metadata_mut().set_item_folder_id(None);
+            changed = true;
+        }
+    }
+    for entry in &mut payload.history {
+        if entry
+            .item
+            .metadata()
+            .item_folder_id()
+            .is_some_and(|folder_id| !ids.contains(folder_id))
+        {
+            entry.item.metadata_mut().set_item_folder_id(None);
+            changed = true;
+        }
+    }
     changed
 }

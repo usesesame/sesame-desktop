@@ -99,23 +99,35 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
         .ok_or("Sesame could not read the local vault file name.")?;
     let tmp_path = parent.join(format!(".{name}.{}.tmp", random_id()));
     let mut tmp = open_private_file(&tmp_path)?;
-    tmp.write_all(&bytes)
-        .and_then(|_| tmp.sync_all())
-        .map_err(|_| "Sesame could not write the local vault.".to_string())?;
+    let written = tmp.write_all(&bytes).and_then(|_| tmp.sync_all());
     drop(tmp);
 
-    if retain_previous && path.exists() {
-        let previous = path.with_extension("sesame.prev");
-        copy_private_file(path, &previous)
-            .map_err(|_| "Sesame could not protect the previous vault copy.".to_string())?;
-    } else if !retain_previous {
-        match fs::remove_file(path.with_extension("sesame.prev")) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Sesame could not remove the previous vault wrapper.".into()),
-        }
+    // Every failure below must remove the staged file: a full encrypted vault
+    // image left behind would survive "delete local vault".
+    let outcome: VaultResult<()> = if written.is_err() {
+        Err("Sesame could not write the local vault.".into())
+    } else {
+        (|| {
+            if retain_previous && path.exists() {
+                let previous = path.with_extension("sesame.prev");
+                copy_private_file(path, &previous)
+                    .map_err(|_| "Sesame could not protect the previous vault copy.".to_string())?;
+            } else if !retain_previous {
+                match fs::remove_file(path.with_extension("sesame.prev")) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => {
+                        return Err("Sesame could not remove the previous vault wrapper.".into())
+                    }
+                }
+            }
+            replace_file(&tmp_path, path)
+        })()
+    };
+    if outcome.is_err() {
+        let _ = fs::remove_file(&tmp_path);
     }
-    replace_file(&tmp_path, path)
+    outcome
 }
 
 pub fn persist_session(session: &mut UnlockedVault) -> VaultResult<()> {
@@ -561,17 +573,32 @@ pub fn delete_folder_from_payload(
     let mut next_payload = payload.clone();
     next_payload.folders.retain(|folder| folder.id != folder_id);
     let now = unix_timestamp();
-    let mut items = next_payload.item_views();
-    let filed: Vec<String> = items
-        .iter()
-        .filter(|item| item.metadata().item_folder_id() == Some(folder_id))
-        .map(|item| item.id().to_string())
-        .collect();
-    items.zeroize();
+    let mut filed = Vec::new();
+    for id in next_payload.active_item_ids() {
+        if next_payload
+            .item_metadata_mut(&id)
+            .and_then(|item| item.item_folder_id())
+            .is_some_and(|item_folder| item_folder == folder_id)
+        {
+            filed.push(id);
+        }
+    }
     for id in filed {
         if let Some(item) = next_payload.item_metadata_mut(&id) {
             item.set_item_folder_id(None);
             item.mark_item_changed(now);
+        }
+    }
+    // Trash and history entries can be restored later, so a reference to a
+    // folder that no longer exists must not survive there either.
+    for trashed in &mut next_payload.trash {
+        if trashed.item.metadata().item_folder_id() == Some(folder_id) {
+            trashed.item.metadata_mut().set_item_folder_id(None);
+        }
+    }
+    for entry in &mut next_payload.history {
+        if entry.item.metadata().item_folder_id() == Some(folder_id) {
+            entry.item.metadata_mut().set_item_folder_id(None);
         }
     }
     Ok(next_payload)
@@ -867,6 +894,39 @@ mod tests {
         assert_eq!(opened.payload.entries.len(), 1);
         assert_eq!(opened.payload.entries[0].password, "fictional-secret");
         fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn deleting_a_folder_clears_references_in_trash_and_history() {
+        use crate::types::{HistoryEntry, HistoryOperation, TrashedItem};
+
+        let mut payload = VaultPayload::default();
+        payload.folders.push(Folder {
+            id: "f1".to_string(),
+            name: "Work".to_string(),
+        });
+        let item = VaultEntry {
+            id: "one".to_string(),
+            title: "Example".to_string(),
+            folder_id: Some("f1".to_string()),
+            ..VaultEntry::default()
+        };
+        payload.trash.push(TrashedItem {
+            item: TaggedItem::Login(item.clone()),
+            deleted_at: 1,
+        });
+        payload.history.push(HistoryEntry {
+            id: "h1".to_string(),
+            item: TaggedItem::Login(item),
+            captured_at: 1,
+            operation: HistoryOperation::Edit,
+        });
+
+        let next = delete_folder_from_payload(&payload, "f1").expect("folder deleted");
+
+        assert!(next.folders.is_empty());
+        assert_eq!(next.trash[0].item.metadata().item_folder_id(), None);
+        assert_eq!(next.history[0].item.metadata().item_folder_id(), None);
     }
 
     #[test]
