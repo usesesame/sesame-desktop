@@ -156,6 +156,15 @@ test('a release build says where to check Sync, and claims nothing itself', () =
       `the release-build Sync row references ${forbidden}, which puts the Sync client into a shipping bundle`,
     )
   }
+
+  const meta = read('src', 'lib', 'app-meta.ts')
+  const target = meta.match(/SYNC_STATUS_URL = siteOrigin \? `\$\{siteOrigin\}(\/[^`]*)`/)
+  assert.ok(target, 'SYNC_STATUS_URL is no longer a single origin-relative declaration this test can read')
+  assert.equal(
+    target[1],
+    '/roadmap#sync',
+    'the Settings link target changed; the site must carry the page and fragment it names',
+  )
 })
 
 test('the Sync conflict screen never preselects a side', () => {
