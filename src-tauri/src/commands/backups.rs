@@ -115,16 +115,39 @@ pub fn export_vault_csv(
         return Err("The selected export folder no longer exists.".into());
     }
     let payload = session.open_payload()?;
-    let bytes = csv_export_bytes(&payload)?;
-    write_export_file(&destination, &bytes)?;
-    let mut written = vec![backup_file_name(&destination)?];
-
+    let mut outputs = vec![(destination.clone(), csv_export_bytes(&payload)?)];
     if !payload.identities.is_empty() {
         let identities_destination = identities_export_path(&destination)
             .ok_or("Sesame could not name the exported identities file.")?;
-        let identities_bytes = identities_csv_bytes(&payload)?;
-        write_export_file(&identities_destination, &identities_bytes)?;
-        written.push(backup_file_name(&identities_destination)?);
+        outputs.push((identities_destination, identities_csv_bytes(&payload)?));
+    }
+
+    // The plaintext CSV must never be left behind as a silent partial export:
+    // remove any file this command created when a later write fails, and name
+    // any file it had to replace before the failure.
+    let mut created: Vec<PathBuf> = Vec::new();
+    let mut replaced: Vec<String> = Vec::new();
+    let mut written = Vec::new();
+    for (path, bytes) in &outputs {
+        let existed = path.exists();
+        if let Err(error) = write_export_file(path, bytes) {
+            for path in &created {
+                let _ = std::fs::remove_file(path);
+            }
+            if replaced.is_empty() {
+                return Err(error);
+            }
+            return Err(format!(
+                "Sesame could not finish the readable export. It replaced {} before stopping, so review or remove that file.",
+                replaced.join(", ")
+            ));
+        }
+        if existed {
+            replaced.push(backup_file_name(path)?);
+        } else {
+            created.push(path.clone());
+        }
+        written.push(backup_file_name(path)?);
     }
 
     Ok(written)
