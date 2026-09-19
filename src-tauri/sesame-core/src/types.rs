@@ -715,6 +715,20 @@ impl TaggedItem {
         }
     }
 
+    pub fn set_id(&mut self, new_id: String) {
+        match self {
+            TaggedItem::Login(item) => item.id = new_id,
+            TaggedItem::Identity(item) => item.id = new_id,
+            TaggedItem::SecureNote(item) => item.id = new_id,
+            TaggedItem::Card(item) => item.id = new_id,
+            TaggedItem::WifiNetwork(item) => item.id = new_id,
+            TaggedItem::SshKey(item) => item.id = new_id,
+            TaggedItem::SoftwareLicense(item) => item.id = new_id,
+            TaggedItem::Document(item) => item.id = new_id,
+            TaggedItem::CustomRecord(item) => item.id = new_id,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             TaggedItem::Login(_) => "login",

@@ -165,5 +165,102 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
             changed = true;
         }
     }
+
+    // A corrupted or crafted payload can carry empty or duplicate ids. Keyed
+    // lists cannot render those and the save path refuses the whole vault, so
+    // regenerate the offenders instead of leaving it unsaveable.
+    let mut item_ids = HashSet::new();
+    macro_rules! repair_item_ids {
+        ($collection:expr) => {
+            for item in &mut $collection {
+                if item.id.trim().is_empty() || !item_ids.insert(item.id.clone()) {
+                    item.id = random_id();
+                    item_ids.insert(item.id.clone());
+                    item.updated_at = now;
+                    changed = true;
+                }
+            }
+        };
+    }
+    repair_item_ids!(payload.entries);
+    repair_item_ids!(payload.identities);
+    repair_item_ids!(payload.secure_notes);
+    repair_item_ids!(payload.cards);
+    repair_item_ids!(payload.wifi_networks);
+    repair_item_ids!(payload.ssh_keys);
+    repair_item_ids!(payload.software_licenses);
+    repair_item_ids!(payload.documents);
+    repair_item_ids!(payload.custom_records);
+
+    let mut trashed_ids = HashSet::new();
+    for trashed in &mut payload.trash {
+        let item_id = trashed.item.id().to_string();
+        if item_id.trim().is_empty() || !trashed_ids.insert(item_id) {
+            trashed.item.set_id(random_id());
+            changed = true;
+        }
+    }
+    let mut history_ids = HashSet::new();
+    for entry in &mut payload.history {
+        if entry.id.trim().is_empty() || !history_ids.insert(entry.id.clone()) {
+            entry.id = random_id();
+            changed = true;
+        }
+    }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry};
+
+    fn login(id: &str) -> VaultEntry {
+        VaultEntry {
+            id: id.to_string(),
+            title: "Example".to_string(),
+            ..VaultEntry::default()
+        }
+    }
+
+    #[test]
+    fn duplicate_and_empty_ids_are_repaired_on_open() {
+        let mut payload = VaultPayload::default();
+        payload.entries.push(login("same"));
+        payload.entries.push(login("same"));
+        payload.entries.push(login(""));
+        payload.trash.push(TrashedItem {
+            item: TaggedItem::Login(login("gone")),
+            deleted_at: 1,
+        });
+        payload.trash.push(TrashedItem {
+            item: TaggedItem::Login(login("gone")),
+            deleted_at: 2,
+        });
+        payload.history.push(HistoryEntry {
+            id: "h".to_string(),
+            item: TaggedItem::Login(login("old")),
+            captured_at: 1,
+            operation: HistoryOperation::Edit,
+        });
+        payload.history.push(HistoryEntry {
+            id: "h".to_string(),
+            item: TaggedItem::Login(login("older")),
+            captured_at: 2,
+            operation: HistoryOperation::Edit,
+        });
+
+        let changed = migrate_payload(&mut payload);
+
+        assert!(changed);
+        let ids: Vec<&str> = payload
+            .entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
+        assert!(ids.iter().all(|id| !id.trim().is_empty()));
+        assert_eq!(ids.iter().collect::<HashSet<_>>().len(), ids.len());
+        assert_ne!(payload.trash[0].item.id(), payload.trash[1].item.id());
+        assert_ne!(payload.history[0].id, payload.history[1].id);
+    }
 }
