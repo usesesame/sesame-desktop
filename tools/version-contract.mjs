@@ -12,6 +12,7 @@ const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 
 const files = {
   package: path.join(workspace, 'package.json'),
+  lock: path.join(workspace, 'package-lock.json'),
   cargo: path.join(workspace, 'src-tauri', 'Cargo.toml'),
   tauri: path.join(workspace, 'src-tauri', 'tauri.conf.json'),
 }
@@ -86,11 +87,37 @@ async function desktopTargets(version) {
   ]
 }
 
+async function lockfileTarget(version) {
+  const source = await readFile(files.lock, 'utf8')
+  let lock
+  try {
+    lock = JSON.parse(source)
+  } catch (error) {
+    throw new Error(`package-lock.json is not valid JSON: ${error.message}`, { cause: error })
+  }
+  const root = lock.packages?.['']
+  if (!root || typeof root !== 'object') {
+    throw new Error('package-lock.json must contain a root package entry.')
+  }
+  const expected = JSON.stringify(
+    { ...lock, version, packages: { ...lock.packages, '': { ...root, version } } },
+    null,
+    2,
+  ) + '\n'
+  return {
+    label: 'package-lock.json',
+    file: files.lock,
+    current: source,
+    expected,
+  }
+}
+
 async function main() {
   const rootPackage = await readJson(files.package, 'package.json')
 
   const desktopVersion = requireVersion(rootPackage.version, 'package.json')
   const targets = await desktopTargets(desktopVersion)
+  targets.push(await lockfileTarget(desktopVersion))
   const stale = targets.filter((target) => target.current !== target.expected)
 
   if (mode === 'check' && stale.length > 0) {
