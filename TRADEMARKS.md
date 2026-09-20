@@ -31,8 +31,8 @@ package identifier, browser-extension identity, and service domain. Do not use
 `Sesame`, a confusingly similar name, or the official artwork as the branding
 of that distribution or service without prior written permission.
 
-You may still describe the result as “based on Sesame” or “compatible with
-Sesame” under the conditions above. The source licence continues to require its
+You may still describe the result as "based on Sesame" or "compatible with
+Sesame" under the conditions above. The source licence continues to require its
 own notices and corresponding-source obligations; rebranding does not remove
 them.
 

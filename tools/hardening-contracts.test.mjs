@@ -24,14 +24,22 @@ function filesMatching(pattern, from = root) {
   return found
 }
 
+function withoutComments(text) {
+  return text
+    .replace(/<#[\s\S]*?#>/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1')
+    .replace(/(^|\s)#.*$/gm, '$1')
+}
+
 test('nothing in tools/ is left behind unreferenced', () => {
   const workflowDirectory = join(root, '.github', 'workflows')
   const referrers = [
-    { name: 'package.json', text: read('package.json') },
-    ...readdirSync(workflowDirectory).map((name) => ({ name, text: read('.github', 'workflows', name) })),
+    { name: 'package.json', text: withoutComments(read('package.json')) },
+    ...readdirSync(workflowDirectory).map((name) => ({ name, text: withoutComments(read('.github', 'workflows', name)) })),
     ...filesMatching(/\.(mjs|js|ps1)$/, join(root, 'tools')).map((path) => ({
       name: relative(join(root, 'tools'), path),
-      text: readFileSync(path, 'utf8'),
+      text: withoutComments(readFileSync(path, 'utf8')),
     })),
   ]
 

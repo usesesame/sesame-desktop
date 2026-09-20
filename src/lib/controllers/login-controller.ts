@@ -114,8 +114,6 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     const generation = revealGeneration
     try {
       const secret = await revealLoginSecret(id)
-      // A lock or an item change while the reveal was in flight must not leave
-      // plaintext in the store or satisfy a later reveal from cache.
       if (generation !== revealGeneration || !vault.value().status.unlocked || selection.value().activeItemId !== id) return ''
       state.patch({ revealedPassword: secret, revealedFor: id, passwordPresenceRequired: false })
       return secret
@@ -390,7 +388,6 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       state.patch({ breachCheckWorking: true, breachCheckError: '' })
       try {
         const result = await checkPasswordBreach(secret)
-        // A verdict for one login must never render under another.
         if (vault.value().loginCard?.id !== entryId || state.value().breachCheckEntryId !== entryId) return
         state.patch({ breachCheckResult: result })
       } catch (error) {

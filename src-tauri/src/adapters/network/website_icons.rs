@@ -46,27 +46,41 @@ pub struct WebsiteIconCacheStatus {
     size_bytes: u64,
 }
 
+async fn run_cache_work<T: Send + 'static>(
+    work: impl FnOnce() -> VaultResult<T> + Send + 'static,
+) -> VaultResult<T> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| "Sesame could not complete the website icon request.".to_string())?
+}
+
 #[tauri::command]
 pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Option<String>> {
     let host = normalized_host(&site)?;
     let cache_dir = cache_dir(&app)?;
-    fs::create_dir_all(&cache_dir)
-        .map_err(|_| "Sesame could not create the website icon cache.".to_string())?;
-    let paths = cache_paths(&cache_dir, &host);
-    let mut metadata = read_metadata(&paths.metadata);
-    let now = unix_time();
+    let (paths, mut metadata, now, cached) = {
+        let cache_dir = cache_dir.clone();
+        let host = host.clone();
+        run_cache_work(move || {
+            fs::create_dir_all(&cache_dir)
+                .map_err(|_| "Sesame could not create the website icon cache.".to_string())?;
+            let paths = cache_paths(&cache_dir, &host);
+            let metadata = read_metadata(&paths.metadata);
+            let now = unix_time();
+            let cached = read_cached_icon(&paths.image, metadata.media_type.as_deref());
+            Ok((paths, metadata, now, cached))
+        })
+        .await?
+    };
 
     if cache_is_fresh(&metadata, now) {
-        if let Some(icon) = read_cached_icon(&paths.image, metadata.media_type.as_deref()) {
+        if let Some(icon) = cached.clone() {
             return Ok(Some(icon));
         }
     }
 
     if failure_is_recent(&metadata, now) {
-        return Ok(read_cached_icon(
-            &paths.image,
-            metadata.media_type.as_deref(),
-        ));
+        return Ok(cached);
     }
 
     let fetched = match resolve_public_host(host).await {
@@ -75,41 +89,53 @@ pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Optio
     };
     match fetched {
         Ok((bytes, media_type)) => {
-            write_atomic(&paths.image, &bytes)?;
-            metadata.fetched_at = Some(now);
-            metadata.failed_at = None;
-            metadata.media_type = Some(media_type.clone());
-            write_metadata(&paths.metadata, &metadata)?;
-            prune_cache(&cache_dir, &paths.metadata, &paths.image);
-            Ok(Some(data_url(&media_type, &bytes)))
+            run_cache_work(move || {
+                write_atomic(&paths.image, &bytes)?;
+                metadata.fetched_at = Some(now);
+                metadata.failed_at = None;
+                metadata.media_type = Some(media_type.clone());
+                write_metadata(&paths.metadata, &metadata)?;
+                prune_cache(&cache_dir, &paths.metadata, &paths.image);
+                Ok(Some(data_url(&media_type, &bytes)))
+            })
+            .await
         }
         Err(_) => {
-            metadata.failed_at = Some(now);
-            write_metadata(&paths.metadata, &metadata)?;
-            prune_cache(&cache_dir, &paths.metadata, &paths.image);
-            Ok(read_cached_icon(
-                &paths.image,
-                metadata.media_type.as_deref(),
-            ))
+            run_cache_work(move || {
+                metadata.failed_at = Some(now);
+                write_metadata(&paths.metadata, &metadata)?;
+                prune_cache(&cache_dir, &paths.metadata, &paths.image);
+                Ok(read_cached_icon(
+                    &paths.image,
+                    metadata.media_type.as_deref(),
+                ))
+            })
+            .await
         }
     }
 }
 
 #[tauri::command]
-pub fn clear_website_icon_cache(app: AppHandle) -> VaultResult<()> {
+pub async fn clear_website_icon_cache(app: AppHandle) -> VaultResult<()> {
     let path = cache_dir(&app)?;
-    if path.exists() {
-        fs::remove_dir_all(path)
-            .map_err(|_| "Sesame could not clear the website icon cache.".to_string())?;
-    }
-    Ok(())
+    run_cache_work(move || {
+        if path.exists() {
+            fs::remove_dir_all(path)
+                .map_err(|_| "Sesame could not clear the website icon cache.".to_string())?;
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_website_icon_cache_status(app: AppHandle) -> VaultResult<WebsiteIconCacheStatus> {
+pub async fn get_website_icon_cache_status(app: AppHandle) -> VaultResult<WebsiteIconCacheStatus> {
     let path = cache_dir(&app)?;
-    cleanup_stale_temporary_files(&path);
-    Ok(cache_status_at(&path))
+    run_cache_work(move || {
+        cleanup_stale_temporary_files(&path);
+        Ok(cache_status_at(&path))
+    })
+    .await
 }
 
 fn cache_dir(app: &AppHandle) -> VaultResult<PathBuf> {

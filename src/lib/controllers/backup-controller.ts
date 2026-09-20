@@ -152,12 +152,14 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       feedback.clearError()
       try {
         const hadVault = vault.value().status.exists
+        const upgraded = current.restoreSelection.compatibility === 'upgrade'
         const restored = await restoreBackup(current.restoreSelection.source, current.restoreSecret)
+        const action = upgraded ? 'Older backup upgraded and restored.' : 'Backup restored.'
         const message = restored.safetyBackupName
-          ? `Backup restored. Sesame kept the previous vault as ${restored.safetyBackupName}.`
+          ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.`
           : hadVault
-            ? 'Backup restored.'
-            : 'Backup restored. Unlock with the master password or recovery kit from that backup.'
+            ? action
+            : `${action} Unlock with the master password or recovery kit from that backup.`
         modal.close('restore')
         state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '' })
         await applyRestoredVault(message)
@@ -208,10 +210,14 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       if (!current.drillSelection || !current.drillVerification || !current.drillSecret || current.drillRestoring) return
       state.patch({ drillRestoring: true, drillError: '' })
       try {
+        const upgraded = current.drillVerification.compatibility === 'upgrade'
         const restored = await restoreBackup(current.drillSelection.source, current.drillSecret)
-        const message = restored.safetyBackupName
-          ? `Recovery drill complete. Sesame kept the previous vault as ${restored.safetyBackupName}.`
+        const action = upgraded
+          ? 'Recovery drill complete. The older backup was upgraded and restored.'
           : 'Recovery drill complete. The verified backup was restored.'
+        const message = restored.safetyBackupName
+          ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.`
+          : action
         modal.close('backup-drill')
         clearDrill()
         await applyRestoredVault(message)

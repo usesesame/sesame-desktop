@@ -273,8 +273,6 @@ function createTotpStore() {
   function tick(currentToken: number) {
     if (currentToken !== token || !activeId) return
     const remaining = Math.max(0, Math.ceil((expiryAt - Date.now()) / 1_000))
-    // The interval runs at 250 ms but the displayed second only changes four
-    // times less often; pushing the same value re-renders every subscriber.
     if (remaining !== lastRemaining) {
       lastRemaining = remaining
       store.update((state) => ({ ...state, remaining, progress: `${Math.min(100, Math.max(0, (remaining / 30) * 100))}%` }))

@@ -9,8 +9,8 @@ use crate::{
     api::OpenedVault,
     crypto::{decrypt_bytes, derive_key, validate_kdf_params},
     migration::{migrate_payload, migrate_vault_file, MIN_SUPPORTED_VAULT_FORMAT},
-    payload_aad_for_file, CipherBlob, VaultFile, VaultPayload, MAX_VAULT_FILE_BYTES,
-    RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
+    payload_aad_for_file, BackupCompatibility, CipherBlob, VaultFile, VaultPayload,
+    MAX_VAULT_FILE_BYTES, RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +150,33 @@ impl VaultLoader {
             },
             setup_complete: file.setup_complete,
         })
+    }
+
+    /// Reads the declared format without parsing the rest of the envelope, so a
+    /// backup from a newer Sesame can be named instead of rejected as damaged.
+    pub fn probe_format(bytes: &[u8]) -> LoadResult<u8> {
+        if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
+            return Err(LoadFailure::SizeLimit);
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| LoadFailure::InvalidStructure)?;
+        value
+            .get("formatVersion")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|format| u8::try_from(format).ok())
+            .ok_or(LoadFailure::InvalidStructure)
+    }
+
+    pub fn compatibility(format: u8) -> BackupCompatibility {
+        if format > VAULT_FORMAT_VERSION {
+            BackupCompatibility::Newer
+        } else if format < MIN_SUPPORTED_VAULT_FORMAT {
+            BackupCompatibility::Unsupported
+        } else if format < VAULT_FORMAT_VERSION {
+            BackupCompatibility::Upgrade
+        } else {
+            BackupCompatibility::Current
+        }
     }
 
     pub fn validate(file: &VaultFile) -> LoadResult<()> {

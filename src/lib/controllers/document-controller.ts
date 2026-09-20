@@ -59,8 +59,6 @@ export function createDocumentController(options: RecordControllerOptions) {
 
   async function fetchDocument(id: string): Promise<DocumentMetadata> {
     const document = await getDocument(id)
-    // A late load for a document the editor no longer shows must not replace
-    // the attachments of the one it does.
     if (base.state.value().draft.id === id) {
       attachmentState.patch({ documentAttachments: document.attachments ?? [] })
     }

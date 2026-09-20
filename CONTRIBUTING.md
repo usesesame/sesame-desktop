@@ -80,10 +80,13 @@ surface for this repository.
 tests, and the contract suites, in one command. `npm run desktop:ci` adds the
 production build, the lints, and the Sync preview feature tests.
 
-Unit tests cover the Svelte controllers and Rust vault core. There is no
-installed-app lifecycle suite yet. If you change unlock, migration, import,
-backup, or the browser fill flow, exercise it by hand and write in the pull
-request what you did and what you saw.
+Unit tests cover the Svelte controllers and Rust vault core. Installed-app
+lifecycle evidence comes from `npm run desktop:linux:package:gate`,
+`npm run installer:evidence:collect`, and
+`npm run installer:evidence:compare`; the Windows row runs on the
+windows-latest CI job. If you change unlock, migration, import, backup, or the
+browser fill flow, exercise it by hand and write in the pull request what you
+did and what you saw.
 
 If you change what the desktop is allowed to depend on, run `npm run
 desktop:boundary:verify`. It copies the files listed in `desktop-boundary.json`
@@ -139,8 +142,9 @@ documentation. A comma, a colon, a full stop, or brackets will do the job.
 The extension itself is in
 [sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension).
 The desktop side of that boundary is here, in
-`src-tauri/src/adapters/platform/browser_host/` and `browser_pipe.rs`, with
-the wire format under `src-tauri/contracts/browser/`.
+`src-tauri/src/adapters/platform/browser_host/` and
+`src-tauri/src/adapters/platform/browser_pipe/`, with the wire format under
+`src-tauri/contracts/browser/`.
 
 Changing either side needs a security-boundary review and the clean-profile
 verification described in the extension repository's

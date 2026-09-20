@@ -570,12 +570,24 @@ pub enum ExistingImportRelation {
     AccountConflict,
 }
 
+/// What the interface can safely say about a backup before it is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BackupCompatibility {
+    Current,
+    Upgrade,
+    Newer,
+    Unsupported,
+}
+
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInspection {
     pub file_name: String,
     pub format_version: u8,
+    pub compatibility: BackupCompatibility,
+    pub setup_complete: bool,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -594,6 +606,7 @@ pub struct RestoreBackupResult {
 pub struct BackupVerification {
     pub file_name: String,
     pub format_version: u8,
+    pub compatibility: BackupCompatibility,
     pub vault_name: String,
     pub entry_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -715,6 +728,20 @@ impl TaggedItem {
         }
     }
 
+    pub fn set_id(&mut self, new_id: String) {
+        match self {
+            TaggedItem::Login(item) => item.id = new_id,
+            TaggedItem::Identity(item) => item.id = new_id,
+            TaggedItem::SecureNote(item) => item.id = new_id,
+            TaggedItem::Card(item) => item.id = new_id,
+            TaggedItem::WifiNetwork(item) => item.id = new_id,
+            TaggedItem::SshKey(item) => item.id = new_id,
+            TaggedItem::SoftwareLicense(item) => item.id = new_id,
+            TaggedItem::Document(item) => item.id = new_id,
+            TaggedItem::CustomRecord(item) => item.id = new_id,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             TaggedItem::Login(_) => "login",
@@ -730,6 +757,20 @@ impl TaggedItem {
     }
 
     pub fn metadata(&self) -> &dyn ItemMetadata {
+        match self {
+            TaggedItem::Login(item) => item,
+            TaggedItem::Identity(item) => item,
+            TaggedItem::SecureNote(item) => item,
+            TaggedItem::Card(item) => item,
+            TaggedItem::WifiNetwork(item) => item,
+            TaggedItem::SshKey(item) => item,
+            TaggedItem::SoftwareLicense(item) => item,
+            TaggedItem::Document(item) => item,
+            TaggedItem::CustomRecord(item) => item,
+        }
+    }
+
+    pub fn metadata_mut(&mut self) -> &mut dyn ItemMetadata {
         match self {
             TaggedItem::Login(item) => item,
             TaggedItem::Identity(item) => item,
@@ -1725,6 +1766,35 @@ impl VaultPayload {
         items
     }
 
+    pub fn active_item_ids(&self) -> Vec<String> {
+        let mut ids = Vec::with_capacity(
+            self.entries.len()
+                + self.identities.len()
+                + self.secure_notes.len()
+                + self.cards.len()
+                + self.wifi_networks.len()
+                + self.ssh_keys.len()
+                + self.software_licenses.len()
+                + self.documents.len()
+                + self.custom_records.len(),
+        );
+        macro_rules! append_ids {
+            ($collection:expr) => {
+                ids.extend($collection.iter().map(|item| item.id.clone()));
+            };
+        }
+        append_ids!(self.entries);
+        append_ids!(self.identities);
+        append_ids!(self.secure_notes);
+        append_ids!(self.cards);
+        append_ids!(self.wifi_networks);
+        append_ids!(self.ssh_keys);
+        append_ids!(self.software_licenses);
+        append_ids!(self.documents);
+        append_ids!(self.custom_records);
+        ids
+    }
+
     pub fn item_metadata_mut(&mut self, id: &str) -> Option<&mut dyn ItemMetadata> {
         macro_rules! find_item {
             ($collection:expr) => {
@@ -1925,6 +1995,7 @@ impl TaggedItem {
                 restore!(restored, current, SoftwareLicense)
             }
             (TaggedItem::Document(mut restored), TaggedItem::Document(current)) => {
+                restored.attachments = current.attachments.clone();
                 restore!(restored, current, Document)
             }
             (TaggedItem::CustomRecord(mut restored), TaggedItem::CustomRecord(current)) => {
@@ -2109,6 +2180,8 @@ pub struct BitwardenJsonItem {
     pub ssh_key: Option<BitwardenJsonSshKey>,
     #[serde(default)]
     pub fields: Vec<BitwardenJsonField>,
+    #[serde(default)]
+    pub attachments: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, Default)]

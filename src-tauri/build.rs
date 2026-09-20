@@ -9,9 +9,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SESAME_RELEASE_CANDIDATE_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed=SESAME_RELEASE_CANDIDATE_KEY_ID");
     println!("cargo:rerun-if-env-changed=VITE_SESAME_SITE_ORIGIN");
-    let local_config =
-        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"))
-            .join(".env.local");
+    let local_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env.local");
     println!("cargo:rerun-if-changed={}", local_config.display());
 
     let configured = std::env::var("SESAME_API_BASE_URL").ok().or_else(|| {

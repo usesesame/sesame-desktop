@@ -40,6 +40,7 @@ pub fn verify_backup_file(path: &Path, secret: &str) -> VaultResult<BackupVerifi
             .map(str::to_string)
             .ok_or("Sesame could not read the backup file name.")?,
         format_version: file.format_version,
+        compatibility: VaultLoader::compatibility(file.format_version),
         vault_name: payload.vault_name.clone(),
         entry_count: payload.entries.len(),
         vault_id: payload.vault_id.clone(),
@@ -90,14 +91,27 @@ pub const RECOVERY_HEALTH_FILE: &str = "recovery-health.sesame";
 
 pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
     let parent = vault.parent().unwrap_or_else(|| Path::new(""));
-    vec![
+    let mut paths = vec![
         vault.to_path_buf(),
         vault.with_extension("sesame.prev"),
         vault.with_extension("sesame.tmp"),
         parent.join(crate::storage::PIN_THROTTLE_FILE),
         parent.join(RECOVERY_HEALTH_FILE),
         parent.join("backups"),
-    ]
+    ];
+    if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {
+        let prefix = format!(".{name}.");
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                if file_name.starts_with(&prefix) && file_name.ends_with(".tmp") {
+                    paths.push(entry.path());
+                }
+            }
+        }
+    }
+    paths
 }
 
 pub fn stage_managed_vault_files(vault: &Path, parent: &Path) -> VaultResult<StagedVaultFiles> {
@@ -662,10 +676,39 @@ impl RestoreStorage for FileRestoreStorage {
     }
 }
 
-pub fn read_backup_file(path: &Path) -> VaultResult<VaultFile> {
-    if path.extension().and_then(|extension| extension.to_str()) != Some("sesame") {
-        return Err("Choose a Sesame backup with a .sesame extension.".into());
+pub fn inspect_backup_file(path: &Path) -> VaultResult<BackupInspection> {
+    ensure_sesame_extension(path)?;
+    let bytes = VaultLoader::read_bytes(path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .ok_or("Sesame could not read the backup file name.")?;
+    let format_version = VaultLoader::probe_format(&bytes)?;
+    let compatibility = VaultLoader::compatibility(format_version);
+    let setup_complete = match compatibility {
+        BackupCompatibility::Current | BackupCompatibility::Upgrade => {
+            VaultLoader::parse(&bytes)?.setup_complete
+        }
+        BackupCompatibility::Newer | BackupCompatibility::Unsupported => false,
+    };
+    Ok(BackupInspection {
+        file_name,
+        format_version,
+        compatibility,
+        setup_complete,
+    })
+}
+
+fn ensure_sesame_extension(path: &Path) -> VaultResult<()> {
+    if path.extension().and_then(|extension| extension.to_str()) == Some("sesame") {
+        return Ok(());
     }
+    Err("Choose a Sesame backup with a .sesame extension.".into())
+}
+
+pub fn read_backup_file(path: &Path) -> VaultResult<VaultFile> {
+    ensure_sesame_extension(path)?;
     VaultLoader::read(path).map_err(Into::into)
 }
 
