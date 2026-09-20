@@ -354,9 +354,8 @@ fn open<T: DeserializeOwned>(
     kind: &str,
     blob: &CipherBlob,
 ) -> VaultResult<T> {
-    let plaintext = Zeroizing::new(
-        decrypt_bytes(key, blob, &record_aad(role, id, kind)).map_err(|_| invalid_store())?,
-    );
+    let plaintext =
+        decrypt_bytes(key, blob, &record_aad(role, id, kind)).map_err(|_| invalid_store())?;
     serde_json::from_slice(&plaintext).map_err(|_| invalid_store())
 }
 

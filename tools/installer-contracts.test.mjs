@@ -123,13 +123,21 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
     }
 
     const before = collect('before')
+    const policy = JSON.parse(readFileSync(join(before, 'collector-policy.json'), 'utf8').replace(/^\uFEFF/, ''))
     const manifest = readFileSync(join(before, 'data-files.csv'), 'utf8')
     assert.match(manifest, /"relativePath","length","lastWriteTimeUtc","sha256"/)
-    assert.match(manifest, /"vault\.sesame"/)
-    assert.match(manifest, /"native-messaging\\app\.usesesame\.browser\.json"/)
+    assert.match(
+      manifest,
+      /"vault\.sesame"/,
+      `the manifest has no vault row. The collector read ${policy.dataRoot} from LOCALAPPDATA`,
+    )
+    assert.match(
+      manifest,
+      /"native-messaging\\app\.usesesame\.browser\.json"/,
+      `the manifest has no native host manifest row. The collector read ${policy.dataRoot}`,
+    )
     assert.doesNotMatch(manifest, /EBWebView|sesame\.log/)
     assert.doesNotMatch(manifest, /"Count","Keys","Values"/)
-    const policy = JSON.parse(readFileSync(join(before, 'collector-policy.json'), 'utf8').replace(/^\uFEFF/, ''))
     assert.deepEqual(policy.excludedTopLevelRoots, ['EBWebView', 'logs'])
     const nativeHost = JSON.parse(readFileSync(join(before, 'native-host-state.json'), 'utf8').replace(/^\uFEFF/, ''))
     assert.equal(nativeHost.manifestExists, true)
