@@ -2,8 +2,6 @@
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
-  import WebsiteIcon from './WebsiteIcon.svelte'
-  import { readSiteIcons } from '../preferences'
   import { copyToClipboard, getQuickAccessField, getQuickAccessStatus, openQuickAccessItem, previewMode, searchQuickAccessItems } from '../vault'
   import type { QuickAccessAction, QuickAccessItem } from '../types'
   import { itemKindIcon, itemKindLabel } from '../vault-items'
@@ -20,7 +18,6 @@
   let confirming: { id: string; field: string } | null = null
   let searchInput: HTMLInputElement | undefined
   let searchSequence = 0
-  let siteIconsEnabled = readSiteIcons()
 
   $: if (selectedIndex >= items.length) selectedIndex = Math.max(0, items.length - 1)
 
@@ -51,7 +48,6 @@
   }
 
   async function refresh() {
-    siteIconsEnabled = readSiteIcons()
     try {
       const status = await getQuickAccessStatus()
       if (!status.exists) {
@@ -172,7 +168,7 @@
           <li class="quick-access-result-row" class:active={index === selectedIndex}>
             <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
               <span class="entry-avatar" aria-hidden="true">
-                {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
+                {#if item.kind === 'login'}{item.initials}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
               <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
               <span class="quick-access-result-state" role={workingId === item.id || doneId === item.id ? 'status' : undefined}>{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
