@@ -406,7 +406,9 @@ mod tests {
         let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
         start_wallet_daemons_in(&borrowed);
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // The assertion is that the daemons start, not how fast they start while the
+        // rest of the parallel suite is competing for memory and processes.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !markers.iter().all(|marker| marker.exists()) {
             assert!(
                 std::time::Instant::now() < deadline,

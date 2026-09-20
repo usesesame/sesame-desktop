@@ -131,6 +131,8 @@ fn severity(code: &str) -> &'static str {
         | "registration_manifest_failed"
         | "registration_registry_failed"
         | "registration_status_failed"
+        | "registration_cleanup_failed"
+        | "platform_capabilities_failed"
         | "host_protocol_error"
         | "host_io_error"
         | "host_origin_rejected"
@@ -139,7 +141,9 @@ fn severity(code: &str) -> &'static str {
         | "save_listener_failed"
         | "identity_fill_listener_failed"
         | "vault_lock_listener_failed"
-        | "idle_warning_listener_failed" => "error",
+        | "idle_warning_listener_failed"
+        | "quick_access_listener_failed"
+        | "card_fill_listener_failed" => "error",
         "fill_locked"
         | "fill_no_match"
         | "fill_denied"
@@ -159,7 +163,15 @@ fn severity(code: &str) -> &'static str {
         | "identity_connection_closed"
         | "identity_vault_changed"
         | "registration_unsupported"
-        | "host_no_request" => "warn",
+        | "host_no_request"
+        | "picker_cancelled"
+        | "modal_refused"
+        | "card_locked"
+        | "card_no_match"
+        | "card_denied"
+        | "card_timeout"
+        | "card_connection_closed"
+        | "card_vault_changed" => "warn",
         "started"
         | "registration_ok"
         | "host_started"
@@ -170,7 +182,13 @@ fn severity(code: &str) -> &'static str {
         | "save_requested"
         | "save_approved"
         | "identity_requested"
-        | "identity_approved" => "info",
+        | "identity_approved"
+        | "picker_opened"
+        | "selection_verified"
+        | "unregister_ok"
+        | "card_requested"
+        | "card_approved"
+        | "fill_auto_approved" => "info",
         // Unknown or retired codes are routine, never misclassified failures.
         _ => "info",
     }
@@ -495,6 +513,8 @@ fn allowed_code(value: &str) -> bool {
             | "identity_fill_listener_failed"
             | "vault_lock_listener_failed"
             | "idle_warning_listener_failed"
+            | "quick_access_listener_failed"
+            | "card_fill_listener_failed"
             | "platform_capabilities_failed"
             | "picker_opened"
             | "picker_cancelled"
@@ -531,6 +551,7 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "fill_connection_closed"
             | "fill_vault_changed"
             | "fill_listener_failed"
+            | "fill_auto_approved"
             | "save_requested"
             | "save_approved"
             | "save_denied"
@@ -547,5 +568,13 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "identity_timeout"
             | "identity_connection_closed"
             | "identity_vault_changed"
+            | "card_requested"
+            | "card_approved"
+            | "card_denied"
+            | "card_locked"
+            | "card_no_match"
+            | "card_timeout"
+            | "card_connection_closed"
+            | "card_vault_changed"
     )
 }
