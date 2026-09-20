@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # TypeScript 7 ships no compiler API, so typescript-eslint and
+      # svelte-check run on the TypeScript 6 API behind the typescript alias.
+      # The native compiler is tracked separately as @typescript/native.
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
 
   - package-ecosystem: cargo
     directory: /src-tauri
