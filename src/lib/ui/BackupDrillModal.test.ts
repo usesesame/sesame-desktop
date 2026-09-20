@@ -66,6 +66,14 @@ test('a chosen older backup names the older format', async () => {
   expect(screen.getByText('Older Sesame format 8')).toBeTruthy()
 })
 
+test('a chosen newer backup names the update action without a secret form', async () => {
+  renderDrill({ selection: selection('newer') })
+  await Promise.resolve()
+  expect(screen.queryByLabelText('Master password or recovery kit')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Verify backup' })).toBeNull()
+  expect(screen.getByRole('status').textContent).toContain('Update Sesame')
+})
+
 test('a verified current backup confirms the open without an upgrade note', async () => {
   renderDrill({ selection: selection('current'), verification: verification('current') })
   await Promise.resolve()

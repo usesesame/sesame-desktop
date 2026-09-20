@@ -902,6 +902,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .drill-secret input { width: 100%; border: 1px solid var(--border-input); border-radius: var(--radius-md); padding: 12px 13px; color: var(--text); background: var(--surface-inset); }
 .drill-secret input:focus-visible { box-shadow: var(--field-ring); outline: none; }
 .drill-privacy { display: flex; align-items: center; gap: 6px; margin: var(--space-2) 0 0 !important; color: var(--text-faint) !important; font-size: var(--type-1) !important; }
+.drill-format-detail { margin: var(--space-3) 0 0 !important; color: var(--text-muted) !important; font-size: var(--type-2) !important; line-height: 1.55 !important; }
+.drill-next-action { margin: var(--space-2) 0 0 !important; color: var(--text) !important; font-size: var(--type-2) !important; line-height: 1.5 !important; }
 .drill-result { display: flex; align-items: flex-start; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-4); color: var(--ok-text); background: var(--ok-bg); }
 .drill-result > span { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 50%; color: var(--ok-text); background: color-mix(in srgb, var(--ok-text) 12%, transparent); }
 .drill-result > div { display: grid; gap: 4px; }

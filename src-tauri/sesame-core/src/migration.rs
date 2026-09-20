@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::types::ItemMetadata;
 use crate::util::{random_id, unix_timestamp};
 use crate::{Folder, VaultFile, VaultPayload, VaultResult, VAULT_FORMAT_VERSION};
 
@@ -128,18 +129,30 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
         }
     }
 
-    for id in payload.active_item_ids() {
-        if let Some(item) = payload.item_metadata_mut(&id) {
-            if item
-                .item_folder_id()
-                .is_some_and(|folder_id| !ids.contains(folder_id))
-            {
-                item.set_item_folder_id(None);
-                item.mark_item_changed(now);
-                changed = true;
+    // Heal each active item directly: duplicate ids are still unrepaired here,
+    // and an id lookup would heal only the first item that carries the id.
+    macro_rules! heal_item_folder_refs {
+        ($collection:expr) => {
+            for item in &mut $collection {
+                if item
+                    .item_folder_id()
+                    .is_some_and(|folder_id| !ids.contains(folder_id))
+                {
+                    item.set_item_folder_id(None);
+                    item.mark_item_changed(now);
+                    changed = true;
+                }
             }
-        }
+        };
     }
+    heal_item_folder_refs!(payload.identities);
+    heal_item_folder_refs!(payload.secure_notes);
+    heal_item_folder_refs!(payload.cards);
+    heal_item_folder_refs!(payload.wifi_networks);
+    heal_item_folder_refs!(payload.ssh_keys);
+    heal_item_folder_refs!(payload.software_licenses);
+    heal_item_folder_refs!(payload.documents);
+    heal_item_folder_refs!(payload.custom_records);
     for trashed in &mut payload.trash {
         if trashed
             .item
@@ -207,13 +220,23 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry};
+    use crate::types::{
+        Card, Folder, HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry,
+    };
 
     fn login(id: &str) -> VaultEntry {
         VaultEntry {
             id: id.to_string(),
             title: "Example".to_string(),
             ..VaultEntry::default()
+        }
+    }
+
+    fn card(id: &str) -> Card {
+        Card {
+            id: id.to_string(),
+            title: "Example".to_string(),
+            ..Card::default()
         }
     }
 
@@ -256,5 +279,39 @@ mod tests {
         assert_eq!(ids.iter().collect::<HashSet<_>>().len(), ids.len());
         assert_ne!(payload.trash[0].item.id(), payload.trash[1].item.id());
         assert_ne!(payload.history[0].id, payload.history[1].id);
+    }
+
+    #[test]
+    fn a_later_duplicate_is_healed_before_its_id_changes() {
+        let mut payload = VaultPayload::default();
+        payload.folders.push(Folder {
+            id: "f1".to_string(),
+            name: "Example".to_string(),
+        });
+        let mut healed = card("same");
+        healed.set_item_folder_id(Some("f1".to_string()));
+        let mut dangling = card("same");
+        dangling.set_item_folder_id(Some("gone".to_string()));
+        payload.cards.push(healed);
+        payload.cards.push(dangling);
+
+        let changed = migrate_payload(&mut payload);
+
+        assert!(changed);
+        assert_ne!(payload.cards[0].id.clone(), payload.cards[1].id.clone());
+        for card in &payload.cards {
+            if card.id == "same" {
+                assert_eq!(
+                    card.folder_id.as_deref(),
+                    Some("f1"),
+                    "the first copy keeps its valid folder reference"
+                );
+            } else {
+                assert_eq!(
+                    card.folder_id, None,
+                    "the second copy is healed even though an id lookup would find the first copy"
+                );
+            }
+        }
     }
 }

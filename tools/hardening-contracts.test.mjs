@@ -26,6 +26,7 @@ function filesMatching(pattern, from = root) {
 
 function withoutComments(text) {
   return text
+    .replace(/<#[\s\S]*?#>/g, '')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|\s)\/\/.*$/gm, '$1')
     .replace(/(^|\s)#.*$/gm, '$1')
