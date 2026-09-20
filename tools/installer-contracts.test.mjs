@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -99,7 +99,10 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
     return
   }
 
-  const scratch = mkdtempSync(join(tmpdir(), 'sesame-evidence-contract-'))
+  // Windows runners hand out TEMP in 8.3 short form, and PowerShell reports
+  // child FullNames in long form, so the prefix arithmetic in the collector
+  // would chop every relative path. Resolve the real path first.
+  const scratch = mkdtempSync(join(realpathSync(tmpdir()), 'sesame-evidence-contract-'))
   try {
     const localAppData = join(scratch, 'local-app-data')
     const dataRoot = join(localAppData, 'app.usesesame.desktop')
