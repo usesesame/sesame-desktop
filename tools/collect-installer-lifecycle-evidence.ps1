@@ -29,6 +29,11 @@ function Get-Sha256Hex {
 }
 
 $dataRoot = Join-Path $env:LOCALAPPDATA 'app.usesesame.desktop'
+# LOCALAPPDATA can arrive in 8.3 short form while the provider reports child
+# FullNames in long form, so the prefix arithmetic below needs one canonical form.
+if (Test-Path -LiteralPath $dataRoot) {
+  $dataRoot = (Get-Item -LiteralPath $dataRoot).FullName
+}
 $nativeManifest = Join-Path $dataRoot 'native-messaging\app.usesesame.browser.json'
 $excludedDataRoots = @('EBWebView', 'logs')
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
