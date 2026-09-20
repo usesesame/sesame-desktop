@@ -282,8 +282,7 @@ impl VaultLoader {
             return Err(LoadFailure::InvalidStructure);
         }
         validate_blob(blob)?;
-        let bytes =
-            Zeroizing::new(decrypt_bytes(key, blob, aad).map_err(|_| LoadFailure::Authentication)?);
+        let bytes = decrypt_bytes(key, blob, aad).map_err(|_| LoadFailure::Authentication)?;
         decode(bytes, VAULT_FORMAT_VERSION)
     }
 }
@@ -291,9 +290,7 @@ impl VaultLoader {
 fn authenticate_payload(file: &VaultFile, key: &[u8; 32]) -> LoadResult<AuthenticatedPayload> {
     let aad = payload_aad_for_file(file.format_version, file.setup_complete)
         .map_err(|_| LoadFailure::InvalidStructure)?;
-    let bytes = Zeroizing::new(
-        decrypt_bytes(key, &file.payload, aad).map_err(|_| LoadFailure::Authentication)?,
-    );
+    let bytes = decrypt_bytes(key, &file.payload, aad).map_err(|_| LoadFailure::Authentication)?;
     decode(bytes, file.format_version)
 }
 
@@ -315,7 +312,7 @@ fn unwrap(
 ) -> LoadResult<Zeroizing<[u8; 32]>> {
     let wrapping_key = Zeroizing::new(derive_key(secret, kdf).map_err(|_| LoadFailure::UnsafeKdf)?);
     // AEAD cannot distinguish an incorrect credential from a damaged wrapper.
-    let bytes = Zeroizing::new(decrypt_bytes(&wrapping_key, blob, aad).map_err(|_| failure)?);
+    let bytes = decrypt_bytes(&wrapping_key, blob, aad).map_err(|_| failure)?;
     bytes
         .as_slice()
         .try_into()

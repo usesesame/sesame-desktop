@@ -19,7 +19,7 @@ use crate::{
     record_store::VaultRecordStore,
     throttle::{PersistedPinThrottle, PinAttemptGuard},
     UnlockedVault, VaultResult, MAX_VAULT_FILE_BYTES, PIN_WRAP_AAD, RECOVERY_WRAP_AAD,
-    VAULT_FORMAT_VERSION, WRAP_AAD,
+    VAULT_FORMAT_VERSION, VAULT_SIZE_LIMIT_MESSAGE, WRAP_AAD,
 };
 use crate::{
     types::*,
@@ -87,7 +87,7 @@ fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) 
     let bytes = serde_json::to_vec(file)
         .map_err(|_| "Sesame could not save the local vault.".to_string())?;
     if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
-        return Err("This change would exceed the vault's 64 MiB storage limit. Remove unneeded attachments or records and try again. Your saved vault has not changed.".into());
+        return Err(VAULT_SIZE_LIMIT_MESSAGE.into());
     }
     let parent = path
         .parent()
