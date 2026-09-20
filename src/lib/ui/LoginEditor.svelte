@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
@@ -172,7 +173,7 @@
     <label>Login name<input name="login-title" bind:this={nameInput} bind:value={loginDraft.title} required maxlength="160" placeholder="e.g. GitHub…" autocomplete="off" /></label>
     <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} bind:value={loginDraft.url} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="url" spellcheck="false" /></label>
     <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" spellcheck="false"></textarea></label>
-    <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="10000" autocomplete="off" /></label>
+    <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
     <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
       <SelectMenu
         label="Folder"

@@ -26,3 +26,12 @@ test('cancel fires onCancel after the shell is portalled to body', async () => {
   await fireEvent.click(cancel)
   expect(onCancel).toHaveBeenCalledOnce()
 })
+
+test('unmounting removes the portalled shell from the document', async () => {
+  const rendered = render(PasswordPresenceModal, { presenceSecret: 'x', errorMessage: '', onCancel: vi.fn(), onConfirm: vi.fn() })
+  await Promise.resolve()
+  expect(document.querySelector('[data-modal-shell]')).toBeTruthy()
+  rendered.unmount()
+  await Promise.resolve()
+  expect(document.querySelector('[data-modal-shell]')).toBeNull()
+})

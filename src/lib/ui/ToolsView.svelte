@@ -35,8 +35,10 @@
     tabButtons[nextIndex]?.focus()
   }
 
-  let lastPassword = ''
-  let lastPassphrase = ''
+  // Seeded from the stores so returning to this view does not re-push the
+  // generation that is already in history.
+  let lastPassword = $generator.password
+  let lastPassphrase = $passphrase.passphrase
   $: if ($generator.password && $generator.password !== lastPassword) {
     lastPassword = $generator.password
     recentGenerations.push({ value: $generator.password, kind: 'password' })

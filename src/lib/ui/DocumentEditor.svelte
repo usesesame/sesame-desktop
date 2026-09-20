@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
   import type { Attachment, DocumentMetadataInput } from '../types'
@@ -101,7 +102,7 @@
       <label>Expiry date <span class="field-hint">Optional</span><input name="document-expiry-date" bind:value={documentDraft.expiryDate} maxlength="32" autocomplete="off" /></label>
     </div>
     <label>Notes<textarea name="document-notes" bind:value={documentDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="document-tags" value={documentDraft.tags.join(', ')} on:input={(event) => (documentDraft = { ...documentDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="document-tags" value={documentDraft.tags.join(', ')} on:input={(event) => (documentDraft = { ...documentDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. travel, family…" /></label>
 
     {#if documentDraft.id}
       <div class="document-attachments">

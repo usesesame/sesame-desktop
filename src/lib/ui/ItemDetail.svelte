@@ -4,12 +4,13 @@
   import SelectMenu from './SelectMenu.svelte'
   import type { ItemDetail } from '../item-fields'
   import type { Folder, ItemKind } from '../types'
-  import { itemKindIcon, itemKindLabel } from '../vault-items'
+  import { itemKindIcon, itemKindLabel, uniqueTags } from '../vault-items'
 
   const SECRET_REVEAL_TIMEOUT_MS = 30_000
 
   export let kind: ItemKind
   export let detail: ItemDetail
+  export let itemId = ''
   export let folders: Folder[] = []
   export let onCopy: (value: string, label: string) => void
   export let onToggleFavourite: (favourite: boolean) => void
@@ -18,8 +19,8 @@
   export let onMove: (folderId?: string) => void
   export let onShowTag: (tag: string) => void
 
-  let revealed: Record<string, boolean> = {}
-  let revealTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+  let revealed: Record<number, boolean> = {}
+  let revealTimers: Record<number, ReturnType<typeof setTimeout>> = {}
 
   function clearRevealTimers() {
     for (const timer of Object.values(revealTimers)) clearTimeout(timer)
@@ -27,25 +28,30 @@
     revealed = {}
   }
 
-  function hide(label: string) {
-    const { [label]: _hidden, ...rest } = revealed
+  function hide(index: number) {
+    const { [index]: _hidden, ...rest } = revealed
     revealed = rest
-    clearTimeout(revealTimers[label])
-    const { [label]: _timer, ...timers } = revealTimers
+    clearTimeout(revealTimers[index])
+    const { [index]: _timer, ...timers } = revealTimers
     revealTimers = timers
   }
 
-  function toggleReveal(label: string) {
-    if (revealed[label]) {
-      hide(label)
+  function toggleReveal(index: number) {
+    if (revealed[index]) {
+      hide(index)
       return
     }
-    revealed = { ...revealed, [label]: true }
-    revealTimers = { ...revealTimers, [label]: setTimeout(() => hide(label), SECRET_REVEAL_TIMEOUT_MS) }
+    revealed = { ...revealed, [index]: true }
+    revealTimers = { ...revealTimers, [index]: setTimeout(() => hide(index), SECRET_REVEAL_TIMEOUT_MS) }
   }
 
-  // A reveal must not survive the item it belongs to.
-  $: if (detail) clearRevealTimers()
+  // A reveal must not survive the item it belongs to, but a favourite or folder
+  // refresh of the same item must keep it.
+  let lastItemId = itemId
+  $: if (itemId !== lastItemId) {
+    lastItemId = itemId
+    clearRevealTimers()
+  }
   onDestroy(clearRevealTimers)
 
   function attachmentSize(bytes: number): string {
@@ -63,9 +69,9 @@
       <span>{itemKindLabel(kind)}</span>
       {#if detail.subtitle}<span class="item-subtitle">{detail.subtitle}</span>{/if}
     </div>
-    {#if detail.tags.length}
+    {#if uniqueTags(detail.tags).length}
       <div class="issue-chips">
-        {#each detail.tags as tag (tag)}
+        {#each uniqueTags(detail.tags) as tag (tag)}
           <button type="button" class="tag-chip" on:click={() => onShowTag(tag)}>{tag}</button>
         {/each}
       </div>
@@ -79,16 +85,16 @@
 
 {#if detail.fields.length}
   <section class="credentials-panel" aria-label={`${itemKindLabel(kind)} details`}>
-    {#each detail.fields as field (field.label)}
+    {#each detail.fields as field, index (index)}
       <div class="credential-row" class:credential-row-multiline={field.multiline}>
         <div class="credential-label"><Icon name={field.icon} size={16} /><span>{field.label}</span></div>
-        {#if field.secret && !revealed[field.label]}
+        {#if field.secret && !revealed[index]}
           <code class="concealed">••••••••••••••••</code>
         {:else}
           <code class:credential-block={field.multiline}>{field.value}</code>
         {/if}
         {#if field.secret}
-          <button type="button" class="credential-button" aria-label={revealed[field.label] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[field.label]} on:click={() => toggleReveal(field.label)}><Icon name={revealed[field.label] ? 'eye-off' : 'eye'} size={16} /></button>
+          <button type="button" class="credential-button" aria-label={revealed[index] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[index]} on:click={() => toggleReveal(index)}><Icon name={revealed[index] ? 'eye-off' : 'eye'} size={16} /></button>
         {/if}
         <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
       </div>

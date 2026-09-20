@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
   import type { SshKeyInput } from '../types'
@@ -93,7 +94,7 @@
       </span>
     </label>
     <label>Notes<textarea name="ssh-key-notes" bind:value={keyDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="ssh-key-tags" value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="ssh-key-tags" value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy…" /></label>
   </div>
 
   {#if confirmingDiscard}

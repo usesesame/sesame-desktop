@@ -22,7 +22,9 @@ test('ModalShell owns labelled dialog, focus trap, Escape, and focus restoration
   assert.match(source, /event\.key === 'Escape'/)
   assert.match(source, /event\.key !== 'Tab'/)
   assert.match(source, /isTopmostModal\(\)/)
-  assert.match(source, /onDestroy\(restoreFocus\)/)
+  assert.match(source, /onDestroy\(\(\) => \{/)
+  assert.match(source, /portaledShell\?\.remove\(\)/)
+  assert.match(source, /restoreFocus\(\)/)
   assert.match(source, /target\.focus\(\{ preventScroll: true \}\)/)
 })
 
@@ -231,7 +233,8 @@ const modalControllerSource = read(join(projectRoot, 'src', 'lib', 'controllers'
 test('ModalController keeps conflicting dialogs mutually exclusive', () => {
   assert.match(modalControllerSource, /function modalKindsConflict/)
   assert.match(modalControllerSource, /a === 'restore' \|\| b === 'restore'/)
-  assert.match(modalControllerSource, /return true/)
+  assert.match(modalControllerSource, /a === 'delete-login' \|\| b === 'delete-login'/)
+  assert.match(modalControllerSource, /return a === b/)
 })
 
 test('ModalController lockCleared closes every modal', () => {

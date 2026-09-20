@@ -53,7 +53,12 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
     deleteWorking: false,
   })
 
+  // Bumped whenever the editor closes or opens so a late record load cannot
+  // overwrite the draft the user is looking at.
+  let editorRequest = 0
+
   function closeEditor() {
+    editorRequest += 1
     modal.close(editorModalKind)
     state.patch({ draft: config.emptyDraft(), legacyFields: [] })
   }
@@ -63,22 +68,26 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
     openNew() {
       const opened = modal.open(config.editorModal)
       if (!opened) return
+      editorRequest += 1
       state.patch({ draft: config.emptyDraft(), editorTitle: config.copy.addTitle, legacyFields: [] })
       feedback.clearError()
     },
     async openEditor(id: string) {
       const opened = modal.open(config.editorModal)
       if (!opened) return
+      const request = ++editorRequest
       state.patch({ loading: true })
       feedback.clearError()
       try {
         const item = await config.api.get(id)
+        if (request !== editorRequest) return
         state.patch({ draft: config.draftFrom(item), editorTitle: config.copy.editTitle, legacyFields: item.legacyFields ?? [] })
       } catch (error) {
+        if (request !== editorRequest) return
         modal.close(editorModalKind)
         feedback.setError(error)
       } finally {
-        state.patch({ loading: false })
+        if (request === editorRequest) state.patch({ loading: false })
       }
     },
     closeEditor,

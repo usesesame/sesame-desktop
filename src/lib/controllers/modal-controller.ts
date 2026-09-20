@@ -130,7 +130,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
 function modalKindsConflict(a: NonNullable<ActiveModal>['kind'], b: NonNullable<ActiveModal>['kind']): boolean {
   if (a === 'restore' || b === 'restore') return true
   if (a === 'delete-login' || b === 'delete-login') return true
-  return true
+  return a === b
 }
 
 function clearSecretBearingModal(modal: ActiveModal) {

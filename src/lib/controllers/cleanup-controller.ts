@@ -53,22 +53,27 @@ export function createCleanupController(options: CleanupControllerOptions) {
     return issueKinds.includes(filter)
   }
 
+  let duplicateLoadGeneration = 0
+
   async function loadDuplicateGroups() {
+    const generation = ++duplicateLoadGeneration
     state.patch({ duplicateReviewLoading: true })
     feedback.clearError()
     try {
       const groups = await getDuplicateGroups()
+      if (generation !== duplicateLoadGeneration || !vault.value().status.unlocked) return
       state.patch({
         duplicateGroups: groups,
         duplicateGroupId: groups[0]?.id,
         duplicateSelectedIds: groups[0]?.entries.map((entry) => entry.id) ?? [],
       })
     } catch (error) {
+      if (generation !== duplicateLoadGeneration) return
       void recordDiagnostic('ui', 'handled_error')
       void options.refreshDiagnostics()
       feedback.setError(error)
     } finally {
-      state.patch({ duplicateReviewLoading: false })
+      if (generation === duplicateLoadGeneration) state.patch({ duplicateReviewLoading: false })
     }
   }
 
@@ -154,21 +159,32 @@ export function createCleanupController(options: CleanupControllerOptions) {
     },
     async confirmDelete() {
       const candidate = state.value().deleteCandidate
-      if (!candidate) return
+      if (!candidate || state.value().cleanupWorking) return
       const batch = state.value().deleteBatch
       const targets = batch.length ? batch : [candidate]
       state.patch({ cleanupWorking: true })
       feedback.clearError()
+      let lastSnapshot: Awaited<ReturnType<typeof deleteLogin>>['snapshot'] | null = null
+      let deleted = 0
       try {
-        let result = await deleteLogin(targets[0].id)
-        for (const target of targets.slice(1)) result = await deleteLogin(target.id)
-        vault.patch({ snapshot: result.snapshot })
+        for (const target of targets) {
+          lastSnapshot = (await deleteLogin(target.id)).snapshot
+          deleted += 1
+          if (!vault.value().status.unlocked) break
+        }
+        if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
         modal.close('delete-login')
         state.patch({ deleteCandidate: null, deleteBatch: [] })
+        if (deleted !== targets.length) {
+          if (vault.value().status.unlocked) {
+            feedback.setErrorMessage('Sesame removed some logins before the vault locked. The rest were left untouched.')
+          }
+          return
+        }
         const openCardDeleted = targets.some((target) => vault.value().loginCard?.id === target.id)
         if (openCardDeleted) {
           options.clearLoginSelection()
-          if (result.snapshot.entries[0]) await options.selectEntry(result.snapshot.entries[0].id)
+          if (lastSnapshot?.entries[0]) await options.selectEntry(lastSnapshot.entries[0].id)
         }
         if (state.value().duplicateReviewOpen) await loadDuplicateGroups()
         feedback.showNotice(
@@ -178,6 +194,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
             : `${targets.length} logins were removed from your vault.`,
         )
       } catch (error) {
+        if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
         void recordDiagnostic('vault_save', 'failed')
         void options.refreshDiagnostics()
         feedback.setError(error)
@@ -271,6 +288,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
       }
     },
     clearSecrets() {
+      duplicateLoadGeneration += 1
       modal.closeAll()
       state.set({
         duplicateReviewOpen: false, duplicateGroups: [], duplicateGroupId: undefined, duplicateSelectedIds: [],

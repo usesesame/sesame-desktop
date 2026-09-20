@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import LegacyDataPanel from './LegacyDataPanel.svelte'
   import type { CardInput, LegacyField } from '../types'
@@ -175,7 +176,7 @@
       <label>Network <span class="field-hint">Filled from the card number</span><input name="card-network" bind:value={cardDraft.brand} maxlength="64" autocomplete="cc-type" /></label>
     </div>
     <label>Notes<textarea name="card-notes" bind:value={cardDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="card-tags" value={cardDraft.tags.join(', ')} on:input={(event) => (cardDraft = { ...cardDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="card-tags" value={cardDraft.tags.join(', ')} on:input={(event) => (cardDraft = { ...cardDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. personal, travel…" /></label>
     <LegacyDataPanel fields={legacyFields} />
   </div>
 

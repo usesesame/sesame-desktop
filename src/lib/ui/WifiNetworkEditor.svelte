@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
   import type { WifiNetworkInput } from '../types'
@@ -74,7 +75,7 @@
       </datalist>
     </label>
     <label>Notes<textarea name="wifi-notes" bind:value={networkDraft.notes} rows="4" maxlength="4000"></textarea></label>
-    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="wifi-tags" value={networkDraft.tags.join(', ')} on:input={(event) => (networkDraft = { ...networkDraft, tags: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel…" /></label>
+    <label>Tags <span class="field-hint">Comma separated, optional</span><input name="wifi-tags" value={networkDraft.tags.join(', ')} on:input={(event) => (networkDraft = { ...networkDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel…" /></label>
   </div>
 
   {#if confirmingDiscard}
