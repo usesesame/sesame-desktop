@@ -8,9 +8,26 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
 const workflows = readdirSync(join(root, '.github', 'workflows'))
-  .filter((name) => name.endsWith('.yml'))
+  .filter((name) => /\.(ya?ml)$/.test(name))
   .map((name) => join('.github', 'workflows', name))
   .sort()
+
+const topLevelPermissions = (body) => {
+  const start = body.match(/^permissions:\s*$/m)
+  assert.ok(start, 'the workflow declares no top-level permissions block')
+  const rest = body.slice(start.index + start[0].length)
+  const end = rest.search(/^[^\s#]/m)
+  return end >= 0 ? rest.slice(0, end) : rest
+}
+
+const jobBlock = (body, job) => {
+  const start = body.indexOf(`\n  ${job}:\n`)
+  assert.ok(start >= 0, `the ${job} job is missing from the workflow`)
+  const rest = body.slice(start + 1)
+  const afterFirst = rest.indexOf('\n') + 1
+  const next = rest.slice(afterFirst).match(/^ {2}[a-z0-9_-]+:$/m)
+  return next ? rest.slice(0, afterFirst + next.index) : rest
+}
 
 test('every workflow declares permissions and pins every third-party action', () => {
   assert.ok(workflows.length >= 4, `expected this repository's workflows, found ${workflows.length}`)
@@ -32,18 +49,28 @@ test('every workflow declares permissions and pins every third-party action', ()
 test('a workflow that writes says so at the job that writes', () => {
   for (const workflow of workflows) {
     const body = read(workflow)
-    const header = body.slice(0, body.indexOf('\njobs:'))
-    assert.match(
-      header,
-      /^permissions:\s*\n\s+contents: read\s*$/m,
-      `${workflow} should default to contents: read at the top and widen per job`,
+    const entries = [...topLevelPermissions(body).matchAll(/^\s+([a-z-]+):\s*([a-z-]+)\s*$/gm)]
+      .map(([, key, value]) => `${key}: ${value}`)
+    assert.deepEqual(
+      entries,
+      ['contents: read'],
+      `${workflow} should default to exactly contents: read at the top and widen per job`,
     )
   }
-  for (const workflow of ['release-early-access.yml', 'release-linux-early-access.yml']) {
+  for (const [workflow, signingJob] of [
+    ['release-early-access.yml', 'build-and-attest'],
+    ['release-linux-early-access.yml', 'build-and-test'],
+  ]) {
     const body = read('.github', 'workflows', workflow)
-    assert.match(body, /id-token: write/, `${workflow} signs keylessly and needs an OIDC token`)
-    assert.match(body, /environment: release-build/, `${workflow} should build behind its protected environment`)
-    assert.match(body, /environment: release-publish/, `${workflow} should publish behind its protected environment`)
+    const job = jobBlock(body, signingJob)
+    assert.match(job, /^\s+id-token:\s*write\s*$/m, `${workflow} signs keylessly in ${signingJob} and needs an OIDC token there`)
+    assert.match(job, /^\s+environment:\s*release-build\s*$/m, `${workflow} should build ${signingJob} behind its protected environment`)
+    const publishBlock = jobBlock(body, signingJob === 'build-and-attest' ? 'publish-candidate' : 'publish')
+    assert.match(
+      publishBlock,
+      /^\s+environment:\s*release-publish\s*$/m,
+      `${workflow} should publish behind its protected environment`,
+    )
   }
 })
 
