@@ -79,16 +79,29 @@ pub fn write_service_connection(
 }
 
 pub fn read_service_connection(app: &AppHandle) -> VaultResult<ServiceConnectionFile> {
-    let path = service_connection_path(app)?;
+    read_service_connection_at(&service_connection_path(app)?, &service_api_base_url()?)
+}
+
+fn read_service_connection_at(
+    path: &std::path::Path,
+    expected_api_base_url: &str,
+) -> VaultResult<ServiceConnectionFile> {
     let bytes = crate::vault::util::require_file_with_limit(
-        &path,
+        path,
         64 * 1024,
         "No desktop account connection is stored on this device.",
     )?;
-    let connection: ServiceConnectionFile = serde_json::from_slice(&bytes)
+    parse_service_connection(&bytes, expected_api_base_url)
+}
+
+fn parse_service_connection(
+    bytes: &[u8],
+    expected_api_base_url: &str,
+) -> VaultResult<ServiceConnectionFile> {
+    let connection: ServiceConnectionFile = serde_json::from_slice(bytes)
         .map_err(|_| "The desktop account connection is invalid.".to_string())?;
     if connection.format_version != SERVICE_CONNECTION_FORMAT_VERSION
-        || connection.api_base_url != service_api_base_url()?
+        || connection.api_base_url != expected_api_base_url
         || connection.protected_token.is_empty()
         || connection.device_id.is_empty()
         || connection.device_name.is_empty()
@@ -116,5 +129,80 @@ pub fn remove_service_connection(app: &AppHandle) -> VaultResult<()> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err("Sesame could not remove the desktop account connection.".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const API_BASE_URL: &str = "https://api.example.test";
+
+    fn connection() -> ServiceConnectionFile {
+        ServiceConnectionFile {
+            format_version: SERVICE_CONNECTION_FORMAT_VERSION,
+            api_base_url: API_BASE_URL.to_string(),
+            protected_token: "cHJvdGVjdGVk".to_string(),
+            device_id: "device-1".to_string(),
+            device_name: "Linux desktop".to_string(),
+        }
+    }
+
+    fn parse(value: &ServiceConnectionFile) -> VaultResult<ServiceConnectionFile> {
+        parse_service_connection(&serde_json::to_vec(value).unwrap(), API_BASE_URL)
+    }
+
+    #[test]
+    fn a_stored_connection_round_trips() {
+        let parsed = parse(&connection()).unwrap();
+        assert_eq!(parsed.api_base_url, API_BASE_URL);
+        assert_eq!(parsed.device_id, "device-1");
+        assert_eq!(parsed.device_name, "Linux desktop");
+    }
+
+    #[test]
+    fn a_connection_written_for_another_service_is_refused() {
+        let mut value = connection();
+        value.api_base_url = "https://api.other.test".to_string();
+        assert!(parse(&value).is_err());
+    }
+
+    #[test]
+    fn an_unsupported_connection_format_is_refused() {
+        let mut value = connection();
+        value.format_version = SERVICE_CONNECTION_FORMAT_VERSION + 1;
+        assert!(parse(&value).is_err());
+    }
+
+    #[test]
+    fn blank_connection_fields_are_refused() {
+        for blank in [
+            |value: &mut ServiceConnectionFile| value.protected_token.clear(),
+            |value: &mut ServiceConnectionFile| value.device_id.clear(),
+            |value: &mut ServiceConnectionFile| value.device_name.clear(),
+        ] {
+            let mut value = connection();
+            blank(&mut value);
+            assert!(parse(&value).is_err());
+        }
+    }
+
+    #[test]
+    fn a_malformed_connection_is_refused() {
+        assert!(parse_service_connection(b"{", API_BASE_URL).is_err());
+        assert!(parse_service_connection(b"", API_BASE_URL).is_err());
+    }
+
+    #[test]
+    fn an_oversized_connection_file_is_refused() {
+        let directory = std::env::temp_dir().join(format!(
+            "sesame-account-connection-{}",
+            crate::vault::util::random_id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("service-connection.json");
+        std::fs::write(&path, vec![b' '; 64 * 1024 + 1]).unwrap();
+        assert!(read_service_connection_at(&path, API_BASE_URL).is_err());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }
