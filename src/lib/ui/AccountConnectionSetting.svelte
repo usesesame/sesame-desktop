@@ -49,7 +49,11 @@
       {#if !available}
         Account linking is available in the installed desktop app.
       {:else if !$platformCapabilities.accountLinking}
-        Account linking is not available on this operating system yet. Your local vault is unaffected.
+        {#if $platformCapabilities.os === 'linux'}
+          Account linking needs libsecret and a system wallet such as GNOME Keyring or KWallet. Your local vault is unaffected.
+        {:else}
+          Account linking is not available on this operating system yet. Your local vault is unaffected.
+        {/if}
       {:else}
         {description}
       {/if}
@@ -59,7 +63,7 @@
   {#if !available}
     <span class="status-pill neutral">Desktop only</span>
   {:else if !$platformCapabilities.accountLinking}
-    <span class="status-pill neutral">Not on this system</span>
+    <span class="status-pill neutral">{$platformCapabilities.os === 'linux' ? 'Wallet required' : 'Not on this system'}</span>
   {:else if connection.connected}
     <div class="settings-service-actions">
       <span class:offline={connection.state === 'offline' || connection.state === 'serviceUnavailable' || connection.state === 'rateLimited'} class:warning={connection.state === 'suspended' || connection.state === 'needsAttention'} class="status-pill">{statusLabel}</span>

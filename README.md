@@ -108,7 +108,7 @@ The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
 | Unlock with PIN | Yes | Secret Service wallet, validation pending |
 | Unlock with Windows Hello | Yes | No |
 | Auto-type | Yes | No |
-| Account linking | Yes | No |
+| Account linking | Yes | Secret Service wallet, validation pending |
 | Signed desktop updates | Yes | No |
 
 Linux reads screen-lock status from systemd-logind and falls back to the
@@ -120,9 +120,9 @@ shortcut only in X11 sessions and hides the setting elsewhere. Use the tray
 icon, or start Sesame with `GDK_BACKEND=x11`.
 
 Linux keeps Sesame's random device-protection key in the desktop Secret Service
-wallet. PIN peppers and local attempt-throttle state are authenticated and
-encrypted with that key. Windows uses DPAPI for the same boundary. Windows
-Hello and auto-type remain unavailable on Linux.
+wallet. PIN peppers, the linked-account token, and local attempt-throttle state
+are authenticated and encrypted with that key. Windows uses DPAPI for the same
+boundary. Windows Hello and auto-type remain unavailable on Linux.
 
 PIN unlock requires a Secret Service wallet provider. When no wallet is
 running, Sesame starts `gnome-keyring-daemon` or `ksecretd` itself, so GNOME,

@@ -483,7 +483,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       feedback.clearError()
       try {
         state.patch({ serviceConnection: await linkDesktopService(code) })
-        feedback.showNotice('Desktop connected', 'This Windows desktop is linked to your Sesame account. Sync is still unavailable.')
+        feedback.showNotice('Desktop connected', 'This desktop is linked to your Sesame account. Sync is still unavailable.')
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -496,7 +496,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       try {
         await disconnectService()
         state.patch({ serviceConnection: emptyService })
-        feedback.showNotice('Desktop disconnected', 'The account connection was removed from this Windows profile. Your vault is unchanged.')
+        feedback.showNotice('Desktop disconnected', 'The account connection was removed from this device. Your vault is unchanged.')
       } catch (error) {
         feedback.setError(error)
       } finally {

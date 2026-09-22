@@ -29,6 +29,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      # Public half of the account-service capability signing key. The release
+      # environment variable must hold the same value the server publishes.
+      SESAME_CAPABILITY_PUBLIC_KEY: ${{ vars.SESAME_CAPABILITY_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,6 +77,15 @@ jobs:
           version=$(node -p "require('./package.json').version")
           if [ "$GITHUB_REF" != "refs/tags/v$version" ]; then
             echo "Release tag does not match package version $version." >&2
+            exit 1
+          fi
+
+      # A missing capability key makes every link attempt fail at run time, so
+      # fail the release instead of shipping a desktop that cannot link.
+      - name: Require the account capability configuration
+        run: |
+          if ! [[ "${SESAME_CAPABILITY_PUBLIC_KEY:-}" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+            echo "SESAME_CAPABILITY_PUBLIC_KEY is missing or not a 32-byte base64url key." >&2
             exit 1
           fi
 
