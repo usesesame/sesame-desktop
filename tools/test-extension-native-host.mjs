@@ -101,12 +101,29 @@ function runExtensionSuite(extensionDirectory, environment, testNamePattern) {
     throw new Error(`The extension checkout has no dependencies installed: run npm ci in ${extensionDirectory}.`)
   }
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const result = spawnSync(npm, ['--prefix', extensionDirectory, 'run', 'test:browser', '--', '--testNamePattern', testNamePattern], {
+  const reportPath = join(tmpdir(), `sesame-native-host-report-${process.pid}.json`)
+  const result = spawnSync(npm, [
+    '--prefix', extensionDirectory, 'run', 'test:browser', '--',
+    '--testNamePattern', testNamePattern,
+    '--reporter=json',
+    `--outputFile=${reportPath}`,
+  ], {
     cwd: root,
     stdio: 'inherit',
     env: environment,
   })
+  let report = null
+  try {
+    report = JSON.parse(readFileSync(reportPath, 'utf8'))
+  } catch {
+    report = null
+  }
+  rmSync(reportPath, { force: true })
   if (result.status !== 0) throw new Error('The extension browser suite failed against the registered native host.')
+  if (!report || report.numFailedTests > 0) throw new Error('The extension browser run reported a failing native-host test.')
+  if (!(report.numPassedTests >= 1)) {
+    throw new Error('The extension browser run matched no native-host test, so it proved nothing. Update the extension checkout or the test name pattern.')
+  }
 }
 
 async function main() {
@@ -121,18 +138,21 @@ async function main() {
   buildBinaries()
 
   const testRoot = mkdtempSync(join(tmpdir(), 'sesame-extension-native-host-'))
-  const environment = {
-    ...scratchEnvironment(testRoot),
+  const desktopEnvironment = scratchEnvironment(testRoot)
+  const browserEnvironment = {
+    ...process.env,
+    XDG_RUNTIME_DIR: desktopEnvironment.XDG_RUNTIME_DIR,
     SESAME_NATIVE_HOST_TEST: '1',
+    SESAME_NATIVE_HOST_EXPECT_DESKTOP: '1',
     SESAME_NATIVE_HOST_MANIFEST: writeHostManifest(testRoot, contract),
   }
-  if (process.env.SESAME_MANUAL_NATIVE_FILL === '1') environment.SESAME_MANUAL_NATIVE_FILL = '1'
-  if (process.env.SESAME_BROWSER_TEST_EXECUTABLE) environment.SESAME_BROWSER_TEST_EXECUTABLE = process.env.SESAME_BROWSER_TEST_EXECUTABLE
+  if (process.env.SESAME_MANUAL_NATIVE_FILL === '1') browserEnvironment.SESAME_MANUAL_NATIVE_FILL = '1'
+  if (process.env.SESAME_BROWSER_TEST_EXECUTABLE) browserEnvironment.SESAME_BROWSER_TEST_EXECUTABLE = process.env.SESAME_BROWSER_TEST_EXECUTABLE
 
-  const desktop = spawn(desktopExe, [], { env: environment, stdio: 'ignore' })
+  const desktop = spawn(desktopExe, [], { env: desktopEnvironment, stdio: 'ignore' })
   try {
-    await waitForBrokerSocket(environment, desktop)
-    runExtensionSuite(options.extensionDirectory, environment, options.testNamePattern)
+    await waitForBrokerSocket(desktopEnvironment, desktop)
+    runExtensionSuite(options.extensionDirectory, browserEnvironment, options.testNamePattern)
     console.log('The extension answered through the real native host and the live desktop broker on Linux.')
   } finally {
     try { process.kill(desktop.pid) } catch { void 0 }

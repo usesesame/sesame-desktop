@@ -121,18 +121,17 @@ async function waitForBrokerSocket(environment) {
   const directory = join(environment.XDG_RUNTIME_DIR, 'sesame')
   const socket = join(directory, 'browser.sock')
   const deadline = Date.now() + 60_000
+  let lastMode = ''
   while (Date.now() < deadline) {
     if (existsSync(socket)) {
-      if ((statSync(directory).mode & 0o777) !== 0o700) {
-        throw new Error(`The broker directory mode is ${(statSync(directory).mode & 0o777).toString(8)}, not 700.`)
-      }
-      if ((statSync(socket).mode & 0o777) !== 0o600) {
-        throw new Error(`The broker socket mode is ${(statSync(socket).mode & 0o777).toString(8)}, not 600.`)
-      }
-      return socket
+      const directoryMode = statSync(directory).mode & 0o777
+      const socketMode = statSync(socket).mode & 0o777
+      if (directoryMode === 0o700 && socketMode === 0o600) return socket
+      lastMode = `directory ${directoryMode.toString(8)}, socket ${socketMode.toString(8)}`
     }
     await delay(250)
   }
+  if (lastMode) throw new Error(`The broker socket modes never became private (last saw ${lastMode}).`)
   throw new Error('The desktop broker did not create its socket within 60 seconds.')
 }
 

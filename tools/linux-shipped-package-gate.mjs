@@ -94,6 +94,10 @@ function browserRegistration(binary, environment) {
   }
 }
 
+async function removeBrowserRegistration(environment) {
+  await rm(path.join(environment.XDG_CONFIG_HOME, 'google-chrome', 'NativeMessagingHosts'), { recursive: true, force: true })
+}
+
 async function launchAndStop(binary, { launchSeconds, logPath, environment }) {
   const log = []
   const child = launchApp({ binary, root: path.dirname(logPath), bridge: { port: 0, token: 'shipped-package-gate' }, log, env: environment })
@@ -182,6 +186,7 @@ async function main() {
       const previousBinary = await installPackage(previousPath)
       const previousAlive = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log'), environment })
       record(steps, 'upgrade.previous_launch', previousAlive, undefined, previousAlive ? undefined : 'The previous package exited before the launch window closed.')
+      await removeBrowserRegistration(environment)
       binary = await installPackage(packagePath)
       const candidateAlive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-upgrade-launch.log'), environment })
       record(steps, 'upgrade.candidate_launch', candidateAlive, undefined, candidateAlive ? undefined : 'The candidate exited before the launch window closed.')
