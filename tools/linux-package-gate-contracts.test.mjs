@@ -4,6 +4,8 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
+import { requiredShippedSteps } from './linux-shipped-package-gate.mjs'
+import { chromeHostManifestMatches, pinnedChromeOrigin } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
 
@@ -80,4 +82,36 @@ test('the gate refuses non-Linux and non-deb inputs', async () => {
   assert.match(source, /if \(platform !== 'linux'\) throw new Error/)
   assert.match(source, /dpkg-deb/)
   assert.match(source, /sudo', \['-n', 'dpkg', '-i'/)
+})
+
+test('the shipped manifest check pins the host path, type, and single origin', () => {
+  const manifest = {
+    name: 'app.usesesame.browser',
+    type: 'stdio',
+    path: '/usr/bin/sesame-browser-host',
+    allowed_origins: [pinnedChromeOrigin],
+  }
+  assert.equal(chromeHostManifestMatches(manifest, '/usr/bin/sesame-browser-host'), true)
+  assert.equal(chromeHostManifestMatches({ ...manifest, path: '/tmp/sesame-browser-host' }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, type: 'ws' }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: ['chrome-extension://other/'] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: [pinnedChromeOrigin, pinnedChromeOrigin] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, name: 'app.other.browser' }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({}, '/usr/bin/sesame-browser-host'), false)
+})
+
+test('both package gates require the shipped host and its startup registration', () => {
+  assert.ok(requiredPackageSteps.includes('package.browser_host'))
+  assert.ok(requiredPackageSteps.includes('browser.registration'))
+  assert.ok(requiredShippedSteps.includes('package.browser_host'))
+  assert.ok(requiredShippedSteps.includes('browser.registration'))
+})
+
+test('Linux CI proves host registration and the live broker exchange', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  assert.match(workflow, /dbus-run-session -- node tools\/test-browser-host-pipe\.mjs/, 'the Linux job does not run the native-host pipe test')
+  const harness = await readFile(path.join(repository, 'tools', 'test-browser-host-pipe.mjs'), 'utf8')
+  assert.match(harness, /\['register'\]/, 'the harness does not exercise the register verb')
+  assert.match(harness, /\['unregister'\]/, 'the harness does not exercise the unregister verb')
+  assert.doesNotMatch(harness, /Windows-only/, 'the harness still skips the Linux path')
 })

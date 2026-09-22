@@ -5,7 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { architectureName, launchApp, platformName, sha256, stopApp } from './desktop-e2e-bridge.mjs'
+import { architectureName, chromeHostManifestMatches, launchApp, linuxBrowserEnvironment, platformName, readChromeHostManifest, sha256, stopApp } from './desktop-e2e-bridge.mjs'
 import { repositoryRoot } from './vault-compatibility-gate.mjs'
 
 const run = promisify(execFile)
@@ -15,9 +15,11 @@ export const SHIPPED_RUN_SCHEMA = 'sesame.linux-shipped-package-run/1'
 export const requiredShippedSteps = [
   'package.metadata',
   'package.desktop_entry',
+  'package.browser_host',
   'package.install',
   'app.launch',
   'app.stop',
+  'browser.registration',
   'package.uninstall',
 ]
 export const requiredUpgradeSteps = ['upgrade.previous_launch', 'upgrade.candidate_launch']
@@ -73,15 +75,28 @@ async function inspectContents(staging) {
   const desktopPath = path.join(staging, 'usr/share/applications/Sesame.desktop')
   const desktopEntry = await readFile(desktopPath, 'utf8').catch(() => '')
   const iconPath = path.join(staging, 'usr/share/icons/hicolor/512x512/apps/sesame.png')
+  const hostPath = path.join(staging, 'usr/bin/sesame-browser-host')
   return {
     desktopEntry: /^Exec=.*\bsesame\b/m.test(desktopEntry) && desktopEntry.includes('Icon=sesame'),
     icon: (await stat(iconPath).catch(() => null))?.isFile() === true,
+    browserHost: (await stat(hostPath).catch(() => null))?.isFile() === true,
   }
 }
 
-async function launchAndStop(binary, { launchSeconds, logPath }) {
+function browserRegistration(binary, environment) {
+  const manifest = readChromeHostManifest(environment)
+  const expectedHost = path.join(path.dirname(binary), 'sesame-browser-host')
+  const ok = chromeHostManifestMatches(manifest, expectedHost)
+  return {
+    ok,
+    value: { host: manifest.path ?? null, allowedOrigins: manifest.allowed_origins ?? [] },
+    error: ok ? undefined : 'The installed app did not register a matching Chrome native-host manifest.',
+  }
+}
+
+async function launchAndStop(binary, { launchSeconds, logPath, environment }) {
   const log = []
-  const child = launchApp({ binary, root: path.dirname(logPath), bridge: { port: 0, token: 'shipped-package-gate' }, log })
+  const child = launchApp({ binary, root: path.dirname(logPath), bridge: { port: 0, token: 'shipped-package-gate' }, log, env: environment })
   await new Promise((resolve) => setTimeout(resolve, launchSeconds * 1000))
   const alive = child.exitCode === null
   await stopApp(child)
@@ -94,7 +109,8 @@ async function installPackage(packagePath) {
   const status = await command('dpkg-query', ['-W', '-f=${Status}', 'sesame'])
   const listing = await command('dpkg-query', ['-L', 'sesame'])
   const binary = listing.split('\n').find((line) => line.endsWith('/bin/sesame'))
-  if (!status.includes('install ok installed') || !binary) throw new Error('dpkg did not install the package into a bin directory.')
+  const host = listing.split('\n').find((line) => line.endsWith('/bin/sesame-browser-host'))
+  if (!status.includes('install ok installed') || !binary || !host) throw new Error('dpkg did not install the package and its browser host into a bin directory.')
   return binary
 }
 
@@ -135,6 +151,7 @@ async function main() {
 
   const workRoot = await mkdtemp(path.join(tmpdir(), 'sesame-shipped-package-'))
   const staging = path.join(workRoot, 'staging')
+  const environment = linuxBrowserEnvironment(workRoot)
   await mkdir(staging, { recursive: true })
   await command('dpkg-deb', ['-x', packagePath, staging])
 
@@ -144,6 +161,7 @@ async function main() {
     record(steps, 'package.metadata', true, metadata)
     const contents = await inspectContents(staging)
     record(steps, 'package.desktop_entry', contents.desktopEntry && contents.icon, contents)
+    record(steps, 'package.browser_host', contents.browserHost)
 
     let binary
     if (options.installKind === 'dpkg') {
@@ -162,16 +180,18 @@ async function main() {
       const previousMetadata = await packageMetadata(previousPath, expectedArchitecture)
       previousPackage = { filename: path.basename(previousPath), sha256: sha256(previousBytes), bytes: previousBytes.length, ...previousMetadata }
       const previousBinary = await installPackage(previousPath)
-      const previousAlive = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log') })
+      const previousAlive = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log'), environment })
       record(steps, 'upgrade.previous_launch', previousAlive, undefined, previousAlive ? undefined : 'The previous package exited before the launch window closed.')
       binary = await installPackage(packagePath)
-      const candidateAlive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-upgrade-launch.log') })
+      const candidateAlive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-upgrade-launch.log'), environment })
       record(steps, 'upgrade.candidate_launch', candidateAlive, undefined, candidateAlive ? undefined : 'The candidate exited before the launch window closed.')
     }
 
-    const alive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log') })
+    const alive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log'), environment })
     record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The installed app exited before the launch window closed.')
     record(steps, 'app.stop', true)
+    const registration = browserRegistration(binary, environment)
+    record(steps, 'browser.registration', registration.ok, registration.value, registration.error)
 
     if (options.installKind === 'dpkg') {
       await command('sudo', ['-n', 'dpkg', '-r', 'sesame'])

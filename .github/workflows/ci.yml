@@ -150,6 +150,7 @@ jobs:
             patchelf \
             xdg-utils \
             rpm \
+            dbus \
             xvfb
 
       - run: npm ci
@@ -174,6 +175,11 @@ jobs:
           npm run desktop:lint:rust
           cargo test --manifest-path src-tauri/Cargo.toml
           cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview
+
+      # The host registers its manifests, unregisters them, and then completes
+      # an authenticated native-messaging exchange with the live broker.
+      - name: Prove the browser host talks to the live desktop broker
+        run: xvfb-run -a dbus-run-session -- node tools/test-browser-host-pipe.mjs
 
       - name: Build the Linux bundles
         run: >-
