@@ -13,22 +13,47 @@ use crate::vault::{
     ServiceConnectionStatus, VaultResult, SERVICE_CONNECTION_FORMAT_VERSION,
 };
 
+const LINK_CODE_MIN_LENGTH: usize = 32;
+const LINK_CODE_MAX_LENGTH: usize = 128;
+
+fn validated_link_code(raw: &str) -> VaultResult<String> {
+    let code = raw.trim();
+    if code.len() < LINK_CODE_MIN_LENGTH || code.len() > LINK_CODE_MAX_LENGTH {
+        return Err("Enter the one-time desktop code from your Sesame account.".into());
+    }
+    Ok(code.to_string())
+}
+
+fn platform_label(os: &str) -> &str {
+    match os {
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "macos" => "macOS",
+        other => other,
+    }
+}
+
+fn default_device_name_for(os: &str) -> String {
+    format!("{} desktop", platform_label(os))
+}
+
+fn default_device_name() -> String {
+    default_device_name_for(std::env::consts::OS)
+}
+
 #[tauri::command]
 pub async fn link_desktop_service(
     app: AppHandle,
     code: String,
 ) -> VaultResult<ServiceConnectionStatus> {
-    let code = code.trim().to_string();
-    if code.len() < 32 || code.len() > 128 {
-        return Err("Enter the one-time desktop code from your Sesame account.".into());
-    }
+    let code = validated_link_code(&code)?;
     // A valid code is not sufficient when the signed capability document disables linking.
     require_desktop_linking().await?;
     let api_base_url = service_api_base_url()?;
     let client = service_client()?;
     let response = client
         .post(format!("{api_base_url}/v1/desktop/link"))
-        .json(&serde_json::json!({ "code": code, "deviceName": "Windows desktop" }))
+        .json(&serde_json::json!({ "code": code, "deviceName": default_device_name() }))
         .send()
         .await
         .map_err(|_| {
@@ -215,4 +240,39 @@ pub async fn disconnect_service(app: AppHandle) -> VaultResult<()> {
         token.zeroize();
     }
     remove_service_connection(&app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn link_codes_outside_the_length_bounds_are_refused() {
+        assert!(validated_link_code("").is_err());
+        assert!(validated_link_code(&"a".repeat(LINK_CODE_MIN_LENGTH - 1)).is_err());
+        assert!(validated_link_code(&"a".repeat(LINK_CODE_MAX_LENGTH + 1)).is_err());
+    }
+
+    #[test]
+    fn a_link_code_is_trimmed_before_its_length_is_checked() {
+        let code = format!("  {}  ", "a".repeat(LINK_CODE_MIN_LENGTH));
+        assert_eq!(
+            validated_link_code(&code).unwrap(),
+            "a".repeat(LINK_CODE_MIN_LENGTH)
+        );
+        let padded_short = format!("  {}  ", "a".repeat(LINK_CODE_MIN_LENGTH - 1));
+        assert!(validated_link_code(&padded_short).is_err());
+    }
+
+    #[test]
+    fn the_default_device_name_names_the_platform() {
+        assert_eq!(default_device_name_for("windows"), "Windows desktop");
+        assert_eq!(default_device_name_for("linux"), "Linux desktop");
+        assert_eq!(default_device_name_for("macos"), "macOS desktop");
+        assert_eq!(default_device_name_for("freebsd"), "freebsd desktop");
+        assert_eq!(
+            default_device_name(),
+            default_device_name_for(std::env::consts::OS)
+        );
+    }
 }

@@ -116,6 +116,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      # Public half of the account-service capability signing key. The release
+      # environment variable must hold the same value the server publishes.
+      SESAME_CAPABILITY_PUBLIC_KEY: ${{ vars.SESAME_CAPABILITY_PUBLIC_KEY }}
     outputs:
       manifest: ${{ steps.evidence.outputs.manifest }}
     steps:
@@ -159,6 +163,15 @@ jobs:
         run: |
           $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
           if ($env:GITHUB_REF -ne "refs/tags/v$version") { throw "Release tag does not match package version $version." }
+
+      # A missing capability key makes every link attempt fail at run time, so
+      # fail the release instead of shipping a desktop that cannot link.
+      - name: Require the account capability configuration
+        shell: pwsh
+        run: |
+          if ($env:SESAME_CAPABILITY_PUBLIC_KEY -notmatch '^[A-Za-z0-9_-]{43}$') {
+            throw "SESAME_CAPABILITY_PUBLIC_KEY is missing or not a 32-byte base64url key."
+          }
 
       - name: Run the complete release gate
         run: npm run release:check
