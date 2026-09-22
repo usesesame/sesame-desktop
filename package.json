@@ -54,6 +54,7 @@
     "tauri:dev:browser": "npm run desktop:host:stage && tauri dev",
     "desktop:host:build": "node tools/build-browser-host.mjs",
     "desktop:host:test": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-extension-native-host.ps1",
+    "desktop:host:test:linux": "node tools/test-extension-native-host.mjs",
     "desktop:host:pipe-test": "node tools/test-browser-host-pipe.mjs",
     "desktop:linux:prerequisites": "node tools/check-linux-prerequisites.mjs",
     "desktop:linux:bundle-prerequisites": "node tools/check-linux-prerequisites.mjs --bundle",

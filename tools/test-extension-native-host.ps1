@@ -125,7 +125,7 @@ try {
     Write-Host 'Sesame must be running and unlocked. This run saves a disposable login and then fills it, so approve both prompts in Sesame.'
     & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'disposable login'
   } else {
-    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'registered Windows native host'
+    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'registered native host'
   }
   if ($LASTEXITCODE -ne 0) { throw 'The native-host browser integration test failed.' }
 } finally {
