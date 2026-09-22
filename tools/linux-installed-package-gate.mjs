@@ -54,6 +54,11 @@ async function command(executable, args) {
   return stdout.trim()
 }
 
+async function executableFile(path) {
+  const info = await stat(path).catch(() => null)
+  return info?.isFile() === true && (info.mode & 0o111) !== 0
+}
+
 function browserRegistration(binary, environment) {
   const manifest = readChromeHostManifest(environment)
   const expectedHost = path.join(path.dirname(binary), 'sesame-browser-host')
@@ -183,7 +188,9 @@ async function main() {
   recordStep(steps, 'package.desktop_entry', {
     ok: /^Exec=.*\bsesame\b/m.test(desktopEntry) && String(desktopEntry).includes('Icon=sesame') && (await stat(iconPath).catch(() => null))?.isFile() === true,
   })
-  recordStep(steps, 'package.browser_host', { ok: (await stat(path.join(staging, 'usr/bin', hostName)).catch(() => null))?.isFile() === true })
+  recordStep(steps, 'package.browser_host', {
+    ok: await executableFile(path.join(staging, 'usr/bin', hostName)),
+  })
 
   let installedBinary = path.join(staging, 'usr/bin', binName)
   if (options.installKind === 'dpkg') {

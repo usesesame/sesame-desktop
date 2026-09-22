@@ -76,10 +76,11 @@ async function inspectContents(staging) {
   const desktopEntry = await readFile(desktopPath, 'utf8').catch(() => '')
   const iconPath = path.join(staging, 'usr/share/icons/hicolor/512x512/apps/sesame.png')
   const hostPath = path.join(staging, 'usr/bin/sesame-browser-host')
+  const hostInfo = await stat(hostPath).catch(() => null)
   return {
     desktopEntry: /^Exec=.*\bsesame\b/m.test(desktopEntry) && desktopEntry.includes('Icon=sesame'),
     icon: (await stat(iconPath).catch(() => null))?.isFile() === true,
-    browserHost: (await stat(hostPath).catch(() => null))?.isFile() === true,
+    browserHost: hostInfo?.isFile() === true && (hostInfo.mode & 0o111) !== 0,
   }
 }
 

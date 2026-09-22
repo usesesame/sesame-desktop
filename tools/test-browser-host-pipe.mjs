@@ -76,6 +76,47 @@ function sameFile(one, other) {
   }
 }
 
+function readManifest(location) {
+  return JSON.parse(readFileSync(location, 'utf8'))
+}
+
+function verifyChromiumManifest(location) {
+  const manifest = readManifest(location)
+  if (manifest.name !== hostName || manifest.type !== 'stdio') {
+    throw new Error(`${location} has the wrong identity: ${JSON.stringify(manifest)}`)
+  }
+  if (!sameFile(manifest.path, hostExe)) {
+    throw new Error(`${location} points at ${manifest.path}, not ${hostExe}`)
+  }
+  if (
+    !Array.isArray(manifest.allowed_origins)
+    || manifest.allowed_origins.length !== 1
+    || manifest.allowed_origins[0] !== `${pinnedOrigin}/`
+  ) {
+    throw new Error(`${location} allows ${JSON.stringify(manifest.allowed_origins)}`)
+  }
+}
+
+function verifyFirefoxManifest(location) {
+  const manifest = readManifest(location)
+  if (manifest.name !== hostName || manifest.type !== 'stdio') {
+    throw new Error(`${location} has the wrong identity: ${JSON.stringify(manifest)}`)
+  }
+  if (!sameFile(manifest.path, hostExe)) {
+    throw new Error(`${location} points at ${manifest.path}, not ${hostExe}`)
+  }
+  if (
+    !Array.isArray(manifest.allowed_extensions)
+    || manifest.allowed_extensions.length !== 1
+    || manifest.allowed_extensions[0] !== firefoxExtensionId
+  ) {
+    throw new Error(`${location} allows ${JSON.stringify(manifest.allowed_extensions)}`)
+  }
+  if ('allowed_origins' in manifest) {
+    throw new Error(`${location} must not carry Chromium origins.`)
+  }
+}
+
 function verifyRegistrationLifecycle(environment) {
   const paths = manifestPaths(environment)
   const all = [...paths.chromium, ...paths.edge, ...paths.firefox]
@@ -83,31 +124,8 @@ function verifyRegistrationLifecycle(environment) {
   for (const location of all) {
     if (!existsSync(location)) throw new Error(`The browser host did not write ${location}`)
   }
-  const chromium = JSON.parse(readFileSync(paths.chromium[0], 'utf8'))
-  if (chromium.name !== hostName || chromium.type !== 'stdio') {
-    throw new Error(`The Chromium manifest has the wrong identity: ${JSON.stringify(chromium)}`)
-  }
-  if (!sameFile(chromium.path, hostExe)) {
-    throw new Error(`The Chromium manifest points at ${chromium.path}, not ${hostExe}`)
-  }
-  if (
-    !Array.isArray(chromium.allowed_origins)
-    || chromium.allowed_origins.length !== 1
-    || chromium.allowed_origins[0] !== `${pinnedOrigin}/`
-  ) {
-    throw new Error(`The Chromium manifest allows ${JSON.stringify(chromium.allowed_origins)}`)
-  }
-  const firefox = JSON.parse(readFileSync(paths.firefox[0], 'utf8'))
-  if (
-    !Array.isArray(firefox.allowed_extensions)
-    || firefox.allowed_extensions.length !== 1
-    || firefox.allowed_extensions[0] !== firefoxExtensionId
-  ) {
-    throw new Error(`The Firefox manifest allows ${JSON.stringify(firefox.allowed_extensions)}`)
-  }
-  if ('allowed_origins' in firefox) {
-    throw new Error('The Firefox manifest must not carry Chromium origins.')
-  }
+  for (const location of [...paths.chromium, ...paths.edge]) verifyChromiumManifest(location)
+  for (const location of paths.firefox) verifyFirefoxManifest(location)
   run(hostExe, ['unregister'], environment)
   for (const location of all) {
     if (existsSync(location)) throw new Error(`The browser host left ${location} behind`)

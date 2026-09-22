@@ -113,5 +113,14 @@ test('Linux CI proves host registration and the live broker exchange', async () 
   const harness = await readFile(path.join(repository, 'tools', 'test-browser-host-pipe.mjs'), 'utf8')
   assert.match(harness, /\['register'\]/, 'the harness does not exercise the register verb')
   assert.match(harness, /\['unregister'\]/, 'the harness does not exercise the unregister verb')
+  assert.match(harness, /verifyChromiumManifest\(location\)/, 'the harness does not validate every Chromium manifest')
+  assert.match(harness, /verifyFirefoxManifest\(location\)/, 'the harness does not validate the Firefox manifest')
   assert.doesNotMatch(harness, /Windows-only/, 'the harness still skips the Linux path')
+})
+
+test('both package gates require an executable browser host', async () => {
+  for (const file of ['linux-installed-package-gate.mjs', 'linux-shipped-package-gate.mjs']) {
+    const source = await readFile(path.join(repository, 'tools', file), 'utf8')
+    assert.match(source, /0o111/, `${file} does not require the host to be executable`)
+  }
 })
