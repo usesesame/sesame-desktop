@@ -4,6 +4,72 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.3.0
+
+### Account
+
+- Sesame account linking is available on Linux. It uses the desktop Secret
+  Service wallet to encrypt the account token with the same device key that
+  protects the PIN pepper and local attempt-throttle state, and the setting
+  stays hidden on systems without a wallet.
+- The release pipeline requires the account capability public key. A tagged
+  release fails before the build when it is missing or malformed instead of
+  shipping a desktop where every link attempt fails.
+
+### Browser integration
+
+- The browser connection works on Linux from the deb and rpm packages. The
+  release gate registers the native host in a scratch home, checks the pinned
+  extension origin and the sidecar path, verifies the broker socket is
+  private, and completes a request with the live desktop. The package gates
+  require an executable `sesame-browser-host` and its startup registration.
+- The extension suite can run against the real native host and the running
+  desktop on Linux.
+
+### Linux packaging
+
+- The AppImage no longer bundles the Wayland client and cursor libraries, so
+  its window renders on hosts with a newer Wayland stack instead of staying
+  blank white.
+- Publishing tolerates the AppImage file name Tauri produces, so a Linux
+  asset no longer stops the Windows publish step of the same release.
+
+### Vault and backups
+
+- Export, restore, and open no longer lose data silently. Partial and
+  attachment-losing exports name what was left out, SSH-only Bitwarden
+  exports are accepted, document history no longer stores attachment bytes,
+  duplicate item ids repair on open, staged vault temporary files are
+  cleaned up, and the presence grant drops when the vault locks.
+- Backup compatibility is shown before a restore starts.
+
+### Security
+
+- The vault writer bounds the plaintext at the storage limit before it
+  serializes, and decrypted payload, key-wrapper, and sealed-record buffers
+  are wiped when dropped.
+
+### Interface
+
+- Quick access renders the plain initial block when website icons are denied
+  instead of an icon that never loads.
+- Modal teardown, opening a second modal while one is active, duplicate tags,
+  fields, and URLs, async results that returned to the wrong item, and
+  needless whole-window repaints are repaired.
+- Settings copy names the local platform instead of assuming a Windows
+  desktop.
+
+### Diagnostics and release pipeline
+
+- Card-fill and quick-access diagnostic codes are now on the allowlist and
+  every allowlisted code carries a severity, so those events are recorded
+  instead of dropped or pruned.
+- The cross-repository contract suites run in the desktop gate: workflow
+  governance, design tokens, installer hooks, the command surface, and the
+  lockfile version check.
+- The build uses the TypeScript 7 native compiler beside the TypeScript 6
+  API that the lint and Svelte tools consume.
+
 ## 0.2.5
 
 ### Security
