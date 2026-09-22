@@ -6,7 +6,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { architectureName, launchApp, openBridge, platformName, recordStep, sha256, stopApp } from './desktop-e2e-bridge.mjs'
+import { architectureName, chromeHostManifestMatches, launchApp, linuxBrowserEnvironment, openBridge, platformName, readChromeHostManifest, recordStep, sha256, stopApp } from './desktop-e2e-bridge.mjs'
 import { runVaultRestoreGate } from './run-vault-restore-gate.mjs'
 import { repositoryRoot } from './vault-compatibility-gate.mjs'
 
@@ -17,8 +17,10 @@ export const PACKAGE_RUN_SCHEMA = 'sesame.linux-installed-package-run/1'
 export const requiredPackageSteps = [
   'package.metadata',
   'package.desktop_entry',
+  'package.browser_host',
   'package.install',
   'app.launch',
+  'browser.registration',
   'vault.create',
   'vault.backup.verified',
   'vault.lock',
@@ -52,15 +54,32 @@ async function command(executable, args) {
   return stdout.trim()
 }
 
-async function runAppLifecycle({ binary, vaultRoot, logPath }) {
+async function executableFile(path) {
+  const info = await stat(path).catch(() => null)
+  return info?.isFile() === true && (info.mode & 0o111) !== 0
+}
+
+function browserRegistration(binary, environment) {
+  const manifest = readChromeHostManifest(environment)
+  const expectedHost = path.join(path.dirname(binary), 'sesame-browser-host')
+  const ok = chromeHostManifestMatches(manifest, expectedHost)
+  return {
+    ok,
+    value: { host: manifest.path ?? null, allowedOrigins: manifest.allowed_origins ?? [] },
+    error: ok ? undefined : 'The installed app did not register a matching Chrome native-host manifest.',
+  }
+}
+
+async function runAppLifecycle({ binary, vaultRoot, logPath, environment }) {
   const steps = []
   const log = []
   const bridge = await openBridge(`linux-package-${randomBytes(16).toString('hex')}`)
-  const child = launchApp({ binary, root: vaultRoot, bridge, log })
+  const child = launchApp({ binary, root: vaultRoot, bridge, log, env: environment })
   try {
     const connected = await bridge.waitForConnection()
     recordStep(steps, 'app.launch', { ok: connected, error: connected ? undefined : 'The installed app never connected to the test bridge.' })
     if (!connected) return steps
+    recordStep(steps, 'browser.registration', browserRegistration(binary, environment))
     recordStep(steps, 'vault.status.before', await bridge.call('get_vault_status', {}))
     recordStep(steps, 'vault.create', await bridge.call('create_vault', { request: { masterPassword: 'fictional package validation' } }))
     const created = await bridge.call('get_vault_status', {})
@@ -81,11 +100,11 @@ async function runAppLifecycle({ binary, vaultRoot, logPath }) {
   return steps
 }
 
-async function runRestartLifecycle({ binary, vaultRoot, logPath }) {
+async function runRestartLifecycle({ binary, vaultRoot, logPath, environment }) {
   const steps = []
   const log = []
   const bridge = await openBridge(`linux-package-${randomBytes(16).toString('hex')}`)
-  const child = launchApp({ binary, root: vaultRoot, bridge, log })
+  const child = launchApp({ binary, root: vaultRoot, bridge, log, env: environment })
   try {
     const connected = await bridge.waitForConnection()
     recordStep(steps, 'app.restart', { ok: connected, error: connected ? undefined : 'The restarted app never connected to the test bridge.' })
@@ -163,10 +182,14 @@ async function main() {
   const desktopEntry = await readFile(desktopPath, 'utf8').catch(() => '')
   const iconPath = path.join(staging, 'usr/share/icons/hicolor/512x512/apps/sesame.png')
   const binName = 'sesame'
+  const hostName = 'sesame-browser-host'
   const steps = []
   recordStep(steps, 'package.metadata', { ok: true, value: { name, version: packageVersion, architecture: packageArchitecture } })
   recordStep(steps, 'package.desktop_entry', {
     ok: /^Exec=.*\bsesame\b/m.test(desktopEntry) && String(desktopEntry).includes('Icon=sesame') && (await stat(iconPath).catch(() => null))?.isFile() === true,
+  })
+  recordStep(steps, 'package.browser_host', {
+    ok: await executableFile(path.join(staging, 'usr/bin', hostName)),
   })
 
   let installedBinary = path.join(staging, 'usr/bin', binName)
@@ -176,7 +199,8 @@ async function main() {
       const status = await command('dpkg-query', ['-W', '-f=${Status}', name])
       const listing = await command('dpkg-query', ['-L', name])
       const installedPath = listing.split('\n').find((line) => line.endsWith(`/bin/${binName}`))
-      if (!status.includes('install ok installed') || !installedPath) throw new Error('dpkg did not install the package into a bin directory.')
+      const installedHost = listing.split('\n').find((line) => line.endsWith(`/bin/${hostName}`))
+      if (!status.includes('install ok installed') || !installedPath || !installedHost) throw new Error('dpkg did not install the package and its browser host into a bin directory.')
       installedBinary = installedPath
       recordStep(steps, 'package.install', { ok: true, value: { installKind: 'dpkg', binary: installedBinary } })
     } catch (error) {
@@ -187,9 +211,10 @@ async function main() {
     recordStep(steps, 'package.install', { ok: true, value: { installKind: 'extracted', binary: installedBinary } })
   }
 
+  const environment = linuxBrowserEnvironment(workRoot)
   const binarySha256 = sha256(await readFile(installedBinary))
-  steps.push(...await runAppLifecycle({ binary: installedBinary, vaultRoot, logPath: path.join(out, 'linux-package-launch.log') }))
-  steps.push(...await runRestartLifecycle({ binary: installedBinary, vaultRoot, logPath: path.join(out, 'linux-package-restart.log') }))
+  steps.push(...await runAppLifecycle({ binary: installedBinary, vaultRoot, logPath: path.join(out, 'linux-package-launch.log'), environment }))
+  steps.push(...await runRestartLifecycle({ binary: installedBinary, vaultRoot, logPath: path.join(out, 'linux-package-restart.log'), environment }))
 
   let restore = null
   if (!options.skipRestore) {

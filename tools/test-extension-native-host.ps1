@@ -120,14 +120,20 @@ try {
   $env:SESAME_BROWSER_TEST_EXECUTABLE = Resolve-BrowserExecutable -Name $Browser -Candidates $browserConfig.Executables
   $env:SESAME_NATIVE_HOST_TEST = '1'
   $env:SESAME_NATIVE_HOST_BROWSER = $browserConfig.Channel
+  $reportPath = Join-Path $env:TEMP "sesame-native-host-report-$PID.json"
   if ($ManualFill) {
     $env:SESAME_MANUAL_NATIVE_FILL = '1'
     Write-Host 'Sesame must be running and unlocked. This run saves a disposable login and then fills it, so approve both prompts in Sesame.'
-    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'disposable login'
+    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'disposable login' --reporter=json "--outputFile=$reportPath"
   } else {
-    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'registered Windows native host'
+    & npm.cmd --prefix $extensionCheckout run test:browser -- --testNamePattern 'registered native host' --reporter=json "--outputFile=$reportPath"
   }
   if ($LASTEXITCODE -ne 0) { throw 'The native-host browser integration test failed.' }
+  if (-not (Test-Path -LiteralPath $reportPath)) { throw 'The native-host browser integration test wrote no report.' }
+  $report = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
+  Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+  if ($report.numFailedTests -ne 0) { throw 'The native-host browser integration test reported a failure.' }
+  if ($report.numPassedTests -lt 1) { throw 'The native-host browser integration run matched no test, so it proved nothing.' }
 } finally {
   Remove-Item Env:\SESAME_NATIVE_HOST_TEST -ErrorAction SilentlyContinue
   Remove-Item Env:\SESAME_NATIVE_HOST_BROWSER -ErrorAction SilentlyContinue

@@ -1,10 +1,15 @@
 import { createHash } from 'node:crypto'
 import { spawn, execFile } from 'node:child_process'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import path from 'node:path'
 import { promisify } from 'node:util'
 
 export const CONNECTION_TIMEOUT_MS = 90_000
 export const COMMAND_TIMEOUT_MS = 300_000
+
+export const browserHostName = 'app.usesesame.browser'
+export const pinnedChromeOrigin = 'chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg/'
 
 const run = promisify(execFile)
 
@@ -135,10 +140,11 @@ export async function openBridge(token) {
   return bridge
 }
 
-export function launchApp({ binary, root, bridge, log }) {
+export function launchApp({ binary, root, bridge, log, env = {} }) {
   const child = spawn(binary, [`--sesame-e2e-root=${root}`], {
     env: {
       ...process.env,
+      ...env,
       SESAME_DESKTOP_E2E_PORT: String(bridge.port),
       SESAME_DESKTOP_E2E_TOKEN: bridge.token,
     },
@@ -148,6 +154,40 @@ export function launchApp({ binary, root, bridge, log }) {
   child.stdout.on('data', (chunk) => log.push(chunk.toString('utf8')))
   child.stderr.on('data', (chunk) => log.push(chunk.toString('utf8')))
   return child
+}
+
+export function linuxBrowserEnvironment(root) {
+  const directories = {
+    HOME: path.join(root, 'browser-home'),
+    XDG_CONFIG_HOME: path.join(root, 'browser-config'),
+    XDG_DATA_HOME: path.join(root, 'browser-data'),
+    XDG_CACHE_HOME: path.join(root, 'browser-cache'),
+    XDG_RUNTIME_DIR: path.join(root, 'browser-runtime'),
+  }
+  for (const directory of Object.values(directories)) mkdirSync(directory, { recursive: true, mode: 0o700 })
+  return directories
+}
+
+export function chromeHostManifestPath(environment) {
+  return path.join(environment.XDG_CONFIG_HOME, 'google-chrome', 'NativeMessagingHosts', `${browserHostName}.json`)
+}
+
+export function readChromeHostManifest(environment) {
+  try {
+    return JSON.parse(readFileSync(chromeHostManifestPath(environment), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+export function chromeHostManifestMatches(manifest, expectedHost) {
+  return manifest.name === browserHostName
+    && manifest.type === 'stdio'
+    && typeof manifest.path === 'string'
+    && path.resolve(manifest.path) === path.resolve(expectedHost)
+    && Array.isArray(manifest.allowed_origins)
+    && manifest.allowed_origins.length === 1
+    && manifest.allowed_origins[0] === pinnedChromeOrigin
 }
 
 export async function stopApp(child) {
