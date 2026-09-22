@@ -30,9 +30,9 @@ jobs:
       contents: read
       id-token: write
     env:
-      # Public half of the account-service capability signing key. The release
-      # environment variable must hold the same value the server publishes.
-      SESAME_CAPABILITY_PUBLIC_KEY: ${{ vars.SESAME_CAPABILITY_PUBLIC_KEY }}
+      # Public half of the account-service capability signing key, stored as a
+      # repository secret. It must hold the same value the server publishes.
+      SESAME_CAPABILITY_PUBLIC_KEY: ${{ secrets.SESAME_CAPABILITY_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
