@@ -20,7 +20,7 @@ interface BrowserSaveControllerOptions {
 }
 
 export function createBrowserSaveController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: BrowserSaveControllerOptions) {
-  const { browserSave, vault } = stores
+  const { browserSave, selection, vault } = stores
   let syncTimer: ReturnType<typeof window.setTimeout> | undefined
   let disposed = false
   let stopSubscription: (() => void) | undefined
@@ -78,6 +78,9 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
       const result = await resolveBrowserSaveRequest(request.approvalId, approved, selectedId)
       if (approved && result) {
         vault.patch({ snapshot: result.snapshot })
+        if (selection.value().activeItemId === result.id && selection.value().securityFilter) {
+          selection.patch({ securityFilter: null })
+        }
         const selected = request.kind === 'update'
           ? request.candidates.find((candidate) => candidate.id === current.selectedId)
           : undefined
