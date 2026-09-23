@@ -78,7 +78,10 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
       const result = await resolveBrowserSaveRequest(request.approvalId, approved, selectedId)
       if (approved && result) {
         vault.patch({ snapshot: result.snapshot })
-        const label = request.title.trim() || request.hostname
+        const selected = request.kind === 'update'
+          ? request.candidates.find((candidate) => candidate.id === current.selectedId)
+          : undefined
+        const label = selected?.title.trim() || request.title.trim() || request.hostname
         feedback.showNotice(
           request.kind === 'update' ? 'Login updated' : 'Login saved',
           request.kind === 'update'

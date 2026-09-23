@@ -5,7 +5,7 @@ use crate::vault::imports::entry_from_input;
 use crate::vault::storage::commit_payload_change;
 use crate::vault::types::TaggedItem;
 use crate::vault::util::unix_timestamp;
-use crate::vault::{LoginInput, SaveLoginResult, VaultResult, VaultState};
+use crate::vault::{LoginInput, SaveLoginResult, VaultEntry, VaultResult, VaultState};
 use crate::{browser_fill, browser_host, diagnostics};
 
 #[tauri::command]
@@ -196,9 +196,7 @@ fn save_login_update(
         return Err("That saved login no longer exists.".to_string());
     };
     let previous = existing.clone();
-    existing.password = payload.password;
-    existing.updated_at = unix_timestamp();
-    existing.revision = existing.revision.saturating_add(1);
+    apply_browser_password_update(existing, payload.password, unix_timestamp());
     crate::vault::history::capture_history(&mut next_payload, TaggedItem::Login(previous));
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
@@ -206,6 +204,13 @@ fn save_login_update(
         id: target_id,
         snapshot: session.snapshot(),
     })
+}
+
+fn apply_browser_password_update(entry: &mut VaultEntry, password: String, now: u64) {
+    entry.password = password;
+    entry.updated_at = now;
+    entry.password_updated_at = now;
+    entry.revision = entry.revision.saturating_add(1);
 }
 
 #[tauri::command]
@@ -247,4 +252,42 @@ pub fn get_pending_browser_card_fill(
     state: State<'_, browser_fill::BrowserFillState>,
 ) -> Option<browser_fill::BrowserCardRequestEvent> {
     browser_fill::pending_card(state)
+}
+
+#[cfg(test)]
+mod browser_update_tests {
+    use super::*;
+
+    fn fictional_entry() -> VaultEntry {
+        VaultEntry {
+            id: "login-a".to_string(),
+            password: "fictional-stored-secret".to_string(),
+            updated_at: 41,
+            password_updated_at: 40,
+            revision: 7,
+            ..VaultEntry::default()
+        }
+    }
+
+    #[test]
+    fn an_update_stamps_both_timestamps_and_bumps_the_revision() {
+        let mut entry = fictional_entry();
+
+        apply_browser_password_update(&mut entry, "fictional-new-secret".to_string(), 9001);
+
+        assert_eq!(entry.password, "fictional-new-secret");
+        assert_eq!(entry.updated_at, 9001);
+        assert_eq!(entry.password_updated_at, 9001);
+        assert_eq!(entry.revision, 8);
+    }
+
+    #[test]
+    fn an_update_replaces_the_previous_password() {
+        let mut entry = fictional_entry();
+
+        apply_browser_password_update(&mut entry, "fictional-new-secret".to_string(), 9001);
+
+        assert_eq!(entry.password, "fictional-new-secret");
+        assert!(!entry.password.contains("fictional-stored-secret"));
+    }
 }
