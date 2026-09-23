@@ -78,8 +78,10 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
       const result = await resolveBrowserSaveRequest(request.approvalId, approved, selectedId)
       if (approved && result) {
         vault.patch({ snapshot: result.snapshot })
-        if (selection.value().activeItemId === result.id && selection.value().securityFilter) {
-          selection.patch({ securityFilter: null })
+        const activeFilter = selection.value().securityFilter
+        if (request.kind === 'update' && activeFilter && selection.value().activeItemId === result.id) {
+          const updated = result.snapshot.entries.find((entry) => entry.id === result.id)
+          if (updated && !updated.issueKinds.includes(activeFilter)) selection.patch({ securityFilter: null })
         }
         const selected = request.kind === 'update'
           ? request.candidates.find((candidate) => candidate.id === current.selectedId)

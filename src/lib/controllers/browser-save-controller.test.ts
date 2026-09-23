@@ -18,7 +18,9 @@ vi.mock('../vault', () => ({
   ...vaultApi,
 }))
 
-const snapshot = { entries: [], folders: [] } as unknown as VaultSnapshot
+function snapshotWith(issueKinds: string[]): VaultSnapshot {
+  return { entries: [{ id: 'login-a', issueKinds }], folders: [] } as unknown as VaultSnapshot
+}
 
 function request(kind: 'new' | 'update'): BrowserSaveRequest {
   return {
@@ -58,18 +60,29 @@ function harness(activeItemId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vaultApi.resolveBrowserSave.mockResolvedValue({ id: 'login-a', snapshot })
 })
 
 describe('browser save notices', () => {
-  it('clears the security filter when the updated login is the active one', async () => {
+  it('clears the security filter when the update resolves the active login issue', async () => {
+    const resolved = snapshotWith(['totp'])
+    vaultApi.resolveBrowserSave.mockResolvedValue({ id: 'login-a', snapshot: resolved })
     const { stores, controller } = harness('login-a')
     controller.receive(request('update'))
 
     await controller.resolve(true)
 
     expect(stores.selection.value().securityFilter).toBeNull()
-    expect(stores.vault.value().snapshot).toBe(snapshot)
+    expect(stores.vault.value().snapshot).toBe(resolved)
+  })
+
+  it('keeps the security filter when the active login still has the issue', async () => {
+    vaultApi.resolveBrowserSave.mockResolvedValue({ id: 'login-a', snapshot: snapshotWith(['old-password']) })
+    const { stores, controller } = harness('login-a')
+    controller.receive(request('update'))
+
+    await controller.resolve(true)
+
+    expect(stores.selection.value().securityFilter).toBe('old-password')
   })
 
   it('keeps the security filter when another login is active', async () => {
