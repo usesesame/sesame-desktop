@@ -436,6 +436,50 @@ pub fn payload_without_login(payload: &VaultPayload, id: &str) -> VaultResult<Va
     Ok(next_payload)
 }
 
+/// The one writer for a saved login's revision and password timestamps.
+///
+/// `updated` carries the fields to store and its `id` names the target.
+/// `password` replaces the stored value when present; `None` means the edit
+/// left the password field blank, so both the stored password and its
+/// timestamp stay. `updated_at` and `revision` always move. A supplied
+/// password moves `password_updated_at` only when it differs from the stored
+/// value, or when the stored timestamp was never set. The replaced entry is
+/// kept in history.
+pub fn payload_with_saved_login(
+    payload: &VaultPayload,
+    mut updated: VaultEntry,
+    password: Option<String>,
+    now: u64,
+) -> VaultResult<VaultPayload> {
+    let mut next_payload = payload.clone();
+    let existing = next_payload
+        .entries
+        .iter_mut()
+        .find(|entry| entry.id == updated.id)
+        .ok_or("That saved login no longer exists.")?;
+    let previous = existing.clone();
+    match password {
+        None => {
+            updated.password = previous.password.clone();
+            updated.password_updated_at = previous.password_updated_at;
+        }
+        Some(password) => {
+            updated.password_updated_at =
+                if password == previous.password && previous.password_updated_at > 0 {
+                    previous.password_updated_at
+                } else {
+                    now
+                };
+            updated.password = password;
+        }
+    }
+    updated.updated_at = now;
+    updated.revision = previous.revision.saturating_add(1);
+    *existing = updated;
+    crate::history::capture_history(&mut next_payload, TaggedItem::Login(previous));
+    Ok(next_payload)
+}
+
 pub fn payload_with_login_folders(
     payload: &VaultPayload,
     ids: &HashSet<String>,
