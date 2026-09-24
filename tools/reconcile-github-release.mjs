@@ -5,7 +5,15 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import { fileSha256 } from './release-evidence-lib.mjs'
-import { RELEASE_SET_DIGEST_LABEL, assertCandidateMatchesAssets, collectPublishAssets, linuxLaneAssetPatterns, planReleasePublication } from './release-publish-reconcile.mjs'
+import {
+  RELEASE_SET_DIGEST_LABEL,
+  RELEASE_VISIBILITY_DRAFT,
+  assertCandidateMatchesAssets,
+  collectPublishAssets,
+  linuxLaneAssetPatterns,
+  parseReleaseVisibility,
+  planReleasePublication,
+} from './release-publish-reconcile.mjs'
 
 const [handoffDirectory, publicDirectory, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
 if (!handoffDirectory || !publicDirectory || !manifestFilename || !candidateFilename) {
@@ -16,6 +24,7 @@ const repository = process.env.GITHUB_REPOSITORY
 const tag = process.env.GITHUB_REF_NAME
 if (!repository || !tag) throw new Error('Set GITHUB_REPOSITORY and GITHUB_REF_NAME.')
 if (!process.env.GH_TOKEN) throw new Error('GH_TOKEN is required to query and mutate the GitHub release.')
+const visibility = parseReleaseVisibility(process.env.SESAME_RELEASE_VISIBILITY)
 
 const run = promisify(execFile)
 const gh = async (args) => run('gh', args, { env: process.env, maxBuffer: 16 * 1024 * 1024 })
@@ -67,6 +76,7 @@ const reconcile = async (release) => {
     expectedAssets: assets,
     setDigest: candidate.setDigest,
     foreignAssets: linuxLaneAssetPatterns(manifest.version),
+    visibility,
   })
   if (plan.action === 'conflict') {
     throw new Error([
@@ -84,7 +94,8 @@ const reconcile = async (release) => {
       await rm(directory, { recursive: true, force: true })
     }
   }
-  process.stdout.write(`Release ${tag} ${plan.action === 'complete' ? 'already carries' : 'now carries'} all ${assets.length} verified assets.\n`)
+  const state = plan.draft ? 'unpublished draft' : 'published release'
+  process.stdout.write(`Release ${tag} ${plan.action === 'complete' ? 'already carries' : 'now carries'} all ${assets.length} verified assets as an ${state}.\n`)
 }
 
 let release = await fetchRelease()
@@ -96,9 +107,10 @@ if (!release) {
       '--repo', repository,
       '--title', `Sesame ${tag}`,
       '--notes-file', notesFilename,
+      ...(visibility === RELEASE_VISIBILITY_DRAFT ? ['--draft'] : []),
       ...assetPaths(assets.map((asset) => asset.name)),
     ])
-    process.stdout.write(`Created release ${tag} with ${assets.length} verified assets.\n`)
+    process.stdout.write(`Created ${visibility === RELEASE_VISIBILITY_DRAFT ? 'unpublished draft' : 'published'} release ${tag} with ${assets.length} verified assets.\n`)
   } catch (error) {
     if (!/HTTP 422|already[_ ]exists|already exists/i.test(error.stderr ?? '')) throw error
     release = await fetchRelease()
