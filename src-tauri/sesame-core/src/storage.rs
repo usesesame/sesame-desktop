@@ -436,15 +436,6 @@ pub fn payload_without_login(payload: &VaultPayload, id: &str) -> VaultResult<Va
     Ok(next_payload)
 }
 
-/// The one writer for a saved login's revision and password timestamps.
-///
-/// `updated` carries the fields to store and its `id` names the target.
-/// `password` replaces the stored value when present; `None` means the edit
-/// left the password field blank, so both the stored password and its
-/// timestamp stay. `updated_at` and `revision` always move. A supplied
-/// password moves `password_updated_at` only when it differs from the stored
-/// value, or when the stored timestamp was never set. The replaced entry is
-/// kept in history.
 pub fn payload_with_saved_login(
     payload: &VaultPayload,
     mut updated: VaultEntry,
