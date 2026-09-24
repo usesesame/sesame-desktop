@@ -71,12 +71,8 @@
   }
   .step-icon {
     display: grid;
-    width: 30px;
-    height: 30px;
     place-items: center;
-    border-radius: var(--radius-sm);
     color: var(--chip-icon);
-    background: var(--chip-bg);
   }
   .start-button {
     width: 100%;

@@ -1,7 +1,6 @@
 <script lang="ts">
   // Sync has not passed its review.
   import { onMount } from 'svelte'
-  import Icon from '../Icon.svelte'
   import SyncEnableModal from './SyncEnableModal.svelte'
   import SyncApproveDeviceModal from './SyncApproveDeviceModal.svelte'
   import SyncConflictModal from './SyncConflictModal.svelte'
@@ -75,7 +74,6 @@
 </script>
 
 <article>
-  <span class="settings-icon"><Icon name="refresh" size={16} /></span>
   <div class="setting-copy">
     <strong>Sesame Sync</strong>
     <p role="status">{summary}. Sesame cannot read what it stores.</p>
@@ -143,7 +141,6 @@
 </article>
 
 <article class="sync-caution">
-  <span class="settings-icon"><Icon name="shield-alert" size={16} /></span>
   <div class="setting-copy">
     <strong>Unreviewed preview</strong>
     <p>The protocol changed after the last review. Use a throwaway vault.</p>
@@ -350,9 +347,6 @@
     gap: var(--space-3);
   }
 
-  .sync-caution :global(.settings-icon) {
-    color: var(--danger);
-  }
   .sync-caution p {
     color: var(--danger);
   }

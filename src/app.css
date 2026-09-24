@@ -300,7 +300,7 @@ button.no-totp, .credential-button, .more-button {
 .lede { max-width: 540px; color: var(--text-muted); font-size: var(--type-3); line-height: 1.6; }
 .unlock-card { width: min(100%, 440px); margin: 0; padding: var(--space-6); border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lift); }
 .card-topline { display: flex; justify-content: space-between; color: var(--text-2); font-size: var(--type-2); font-weight: var(--weight-bold); }
-.beta-chip { padding: var(--space-1) 7px; border-radius: 5px; color: var(--gold-text); background: var(--gold-soft-bg); font-size: var(--type-1); letter-spacing: .9px; }
+.beta-chip { padding: var(--space-1) 7px; border-radius: var(--radius-sm); color: var(--gold-text); background: var(--gold-soft-bg); font-size: var(--type-1); letter-spacing: .9px; }
 .unlock-card .beta-chip { display: none; }
 .unlock-card h1 { margin: var(--space-4) 0 var(--space-2); font-size: var(--type-5); }
 .unlock-card > p, .unlock-card form + .tiny-note { color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
@@ -448,16 +448,16 @@ button.no-totp, .credential-button, .more-button {
    global input:focus rule paints a second halo around the bare input inside
    the first one, which is the doubled ring the search box has been showing. */
 .search-box input:focus { box-shadow: none; }
-.search-box button { display: grid; width: 21px; height: 21px; flex: none; place-items: center; border: 0; border-radius: 5px; padding: 0; color: var(--text-muted); background: transparent; font-size: var(--type-4); line-height: 1; }
+.search-box button { display: grid; width: 21px; height: 21px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); padding: 0; color: var(--text-muted); background: transparent; font-size: var(--type-4); line-height: 1; }
 .search-box button:hover { color: var(--accent-link); background: var(--tint); }
-.search-box kbd { display: grid; min-width: 21px; height: 21px; place-items: center; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--text-faint); background: var(--surface); font-family: var(--font-ui); font-size: var(--type-1); font-weight: var(--weight-medium); line-height: 1; }
+.search-box kbd { display: grid; min-width: 21px; height: 21px; place-items: center; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); color: var(--text-faint); background: var(--surface); font-family: var(--font-ui); font-size: var(--type-1); font-weight: var(--weight-medium); line-height: 1; }
 .active-filters { display: flex; flex-wrap: wrap; gap: 5px; margin-top: var(--space-2); }
 .active-filter {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 4px 8px 4px 10px;
   color: var(--accent-link);
   background: var(--tint);
@@ -478,7 +478,7 @@ button.no-totp, .credential-button, .more-button {
   place-items: center;
   margin: 0;
   border: 1px solid var(--border-input);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   cursor: pointer;
   transition: background-color .16s ease, border-color .16s ease;
@@ -496,7 +496,7 @@ button.no-totp, .credential-button, .more-button {
 .bulk-toolbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .bulk-toolbar-actions .secondary-button, .bulk-toolbar-actions .editor-delete { min-height: 30px; }
 .entry-list { display: grid; gap: 2px; margin-top: 14px; min-height: 0; flex: 1; align-content: start; padding: 3px 12px 4px 0; scroll-padding: 4px 0; overflow-y: auto; scrollbar-gutter: stable; }
-.entry-row { position: relative; display: flex; align-items: center; gap: var(--space-3); width: 100%; border: 0; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); color: var(--text); background: transparent; text-align: left; transition: background-color .15s ease; content-visibility: auto; contain-intrinsic-size: auto 50px; }
+.entry-row { position: relative; display: flex; align-items: center; gap: var(--space-3); width: 100%; border: 0; border-radius: var(--radius-md); padding: var(--space-3); color: var(--text); background: transparent; text-align: left; transition: background-color .15s ease; content-visibility: auto; contain-intrinsic-size: auto 58px; }
 .entry-row:hover:not(.selected) { background: var(--control-hover); }
 .entry-row.selected { background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
 .entry-row.multi-selected { background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
@@ -506,7 +506,7 @@ button.no-totp, .credential-button, .more-button {
 .entry-select-box { margin: 0; }
 .entry-favourite, .card-favourite { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-faint); background: transparent; }
 .entry-favourite:hover, .entry-favourite.active, .card-favourite:hover, .card-favourite.active { color: var(--gold-text); background: var(--gold-soft-bg); }
-.entry-avatar { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: var(--gold-text); background: var(--gold-soft-bg); font-size: var(--type-2); font-weight: var(--weight-bold); overflow: hidden; }
+.entry-avatar { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-md); color: var(--gold-text); background: var(--gold-soft-bg); font-size: var(--type-2); font-weight: var(--weight-bold); overflow: hidden; }
 .entry-avatar img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: contain; background: var(--surface); }
 .entry-title { display: grid; min-width: 0; gap: 1px; }
 .entry-title strong { overflow: hidden; font-size: var(--type-3); font-weight: var(--weight-bold); text-overflow: ellipsis; white-space: nowrap; }
@@ -557,13 +557,13 @@ button.no-totp, .credential-button, .more-button {
 .folder-menu-items { display: grid; max-height: 210px; margin: 2px 0 4px; padding: 3px 0 3px 12px; overflow-y: auto; }
 .folder-menu-items button { width: 100%; font-size: var(--type-2); }
 .folder-menu-items button.current { color: var(--accent-link); }
-.folder-menu-indent { width: 11px; height: 11px; border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); border-radius: 0 0 0 4px; }
+.folder-menu-indent { width: 11px; height: 11px; border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); border-radius: 0 0 0 var(--radius-sm); }
 
 .folder-manager-modal { width: min(100%, 540px); }
 .folder-manager-modal > h2, .folder-name-modal h2 { margin: 0 0 var(--space-2); }
 .folder-manager-modal > p:not(.eyebrow), .folder-name-modal p { margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
 .folder-manager-list { display: grid; gap: 5px; max-height: min(390px, 50vh); margin-top: var(--space-5); overflow-y: auto; }
-.folder-manager-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) 32px 32px; min-height: 52px; align-items: center; gap: 8px; border-radius: var(--radius-md); padding: 7px 9px; background: var(--surface-inset); }
+.folder-manager-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) 32px 32px; min-height: 52px; align-items: center; gap: 8px; border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); }
 .folder-manager-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-sm); color: var(--accent-link); background: var(--tint); }
 .folder-manager-list article > div { display: grid; min-width: 0; gap: 2px; }
 .folder-manager-list strong, .folder-manager-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -591,7 +591,7 @@ button.no-totp, .credential-button, .more-button {
 .checkup-fix-copy strong { color: var(--text); font-size: var(--type-3); }
 .checkup-fix-copy p { margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
 .password-score { display: inline-flex; align-items: center; gap: 8px; margin-top: 3px; color: var(--text-muted); font-size: var(--type-1); font-weight: var(--weight-bold); }
-.password-score-track { display: block; width: 88px; height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--warn-text) 18%, transparent); overflow: hidden; }
+.password-score-track { display: block; width: 88px; height: 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn-text) 18%, transparent); overflow: hidden; }
 .password-score-fill { display: block; height: 100%; border-radius: inherit; background: var(--warn-text); transition: width .3s var(--ease-out); }
 .checkup-fix-panel > .secondary-button { grid-column: 2; justify-self: start; }
 .checkup-fix-actions { display: flex; align-items: center; gap: var(--space-2); grid-column: 2; }
@@ -599,7 +599,7 @@ button.no-totp, .credential-button, .more-button {
 .more-button { display: grid; width: 32px; height: 32px; place-items: center; margin-left: auto; border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; line-height: 0; transition: background-color .16s ease, color .16s ease; }
 .more-button:hover { color: var(--accent-link); background: var(--tint); }
 .credentials-panel { display: grid; margin-top: var(--space-5); border-radius: var(--radius-md); background: var(--surface-inset); overflow: hidden; }
-.credential-row { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto auto auto; min-height: 58px; align-items: center; gap: 10px; padding: 10px var(--space-3); }
+.credential-row { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto auto auto; min-height: 58px; align-items: center; gap: 10px; padding: var(--space-3); }
 .credential-row + .credential-row { border-top: 1px solid var(--border-soft); }
 .credential-label { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .credential-label svg { color: var(--chip-icon); }
@@ -699,8 +699,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .finding-row strong { min-width: 30px; color: currentColor; font-family: var(--font-display); font-variation-settings: var(--font-display-settings); font-size: var(--type-4); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; text-align: right; }
 .finding-row > svg { color: var(--text-faint); transition: color .15s ease, transform .18s var(--ease-out); }
 .finding-row:hover:not(:disabled) > svg { color: var(--accent-link); transform: translateX(2px); }
-.finding-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: var(--radius-sm); color: var(--warn-text); background: var(--warn-bg); line-height: 0; }
-.finding-row.clear .finding-icon { color: var(--chip-icon); background: var(--chip-bg); }
+.finding-icon { display: grid; place-items: center; color: var(--warn-text); line-height: 0; }
+.finding-row.clear .finding-icon { color: var(--chip-icon); }
 
 /* =========================================================================
    Feature: duplicate / cleanup review
@@ -784,7 +784,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .merge-fields-head { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-2); }
 .merge-field { min-width: 0; margin: 0; padding: 0; border: 0; }
 .merge-field legend { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: var(--type-2); font-weight: var(--weight-bold); }
-.merge-field label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); margin-bottom: 6px; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, box-shadow .16s ease; }
+.merge-field label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); margin-bottom: 6px; border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); cursor: pointer; transition: background-color .16s ease, box-shadow .16s ease; }
 .merge-field label.active { background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
 .merge-field label span { display: grid; min-width: 0; gap: 2px; }
 .merge-field small { color: var(--text-muted); font-size: var(--type-2); }
@@ -814,7 +814,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .output-value code.placeholder { color: var(--text-faint); font-family: var(--font-ui); font-size: var(--type-3); font-weight: var(--weight-regular); letter-spacing: 0; }
 .output-buttons { display: flex; gap: var(--space-2); }
 .output-buttons .icon-button { background: var(--surface); }
-.strength-track { height: 4px; border-radius: 4px; background: var(--ring-track); overflow: hidden; }
+.strength-track { height: 4px; border-radius: var(--radius-sm); background: var(--ring-track); overflow: hidden; }
 .strength-track span { display: block; height: 100%; border-radius: inherit; background: var(--ok-text); transition: width .2s ease, background-color .2s ease; }
 .strength-track span.weak { background: var(--danger); }
 .strength-track span.fair { background: var(--warn-text); }
@@ -834,7 +834,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .generator-toggles button { display: flex; min-height: 44px; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-medium); text-align: left; transition: background-color .16s ease, color .16s ease; }
 .generator-toggles button:hover { background: var(--tint-hover); }
 .generator-toggles button.active { color: var(--accent-link); background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
-.toggle-check { display: grid; width: 17px; height: 17px; flex: none; place-items: center; border: 1px solid var(--border-input); border-radius: 5px; color: var(--on-accent); background: var(--surface); transition: background-color .16s ease, border-color .16s ease; }
+.toggle-check { display: grid; width: 17px; height: 17px; flex: none; place-items: center; border: 1px solid var(--border-input); border-radius: var(--radius-sm); color: var(--on-accent); background: var(--surface); transition: background-color .16s ease, border-color .16s ease; }
 .generator-toggles button.active .toggle-check { border-color: var(--accent); background: var(--accent); }
 .ambiguity-toggle, .setting-toggle { display: flex; width: 100%; align-items: center; gap: var(--space-3); margin-top: var(--space-4); border: 0; border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface-2); text-align: left; }
 .ambiguity-toggle:hover, .setting-toggle:hover { background: var(--tint-hover); }
@@ -940,19 +940,18 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-tabs button.active { color: var(--text-heading); background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
 .settings-panel .settings-groups { animation: view-enter .22s var(--ease-out) both; }
 .settings-group > h3 { margin: 0 0 var(--space-2); padding-left: var(--space-3); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-medium); letter-spacing: .02em; }
-.settings-list { --settings-row-indent: calc(36px + var(--space-4)); padding: var(--space-2) var(--space-4); border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); }
+.settings-list { padding: var(--space-2) var(--space-4); border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); }
 .view-header + .settings-tabs { margin-top: var(--space-5); }
 .settings-view article { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft); }
 .settings-view article:last-child { border-bottom: 0; }
 .settings-view article > div { flex: 1; min-width: 0; }
 .setting-copy { min-width: 0; }
-.settings-icon { display: grid; flex: none; width: 36px; height: 36px; place-items: center; border-radius: var(--radius-md); color: var(--chip-icon); background: var(--chip-bg); }
 .settings-manage { min-height: 34px; padding: 0 var(--space-4); }
 .diagnostic-actions { display: flex; flex: none !important; align-items: center; gap: var(--space-2); }
 /* Rows that reveal a panel below themselves: the panel is a full-width flex line
    of its own, so the copy column keeps its width instead of being crushed. */
 .settings-view article.settings-row-expandable { flex-wrap: wrap; }
-.settings-row-expandable > .diagnostics-detail { flex: 1 0 calc(100% - var(--settings-row-indent)); margin-left: var(--settings-row-indent); }
+.settings-row-expandable > .diagnostics-detail { flex: 1 0 100%; }
 /* Collapsed it is only a quiet toggle; the inset panel appears once it opens. */
 .diagnostics-detail { margin-top: var(--space-2); padding: 0; border: 0; border-radius: var(--radius-lg); background: transparent; }
 .diagnostics-detail[open] { margin-top: var(--space-3); padding: var(--space-4) var(--space-5); background: var(--surface-inset); }
@@ -1086,7 +1085,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .document-attachments { display: grid; gap: var(--space-2); }
 .document-attachments-label { font-weight: var(--weight-medium); }
 .document-attachments-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.document-attachments-list li { display: flex; align-items: center; gap: var(--space-2); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); background: var(--surface-inset); }
+.document-attachments-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); }
 .document-attachment-download { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; }
 .document-attachment-download:hover { text-decoration: underline; }
 .document-attachment-name { overflow: hidden; flex: 1; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
@@ -1158,7 +1157,6 @@ button.no-totp:hover { filter: brightness(.97); }
   .settings-groups { gap: var(--space-4); }
   .settings-list { padding: var(--space-1) var(--space-4); }
   .settings-view article { gap: var(--space-3); padding: var(--space-3) 0; }
-  .settings-icon { width: 32px; height: 32px; }
 }
 
 @media (max-width: 960px) {
@@ -1206,8 +1204,8 @@ button.no-totp:hover { filter: brightness(.97); }
    rule above hides these handles with the column they resize, and a Svelte
    scoped class would never be matched by it. */
 .panel-resizer { position: relative; width: var(--space-2); justify-self: stretch; border-radius: var(--radius-pill); background: transparent; cursor: col-resize; touch-action: none; transition: background-color var(--t-fast) ease; }
-.panel-resizer::after { content: ""; position: absolute; inset-block: 25%; left: 50%; width: 2px; transform: translateX(-50%); border-radius: var(--radius-pill); background: var(--border-soft); transition: background-color var(--t-fast) ease; }
-.panel-resizer:hover::after, .panel-resizer.dragging::after, .panel-resizer:focus-visible::after { background: var(--accent-link); }
+.panel-resizer::after { content: ""; position: absolute; inset-block: 0; left: 50%; width: 2px; transform: translateX(-50%); border-radius: var(--radius-pill); background: var(--accent-link); opacity: 0; transition: opacity var(--t-fast) ease; }
+.panel-resizer:hover::after, .panel-resizer.dragging::after, .panel-resizer:focus-visible::after { opacity: 1; }
 .panel-resizer:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* The shortcut reference in Settings. One source: WorkspaceShell exports the
@@ -1217,12 +1215,12 @@ button.no-totp:hover { filter: brightness(.97); }
 .shortcut-list > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .shortcut-list dt { color: var(--text-muted); font-size: var(--type-2); }
 .shortcut-list dd { display: flex; gap: 3px; margin: 0; }
-.shortcut-list kbd { display: grid; min-width: 21px; height: 21px; place-items: center; padding: 0 5px; border: 1px solid var(--border-soft); border-radius: 5px; color: var(--text-2); background: var(--surface); font-family: var(--font-ui); font-size: var(--type-1); font-weight: var(--weight-medium); line-height: 1; }
+.shortcut-list kbd { display: grid; min-width: 21px; height: 21px; place-items: center; padding: 0 5px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface); font-family: var(--font-ui); font-size: var(--type-1); font-weight: var(--weight-medium); line-height: 1; }
 
 /* The bulk delete confirmation lists what it is about to remove. A confirmation
    that names one login while removing several is worse than none. */
 .confirm-list { display: grid; gap: var(--space-2); max-height: 190px; margin: var(--space-3) 0 0; padding: 0; overflow-y: auto; list-style: none; text-align: left; }
-.confirm-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-2); background: var(--surface-inset); }
+.confirm-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); }
 .confirm-list strong { display: block; color: var(--text); font-size: var(--type-3); }
 .confirm-list span:not(.entry-avatar) { color: var(--text-muted); font-size: var(--type-2); }
 
@@ -1234,7 +1232,7 @@ button.no-totp:hover { filter: brightness(.97); }
 
 .trash-empty-icon { display: grid; place-items: center; color: var(--gold-text); background: var(--gold-soft-bg); border-radius: var(--radius-lg); }
 .trash-list { display: grid; gap: 0; margin: 0; border: 0; border-radius: var(--radius-lg); padding: 0; background: var(--surface); list-style: none; box-shadow: var(--shadow-raised); overflow: hidden; }
-.trash-row { display: flex; align-items: center; gap: var(--space-3); border-bottom: 1px solid var(--border-soft); border-radius: 0; padding: var(--space-2) var(--space-3); background: transparent; box-shadow: none; }
+.trash-row { display: flex; align-items: center; gap: var(--space-3); border-bottom: 1px solid var(--border-soft); border-radius: 0; padding: var(--space-3); background: transparent; box-shadow: none; }
 .trash-row:last-child { border-bottom: 0; }
 .trash-row-detail { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .trash-row-detail strong { color: var(--text); font-size: var(--type-3); }
@@ -1243,7 +1241,7 @@ button.no-totp:hover { filter: brightness(.97); }
 
 .history-empty-icon { display: grid; place-items: center; color: var(--gold-text); background: var(--gold-soft-bg); border-radius: var(--radius-lg); }
 .history-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.history-row { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); background: transparent; box-shadow: none; transition: background-color .15s ease; }
+.history-row { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-3); background: transparent; box-shadow: none; transition: background-color .15s ease; }
 .history-row:hover { background: var(--control-hover); }
 .history-row-detail { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .history-change { color: var(--text); font-size: var(--type-3); }
@@ -1266,7 +1264,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .add-item-options button { display: flex; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); color: var(--text); background: transparent; font-size: var(--type-2); text-align: left; cursor: pointer; }
 .add-item-options button:hover, .add-item-options button:focus-visible { color: var(--text-heading); background: var(--control-hover); }
 
-.tag-chip { display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 999px; padding: 3px 10px; color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); cursor: pointer; }
+.tag-chip { display: inline-flex; align-items: center; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: var(--radius-pill); padding: 3px 10px; color: var(--text-muted); background: var(--surface-inset); font-size: var(--type-1); cursor: pointer; }
 .tag-chip:hover { color: var(--accent-link); background: var(--tint); }
 .item-subtitle { color: var(--text-muted); }
 .credential-row-multiline { grid-template-columns: 132px minmax(0, 1fr) auto auto; align-items: start; padding-top: var(--space-3); }
@@ -1274,7 +1272,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .credential-row .credential-block { overflow: auto; max-height: 168px; color: var(--text); font-size: var(--type-3); line-height: 1.5; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere; }
 .item-notes { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; white-space: pre-wrap; }
 .attachment-list { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
-.attachment-list li { display: flex; align-items: center; gap: var(--space-2); border-radius: var(--radius-sm); padding: var(--space-2); color: var(--text); background: var(--surface-inset); font-size: var(--type-2); }
+.attachment-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface-inset); font-size: var(--type-2); }
 .attachment-list small { margin-left: auto; color: var(--text-faint); }
 .item-collection-row { display: flex; align-items: center; gap: var(--space-2); max-width: 480px; margin-top: var(--space-2); }
 .item-collection-row .sort-control { flex: 1; min-width: 0; }

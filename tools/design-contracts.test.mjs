@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
-import { TYPE_ALLOWLIST, block, contrastRatio, declarations, evaluateContrast, findLiteralTypeDeclarations } from './design-contracts.mjs'
+import { TYPE_ALLOWLIST, block, contrastRatio, declarations, evaluateContrast, findLiteralRadiusDeclarations, findLiteralTypeDeclarations } from './design-contracts.mjs'
 
 const repository = process.cwd()
 const appCss = path.join(repository, 'src', 'app.css')
@@ -70,4 +70,32 @@ test('lowering a measured token fails the contract', () => {
   assert.notEqual(lowered, css)
   const violations = evaluateContrast('light', new Map(declarations(block(lowered, /^:root \{/m))))
   assert.deepEqual(violations.map((entry) => entry.name), ['muted text on background', 'muted text on surface'])
+})
+
+test('a literal corner radius is a violation unless the allowlist covers it', () => {
+  const violations = findLiteralRadiusDeclarations([{ path: 'fixture.css', text: '.card { border-radius: 5px; }\n' }])
+  assert.equal(violations.length, 1)
+  assert.deepEqual(
+    findLiteralRadiusDeclarations([
+      { path: 'fixture.css', text: '.card { border-radius: var(--radius-md); }\n.circle { border-radius: 50%; }\n.flat { border-radius: 0; }\n' },
+    ]),
+    [],
+  )
+  assert.deepEqual(
+    findLiteralRadiusDeclarations(
+      [{ path: 'fixture.css', text: '.special { border-radius: 7px; }\n' }],
+      [{ selector: '.special', reason: 'fixture exemption' }],
+    ),
+    [],
+  )
+})
+
+test('the desktop stylesheet has no literal radius and a planted one fails', () => {
+  const real = readFileSync(appCss, 'utf8')
+  assert.deepEqual(findLiteralRadiusDeclarations([{ path: 'src/app.css', text: real }]), [])
+  const planted = real.replace('.empty-vault h3 {', '.empty-vault h3 { border-radius: 6px;')
+  assert.notEqual(planted, real)
+  const violations = findLiteralRadiusDeclarations([{ path: 'src/app.css', text: planted }])
+  assert.equal(violations.length, 1)
+  assert.equal(violations[0].value, '6px')
 })

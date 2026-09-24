@@ -282,7 +282,7 @@
     height: 18px;
     place-items: center;
     border: 1px solid var(--border-input);
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     color: var(--on-accent);
     background: var(--surface);
   }

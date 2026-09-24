@@ -292,7 +292,7 @@
   .primary-button {
     padding: 12px 18px;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     background: var(--accent);
     color: var(--on-accent);
     font-size: var(--type-2);
