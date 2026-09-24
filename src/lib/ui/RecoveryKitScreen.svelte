@@ -188,19 +188,19 @@
     align-items: center;
     gap: 10px;
     margin-bottom: 18px;
-    font-weight: 700;
+    font-weight: var(--weight-regular);
   }
   .sesame-mark { width: 28px; height: 28px; }
   .brand-progress { margin-left: auto; }
   .eyebrow {
     margin: 0 0 6px;
     font-size: var(--type-1);
-    font-weight: 700;
+    font-weight: var(--weight-bold);
     color: var(--eyebrow);
   }
   h1 {
     margin: 0 0 10px;
-    font-size: 22px;
+    font-size: var(--type-5);
     font-family: var(--font-display);
   }
   .lede {
@@ -223,7 +223,7 @@
   .recovery-code span {
     color: var(--accent-link);
     font-size: var(--type-4);
-    font-weight: 700;
+    font-weight: var(--weight-bold);
     letter-spacing: .1em;
   }
   .recovery-confirm {
@@ -231,7 +231,7 @@
     align-items: flex-start;
     gap: 10px;
     margin-bottom: 18px;
-    font-size: 13px;
+    font-size: var(--type-2);
     cursor: pointer;
   }
   .verify-groups {
@@ -242,7 +242,7 @@
   .verify-group {
     display: grid;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--type-2);
   }
   .verify-group input {
     padding: 10px;
@@ -250,7 +250,9 @@
     border-radius: var(--radius-sm);
     background: var(--bg);
     color: var(--text);
-    font: 16px/1.3 ui-monospace, monospace;
+    font-family: var(--font-code);
+    font-size: var(--type-3);
+    line-height: 1.3;
     text-transform: uppercase;
   }
   .verify-error {
@@ -259,7 +261,7 @@
     border-radius: var(--radius-sm);
     background: var(--danger-tint);
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--type-2);
   }
   .text-button {
     justify-self: start;
@@ -270,7 +272,7 @@
     background: var(--surface-inset);
     color: var(--accent-link);
     font-size: var(--type-2);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     cursor: pointer;
   }
   .text-button:hover:not(:disabled) { background: var(--tint); }
@@ -284,7 +286,7 @@
   }
   .save-status {
     margin: -4px 0 14px;
-    font-size: 12px;
+    font-size: var(--type-2);
     color: var(--text-muted);
   }
   .primary-button {
@@ -293,7 +295,8 @@
     border-radius: 10px;
     background: var(--accent);
     color: var(--on-accent);
-    font-weight: 600;
+    font-size: var(--type-2);
+    font-weight: var(--weight-medium);
     cursor: pointer;
   }
   .primary-button:disabled {
@@ -303,7 +306,7 @@
   .full { width: 100%; }
   .tiny-note {
     margin: 12px 0 0;
-    font-size: 12px;
+    font-size: var(--type-2);
     color: var(--text-muted);
   }
 </style>

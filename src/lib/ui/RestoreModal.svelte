@@ -25,7 +25,6 @@
   <ModalShell onClose={() => !restoringBackup && onClose()} labelledby="restore-heading" tone="restore" modalClass="restore-modal" initialFocus={focusSecret} ariaBusy={restoringBackup}>
       <button type="button" class="modal-close" disabled={restoringBackup} on:click={onClose} aria-label="Close restore">×</button>
       <span class="restore-icon"><Icon name="refresh" size={22} /></span>
-      <p class="eyebrow">Restore encrypted backup</p>
       <h2 id="restore-heading">{formatCopy.canRestore ? (replacesVault ? 'Replace the current vault?' : 'Restore this backup?') : 'Sesame cannot restore this backup.'}</h2>
       <div class="restore-file"><Icon name="archive" size={17} /><div><strong>{restoreSelection.fileName}</strong><span>{formatCopy.label}</span></div></div>
       <p class="restore-format-detail">{formatCopy.detail}</p>
@@ -47,6 +46,6 @@
 {/if}
 
 <style>
-  .restore-format-detail { margin: var(--space-3) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
-  .restore-next-action { margin: var(--space-2) 0 0; color: var(--text); font-size: var(--type-2); line-height: 1.5; }
+  .restore-format-detail { margin: var(--space-3) 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
+  .restore-next-action { margin: var(--space-2) 0 0; color: var(--text); font-size: var(--type-3); line-height: 1.5; }
 </style>

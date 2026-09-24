@@ -27,7 +27,6 @@
 
 <ModalShell open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
-  <p class="eyebrow">Fill card in browser</p>
   <h2 id="browser-card-heading">Fill {request.hostname}?</h2>
   <p id="browser-card-description">Choose a saved card. Every card fill needs this confirmation, and Sesame does not submit the form.</p>
   <div class="browser-fill-origin"><Icon name="shield" size={15} /><span>Requesting page</span><code>{request.origin}</code></div>
