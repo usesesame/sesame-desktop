@@ -1336,7 +1336,6 @@ mod grant_tests {
             .publish(&approval_id, ApprovalEvent::Fill(event))
             .expect("publish");
         assert!(state.pending_fill_request().is_some());
-        // A save poll must not pick up a fill prompt.
         assert!(state.pending_save_request().is_none());
 
         state

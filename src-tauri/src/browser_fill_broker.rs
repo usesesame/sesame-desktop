@@ -1,8 +1,3 @@
-// The browser approval broker: one pending request, one lifecycle. Protocol
-// dispatch lives in `browser_fill.rs`; this module owns the wait, decision,
-// binding, and secret lifetime for whatever prompt is waiting.
-
-/// What one pending approval is for. Exactly one approval may wait at a time.
 enum ApprovalRequest {
     Fill {
         candidate_ids: HashSet<String>,
@@ -33,7 +28,6 @@ impl ApprovalRequest {
     }
 }
 
-/// The four prompts share one lifecycle; only the event and diagnostic names differ.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ApprovalKind {
     Fill,
@@ -80,8 +74,6 @@ impl ApprovalKind {
     }
 }
 
-/// What the renderer decided. `Saved` approves the save prompt; `Selected`
-/// names the vault item the user chose for the other prompts.
 enum ApprovalDecision {
     Denied,
     InvalidSelection,
@@ -89,7 +81,6 @@ enum ApprovalDecision {
     Saved,
 }
 
-/// The prompt the renderer reads while the approval waits.
 enum ApprovalEvent {
     Fill(BrowserFillRequestEvent),
     Save(BrowserSaveRequestEvent),
@@ -304,8 +295,6 @@ impl BrowserFillState {
         Ok(())
     }
 
-    /// One decision path for every prompt. A selection outside the offered set
-    /// is refused and consumes the approval, exactly like a denial.
     fn decide(
         &self,
         approval_id: &str,
