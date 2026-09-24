@@ -10,9 +10,6 @@ export const RELEASE_VISIBILITY_PUBLISHED = 'published'
 const sha256Pattern = /^[0-9a-f]{64}$/
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/
 
-// An unsigned installer must stay an unpublished draft until Authenticode
-// signing exists and a maintainer publishes the release deliberately. An
-// unset or unknown value therefore resolves to the draft policy, not to public.
 export function parseReleaseVisibility(value) {
   if (value === undefined || value === null || value === '' || value === RELEASE_VISIBILITY_DRAFT) {
     return RELEASE_VISIBILITY_DRAFT
@@ -143,9 +140,6 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
     }
   }
   const conflicts = []
-  // A draft under the public policy has no recorded decision to publish it, so
-  // the run stops instead of publishing or overwriting it. A published release
-  // under the draft policy is a deliberate post-approval state; retries converge.
   if (release.isDraft && visibility === RELEASE_VISIBILITY_PUBLISHED) {
     conflicts.push('The existing release is a draft: publish or delete it deliberately before this job can converge.')
   }

@@ -207,8 +207,6 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      # REL-06: both lanes write one release per tag; it stays an unpublished
-      # draft until Authenticode signing exists and a maintainer publishes it.
       SESAME_RELEASE_VISIBILITY: draft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

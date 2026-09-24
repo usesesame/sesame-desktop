@@ -325,8 +325,6 @@ jobs:
     permissions:
       contents: write
     env:
-      # REL-06: the unsigned installer stays an unpublished draft until BASE-02
-      # Authenticode signing exists and a maintainer publishes the release.
       SESAME_RELEASE_VISIBILITY: draft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -403,9 +401,6 @@ jobs:
           } > release-notes.md
           node tools/reconcile-github-release.mjs release-handoff public-release-evidence "$MANIFEST" "$(ls release-handoff/*.candidate.json)" release-notes.md
 
-      # A tag must not publish an unsigned installer or updater manifest. The
-      # draft state and anonymous 404s are checked here, before the candidate is
-      # submitted, so a signing policy change has to update this step too.
       - name: Prove the release stays unpublished until signing
         env:
           GH_TOKEN: ${{ github.token }}
