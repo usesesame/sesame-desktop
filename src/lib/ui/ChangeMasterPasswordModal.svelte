@@ -37,7 +37,7 @@
 >
   {#if showingRecoveryKit}
     <span class="confirm-icon"><Icon name="file-key" size={20} /></span>
-    <h2 id="change-master-password-heading">Save this new kit.</h2>
+    <h2 id="change-master-password-heading">Save this new kit</h2>
     <p id="change-master-password-description">Your vault now uses a new encryption key. Your old recovery kit no longer opens it. PIN and Windows Hello unlock were turned off and can be enabled again after you save this new kit.</p>
     <code class="recovery-code">{recoveryKit}</code>
     <label class="recovery-confirm"><input name="replacement-recovery-kit-saved" type="checkbox" bind:checked={recoveryConfirmed} /> <span>I saved this outside Sesame.</span></label>

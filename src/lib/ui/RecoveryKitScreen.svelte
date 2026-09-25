@@ -109,7 +109,7 @@
     <div class="brand"><img class="sesame-mark" src="/favicon.svg" alt="" width="512" height="512" /><span>Sesame</span><span class="brand-progress"><SetupProgress step={2} /></span></div>
     <p class="eyebrow">Recovery kit</p>
     <h1 bind:this={heading} id="recovery-kit-heading" tabindex="-1">
-      {verifyMode ? 'Verify your kit' : 'Write this down.'}
+      {verifyMode ? 'Verify your kit' : 'Write this down'}
     </h1>
     <p id="recovery-kit-description" class="lede">
       {#if verifyMode}

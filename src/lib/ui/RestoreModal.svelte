@@ -25,7 +25,7 @@
   <ModalShell onClose={() => !restoringBackup && onClose()} labelledby="restore-heading" tone="restore" modalClass="restore-modal" initialFocus={focusSecret} ariaBusy={restoringBackup}>
       <button type="button" class="modal-close" disabled={restoringBackup} on:click={onClose} aria-label="Close restore">×</button>
       <span class="restore-icon"><Icon name="refresh" size={22} /></span>
-      <h2 id="restore-heading">{formatCopy.canRestore ? (replacesVault ? 'Replace the current vault?' : 'Restore this backup?') : 'Sesame cannot restore this backup.'}</h2>
+      <h2 id="restore-heading">{formatCopy.canRestore ? (replacesVault ? 'Replace the current vault?' : 'Restore this backup?') : 'Sesame cannot restore this backup'}</h2>
       <div class="restore-file"><Icon name="archive" size={17} /><div><strong>{restoreSelection.fileName}</strong><span>{formatCopy.label}</span></div></div>
       <p class="restore-format-detail">{formatCopy.detail}</p>
       {#if formatCopy.canRestore}
