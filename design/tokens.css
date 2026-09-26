@@ -43,6 +43,10 @@
   --type-5: 1.5rem;    /* 24px */
   --type-6: 1.875rem;  /* 30px */
 
+  --weight-regular: 400;
+  --weight-medium: 550;
+  --weight-bold: 650;
+
   /* ---- Spacing ---------------------------------------------------------- */
   --space-1: 0.25rem; /* 4px */
   --space-2: 0.5rem;  /* 8px */

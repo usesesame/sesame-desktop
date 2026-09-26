@@ -2,6 +2,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { findLiteralTypeDeclarations } from './design-contracts.mjs'
+
 // design/tokens.css is canonical here and has no downstream copies to keep in
 // step: the website, the account and admin portals, and the browser extension
 // each own their snapshot in their own repository. What remains worth checking
@@ -281,6 +283,13 @@ for (const line of appLines) {
 if (sidebar.length) fail('these sidebar rules bypass the navigation surface tokens', sidebar)
 for (const name of ['--sidebar-hover', '--sidebar-active-layer', '--sidebar-active-top', '--sidebar-active-lift']) {
   if (!appCss.includes(`${name}:`)) fail('a sidebar token is missing', [`${name} is not declared in src/app.css`])
+}
+
+const literalType = findLiteralTypeDeclarations(
+  files.map((file) => ({ path: relative(root, file), text: readFileSync(file, 'utf8') })),
+)
+if (literalType.length) {
+  fail('a literal type value bypasses the shared scale', literalType.map((entry) => `${entry.path}: ${entry.selector} { ${entry.property}: ${entry.value} }`))
 }
 
 console.log(`design tokens: design/tokens.css is well formed, ${light.size} tokens in the light block; ${files.length} desktop sources use only defined tokens`)

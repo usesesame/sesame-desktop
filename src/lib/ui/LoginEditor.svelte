@@ -165,7 +165,7 @@
 >
   <form on:submit|preventDefault={() => onSubmit(totpEntered)} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{loginDraft.id ? 'Saved login' : 'New login'}</p><h2 id="login-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="login-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingLogin} on:click={requestClose} aria-label="Close login editor">×</button>
   </header>
 

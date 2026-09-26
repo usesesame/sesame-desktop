@@ -333,13 +333,13 @@
   .sync-note {
     margin: var(--space-2) 0 0;
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
     line-height: 1.5;
   }
   .sync-done {
     margin: var(--space-2) 0 0;
     color: var(--ok-text, var(--accent-link));
-    font-size: var(--type-1);
+    font-size: var(--type-2);
     line-height: 1.5;
   }
 
@@ -365,12 +365,12 @@
   }
   .sync-own-code strong {
     color: var(--text-heading);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
   }
   .sync-own-code p {
     margin: 0;
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
     line-height: 1.5;
   }
   .sync-own-code code {
@@ -404,7 +404,7 @@
     flex: 1;
     min-width: 0;
     color: var(--text);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -412,6 +412,6 @@
   .sync-device-state {
     flex: none;
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
   }
 </style>
