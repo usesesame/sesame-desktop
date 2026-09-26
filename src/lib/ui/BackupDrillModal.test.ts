@@ -48,7 +48,7 @@ function renderDrill(overrides: Record<string, unknown> = {}) {
 test('an empty drill starts with the file choice', async () => {
   renderDrill()
   await Promise.resolve()
-  expect(screen.getByRole('heading', { name: 'Prove your backup opens.' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Prove your backup opens' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Choose backup' })).toBeTruthy()
 })
 

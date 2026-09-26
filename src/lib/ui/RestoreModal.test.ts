@@ -48,7 +48,7 @@ test('an older backup explains the upgrade and that the selected file stays unch
 test('a newer backup names the update action and offers no restore form', async () => {
   renderRestore('newer')
   await Promise.resolve()
-  expect(screen.getByRole('heading', { name: 'Sesame cannot restore this backup.' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Sesame cannot restore this backup' })).toBeTruthy()
   expect(screen.getByText('Update Sesame, then choose this file again.')).toBeTruthy()
   expect(screen.queryByLabelText("This backup's master password or recovery kit")).toBeNull()
   expect(screen.queryByRole('button', { name: 'Restore backup' })).toBeNull()

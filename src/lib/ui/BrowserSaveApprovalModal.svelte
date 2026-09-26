@@ -42,7 +42,6 @@
   ariaBusy={working}
 >
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
-  <p class="eyebrow">{isUpdate ? 'Update from browser' : 'Save from browser'}</p>
   <h2 id="browser-save-heading">{isUpdate ? 'Update this login?' : 'Save this login?'}</h2>
   <p id="browser-save-description">
     {#if isUpdate}

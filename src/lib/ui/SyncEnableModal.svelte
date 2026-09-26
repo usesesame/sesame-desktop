@@ -55,7 +55,7 @@
 <style>
   .sync-unsafe {
     color: var(--danger);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
   }
 
   .sync-facts {
@@ -69,7 +69,7 @@
     position: relative;
     padding-left: var(--space-5);
     color: var(--text-2);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
     line-height: 1.5;
   }
   .sync-facts li::before {

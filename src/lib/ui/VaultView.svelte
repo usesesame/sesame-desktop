@@ -333,7 +333,7 @@
 {#if !allItems.length}
   <section class="empty-workspace">
     <img class="empty-brand size-md" src="/favicon.svg" alt="" width="512" height="512" />
-    <h2>Bring in your logins.</h2>
+    <h2>Bring in your logins</h2>
     <p>Import an export from another password manager. Sesame reads it on this device.</p>
     <button class="primary-button" on:click={onImport}>Choose export file</button>
     <button class="text-button empty-add" on:click={() => onOpenNewLogin()}>Add a login instead</button>
@@ -455,7 +455,7 @@
           {/each}
         </div>
       {:else}
-        <div class="empty-vault"><Icon name="search" size={24} /><h3>No matching items.</h3><p>Try another search, category, or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show everything</button></div>
+        <div class="empty-vault"><Icon name="search" size={24} /><h3>No matching items</h3><p>Try another search, category, or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show everything</button></div>
       {/if}
     </section>
 
@@ -497,7 +497,7 @@
             onShowTag={(tag) => onShowCollection(tagFilter(tag))}
           />
         {:else}
-          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item.'}</h2><p>Its details will appear here.</p></div>
+          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item'}</h2><p>Its details will appear here.</p></div>
         {/if}
       {:else if $vault.loginCard}
         {@const loginCard = $vault.loginCard}
@@ -597,7 +597,7 @@
           </section>
         {/if}
       {:else}
-        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item.</h2><p>Its details will appear here.</p></div>
+        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item</h2><p>Its details will appear here.</p></div>
       {/if}
     </section>
 

@@ -164,7 +164,7 @@
     color: var(--text-heading);
     font-family: var(--font-display);
     font-size: var(--type-4);
-    font-weight: 500;
+    font-weight: var(--weight-regular);
     letter-spacing: -.02em;
     line-height: 1.25;
   }
@@ -175,7 +175,7 @@
   .empty-state p {
     margin-top: var(--space-1);
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-3);
     line-height: 1.45;
   }
 
@@ -216,9 +216,9 @@
   .group-copy,
   .entry-copy { display: grid; min-width: 0; gap: 2px; }
   .group-copy strong,
-  .entry-copy strong { overflow: hidden; color: var(--text); font-size: var(--type-2); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+  .entry-copy strong { overflow: hidden; color: var(--text); font-size: var(--type-3); font-weight: var(--weight-bold); text-overflow: ellipsis; white-space: nowrap; }
   .group-copy small,
-  .entry-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
+  .entry-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
 
   .review-header {
     display: flex;
@@ -229,8 +229,8 @@
   }
 
   .review-header > div { min-width: 0; }
-  .review-header > div > p:last-child { max-width: 540px; margin-top: var(--space-2); font-size: var(--type-2); }
-  .context-label { margin-bottom: var(--space-1); color: var(--text-muted); font-size: var(--type-1); font-weight: 700; }
+  .review-header > div > p:last-child { max-width: 540px; margin-top: var(--space-2); font-size: var(--type-3); }
+  .context-label { margin-bottom: var(--space-1); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-bold); }
 
   .selection-count {
     flex: none;
@@ -239,7 +239,7 @@
     color: var(--accent-link);
     background: var(--tint);
     font-size: var(--type-1);
-    font-weight: 700;
+    font-weight: var(--weight-bold);
   }
 
   .review-entry-list {
@@ -282,7 +282,7 @@
     height: 18px;
     place-items: center;
     border: 1px solid var(--border-input);
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
     color: var(--on-accent);
     background: var(--surface);
   }
@@ -298,10 +298,10 @@
     color: var(--accent-link);
     background: var(--chip-bg);
     font-size: var(--type-2);
-    font-weight: 750;
+    font-weight: var(--weight-bold);
   }
 
-  .entry-copy span { color: var(--warn-text); font-size: var(--type-1); }
+  .entry-copy span { color: var(--warn-text); font-size: var(--type-2); }
 
   .entry-actions { display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-3); }
   .entry-actions button {
@@ -311,8 +311,8 @@
     padding: 0 var(--space-2);
     color: var(--accent-link);
     background: transparent;
-    font-size: var(--type-1);
-    font-weight: 700;
+    font-size: var(--type-2);
+    font-weight: var(--weight-bold);
   }
   .entry-actions button:hover { background: var(--tint); }
   .entry-actions .delete-action { color: var(--danger); }
@@ -329,7 +329,7 @@
     background: var(--surface-2);
   }
 
-  .review-footer p { color: var(--text-muted); font-size: var(--type-1); }
+  .review-footer p { color: var(--text-muted); font-size: var(--type-2); }
   .merge-button {
     display: inline-flex;
     min-height: 38px;
@@ -342,7 +342,7 @@
     color: var(--on-accent);
     background: var(--accent);
     font-size: var(--type-2);
-    font-weight: 700;
+    font-weight: var(--weight-bold);
   }
   .merge-button:hover:not(:disabled) { background: var(--accent-hover); }
   .merge-button:disabled { cursor: not-allowed; opacity: .5; }
@@ -368,7 +368,7 @@
     border-radius: 50%;
     background: var(--ok-bg);
   }
-  .empty-state strong { color: var(--text); font-size: var(--type-2); }
+  .empty-state strong { color: var(--text); font-size: var(--type-3); }
   .review-empty { color: var(--chip-icon); }
   .review-empty h2 { margin-top: var(--space-3); }
 
