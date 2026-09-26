@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { issueChipLabel, issueChips, issueFilterLabel, issueKindLabels } from '../issue-kinds'
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
@@ -15,6 +15,7 @@
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { PANEL_WIDTH_LIMITS, readPanelWidths, storePanelWidths } from '../preferences'
+  import { NARROW_LAYOUT_QUERY, paneGridTemplate } from '../vault-layout'
 
   export let allItems: VaultItem[] = []
   export let visibleItems: VaultItem[] = []
@@ -122,6 +123,16 @@
   const commitPanelWidths = () => storePanelWidths(panelWidths)
   let pane: VaultPane = $selection.activeItemId ? 'detail' : 'list'
   let lastActiveItemId = $selection.activeItemId
+
+  let wideLayout = !window.matchMedia(NARROW_LAYOUT_QUERY).matches
+  $: layoutStyle = paneGridTemplate(panelWidths.list, wideLayout)
+
+  onMount(() => {
+    const query = window.matchMedia(NARROW_LAYOUT_QUERY)
+    const update = () => (wideLayout = !query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
 
   $: if ($selection.activeItemId !== lastActiveItemId) {
     lastActiveItemId = $selection.activeItemId
@@ -328,7 +339,7 @@
     <button class="text-button empty-add" on:click={() => onOpenNewLogin()}>Add a login instead</button>
   </section>
 {:else}
-  <div class="vault-layout pane-{pane}" style="--vault-list-width: {panelWidths.list}px;">
+  <div class="vault-layout pane-{pane}" style={layoutStyle}>
     <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
         <div>
