@@ -43,6 +43,30 @@ test('the documented allowlist covers the wordmark and glyphs only', () => {
   assert.deepEqual(violations, [])
 })
 
+test('the allowlist matches the selector itself, not a substring or a selector list', () => {
+  const violations = findLiteralTypeDeclarations([
+    { path: 'fixture.css', text: '.brandish { font-size: 14px; }\n' },
+    { path: 'fixture.css', text: '.brand, .entry-title { font-size: 14px; }\n' },
+    { path: 'fixture.css', text: '.sidebar .brand { font-size: 19px; }\n' },
+  ])
+  assert.deepEqual(violations.map((entry) => entry.selector), ['.brandish', '.brand, .entry-title'])
+})
+
+test('comments cannot hide or invent a declaration', () => {
+  const violations = findLiteralTypeDeclarations([
+    { path: 'fixture.css', text: '.card { /* note */ font-size: 14px; }\n' },
+    { path: 'fixture.css', text: '/* .card { font-size: 14px; } */\n.card { font-size: var(--type-1); }\n' },
+  ])
+  assert.deepEqual(violations.map((entry) => entry.value), ['14px'])
+})
+
+test('a numeric weight with a priority suffix is still a violation', () => {
+  const violations = findLiteralTypeDeclarations([
+    { path: 'fixture.css', text: '.card { font-weight: 600 !important; }\n' },
+  ])
+  assert.deepEqual(violations.map((entry) => entry.property), ['font-weight'])
+})
+
 test('the desktop stylesheet passes and a planted literal fails', () => {
   const real = readFileSync(appCss, 'utf8')
   assert.deepEqual(findLiteralTypeDeclarations([{ path: 'src/app.css', text: real }]), [])
