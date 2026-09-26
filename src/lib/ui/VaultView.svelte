@@ -516,7 +516,7 @@
               {#if activePasswordIssues.length}
                 {#each activePasswordIssues as issue (issue.kind)}<p>{issue.explanation}</p>{/each}
                 <span class="password-score"><span class="password-score-track"><span class="password-score-fill" style="width: {selectedEntry.passwordScore}%"></span></span>Password score {selectedEntry.passwordScore}/100</span>
-                <p>Sesame opens the site. The browser helper fills your current password and creates a new one; save the update after the site accepts it.</p>
+                <p>Sesame opens the site. Choose Change password in the browser helper to fill your current password and a generated one; save the update after the site accepts it.</p>
               {:else if activeIssue === 'duplicate'}<p>Compare matching records and keep the values you trust.</p>
               {:else if activeIssue === 'url'}<p>Add the sign-in page so Sesame can open and match this login.</p>
               {:else if activeIssue === 'totp'}<p>Add the site's authenticator secret if it supports app-based 2FA.</p>
