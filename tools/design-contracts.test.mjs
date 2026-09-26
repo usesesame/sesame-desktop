@@ -3,10 +3,18 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
-import { TYPE_ALLOWLIST, findLiteralTypeDeclarations } from './design-contracts.mjs'
+import { TYPE_ALLOWLIST, block, contrastRatio, declarations, evaluateContrast, findLiteralTypeDeclarations } from './design-contracts.mjs'
 
 const repository = process.cwd()
 const appCss = path.join(repository, 'src', 'app.css')
+const tokens = path.join(repository, 'design', 'tokens.css')
+
+function palettes() {
+  const css = readFileSync(tokens, 'utf8')
+  const light = declarations(block(css, /^:root \{/m))
+  const dark = declarations(block(css, /^:root\[data-theme="dark"\] \{/m))
+  return { css, light, dark }
+}
 
 test('a literal font size, weight, or shorthand is a violation', () => {
   const violations = findLiteralTypeDeclarations([
@@ -67,4 +75,23 @@ test('the desktop stylesheet passes and a planted literal fails', () => {
   const violations = findLiteralTypeDeclarations([{ path: 'src/app.css', text: planted }])
   assert.equal(violations.length, 1)
   assert.equal(violations[0].value, '14px')
+})
+
+test('contrast ratio uses the WCAG relative luminance', () => {
+  assert.equal(contrastRatio('#000000', '#ffffff').toFixed(2), '21.00')
+  assert.equal(contrastRatio('#ffffff', '#ffffff'), 1)
+})
+
+test('the real tokens clear every named contrast pair in both themes', () => {
+  const { light, dark } = palettes()
+  assert.deepEqual(evaluateContrast('light', new Map(light)), [])
+  assert.deepEqual(evaluateContrast('dark', new Map([...light, ...dark])), [])
+})
+
+test('lowering a measured token fails the contract', () => {
+  const { css } = palettes()
+  const lowered = css.replace('--text-muted: #5d695e;', '--text-muted: #9aa595;')
+  assert.notEqual(lowered, css)
+  const violations = evaluateContrast('light', new Map(declarations(block(lowered, /^:root \{/m))))
+  assert.deepEqual(violations.map((entry) => entry.name), ['muted text on background', 'muted text on surface'])
 })
