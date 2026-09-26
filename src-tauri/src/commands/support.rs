@@ -115,7 +115,7 @@ fn save_new_login(
         url: payload.origin,
         username: payload.username,
         email: String::new(),
-        password: payload.password,
+        password: payload.password.to_string(),
         folder: String::new(),
         folder_id: None,
         totp: None,
@@ -196,7 +196,7 @@ fn save_login_update(
         return Err("That saved login no longer exists.".to_string());
     };
     let previous = existing.clone();
-    existing.password = payload.password;
+    existing.password = payload.password.to_string();
     existing.updated_at = unix_timestamp();
     existing.revision = existing.revision.saturating_add(1);
     crate::vault::history::capture_history(&mut next_payload, TaggedItem::Login(previous));
