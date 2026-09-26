@@ -63,7 +63,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{recordDraft.id ? 'Saved record' : 'New record'}</p><h2 id="custom-record-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="custom-record-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingRecord} on:click={requestClose} aria-label="Close record editor">×</button>
   </header>
 

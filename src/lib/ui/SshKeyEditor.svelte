@@ -78,7 +78,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{keyDraft.id ? 'Saved key' : 'New key'}</p><h2 id="ssh-key-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="ssh-key-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingKey} on:click={requestClose} aria-label="Close key editor">×</button>
   </header>
 

@@ -63,6 +63,8 @@
     "tools/publish-linux-release.mjs",
     "tools/verify-linux-release-evidence.mjs",
     "tools/linux-release-contracts.test.mjs",
+    "tools/design-contracts.mjs",
+    "tools/design-contracts.test.mjs",
     "tools/design-tokens.mjs",
     "tools/create-static-update-manifest.mjs",
     "tools/create-static-update-manifest.test.mjs",

@@ -8,11 +8,14 @@ import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, fileSha256, rele
 import {
   LATEST_MANIFEST_FILENAME,
   RELEASE_SET_DIGEST_LABEL,
+  RELEASE_VISIBILITY_DRAFT,
+  RELEASE_VISIBILITY_PUBLISHED,
   assertCandidateMatchesAssets,
   collectPublishAssets,
   interpretCandidateSubmission,
   latestReceiptBindsInstaller,
   linuxLaneAssetPatterns,
+  parseReleaseVisibility,
   planReleasePublication,
   windowsLaneAssetPatterns,
 } from './release-publish-reconcile.mjs'
@@ -204,8 +207,13 @@ test('conflicting digests, sizes, extra assets, and drafts stop the run before a
     })
     assert.ok(extra.conflicts.some((line) => line.includes('release-token.env')))
 
-    const draft = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { isDraft: true }), expectedAssets: value.assets, setDigest })
-    assert.ok(draft.conflicts.some((line) => line.includes('draft')))
+    const publicDraft = planReleasePublication({
+      release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { isDraft: true }),
+      expectedAssets: value.assets,
+      setDigest,
+      visibility: RELEASE_VISIBILITY_PUBLISHED,
+    })
+    assert.ok(publicDraft.conflicts.some((line) => line.includes('draft')))
 
     const anchorTolerated = planReleasePublication({ release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { body: `older notes without the anchor\n` }), expectedAssets: value.assets, setDigest })
     assert.equal(anchorTolerated.action, 'conflict')
@@ -214,6 +222,51 @@ test('conflicting digests, sizes, extra assets, and drafts stop the run before a
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
   }
+})
+
+test('the draft policy converges an unpublished release and reports its state', async () => {
+  const value = await publishFixture()
+  try {
+    const complete = planReleasePublication({
+      release: releaseWith(value.assets.map((asset) => remoteAsset(asset)), { isDraft: true }),
+      expectedAssets: value.assets,
+      setDigest,
+    })
+    assert.equal(complete.action, 'complete')
+    assert.equal(complete.draft, true)
+    assert.deepEqual(complete.conflicts, [])
+
+    const resumed = planReleasePublication({
+      release: releaseWith([], { isDraft: true }),
+      expectedAssets: value.assets,
+      setDigest,
+    })
+    assert.equal(resumed.action, 'resume')
+    assert.equal(resumed.draft, true)
+
+    const published = planReleasePublication({
+      release: releaseWith(value.assets.map((asset) => remoteAsset(asset))),
+      expectedAssets: value.assets,
+      setDigest,
+    })
+    assert.equal(published.action, 'complete')
+    assert.equal(published.draft, false)
+
+    const created = planReleasePublication({ release: null, expectedAssets: value.assets, setDigest })
+    assert.equal(created.action, 'create')
+    assert.equal(created.draft, true)
+  } finally {
+    await rm(value.evidence.root, { recursive: true, force: true })
+    await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('release visibility fails closed to draft and rejects unknown values', () => {
+  assert.equal(parseReleaseVisibility(undefined), RELEASE_VISIBILITY_DRAFT)
+  assert.equal(parseReleaseVisibility(''), RELEASE_VISIBILITY_DRAFT)
+  assert.equal(parseReleaseVisibility('draft'), RELEASE_VISIBILITY_DRAFT)
+  assert.equal(parseReleaseVisibility('published'), RELEASE_VISIBILITY_PUBLISHED)
+  assert.throws(() => parseReleaseVisibility('public'), /Unknown release visibility/)
 })
 
 test('the counterpart lane shares the release without weakening asset checks', () => {

@@ -43,6 +43,10 @@
   --type-5: 1.5rem;    /* 24px */
   --type-6: 1.875rem;  /* 30px */
 
+  --weight-regular: 400;
+  --weight-medium: 550;
+  --weight-bold: 650;
+
   /* ---- Spacing ---------------------------------------------------------- */
   --space-1: 0.25rem; /* 4px */
   --space-2: 0.5rem;  /* 8px */
@@ -77,7 +81,7 @@
   --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
   --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
   --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
-  --border-input: #d9ddd5;
+  --border-input: #878e85;
 
   /* ---- Fields ----------------------------------------------------------- */
   --field-bg: var(--surface-inset);
@@ -90,9 +94,9 @@
   --text-heading: #273329;
   --text: #334136;
   --text-2: #536154;
-  --text-muted: #667267;
+  --text-muted: #5d695e;
   --text-faint: #677166;
-  --eyebrow: #667463;
+  --eyebrow: #5f6c5d;
 
   /* ---- Green accent --accent is the button; --accent-link stays readable as text. */
   --accent: #2e4735;
@@ -210,7 +214,7 @@
     --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
     --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
     --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
-    --border-input: #3b3729;
+    --border-input: #666d60;
 
     --text-heading: #e9efe1;
     --text: #d2dac8;
@@ -304,7 +308,7 @@
   --border: color-mix(in srgb, var(--text-faint) 34%, var(--surface));
   --border-strong: color-mix(in srgb, var(--text-faint) 46%, var(--surface));
   --border-soft: color-mix(in srgb, var(--text-faint) 20%, var(--surface));
-  --border-input: #3b3729;
+  --border-input: #666d60;
 
   --text-heading: #e9efe1;
   --text: #d2dac8;

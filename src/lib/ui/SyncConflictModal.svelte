@@ -97,21 +97,21 @@
   .sync-conflict-head {
     color: var(--text-heading);
     font-size: var(--type-3);
-    font-weight: 650;
+    font-weight: var(--weight-bold);
   }
   .sync-conflict-meta {
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
   }
   .sync-conflict-count {
     margin-top: var(--space-2);
     color: var(--text-2);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
   }
   .sync-warning {
     margin: 0;
     color: var(--warn-text);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
     line-height: 1.5;
   }
   @media (max-width: 560px) {

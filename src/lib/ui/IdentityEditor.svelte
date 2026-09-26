@@ -49,7 +49,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{identityDraft.id ? 'Saved identity' : 'New identity'}</p><h2 id="identity-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="identity-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingIdentity} on:click={requestClose} aria-label="Close identity editor">×</button>
   </header>
 

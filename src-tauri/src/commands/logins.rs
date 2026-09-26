@@ -8,12 +8,14 @@ use crate::vault::imports::{entry_from_input, resolved_totp};
 use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for};
 use crate::vault::storage::{
     commit_payload_change, materialize_entry_folder, payload_with_item_favourite,
-    payload_with_item_folder_id, payload_with_recorded_item_use, payload_without_login,
+    payload_with_item_folder_id, payload_with_recorded_item_use, payload_with_saved_login,
+    payload_without_login,
 };
 use crate::vault::trash::trash_item;
+use crate::vault::util::unix_timestamp;
 use crate::vault::{
     DeleteLoginResult, LoginInput, MergeComparison, MergeDuplicateLoginsRequest,
-    MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, VaultEntry, VaultPayload, VaultResult,
+    MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, VaultPayload, VaultResult,
     VaultSnapshot, VaultState,
 };
 
@@ -196,6 +198,10 @@ pub fn refresh_totp(
 
 #[tauri::command]
 pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResult<SaveLoginResult> {
+    save_login_in_state(input, &state)
+}
+
+fn save_login_in_state(input: LoginInput, state: &VaultState) -> VaultResult<SaveLoginResult> {
     let totp_input = input.totp.clone();
     let mut entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
@@ -211,31 +217,24 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
     materialize_entry_folder(&mut next_payload, &mut entry)?;
     if let Some(existing) = next_payload
         .entries
-        .iter_mut()
+        .iter()
         .find(|saved| saved.id == entry_id)
     {
         let previous = existing.clone();
         let mut updated = entry;
-        updated.created_at = if existing.created_at > 0 {
-            existing.created_at
+        updated.created_at = if previous.created_at > 0 {
+            previous.created_at
         } else {
             updated.created_at
         };
-        updated.import_source = existing.import_source.clone();
-        updated.legacy_fields = existing.legacy_fields.clone();
-        updated.favourite = existing.favourite;
-        updated.last_used_at = existing.last_used_at;
+        updated.import_source = previous.import_source.clone();
+        updated.legacy_fields = previous.legacy_fields.clone();
+        updated.favourite = previous.favourite;
+        updated.last_used_at = previous.last_used_at;
         updated.totp = resolved_totp(totp_input, previous.totp.clone());
-        keep_stored_password_on_blank_edit(&mut updated, &previous);
-        updated.password_updated_at =
-            if previous.password == updated.password && previous.password_updated_at > 0 {
-                previous.password_updated_at
-            } else {
-                updated.password_updated_at
-            };
-        updated.revision = existing.revision.saturating_add(1);
-        *existing = updated;
-        crate::vault::history::capture_history(&mut next_payload, TaggedItem::Login(previous));
+        let password = (!updated.password.is_empty()).then(|| updated.password.clone());
+        next_payload =
+            payload_with_saved_login(&next_payload, updated, password, unix_timestamp())?;
     } else {
         next_payload.entries.push(entry);
     }
@@ -334,13 +333,6 @@ fn change_folders(
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(session.snapshot())
-}
-
-fn keep_stored_password_on_blank_edit(updated: &mut VaultEntry, previous: &VaultEntry) {
-    if updated.password.is_empty() {
-        updated.password = previous.password.clone();
-        updated.password_updated_at = previous.password_updated_at;
-    }
 }
 
 fn checked_item_ids(ids: Vec<String>) -> VaultResult<HashSet<String>> {
@@ -513,43 +505,127 @@ pub fn reveal_login_secret(
 #[cfg(test)]
 mod keep_password_tests {
     use super::*;
+    use crate::vault::storage::payload_with_saved_login;
+    use crate::vault::VaultEntry;
 
-    #[test]
-    fn a_blank_edit_keeps_the_stored_password() {
-        let mut updated = VaultEntry {
+    fn stored_login() -> VaultPayload {
+        let mut payload = VaultPayload::default();
+        payload.entries.push(VaultEntry {
             id: "login-a".to_string(),
-            password: String::new(),
-            ..VaultEntry::default()
-        };
-        let previous = VaultEntry {
-            id: "login-a".to_string(),
+            title: "Northwind".to_string(),
             password: "fictional-stored-secret".to_string(),
+            updated_at: 41,
             password_updated_at: 42,
+            revision: 7,
             ..VaultEntry::default()
-        };
-
-        keep_stored_password_on_blank_edit(&mut updated, &previous);
-
-        assert_eq!(updated.password, "fictional-stored-secret");
-        assert_eq!(updated.password_updated_at, 42);
+        });
+        payload
     }
 
     #[test]
-    fn a_typed_password_replaces_the_stored_one() {
-        let mut updated = VaultEntry {
-            id: "login-a".to_string(),
+    fn a_blank_edit_keeps_the_stored_password_and_its_timestamp() {
+        let payload = stored_login();
+        let mut updated = payload.entries[0].clone();
+        updated.password = String::new();
+
+        let next = payload_with_saved_login(&payload, updated, None, 9001).expect("saved login");
+
+        assert_eq!(next.entries[0].password, "fictional-stored-secret");
+        assert_eq!(next.entries[0].password_updated_at, 42);
+        assert_eq!(next.entries[0].updated_at, 9001);
+        assert_eq!(next.entries[0].revision, 8);
+    }
+
+    #[test]
+    fn a_typed_password_replaces_the_stored_one_and_stamps_the_change() {
+        let payload = stored_login();
+        let mut updated = payload.entries[0].clone();
+        updated.password = "fictional-new-secret".to_string();
+
+        let next = payload_with_saved_login(
+            &payload,
+            updated,
+            Some("fictional-new-secret".to_string()),
+            9001,
+        )
+        .expect("saved login");
+
+        assert_eq!(next.entries[0].password, "fictional-new-secret");
+        assert_eq!(next.entries[0].password_updated_at, 9001);
+        assert_eq!(next.entries[0].revision, 8);
+        assert_eq!(next.history.len(), 1);
+    }
+
+    #[test]
+    fn an_edit_that_keeps_the_same_password_keeps_its_timestamp() {
+        let payload = stored_login();
+        let updated = payload.entries[0].clone();
+
+        let next = payload_with_saved_login(
+            &payload,
+            updated,
+            Some("fictional-stored-secret".to_string()),
+            9001,
+        )
+        .expect("saved login");
+
+        assert_eq!(next.entries[0].password_updated_at, 42);
+        assert_eq!(next.entries[0].revision, 8);
+    }
+
+    #[test]
+    fn an_edit_for_a_missing_login_leaves_the_payload_untouched() {
+        let payload = stored_login();
+        let updated = VaultEntry {
+            id: "login-missing".to_string(),
             password: "fictional-new-secret".to_string(),
             ..VaultEntry::default()
         };
-        let previous = VaultEntry {
-            id: "login-a".to_string(),
-            password: "fictional-stored-secret".to_string(),
-            password_updated_at: 42,
-            ..VaultEntry::default()
-        };
 
-        keep_stored_password_on_blank_edit(&mut updated, &previous);
+        assert!(payload_with_saved_login(&payload, updated, None, 9001).is_err());
+        assert_eq!(payload.entries[0].password, "fictional-stored-secret");
+        assert_eq!(payload.entries[0].revision, 7);
+        assert!(payload.history.is_empty());
+    }
+}
 
-        assert_eq!(updated.password, "fictional-new-secret");
+#[cfg(test)]
+mod save_login_command_tests {
+    use super::*;
+    use crate::commands::test_support::{login_input, TestVault};
+
+    #[test]
+    fn a_typed_password_is_committed_to_the_vault_file() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        let result = save_login_in_state(
+            login_input(
+                Some("login-a"),
+                "https://northwind.example",
+                "fictional-new-secret",
+            ),
+            &vault.state,
+        )
+        .expect("saved login");
+
+        assert_eq!(result.id, "login-a");
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-new-secret");
+        assert_eq!(stored.revision, 8);
+    }
+
+    #[test]
+    fn a_blank_password_edit_keeps_the_stored_password() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        save_login_in_state(
+            login_input(Some("login-a"), "https://northwind.example", ""),
+            &vault.state,
+        )
+        .expect("saved login");
+
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-stored-secret");
+        assert_eq!(stored.password_updated_at, 42);
     }
 }

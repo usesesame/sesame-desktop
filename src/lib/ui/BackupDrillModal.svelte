@@ -40,7 +40,7 @@
   <button type="button" class="modal-close" disabled={working || restoring} on:click={onClose} aria-label="Close backup drill">×</button>
   <span class="confirm-icon"><Icon name="shield" size={20} /></span>
   <p class="eyebrow">Recovery drill</p>
-  <h2 id="backup-drill-heading">Prove your backup opens.</h2>
+  <h2 id="backup-drill-heading">Prove your backup opens</h2>
   <p id="backup-drill-description">Sesame verifies the encrypted copy before offering to restore it. Nothing is replaced during verification.</p>
 
   <ol class="drill-steps" aria-label="Backup drill progress">
