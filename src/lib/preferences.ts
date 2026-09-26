@@ -137,7 +137,7 @@ export interface PanelWidths {
 }
 
 export const PANEL_WIDTH_LIMITS = {
-  list: { min: 280, max: 460, fallback: 300 },
+  list: { min: 300, max: 460, fallback: 340 },
 } as const
 
 function validWidth(value: unknown, limits: { min: number; max: number; fallback: number }): number {

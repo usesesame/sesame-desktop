@@ -184,7 +184,7 @@
     width: 100%;
     border: 0;
     border-radius: var(--radius-md);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-3);
     background: transparent;
     color: var(--text);
     text-align: left;
@@ -193,8 +193,8 @@
   }
   .authenticator-row:hover { background: var(--control-hover); }
   .authenticator-names { display: grid; gap: 2px; min-width: 0; }
-  .authenticator-names strong { overflow: hidden; font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
-  .authenticator-names small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
+  .authenticator-names strong { overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
+  .authenticator-names small { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .authenticator-code {
     font-family: var(--font-code);
     font-size: var(--type-4);
@@ -205,8 +205,8 @@
   .authenticator-copied {
     min-width: 2.5rem;
     color: var(--ok-text);
-    font-size: var(--type-1);
-    font-weight: 600;
+    font-size: var(--type-2);
+    font-weight: var(--weight-medium);
     text-align: right;
   }
   /* The same ring the login detail uses, swept continuously rather than per second. */
@@ -230,7 +230,7 @@
     position: relative;
     color: var(--gold-text);
     font-size: var(--type-1);
-    font-weight: 700;
+    font-weight: var(--weight-bold);
     font-variant-numeric: tabular-nums;
   }
   .code-countdown.expiring {
@@ -257,5 +257,5 @@
     background: var(--chip-bg);
   }
   .authenticator-empty h2 { margin: 0; color: var(--text-heading); font-size: var(--type-4); }
-  .authenticator-empty p { margin: 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+  .authenticator-empty p { margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
 </style>

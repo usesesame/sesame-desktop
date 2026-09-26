@@ -223,15 +223,15 @@
   .quick-access-result-row:not(.active) .quick-access-result-state { display: none; }
   .quick-access-result-row > button:first-child.active, .quick-access-result-row > button:first-child:hover:not(:disabled) { background: var(--tint); }
   .quick-access-result-row > button:first-child:disabled { cursor: default; opacity: .7; }
-  .quick-access-action-button { display: inline-flex; min-height: 32px; flex: none; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-1); font-weight: 650; white-space: nowrap; cursor: pointer; }
+  .quick-access-action-button { display: inline-flex; min-height: 32px; flex: none; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-bold); white-space: nowrap; cursor: pointer; }
   .quick-access-action-button:hover:not(:disabled) { background: var(--tint); }
   .quick-access-action-button.confirming { color: var(--danger); background: var(--danger-bg); }
   .quick-access-action-button:disabled { cursor: default; opacity: .6; }
   .quick-access-result-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-  .quick-access-result-copy strong { overflow: hidden; font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
-  .quick-access-result-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
-  .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: 11px; font-weight: 600; white-space: nowrap; }
-  .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-1); text-align: center; }
-  .quick-access-confirm { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quick-access-result-copy strong { overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
+  .quick-access-result-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
+  .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: var(--type-2); font-weight: var(--weight-medium); white-space: nowrap; }
+  .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-3); text-align: center; }
+  .quick-access-confirm { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: var(--type-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-confirm { color: var(--danger); }
 </style>

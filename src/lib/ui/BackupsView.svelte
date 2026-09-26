@@ -71,7 +71,7 @@
 
 <style>
   .presence-confirm { display: grid; gap: var(--space-1); }
-  .backup-presence-note { margin: 0; color: var(--text-muted); font-size: var(--type-1); }
+  .backup-presence-note { margin: 0; color: var(--text-muted); font-size: var(--type-2); }
   .presence-confirm input {
     width: 100%;
     padding: var(--space-2) var(--space-3);
@@ -106,7 +106,7 @@
   .recovery-health-good .recovery-health-dot { background: var(--ok-text); }
   .recovery-health-attention .recovery-health-dot { background: var(--warn-text); }
   .recovery-health-missing .recovery-health-dot { background: var(--danger); }
-  .recovery-health-head strong { color: var(--text-heading); font-size: var(--type-2); }
-  .recovery-health-meta { margin-left: auto; color: var(--text-muted); font-size: var(--type-1); }
+  .recovery-health-head strong { color: var(--text-heading); font-size: var(--type-3); }
+  .recovery-health-meta { margin-left: auto; color: var(--text-muted); font-size: var(--type-2); }
   .recovery-health-message { margin: 0; color: var(--text-muted); font-size: var(--type-2); }
 </style>
