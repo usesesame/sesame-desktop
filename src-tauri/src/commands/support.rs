@@ -2,8 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::browser_fill::SaveKind;
 use crate::vault::imports::entry_from_input;
-use crate::vault::storage::commit_payload_change;
-use crate::vault::types::TaggedItem;
+use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;
 use crate::vault::{LoginInput, SaveLoginResult, VaultResult, VaultState};
 use crate::{browser_fill, browser_host, diagnostics};
@@ -153,7 +152,7 @@ fn save_new_login(
 
 /// Changes only the password; the outgoing value is captured to history first.
 fn save_login_update(
-    vault: &State<'_, VaultState>,
+    vault: &VaultState,
     payload: browser_fill::SavePayload,
     selected_id: Option<String>,
 ) -> VaultResult<SaveLoginResult> {
@@ -187,19 +186,18 @@ fn save_login_update(
         return Err("That saved login no longer matches this site.".to_string());
     }
 
-    let mut next_payload = current.clone();
-    let Some(existing) = next_payload
+    let updated = current
         .entries
-        .iter_mut()
+        .iter()
         .find(|entry| entry.id == target_id)
-    else {
-        return Err("That saved login no longer exists.".to_string());
-    };
-    let previous = existing.clone();
-    existing.password = payload.password.to_string();
-    existing.updated_at = unix_timestamp();
-    existing.revision = existing.revision.saturating_add(1);
-    crate::vault::history::capture_history(&mut next_payload, TaggedItem::Login(previous));
+        .cloned()
+        .ok_or("That saved login no longer exists.")?;
+    let next_payload = payload_with_saved_login(
+        &current,
+        updated,
+        Some(payload.password.to_string()),
+        unix_timestamp(),
+    )?;
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
     Ok(SaveLoginResult {
@@ -247,4 +245,89 @@ pub fn get_pending_browser_card_fill(
     state: State<'_, browser_fill::BrowserFillState>,
 ) -> Option<browser_fill::BrowserCardRequestEvent> {
     browser_fill::pending_card(state)
+}
+
+#[cfg(test)]
+mod browser_update_tests {
+    use super::save_login_update;
+    use crate::browser_fill::{self, SaveKind};
+    use crate::commands::test_support::TestVault;
+    use crate::vault::storage::payload_with_saved_login;
+    use crate::vault::{VaultEntry, VaultPayload};
+
+    fn payload_with_stored_login() -> VaultPayload {
+        let mut payload = VaultPayload::default();
+        payload.entries.push(VaultEntry {
+            id: "login-a".to_string(),
+            password: "fictional-stored-secret".to_string(),
+            updated_at: 41,
+            password_updated_at: 40,
+            revision: 7,
+            ..VaultEntry::default()
+        });
+        payload
+    }
+
+    #[test]
+    fn an_approved_update_stamps_both_timestamps_and_bumps_the_revision() {
+        let payload = payload_with_stored_login();
+        let updated = payload.entries[0].clone();
+
+        let next = payload_with_saved_login(
+            &payload,
+            updated,
+            Some("fictional-new-secret".to_string()),
+            9001,
+        )
+        .expect("saved update");
+
+        assert_eq!(next.entries[0].password, "fictional-new-secret");
+        assert_eq!(next.entries[0].updated_at, 9001);
+        assert_eq!(next.entries[0].password_updated_at, 9001);
+        assert_eq!(next.entries[0].revision, 8);
+        assert_eq!(next.history.len(), 1);
+    }
+
+    #[test]
+    fn an_approved_update_never_keeps_the_retired_password_in_the_login() {
+        let payload = payload_with_stored_login();
+        let updated = payload.entries[0].clone();
+
+        let next = payload_with_saved_login(
+            &payload,
+            updated,
+            Some("fictional-new-secret".to_string()),
+            9001,
+        )
+        .expect("saved update");
+
+        assert!(!next.entries[0].password.contains("fictional-stored-secret"));
+        assert_eq!(next.history.len(), 1);
+    }
+
+    #[test]
+    fn an_approved_update_commits_the_new_password_through_the_command() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        let payload = browser_fill::SavePayload {
+            kind: SaveKind::Update,
+            title: "Northwind".to_string(),
+            username: "fictional-user".to_string(),
+            password: zeroize::Zeroizing::new("fictional-new-secret".to_string()),
+            origin: "https://northwind.example".to_string(),
+            epoch: vault.state.session_epoch(),
+            candidates: vec![browser_fill::test_update_candidate(
+                "login-a",
+                "https://northwind.example",
+            )],
+        };
+
+        let result = save_login_update(&vault.state, payload, Some("login-a".to_string()))
+            .expect("saved update");
+
+        assert_eq!(result.id, "login-a");
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-new-secret");
+        assert_ne!(stored.password_updated_at, 42);
+        assert_eq!(stored.revision, 8);
+    }
 }

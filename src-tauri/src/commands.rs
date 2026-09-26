@@ -18,6 +18,8 @@ mod secure_notes;
 mod software_licenses;
 mod ssh_keys;
 mod support;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod tools;
 mod trash;
 mod wifi;
