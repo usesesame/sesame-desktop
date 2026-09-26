@@ -82,6 +82,25 @@ export function findLiteralTypeDeclarations(sources) {
   return violations
 }
 
+export const RADIUS_ALLOWLIST = []
+
+const LITERAL_RADIUS = /[0-9]*\.?[0-9]+(px|rem|em)\b/
+
+export function findLiteralRadiusDeclarations(sources, allowlist = RADIUS_ALLOWLIST) {
+  const violations = []
+  for (const { path, text } of sources) {
+    for (const { selector, declaration } of rules(text)) {
+      const match = declaration.match(/^border-radius\s*:\s*(.+)$/s)
+      if (!match) continue
+      const value = match[1].trim()
+      if (value.includes('var(') || !LITERAL_RADIUS.test(value)) continue
+      if (allowlist.some((entry) => selector.includes(entry.selector))) continue
+      violations.push({ path, selector, value })
+    }
+  }
+  return violations
+}
+
 export const CONTRAST_PAIRS = [
   { name: 'text on background', foreground: '--text', background: '--bg', floor: 4.5 },
   { name: 'text on surface', foreground: '--text', background: '--surface', floor: 4.5 },

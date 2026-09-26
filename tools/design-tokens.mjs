@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { block, declarations, evaluateContrast, findLiteralTypeDeclarations } from './design-contracts.mjs'
+import { block, declarations, evaluateContrast, findLiteralRadiusDeclarations, findLiteralTypeDeclarations } from './design-contracts.mjs'
 
 // design/tokens.css is canonical here and has no downstream copies to keep in
 // step: the website, the account and admin portals, and the browser extension
@@ -254,11 +254,16 @@ for (const name of ['--sidebar-hover', '--sidebar-active-layer', '--sidebar-acti
   if (!appCss.includes(`${name}:`)) fail('a sidebar token is missing', [`${name} is not declared in src/app.css`])
 }
 
-const literalType = findLiteralTypeDeclarations(
-  files.map((file) => ({ path: relative(root, file), text: readFileSync(file, 'utf8') })),
-)
+const sources = files.map((file) => ({ path: relative(root, file), text: readFileSync(file, 'utf8') }))
+
+const literalType = findLiteralTypeDeclarations(sources)
 if (literalType.length) {
   fail('a literal type value bypasses the shared scale', literalType.map((entry) => `${entry.path}: ${entry.selector} { ${entry.property}: ${entry.value} }`))
+}
+
+const literalRadius = findLiteralRadiusDeclarations(sources)
+if (literalRadius.length) {
+  fail('a literal corner radius bypasses the shared scale', literalRadius.map((entry) => `${entry.path}: ${entry.selector} { border-radius: ${entry.value} }`))
 }
 
 console.log(`design tokens: design/tokens.css is well formed, ${light.size} tokens in the light block; ${files.length} desktop sources use only defined tokens`)

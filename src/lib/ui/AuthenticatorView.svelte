@@ -184,7 +184,7 @@
     width: 100%;
     border: 0;
     border-radius: var(--radius-md);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-3);
     background: transparent;
     color: var(--text);
     text-align: left;

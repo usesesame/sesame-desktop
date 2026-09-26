@@ -36,7 +36,6 @@
 </script>
 
 <article class="settings-browser-row">
-  <span class="settings-icon"><Icon name="browser" size={17} /></span>
   <div class="setting-copy browser-setting-copy">
     <strong>Browser autofill setup</strong>
     <p>{description()}</p>
