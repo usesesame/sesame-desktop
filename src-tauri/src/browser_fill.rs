@@ -1308,7 +1308,7 @@ mod grant_tests {
             .expect("begin save");
 
         let payload = state.save_payload_if_bound(&approval_id).expect("payload");
-        assert_eq!(payload.password, "fictional-secret");
+        assert_eq!(payload.password.as_str(), "fictional-secret");
         assert_eq!(payload.kind, SaveKind::Update);
         assert!(state.save_payload_if_bound("not-the-approval").is_none());
 
