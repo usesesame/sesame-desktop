@@ -87,8 +87,25 @@ test('a tag keeps the unsigned release unpublished until signing', () => {
 })
 
 test('a blank password on edit keeps the stored secret', () => {
+  const storage = read('src-tauri', 'sesame-core', 'src', 'storage.rs')
+  const start = storage.indexOf('pub fn payload_with_saved_login(')
+  assert.ok(start >= 0, 'payload_with_saved_login does not exist')
+  const next = storage.indexOf('\npub fn ', start + 1)
+  const body = storage.slice(start, next === -1 ? storage.length : next)
+  assert.match(
+    body,
+    /updated\.password = previous\.password\.clone\(\)/,
+    'the vault mutation must keep the stored secret when the edit leaves the password blank',
+  )
+
   const logins = read('src-tauri', 'src', 'commands', 'logins.rs')
-  const start = logins.indexOf('pub fn save_login(')
-  const body = logins.slice(start, logins.indexOf('\n#[tauri::command]', start))
-  assert.match(body, /keep_stored_password_on_blank_edit\(&mut updated, &previous\)/)
+  const saveStart = logins.indexOf('pub fn save_login(')
+  assert.ok(saveStart >= 0, 'save_login does not exist')
+  const saveNext = logins.indexOf('\n#[tauri::command]', saveStart)
+  const saveBody = logins.slice(saveStart, saveNext === -1 ? logins.length : saveNext)
+  assert.match(
+    saveBody,
+    /payload_with_saved_login\(/,
+    'save_login must write through the one vault-domain mutation',
+  )
 })

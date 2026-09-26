@@ -54,7 +54,6 @@
   export let onMoveItem: (folderId?: string) => void
   export let onItemCopy: (value: string, label: string) => void
   export let onOpenRecoveryNotApplicable: () => void
-  export let onFixWeakPassword: () => void
   export let breachCheckOpen = false
   export let breachCheckWorking = false
   export let breachCheckResult: BreachCheckResult | null = null
@@ -517,6 +516,7 @@
               {#if activePasswordIssues.length}
                 {#each activePasswordIssues as issue (issue.kind)}<p>{issue.explanation}</p>{/each}
                 <span class="password-score"><span class="password-score-track"><span class="password-score-fill" style="width: {selectedEntry.passwordScore}%"></span></span>Password score {selectedEntry.passwordScore}/100</span>
+                <p>Sesame opens the site. The browser helper fills your current password and creates a new one; save the update after the site accepts it.</p>
               {:else if activeIssue === 'duplicate'}<p>Compare matching records and keep the values you trust.</p>
               {:else if activeIssue === 'url'}<p>Add the sign-in page so Sesame can open and match this login.</p>
               {:else if activeIssue === 'totp'}<p>Add the site's authenticator secret if it supports app-based 2FA.</p>
@@ -525,7 +525,7 @@
             {#if activeIssue === 'duplicate'}<button type="button" class="secondary-button" on:click={onOpenDuplicateReview}>Review matches</button>
             {:else if activeIssue === 'url'}<button type="button" class="secondary-button" on:click={onAddWebsite}>Add website</button>
             {:else if activeIssue === 'recovery'}<div class="checkup-fix-actions"><button type="button" class="secondary-button" on:click={onOpenLoginEditor}>Add details</button><button type="button" class="text-button" disabled={recoveryActionWorking} on:click={onOpenRecoveryNotApplicable}>No options</button></div>
-            {:else if activePasswordIssues.length}<div class="checkup-fix-actions"><button type="button" class="secondary-button" on:click={onFixWeakPassword}>Generate a new password</button><button type="button" class="text-button" on:click={onOpenLoginEditor}>Edit manually</button></div>
+            {:else if activePasswordIssues.length}<div class="checkup-fix-actions">{#if loginCard.url}<button type="button" class="secondary-button" on:click={() => onOpenWebsite(loginCard.url)}>Change on site</button>{:else}<button type="button" class="secondary-button" on:click={onAddWebsite}>Add website</button>{/if}<button type="button" class="text-button" on:click={onOpenLoginEditor}>Edit manually</button></div>
             {:else}<button type="button" class="secondary-button" on:click={onOpenLoginEditor}>Add 2FA</button>{/if}
           </section>
         {/if}

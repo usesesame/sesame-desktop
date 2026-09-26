@@ -158,6 +158,18 @@ pub struct BrowserFillCandidate {
     match_kind: &'static str,
 }
 
+#[cfg(test)]
+pub(crate) fn test_update_candidate(id: &str, saved_origin: &str) -> BrowserFillCandidate {
+    BrowserFillCandidate {
+        id: id.to_string(),
+        title: "Northwind".to_string(),
+        username: "fictional-user".to_string(),
+        email: String::new(),
+        saved_origin: saved_origin.to_string(),
+        match_kind: "exact",
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserFillRequestEvent {

@@ -20,7 +20,7 @@ interface BrowserSaveControllerOptions {
 }
 
 export function createBrowserSaveController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: BrowserSaveControllerOptions) {
-  const { browserSave, vault } = stores
+  const { browserSave, selection, vault } = stores
   let syncTimer: ReturnType<typeof window.setTimeout> | undefined
   let disposed = false
   let stopSubscription: (() => void) | undefined
@@ -78,7 +78,15 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
       const result = await resolveBrowserSaveRequest(request.approvalId, approved, selectedId)
       if (approved && result) {
         vault.patch({ snapshot: result.snapshot })
-        const label = request.title.trim() || request.hostname
+        const activeFilter = selection.value().securityFilter
+        if (request.kind === 'update' && activeFilter && selection.value().activeItemId === result.id) {
+          const updated = result.snapshot.entries.find((entry) => entry.id === result.id)
+          if (updated && !updated.issueKinds.includes(activeFilter)) selection.patch({ securityFilter: null })
+        }
+        const selected = request.kind === 'update'
+          ? request.candidates.find((candidate) => candidate.id === current.selectedId)
+          : undefined
+        const label = selected?.title.trim() || request.title.trim() || request.hostname
         feedback.showNotice(
           request.kind === 'update' ? 'Login updated' : 'Login saved',
           request.kind === 'update'

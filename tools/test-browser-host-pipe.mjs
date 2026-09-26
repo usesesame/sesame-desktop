@@ -135,6 +135,18 @@ function verifyRegistrationLifecycle(environment) {
 
 const delay = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds))
 
+async function waitForExit(child, timeoutMs) {
+  if (child.exitCode !== null) return
+  let timer
+  await Promise.race([
+    new Promise((resolveExit) => child.once('exit', resolveExit)),
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(resolveTimeout, timeoutMs)
+    }),
+  ])
+  clearTimeout(timer)
+}
+
 async function waitForBrokerSocket(environment) {
   const directory = join(environment.XDG_RUNTIME_DIR, 'sesame')
   const socket = join(directory, 'browser.sock')
@@ -216,7 +228,8 @@ async function main() {
     console.log('The browser native host completed an authenticated exchange with the live desktop broker:', response)
   } finally {
     try { process.kill(desktop.pid) } catch { void 0 }
-    rmSync(testRoot, { recursive: true, force: true })
+    await waitForExit(desktop, 5_000)
+    rmSync(testRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 }
 
