@@ -16,7 +16,6 @@
 <ModalShell onClose={() => !working && onClose()} labelledby="folder-manager-heading" describedby="folder-manager-description" modalClass="folder-manager-modal" ariaBusy={working}>
   <button type="button" class="modal-close" disabled={working} on:click={onClose} aria-label="Close folder organizer">×</button>
   <span class="confirm-icon"><Icon name="folder" size={20} /></span>
-  <p class="eyebrow">Vault organization</p>
   <h2 id="folder-manager-heading">Organize folders</h2>
   <p id="folder-manager-description">Rename a folder everywhere or move its logins back to Unfiled.</p>
   {#if folders.length}

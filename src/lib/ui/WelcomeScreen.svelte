@@ -49,7 +49,7 @@
     background: var(--surface);
     box-shadow: var(--shadow-lift);
   }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-5); font-weight: 700; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-5); font-weight: var(--weight-regular); }
   .sesame-mark { width: 28px; height: 28px; }
   h1 {
     margin: 0 0 10px;
@@ -66,17 +66,13 @@
     align-items: start;
     gap: var(--space-3);
     color: var(--text);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
     line-height: 1.5;
   }
   .step-icon {
     display: grid;
-    width: 30px;
-    height: 30px;
     place-items: center;
-    border-radius: var(--radius-sm);
     color: var(--chip-icon);
-    background: var(--chip-bg);
   }
   .start-button {
     width: 100%;
@@ -86,7 +82,7 @@
     color: var(--on-accent);
     background: var(--accent);
     font-size: var(--type-2);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     cursor: pointer;
     transition: background-color var(--t-fast) ease;
   }
@@ -101,10 +97,10 @@
     color: var(--accent-link);
     background: var(--surface-inset);
     font-size: var(--type-2);
-    font-weight: 600;
+    font-weight: var(--weight-medium);
     cursor: pointer;
     transition: background-color var(--t-fast) ease;
   }
   .restore-button:hover { background: var(--tint); }
-  .tiny-note { margin: var(--space-4) 0 0; color: var(--text-faint); font-size: var(--type-1); line-height: 1.55; }
+  .tiny-note { margin: var(--space-4) 0 0; color: var(--text-faint); font-size: var(--type-2); line-height: 1.55; }
 </style>

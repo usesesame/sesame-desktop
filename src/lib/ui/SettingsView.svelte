@@ -219,12 +219,10 @@
           <h3 id="settings-group-general-appearance">Appearance</h3>
           <div class="settings-list">
             <article>
-              <span class="settings-icon"><Icon name="monitor" size={17} /></span>
               <div class="setting-copy"><strong>Theme</strong><p>Match your system, or force light or dark.</p></div>
               <div class="theme-toggle" role="group" aria-label="Theme" use:slidingSelection><button type="button" class:active={theme === 'light'} aria-pressed={theme === 'light'} aria-label="Light" on:click={() => onSetTheme('light')}><Icon name="sun" size={15} /></button><button type="button" class:active={theme === 'auto'} aria-pressed={theme === 'auto'} aria-label="System" on:click={() => onSetTheme('auto')}><Icon name="monitor" size={15} /></button><button type="button" class:active={theme === 'dark'} aria-pressed={theme === 'dark'} aria-label="Dark" on:click={() => onSetTheme('dark')}><Icon name="moon" size={15} /></button></div>
             </article>
             <article>
-              <span class="settings-icon"><Icon name="globe" size={17} /></span>
               <div class="setting-copy"><strong>Website icons</strong><p>Download icons only as they come into view, then reuse Sesame's local copy for up to 30 days. The first request still reveals the saved domain to that site. {websiteIconCacheLabel}</p></div>
               <div class="website-icon-actions"><button type="button" class="text-button" disabled={websiteIconCacheWorking || websiteIconCacheEntryCount === 0} on:click={onClearWebsiteIconCache}>Clear cache</button><button type="button" class="switch" class:active={siteIconsEnabled} role="switch" aria-checked={siteIconsEnabled} aria-label="Website icons" on:click={() => onSetSiteIconsEnabled(!siteIconsEnabled)}><span></span></button></div>
             </article>
@@ -234,18 +232,15 @@
           <h3 id="settings-group-general-app">This app</h3>
           <div class="settings-list">
             <article>
-              <span class="settings-icon"><Icon name="monitor" size={16} /></span>
               <div class="setting-copy"><strong>Keep Sesame in the tray</strong><p>Closing the window keeps it running. Turn off to quit on close.</p></div>
               <button type="button" class="switch" class:active={keepInTray} role="switch" aria-checked={keepInTray} aria-label="Keep Sesame in the tray" disabled={trayWorking} on:click={onToggleTray}><span></span></button>
             </article>
             <article>
-              <span class="settings-icon"><Icon name="monitor" size={16} /></span>
               <div class="setting-copy"><strong>Start at sign-in</strong><p>Opens in the tray when you sign in. The vault stays locked until you unlock it.</p></div>
               <button type="button" class="switch" class:active={autostartEnabled} role="switch" aria-checked={autostartEnabled} aria-label="Start at sign-in" disabled={autostartWorking} on:click={onToggleAutostart}><span></span></button>
             </article>
             {#if $platformCapabilities.quickAccessShortcut}
             <article>
-              <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Quick access shortcut</strong><p>Opens the quick access popup from anywhere, even while Sesame is in the tray.</p></div>
               <button type="button" class="text-button" disabled={quickAccessShortcutWorking} on:click={recordingShortcut ? cancelRecordingShortcut : startRecordingShortcut}>
                 {recordingShortcut ? 'Press keys (Esc cancels)' : formatAccelerator(quickAccessShortcut)}
@@ -253,7 +248,6 @@
             </article>
             {/if}
             <article>
-              <span class="settings-icon"><Icon name="archive" size={16} /></span>
               {#if $platformCapabilities.desktopUpdates}
                 <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
                 {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing…' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking…' : 'Check now'}</button>{/if}
@@ -262,7 +256,6 @@
               {/if}
             </article>
             <article>
-              <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy">
                 <strong>Keyboard shortcuts</strong>
                 <dl class="shortcut-list">
@@ -283,27 +276,23 @@
           <div class="settings-list">
             {#if $platformCapabilities.sessionAutoLock}
             <article>
-              <span class="settings-icon"><Icon name="lock" size={16} /></span>
               <div class="setting-copy"><strong>Automatic lock</strong><p>Lock the vault after a period without keyboard or pointer activity.</p></div>
               <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
             </article>
             {/if}
             {#if $platformCapabilities.pinUnlock}
             <article>
-              <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a six-digit PIN on this device. Your master password or recovery kit remains available.</p></div>
               <button type="button" class="switch" class:active={pinUnlockAvailable} role="switch" aria-checked={pinUnlockAvailable} aria-label="Unlock with PIN" disabled={pinWorking} on:click={onTogglePin}><span></span></button>
             </article>
             {/if}
             {#if $platformCapabilities.biometricUnlock}
             <article>
-              <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Unlock with Windows Hello</strong><p>Use this device's Windows Hello gesture. Your master password or recovery kit remains available, and Sesame never receives your biometric data.</p></div>
               <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
             </article>
             {/if}
             <article>
-              <span class="settings-icon"><Icon name="copy" size={16} /></span>
               <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>
               <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay" use:slidingSelection>{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
             </article>
@@ -313,7 +302,6 @@
           <h3 id="settings-group-security-key">Your vault key</h3>
           <div class="settings-list">
             <article>
-              <span class="settings-icon"><Icon name="key" size={16} /></span>
               <div class="setting-copy"><strong>Master password</strong><p>Replace your master password and get a fresh recovery kit.</p></div>
               <button type="button" class="secondary-button settings-manage" on:click={onChangeMasterPassword}>Change</button>
             </article>
@@ -344,7 +332,6 @@
             <!-- Renders no Sync control and imports nothing from the Sync client. -->
             {#if !SYNC_PREVIEW_AVAILABLE}
               <article>
-                <span class="settings-icon"><Icon name="refresh" size={16} /></span>
                 <div class="setting-copy">
                   <strong>Sesame Sync</strong>
                   {#if serviceConnection.syncAvailable}
@@ -373,13 +360,11 @@
               <SyncVaultStorageRow />
             {:else}
               <article>
-                <span class="settings-icon"><Icon name="shield" size={17} /></span>
                 <div class="setting-copy"><strong>Local-only vault</strong><p>Your vault is stored on this device. Sesame has no cloud copy.</p></div>
                 <span class="status-pill">Active</span>
               </article>
             {/if}
             <article>
-              <span class="settings-icon"><Icon name="archive" size={16} /></span>
               <div class="setting-copy"><strong>Export and deletion</strong><p>Export a readable copy or remove Sesame data from this device.</p></div>
               <button type="button" class="secondary-button settings-manage" on:click={onManageData}>Manage</button>
             </article>
@@ -389,7 +374,6 @@
           <h3 id="settings-group-data-diagnostics">Diagnostics</h3>
           <div class="settings-list">
             <article class="settings-row-expandable">
-              <span class="settings-icon"><Icon name="file-key" size={16} /></span>
               <div class="setting-copy"><strong>Local diagnostics</strong><p>{diagnosticEventCount} {diagnosticEventCount === 1 ? 'event' : 'events'} stored, {diagnosticErrorCount} flagged. Routine events clear after a day; flagged ones are kept for support. Events record categories and timing only, never vault contents or raw errors.</p></div>
               <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={onExportDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Export</button><button type="button" class="text-button" on:click={onClearDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Clear</button></div>
               {#if diagnosticStatus.recent.length > 0}
