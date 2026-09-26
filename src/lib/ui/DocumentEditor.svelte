@@ -88,7 +88,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{documentDraft.id ? 'Saved document' : 'New document'}</p><h2 id="document-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="document-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingDocument} on:click={requestClose} aria-label="Close document editor">×</button>
   </header>
 

@@ -56,7 +56,7 @@
 >
   <form on:submit|preventDefault={onSubmit}>
   <header class="editor-header">
-    <div><p class="eyebrow">{noteDraft.id ? 'Saved note' : 'New note'}</p><h2 id="secure-note-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="secure-note-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingNote} on:click={requestClose} aria-label="Close note editor">×</button>
   </header>
 

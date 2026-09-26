@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import Icon from '../Icon.svelte'
   import { createSyncPreviewController } from '../controllers/sync-preview-controller'
 
   const syncPreview = createSyncPreviewController()
@@ -14,7 +13,6 @@
 </script>
 
 <article>
-  <span class="settings-icon"><Icon name={syncing ? 'refresh' : 'shield'} size={17} /></span>
   <div class="setting-copy">
     {#if syncing}
       <strong>Synced vault</strong>

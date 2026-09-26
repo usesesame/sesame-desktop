@@ -40,7 +40,6 @@
   ariaBusy={working}
 >
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
-  <p class="eyebrow">Fill in browser</p>
   <h2 id="browser-fill-heading">Fill {request.hostname}?</h2>
   <p id="browser-fill-description">Choose the login to use. The fields will be filled, but the form is not submitted.</p>
 

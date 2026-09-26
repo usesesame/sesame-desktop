@@ -47,7 +47,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{licenseDraft.id ? 'Saved licence' : 'New licence'}</p><h2 id="software-license-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="software-license-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingLicense} on:click={requestClose} aria-label="Close licence editor">×</button>
   </header>
 

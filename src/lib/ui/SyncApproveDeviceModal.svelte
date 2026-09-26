@@ -71,17 +71,17 @@
     margin: 0;
     color: var(--text-heading);
     font-size: var(--type-3);
-    font-weight: 650;
+    font-weight: var(--weight-bold);
   }
   .sync-device-meta {
     margin: var(--space-1) 0 0;
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
   }
   .sync-device-label {
     margin: var(--space-4) 0 var(--space-2);
     color: var(--text-muted);
-    font-size: var(--type-1);
+    font-size: var(--type-2);
   }
   .sync-fingerprint {
     display: block;
@@ -96,7 +96,7 @@
   .sync-warning {
     margin: 0;
     color: var(--warn-text);
-    font-size: var(--type-2);
+    font-size: var(--type-3);
     line-height: 1.5;
   }
   .sync-confirm {

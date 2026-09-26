@@ -37,15 +37,13 @@
 >
   {#if showingRecoveryKit}
     <span class="confirm-icon"><Icon name="file-key" size={20} /></span>
-    <p class="eyebrow">Recovery kit replaced</p>
-    <h2 id="change-master-password-heading">Save this new kit.</h2>
+    <h2 id="change-master-password-heading">Save this new kit</h2>
     <p id="change-master-password-description">Your vault now uses a new encryption key. Your old recovery kit no longer opens it. PIN and Windows Hello unlock were turned off and can be enabled again after you save this new kit.</p>
     <code class="recovery-code">{recoveryKit}</code>
     <label class="recovery-confirm"><input name="replacement-recovery-kit-saved" type="checkbox" bind:checked={recoveryConfirmed} /> <span>I saved this outside Sesame.</span></label>
     <div class="confirm-actions"><button type="button" class="primary-button" disabled={!recoveryConfirmed} on:click={onDone}>Done</button></div>
   {:else}
     <span class="confirm-icon"><Icon name="key" size={20} /></span>
-    <p class="eyebrow">Vault security</p>
     <h2 id="change-master-password-heading">Change master password</h2>
     <p id="change-master-password-description">Your vault stays local. This creates a new encryption key and recovery kit, and turns off PIN and Windows Hello unlock until you enable them again.</p>
     <form on:submit|preventDefault={onSave}>

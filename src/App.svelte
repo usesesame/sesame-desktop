@@ -586,7 +586,6 @@
         onMoveItem={(folderId) => $selection.activeItemId && void itemController.moveToFolder($selection.activeItemId, folderId)}
         onItemCopy={(value, label) => void itemController.copy(value, label)}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
-        onFixWeakPassword={loginController.openEditorWithFreshPassword}
         recoveryActionWorking={$loginState.recoveryActionWorking}
         breachCheckOpen={$loginState.breachCheckOpen}
         breachCheckWorking={$loginState.breachCheckWorking}

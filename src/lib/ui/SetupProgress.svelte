@@ -21,8 +21,8 @@
     gap: var(--space-3);
     margin: 0;
     color: var(--text-muted);
-    font-size: var(--type-1);
-    font-weight: 600;
+    font-size: var(--type-2);
+    font-weight: var(--weight-medium);
   }
   .setup-progress-dots { display: flex; gap: 5px; }
   .dot {

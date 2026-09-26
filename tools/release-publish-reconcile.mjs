@@ -5,8 +5,18 @@ import { assertSafeReleaseFilename, fileSha256, validateEvidenceDirectory } from
 
 export const LATEST_MANIFEST_FILENAME = 'latest.json'
 export const RELEASE_SET_DIGEST_LABEL = 'Release set digest'
+export const RELEASE_VISIBILITY_DRAFT = 'draft'
+export const RELEASE_VISIBILITY_PUBLISHED = 'published'
 const sha256Pattern = /^[0-9a-f]{64}$/
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/
+
+export function parseReleaseVisibility(value) {
+  if (value === undefined || value === null || value === '' || value === RELEASE_VISIBILITY_DRAFT) {
+    return RELEASE_VISIBILITY_DRAFT
+  }
+  if (value === RELEASE_VISIBILITY_PUBLISHED) return RELEASE_VISIBILITY_PUBLISHED
+  throw new Error(`Unknown release visibility ${value}; use ${RELEASE_VISIBILITY_DRAFT} or ${RELEASE_VISIBILITY_PUBLISHED}.`)
+}
 
 // The Windows and Linux lanes publish into one release per tag. Each lane
 // reconciles its own asset set and ignores the other lane's assets by exact
@@ -119,10 +129,20 @@ export function assertCandidateMatchesAssets(candidate, assets, { repository, ta
   return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256, bytes: installer.bytes })
 }
 
-export function planReleasePublication({ release, expectedAssets, setDigest, foreignAssets = [] }) {
-  if (!release) return { action: 'create', upload: expectedAssets.map((asset) => asset.name), conflicts: [], anchor: 'create' }
+export function planReleasePublication({ release, expectedAssets, setDigest, foreignAssets = [], visibility = RELEASE_VISIBILITY_DRAFT }) {
+  if (!release) {
+    return {
+      action: 'create',
+      upload: expectedAssets.map((asset) => asset.name),
+      conflicts: [],
+      anchor: 'create',
+      draft: visibility === RELEASE_VISIBILITY_DRAFT,
+    }
+  }
   const conflicts = []
-  if (release.isDraft) conflicts.push('The existing release is a draft: publish or delete it deliberately before this job can converge.')
+  if (release.isDraft && visibility === RELEASE_VISIBILITY_PUBLISHED) {
+    conflicts.push('The existing release is a draft: publish or delete it deliberately before this job can converge.')
+  }
   const remote = new Map((release.assets ?? []).map((asset) => [asset.name, asset]))
   const upload = []
   for (const asset of expectedAssets) {
@@ -158,7 +178,13 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
   } else if (anchor === 'malformed') {
     conflicts.push(`The release notes carry a malformed ${RELEASE_SET_DIGEST_LABEL.toLowerCase()} line.`)
   }
-  return { action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete', upload, conflicts, anchor }
+  return {
+    action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete',
+    upload,
+    conflicts,
+    anchor,
+    draft: release.isDraft === true,
+  }
 }
 
 // The server accepts an exact replay with 201, so the same POST is both the

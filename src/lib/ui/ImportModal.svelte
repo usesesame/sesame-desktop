@@ -110,7 +110,7 @@
 
 <ModalShell open={true} onClose={requestClose} labelledby="import-heading" describedby="import-description" tone="" modalClass="import-modal" ariaBusy={$imports.importing}>
   <button type="button" class="modal-close" disabled={$imports.importing} on:click={requestClose} aria-label="Close import">×</button>
-  <span class="import-icon"><Icon name="archive" size={21} /></span><p class="eyebrow">Import locally</p><h2 id="import-heading">{$imports.preview ? 'Check this import.' : 'Import your vault.'}</h2><p id="import-description">{$imports.preview ? `${$imports.fileName} stays on this device until you choose to add it.` : 'Reads it on this device before changing your vault.'}</p>
+  <span class="import-icon"><Icon name="archive" size={21} /></span><h2 id="import-heading">{$imports.preview ? 'Check this import' : 'Import your vault'}</h2><p id="import-description">{$imports.preview ? `${$imports.fileName} stays on this device until you choose to add it.` : 'Reads it on this device before changing your vault.'}</p>
   <div class="import-source">
     <span id="import-source-label">Import from</span>
     <button bind:this={sourceButton} class="source-select" type="button" aria-haspopup="listbox" aria-labelledby="import-source-label" aria-controls="import-source-options" aria-expanded={$imports.sourceMenuOpen} on:click={() => imports.patch({ sourceMenuOpen: !$imports.sourceMenuOpen })} on:keydown={handleSourceKeydown} disabled={$imports.importing || Boolean($imports.preview)}>

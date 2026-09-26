@@ -61,11 +61,11 @@ fn identity_response(
         .map(|candidate| candidate.id.clone())
         .collect();
     let fill_state = app.state::<BrowserFillState>();
-    let (approval_id, deadline, receiver) = match fill_state.begin_identity(
+    let (approval_id, deadline, receiver) = match fill_state.begin(
         &request.request_id,
         origin.clone(),
         epoch,
-        candidate_ids,
+        ApprovalRequest::Identity { candidate_ids },
     ) {
         Ok(value) => value,
         Err(reason) => return BrowserResponse::identity_unavailable(&request.request_id, reason),
@@ -81,16 +81,16 @@ fn identity_response(
         expires_at_unix_ms: approval_expires_at_unix_ms(),
     };
     if fill_state
-        .publish_identity(&approval_id, event.clone())
+        .publish(&approval_id, ApprovalEvent::Identity(event.clone()))
         .is_err()
     {
-        fill_state.revoke_identity(&approval_id);
+        fill_state.revoke(&approval_id);
         return BrowserResponse::identity_unavailable(&request.request_id, "approvalUnavailable");
     }
     bring_to_foreground(app);
     let _ = app.emit("browser-identity-request", event);
 
-    let decision = match wait_for_identity_decision(
+    let decision = match wait_for_decision(
         app,
         &fill_state,
         &vault,
@@ -101,21 +101,22 @@ fn identity_response(
         deadline,
         receiver,
         peer,
+        ApprovalKind::Identity,
     ) {
         Ok(decision) => decision,
         Err(reason) => return BrowserResponse::identity_unavailable(&request.request_id, reason),
     };
     let identity_id = match decision {
-        IdentityDecision::Identity(identity_id) => identity_id,
-        IdentityDecision::Denied => {
+        ApprovalDecision::Selected(identity_id) => identity_id,
+        ApprovalDecision::Denied => {
             return BrowserResponse::identity_unavailable(&request.request_id, "approvalDeclined")
         }
-        IdentityDecision::InvalidSelection => {
+        ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
             return BrowserResponse::identity_unavailable(&request.request_id, "invalidSelection")
         }
     };
     if !peer.is_connected() {
-        emit_identity_cancelled(app, &approval_id, "connectionClosed");
+        emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "connectionClosed");
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     }
 
@@ -130,19 +131,19 @@ fn identity_response(
         }
     };
     if vault.session_epoch() != epoch {
-        emit_identity_cancelled(app, &approval_id, "vaultChanged");
+        emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
-        emit_identity_cancelled(app, &approval_id, "vaultChanged");
+        emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "locked");
     };
     let Ok(item) = session.open_item(&identity_id) else {
-        emit_identity_cancelled(app, &approval_id, "vaultChanged");
+        emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     };
     let TaggedItem::Identity(identity) = &*item else {
-        emit_identity_cancelled(app, &approval_id, "vaultChanged");
+        emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "vaultChanged");
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     };
     BrowserResponse::identity_for(
@@ -173,63 +174,4 @@ fn selected_identity_fields(identity: &Identity, requested: &[String]) -> Identi
         }
     }
     fields
-}
-
-#[allow(clippy::too_many_arguments)]
-fn wait_for_identity_decision(
-    app: &AppHandle,
-    fill_state: &BrowserFillState,
-    vault: &VaultState,
-    approval_id: &str,
-    request_id: &str,
-    origin: &NormalizedOrigin,
-    epoch: u64,
-    deadline: Instant,
-    receiver: Receiver<IdentityDecision>,
-    peer: &PipePeer,
-) -> Result<IdentityDecision, &'static str> {
-    loop {
-        match receiver.try_recv() {
-            Ok(decision) => return Ok(decision),
-            Err(TryRecvError::Disconnected) => return Err("approvalUnavailable"),
-            Err(TryRecvError::Empty) => {}
-        }
-        if !peer.is_connected() {
-            fill_state.revoke_identity(approval_id);
-            emit_identity_cancelled(app, approval_id, "connectionClosed");
-            diagnostics::record_browser_host_registration(app, "identity_connection_closed");
-            return Err("staleRequest");
-        }
-        if Instant::now() >= deadline {
-            fill_state.revoke_identity(approval_id);
-            emit_identity_cancelled(app, approval_id, "expired");
-            diagnostics::record_browser_host_registration(app, "identity_timeout");
-            return Err("approvalTimeout");
-        }
-        if !fill_state.is_identity_bound(approval_id, request_id, origin, epoch) {
-            if let Ok(decision) = receiver.try_recv() {
-                return Ok(decision);
-            }
-            fill_state.revoke_identity(approval_id);
-            emit_identity_cancelled(app, approval_id, "expired");
-            return Err("approvalUnavailable");
-        }
-        if vault.session_epoch() != epoch {
-            fill_state.revoke_identity(approval_id);
-            emit_identity_cancelled(app, approval_id, "vaultChanged");
-            diagnostics::record_browser_host_registration(app, "identity_vault_changed");
-            return Err("staleRequest");
-        }
-        thread::sleep(APPROVAL_POLL.min(deadline.saturating_duration_since(Instant::now())));
-    }
-}
-
-fn emit_identity_cancelled(app: &AppHandle, approval_id: &str, reason: &'static str) {
-    let _ = app.emit(
-        "browser-identity-cancelled",
-        BrowserIdentityCancelledEvent {
-            approval_id: approval_id.to_string(),
-            reason,
-        },
-    );
 }

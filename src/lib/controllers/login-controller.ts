@@ -1,7 +1,6 @@
 import type { AppStores } from '../stores/app-stores'
 import type { BreachCheckResult, CleanupEntry, Folder, LoginInput, VaultEntry } from '../types'
 import { derived } from 'svelte/store'
-import { makePassword } from '../generator'
 import {
   autoType,
   bulkAssignFolder,
@@ -329,12 +328,6 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     openEditorWebsite() {
       openEditor()
       state.patch({ editorFocusUrl: true })
-    },
-    openEditorWithFreshPassword() {
-      openEditor()
-      const draft = state.value().loginDraft
-      if (!draft.id) return
-      state.patch({ loginDraft: { ...draft, password: makePassword({ length: 20, options: { lowercase: true, uppercase: true, numbers: true, symbols: true }, avoidAmbiguous: true } ) } })
     },
     closeEditor,
     async togglePasswordReveal() {

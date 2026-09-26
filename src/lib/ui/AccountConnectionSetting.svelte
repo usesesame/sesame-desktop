@@ -42,7 +42,6 @@
 </script>
 
 <article class="settings-service-row">
-  <span class="settings-icon"><Icon name="user" size={17} /></span>
   <div class="setting-copy">
     <strong>Sesame account</strong>
     <p>

@@ -51,7 +51,6 @@
   ariaBusy={working}
 >
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
-  <p class="eyebrow">Fill in browser</p>
   <h2 id="browser-identity-heading">Fill {request.hostname}?</h2>
   <p id="browser-identity-description">Choose the saved identity to use. Only the fields below are filled, and the form is not submitted.</p>
 
