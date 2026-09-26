@@ -86,6 +86,7 @@ describe('browser save notices', () => {
   })
 
   it('keeps the security filter when another login is active', async () => {
+    vaultApi.resolveBrowserSave.mockResolvedValue({ id: 'login-a', snapshot: snapshotWith(['totp']) })
     const { stores, controller } = harness('login-b')
     controller.receive(request('update'))
 

@@ -152,7 +152,7 @@ fn save_new_login(
 
 /// Changes only the password; the outgoing value is captured to history first.
 fn save_login_update(
-    vault: &State<'_, VaultState>,
+    vault: &VaultState,
     payload: browser_fill::SavePayload,
     selected_id: Option<String>,
 ) -> VaultResult<SaveLoginResult> {
@@ -245,6 +245,9 @@ pub fn get_pending_browser_card_fill(
 
 #[cfg(test)]
 mod browser_update_tests {
+    use super::save_login_update;
+    use crate::browser_fill::{self, SaveKind};
+    use crate::commands::test_support::TestVault;
     use crate::vault::storage::payload_with_saved_login;
     use crate::vault::{VaultEntry, VaultPayload};
 
@@ -296,5 +299,31 @@ mod browser_update_tests {
 
         assert!(!next.entries[0].password.contains("fictional-stored-secret"));
         assert_eq!(next.history.len(), 1);
+    }
+
+    #[test]
+    fn an_approved_update_commits_the_new_password_through_the_command() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        let payload = browser_fill::SavePayload {
+            kind: SaveKind::Update,
+            title: "Northwind".to_string(),
+            username: "fictional-user".to_string(),
+            password: "fictional-new-secret".to_string(),
+            origin: "https://northwind.example".to_string(),
+            epoch: vault.state.session_epoch(),
+            candidates: vec![browser_fill::test_update_candidate(
+                "login-a",
+                "https://northwind.example",
+            )],
+        };
+
+        let result = save_login_update(&vault.state, payload, Some("login-a".to_string()))
+            .expect("saved update");
+
+        assert_eq!(result.id, "login-a");
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-new-secret");
+        assert_ne!(stored.password_updated_at, 42);
+        assert_eq!(stored.revision, 8);
     }
 }

@@ -198,6 +198,10 @@ pub fn refresh_totp(
 
 #[tauri::command]
 pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResult<SaveLoginResult> {
+    save_login_in_state(input, &state)
+}
+
+fn save_login_in_state(input: LoginInput, state: &VaultState) -> VaultResult<SaveLoginResult> {
     let totp_input = input.totp.clone();
     let mut entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
@@ -582,5 +586,46 @@ mod keep_password_tests {
         assert_eq!(payload.entries[0].password, "fictional-stored-secret");
         assert_eq!(payload.entries[0].revision, 7);
         assert!(payload.history.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod save_login_command_tests {
+    use super::*;
+    use crate::commands::test_support::{login_input, TestVault};
+
+    #[test]
+    fn a_typed_password_is_committed_to_the_vault_file() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        let result = save_login_in_state(
+            login_input(
+                Some("login-a"),
+                "https://northwind.example",
+                "fictional-new-secret",
+            ),
+            &vault.state,
+        )
+        .expect("saved login");
+
+        assert_eq!(result.id, "login-a");
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-new-secret");
+        assert_eq!(stored.revision, 8);
+    }
+
+    #[test]
+    fn a_blank_password_edit_keeps_the_stored_password() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        save_login_in_state(
+            login_input(Some("login-a"), "https://northwind.example", ""),
+            &vault.state,
+        )
+        .expect("saved login");
+
+        let stored = vault.stored_login("login-a");
+        assert_eq!(stored.password, "fictional-stored-secret");
+        assert_eq!(stored.password_updated_at, 42);
     }
 }

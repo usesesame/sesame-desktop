@@ -137,10 +137,14 @@ const delay = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveW
 
 async function waitForExit(child, timeoutMs) {
   if (child.exitCode !== null) return
+  let timer
   await Promise.race([
     new Promise((resolveExit) => child.once('exit', resolveExit)),
-    delay(timeoutMs),
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(resolveTimeout, timeoutMs)
+    }),
   ])
+  clearTimeout(timer)
 }
 
 async function waitForBrokerSocket(environment) {
