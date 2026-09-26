@@ -207,6 +207,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      SESAME_RELEASE_VISIBILITY: draft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -236,6 +237,9 @@ jobs:
             echo
             echo "Early access build for Linux x86_64: deb, rpm, and AppImage packages."
             echo
+            echo "This GitHub release is an unpublished draft until a maintainer publishes it"
+            echo "deliberately, so no public download is reachable from it yet."
+            echo
             echo "The packages are not signed by a distribution key. Every file was built in"
             echo "public CI from tag $GITHUB_REF_NAME and signed keylessly with Sigstore."
             echo
@@ -244,6 +248,24 @@ jobs:
             echo "Release set digest: $setdigest"
           } > release-notes.md
           node tools/publish-linux-release.mjs release-handoff "$(basename "$manifest")" "$(ls release-artifacts/*.candidate.json)" release-notes.md
+
+      - name: Prove the release stays unpublished
+        shell: bash
+        run: |
+          draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          if [ "$draft" != "true" ]; then
+            echo "The release is published; the unsigned packages must stay an unpublished draft until approval." >&2
+            exit 1
+          fi
+          manifest=$(ls release-handoff/*.release.json)
+          asset=$(jq -r '.artifacts[0].filename' "$manifest")
+          code=$(curl -sS -o /dev/null -w '%{http_code}' "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$asset")
+          if [ "$code" != "404" ]; then
+            echo "$asset is publicly reachable (HTTP $code) while the release is an unpublished draft." >&2
+            exit 1
+          fi
+          echo "Release $GITHUB_REF_NAME is an unpublished draft; $asset is not publicly reachable."
+          echo "Release $GITHUB_REF_NAME is an unpublished draft. Public Linux downloads stay off until a maintainer publishes the release deliberately." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Submit the cryptographically verified candidate
         env:

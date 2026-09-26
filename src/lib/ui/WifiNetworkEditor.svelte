@@ -50,7 +50,7 @@
 >
   <form on:submit|preventDefault={onSubmit} on:input={() => (dirty = true)}>
   <header class="editor-header">
-    <div><p class="eyebrow">{networkDraft.id ? 'Saved network' : 'New network'}</p><h2 id="wifi-network-editor-heading">{editorTitle}</h2></div>
+    <div><h2 id="wifi-network-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingNetwork} on:click={requestClose} aria-label="Close network editor">×</button>
   </header>
 

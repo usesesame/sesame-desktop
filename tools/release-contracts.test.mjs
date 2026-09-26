@@ -65,6 +65,27 @@ test('the saved password is revealed only through a presence gate', () => {
   assert.match(vault, /invoke(<[^>]+>)?\('reveal_login_secret', \{ id \}\)/)
 })
 
+test('a tag keeps the unsigned release unpublished until signing', () => {
+  for (const scriptPath of ['reconcile-github-release.mjs', 'publish-linux-release.mjs']) {
+    const script = read('tools', scriptPath)
+    assert.match(
+      script,
+      /parseReleaseVisibility\(process\.env\.SESAME_RELEASE_VISIBILITY\)/,
+      `${scriptPath} does not resolve the publication policy`,
+    )
+    assert.match(script, /visibility === RELEASE_VISIBILITY_DRAFT \? \['--draft'\] : \[\]/, `${scriptPath} can create a public release`)
+  }
+
+  const windows = read('.github', 'workflows', 'release-early-access.yml')
+  const linux = read('.github', 'workflows', 'release-linux-early-access.yml')
+  for (const [name, workflow] of [['Windows', windows], ['Linux', linux]]) {
+    assert.match(workflow, /SESAME_RELEASE_VISIBILITY: draft/, `${name} does not declare the draft policy`)
+    assert.match(workflow, /--json isDraft/, `${name} does not verify the draft state`)
+    assert.match(workflow, /releases\/download\/\$GITHUB_REF_NAME/, `${name} does not probe the public asset URL`)
+  }
+  assert.match(windows, /for asset in "\$installer" latest\.json; do/, 'the Windows lane must prove the updater manifest is unreachable')
+})
+
 test('a blank password on edit keeps the stored secret', () => {
   const storage = read('src-tauri', 'sesame-core', 'src', 'storage.rs')
   const start = storage.indexOf('pub fn payload_with_saved_login(')

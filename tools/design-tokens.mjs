@@ -2,6 +2,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { block, declarations, evaluateContrast, findLiteralRadiusDeclarations, findLiteralTypeDeclarations } from './design-contracts.mjs'
+
 // design/tokens.css is canonical here and has no downstream copies to keep in
 // step: the website, the account and admin portals, and the browser extension
 // each own their snapshot in their own repository. What remains worth checking
@@ -30,27 +32,6 @@ const REQUIRED_TOKENS = [
   'text',
 ]
 
-function block(css, pattern) {
-  const start = css.search(pattern)
-  if (start < 0) throw new Error(`design/tokens.css has no block matching ${pattern}`)
-  const open = css.indexOf('{', start)
-  let depth = 0
-  for (let index = open; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    else if (css[index] === '}') {
-      depth -= 1
-      if (depth === 0) return css.slice(open + 1, index)
-    }
-  }
-  throw new Error(`unterminated block matching ${pattern}`)
-}
-
-function declarations(text) {
-  const found = new Map()
-  for (const match of text.matchAll(/--([a-z0-9-]+)\s*:\s*([^;]+);/g)) found.set(match[1], match[2].trim())
-  return found
-}
-
 function sourceFiles(dir) {
   return readdirSync(dir).flatMap((name) => {
     if (['node_modules', 'dist', 'test-results', 'target'].includes(name)) return []
@@ -63,18 +44,6 @@ function sourceFiles(dir) {
 function fail(message, problems) {
   console.error(`design tokens: ${message}\n  ${problems.join('\n  ')}`)
   process.exit(1)
-}
-
-function luminance(hex) {
-  const value = hex.replace('#', '')
-  const [r, g, b] = [0, 2, 4]
-    .map((index) => parseInt(value.slice(index, index + 2), 16) / 255)
-    .map((channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
-function contrast(first, second) {
-  return (Math.max(luminance(first), luminance(second)) + 0.05) / (Math.min(luminance(first), luminance(second)) + 0.05)
 }
 
 const mode = process.argv[2]
@@ -151,14 +120,16 @@ if (/0 0 0 1px/.test(fieldRing)) {
   fail('--field-ring draws the doubled 1px edge the halo replaced', [fieldRing])
 }
 
-for (const [name, palette] of [['light', light], ['dark', dark]]) {
-  const focus = palette.get('focus-ring')
-  const surface = palette.get('surface')
-  if (!focus || !surface || !/^#[0-9a-fA-F]{6}$/.test(focus) || !/^#[0-9a-fA-F]{6}$/.test(surface)) {
-    fail(`${name} focus ring or surface is not a plain colour this check can measure`, [`focus=${focus} surface=${surface}`])
-  }
-  const ratio = contrast(focus, surface)
-  if (ratio < 3) fail(`${name} focus ring contrast is ${ratio.toFixed(2)}:1, below 3:1`, [`--focus-ring ${focus} on --surface ${surface}`])
+const contrastViolations = [...evaluateContrast('light', new Map(light)), ...evaluateContrast('dark', new Map([...light, ...dark]))]
+if (contrastViolations.length) {
+  fail(
+    'a named contrast pair is below its floor',
+    contrastViolations.map((entry) =>
+      entry.ratio == null
+        ? `${entry.theme} ${entry.name}: ${entry.foreground ?? 'unresolved'} on ${entry.background ?? 'unresolved'} is not a plain colour this check can measure`
+        : `${entry.theme} ${entry.name} is ${entry.ratio.toFixed(2)}:1, below ${entry.floor}:1`,
+    ),
+  )
 }
 
 const shared = new Set([...light.keys(), ...dark.keys()])
@@ -281,6 +252,18 @@ for (const line of appLines) {
 if (sidebar.length) fail('these sidebar rules bypass the navigation surface tokens', sidebar)
 for (const name of ['--sidebar-hover', '--sidebar-active-layer', '--sidebar-active-top', '--sidebar-active-lift']) {
   if (!appCss.includes(`${name}:`)) fail('a sidebar token is missing', [`${name} is not declared in src/app.css`])
+}
+
+const sources = files.map((file) => ({ path: relative(root, file), text: readFileSync(file, 'utf8') }))
+
+const literalType = findLiteralTypeDeclarations(sources)
+if (literalType.length) {
+  fail('a literal type value bypasses the shared scale', literalType.map((entry) => `${entry.path}: ${entry.selector} { ${entry.property}: ${entry.value} }`))
+}
+
+const literalRadius = findLiteralRadiusDeclarations(sources)
+if (literalRadius.length) {
+  fail('a literal corner radius bypasses the shared scale', literalRadius.map((entry) => `${entry.path}: ${entry.selector} { border-radius: ${entry.value} }`))
 }
 
 console.log(`design tokens: design/tokens.css is well formed, ${light.size} tokens in the light block; ${files.length} desktop sources use only defined tokens`)

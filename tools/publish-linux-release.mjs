@@ -5,7 +5,13 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import { assertSafeReleaseFilename, fileSha256 } from './release-evidence-lib.mjs'
-import { RELEASE_SET_DIGEST_LABEL, planReleasePublication, windowsLaneAssetPatterns } from './release-publish-reconcile.mjs'
+import {
+  RELEASE_SET_DIGEST_LABEL,
+  RELEASE_VISIBILITY_DRAFT,
+  parseReleaseVisibility,
+  planReleasePublication,
+  windowsLaneAssetPatterns,
+} from './release-publish-reconcile.mjs'
 import { assertCandidateArtifactsBindAssets, validateLinuxEvidenceDirectory } from './linux-release-evidence.mjs'
 
 const [handoffInput, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
@@ -16,6 +22,7 @@ const repository = process.env.GITHUB_REPOSITORY
 const tag = process.env.GITHUB_REF_NAME
 if (!repository || !tag) throw new Error('Set GITHUB_REPOSITORY and GITHUB_REF_NAME.')
 if (!process.env.GH_TOKEN) throw new Error('GH_TOKEN is required to query and mutate the GitHub release.')
+const visibility = parseReleaseVisibility(process.env.SESAME_RELEASE_VISIBILITY)
 
 const handoff = path.resolve(handoffInput)
 const { manifest } = await validateLinuxEvidenceDirectory(handoff, manifestFilename)
@@ -95,6 +102,7 @@ const reconcile = async (release) => {
     expectedAssets: assets,
     setDigest: candidate.setDigest,
     foreignAssets: windowsLaneAssetPatterns(manifest.version),
+    visibility,
   })
   if (plan.action === 'conflict') {
     throw new Error([
@@ -112,15 +120,23 @@ const reconcile = async (release) => {
       await rm(directory, { recursive: true, force: true })
     }
   }
-  process.stdout.write(`Release ${tag} ${plan.action === 'complete' ? 'already carries' : 'now carries'} all ${assets.length} verified assets.\n`)
+  const state = plan.draft ? 'unpublished draft' : 'published release'
+  process.stdout.write(`Release ${tag} ${plan.action === 'complete' ? 'already carries' : 'now carries'} all ${assets.length} verified assets as an ${state}.\n`)
 }
 
 let release = await fetchRelease()
 if (!release) {
   if (!notesFilename) throw new Error('Creating the release requires a notes file.')
   try {
-    await gh(['release', 'create', tag, '--repo', repository, '--title', `Sesame ${tag}`, '--notes-file', notesFilename, ...assets.map((asset) => asset.path)])
-    process.stdout.write(`Created release ${tag} with ${assets.length} verified assets.\n`)
+    await gh([
+      'release', 'create', tag,
+      '--repo', repository,
+      '--title', `Sesame ${tag}`,
+      '--notes-file', notesFilename,
+      ...(visibility === RELEASE_VISIBILITY_DRAFT ? ['--draft'] : []),
+      ...assets.map((asset) => asset.path),
+    ])
+    process.stdout.write(`Created ${visibility === RELEASE_VISIBILITY_DRAFT ? 'unpublished draft' : 'published'} release ${tag} with ${assets.length} verified assets.\n`)
   } catch (error) {
     if (!/HTTP 422|already[_ ]exists|already exists/i.test(error.stderr ?? '')) throw error
     release = await fetchRelease()

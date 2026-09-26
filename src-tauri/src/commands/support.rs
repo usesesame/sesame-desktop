@@ -114,7 +114,7 @@ fn save_new_login(
         url: payload.origin,
         username: payload.username,
         email: String::new(),
-        password: payload.password,
+        password: payload.password.to_string(),
         folder: String::new(),
         folder_id: None,
         totp: None,
@@ -192,8 +192,12 @@ fn save_login_update(
         .find(|entry| entry.id == target_id)
         .cloned()
         .ok_or("That saved login no longer exists.")?;
-    let next_payload =
-        payload_with_saved_login(&current, updated, Some(payload.password), unix_timestamp())?;
+    let next_payload = payload_with_saved_login(
+        &current,
+        updated,
+        Some(payload.password.to_string()),
+        unix_timestamp(),
+    )?;
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
     Ok(SaveLoginResult {
@@ -308,7 +312,7 @@ mod browser_update_tests {
             kind: SaveKind::Update,
             title: "Northwind".to_string(),
             username: "fictional-user".to_string(),
-            password: "fictional-new-secret".to_string(),
+            password: zeroize::Zeroizing::new("fictional-new-secret".to_string()),
             origin: "https://northwind.example".to_string(),
             epoch: vault.state.session_epoch(),
             candidates: vec![browser_fill::test_update_candidate(
