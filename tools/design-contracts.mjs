@@ -29,7 +29,8 @@ export function declarations(text) {
   return found
 }
 
-function rules(css) {
+function rules(source) {
+  const css = source.replace(/\/\*[\s\S]*?\*\//g, '')
   const found = []
   const stack = []
   let prelude = ''
@@ -51,8 +52,15 @@ function rules(css) {
   return found
 }
 
+function matchesSelector(selector, allowed) {
+  const escaped = allowed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[\\s>+~])${escaped}(?=$|[:.\\[\\s>+~])`).test(selector.trim())
+}
+
 function allowlisted(property, selector) {
-  return TYPE_ALLOWLIST.some((entry) => entry.property === property && selector.includes(entry.selector))
+  const parts = selector.split(',').map((part) => part.trim()).filter(Boolean)
+  if (!parts.length) return false
+  return parts.every((part) => TYPE_ALLOWLIST.some((entry) => entry.property === property && matchesSelector(part, entry.selector)))
 }
 
 export function findLiteralTypeDeclarations(sources) {
@@ -62,7 +70,7 @@ export function findLiteralTypeDeclarations(sources) {
       const match = declaration.match(/^(font-size|font-weight|font)\s*:\s*(.+)$/s)
       if (!match) continue
       const [, property, rawValue] = match
-      const value = rawValue.trim()
+      const value = rawValue.trim().replace(/\s*!\s*important\s*$/i, '')
       let literal = false
       if (property === 'font-size') literal = LITERAL_SIZE.test(value)
       else if (property === 'font-weight') literal = LITERAL_WEIGHT.test(value)
