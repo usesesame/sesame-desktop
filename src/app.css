@@ -704,6 +704,15 @@ button.no-totp:hover { filter: brightness(.97); }
 .finding-row:hover:not(:disabled) > svg { color: var(--accent-link); transform: translateX(2px); }
 .finding-icon { display: grid; place-items: center; color: var(--warn-text); line-height: 0; }
 .finding-row.clear .finding-icon { color: var(--chip-icon); }
+.clear-findings summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-medium); list-style: none; cursor: pointer; }
+.clear-findings summary::-webkit-details-marker { display: none; }
+.clear-findings summary:hover { background: var(--control-hover); }
+.clear-findings summary:focus-visible { border-radius: var(--radius-sm); outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.clear-findings summary svg { flex: none; color: var(--text-faint); transition: transform var(--t-fast) ease; }
+.clear-findings[open] summary svg { transform: rotate(90deg); }
+.clear-findings-count { margin-left: auto; color: var(--text-faint); font-weight: var(--weight-regular); }
+.clear-list { margin: 0; padding: 0; list-style: none; }
+.clear-list .finding-row:last-child { border-bottom: 0; }
 
 /* =========================================================================
    Feature: duplicate / cleanup review
