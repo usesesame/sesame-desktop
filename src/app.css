@@ -78,6 +78,7 @@ code, .credential-row code, .totp-action strong, .recovery-code { font-family: v
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .58; }
 button:focus-visible, a:focus-visible, [role]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus) { border-color: var(--field-border-hover); }
 input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: var(--field-ring); outline: none; }
 .file-picker:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
