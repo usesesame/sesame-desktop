@@ -503,7 +503,7 @@
 <AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} />
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
-  <main class="loading-screen" aria-live="polite">
+  <main class="loading-screen state-panel" aria-live="polite">
     <div class="loading-mark"><img class="sesame-mark large" src="/favicon.svg" alt="" width="512" height="512" /><span class="loading-spinner" aria-hidden="true"></span></div>
     <p>Opening Sesame…</p>
   </main>

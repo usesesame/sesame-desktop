@@ -233,10 +233,12 @@ button.no-totp, .credential-button, .more-button {
 .beta-onboarding-list svg { margin-top: 2px; color: var(--chip-icon); }
 .beta-onboarding-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
 
-.loading-screen { display: grid; min-height: 100vh; place-content: center; gap: var(--space-4); padding-top: 36px; text-align: center; color: var(--text-muted); }
+.state-panel { display: grid; place-content: center; justify-items: center; gap: var(--space-2); padding: var(--space-5); text-align: center; }
+.state-panel h2, .state-panel h3 { margin: 0; color: var(--text-heading); }
+.state-panel p { max-width: 320px; margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
+.loading-screen { min-height: 100vh; gap: var(--space-4); padding-top: 36px; color: var(--text-muted); }
 .loading-mark { position: relative; display: grid; place-items: center; width: 70px; height: 70px; margin: auto; }
 .loading-spinner { position: absolute; width: 70px; height: 70px; border: 3px solid var(--spinner-track); border-top-color: var(--accent); border-right-color: var(--gold); border-radius: 50%; animation: spinner-turn .82s linear infinite; }
-.loading-screen p { margin: 0; font-size: var(--type-2); }
 .inline-spinner { width: 28px; height: 28px; border: 2px solid var(--spinner-track); border-top-color: var(--accent); border-radius: 50%; animation: spinner-turn .75s linear infinite; }
 
 /* =========================================================================
@@ -372,10 +374,10 @@ button.no-totp, .credential-button, .more-button {
   animation: fade-enter .22s var(--ease-out) both;
 }
 .vault-view-header { animation: view-enter .22s var(--ease-out) both; width: min(100%, var(--content-width)); margin-inline: auto; }
-.empty-workspace { display: grid; width: min(100%, var(--content-width)); margin-inline: auto; min-height: calc(100% - 75px); place-content: center; justify-items: center; padding: 42px; border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); text-align: center; animation: view-enter .22s var(--ease-out) both; }
+.empty-workspace { width: min(100%, var(--content-width)); margin-inline: auto; min-height: calc(100% - 75px); gap: var(--space-3); padding: 42px; border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); animation: view-enter .22s var(--ease-out) both; }
 .empty-workspace h2 { margin: 0; color: var(--text-heading); font-size: var(--type-6); }
-.empty-workspace p:not(.eyebrow) { max-width: 355px; margin: var(--space-3) 0 var(--space-5); color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
-.empty-add { margin-top: var(--space-3); }
+.empty-workspace p:not(.eyebrow) { max-width: 355px; margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
+.empty-add { margin-top: 0; }
 .empty-workspace small { margin-top: var(--space-4); color: var(--text-faint); font-size: var(--type-2); }
 
 /* One of seven Items tab panels; it must not use the boxed hero treatment .empty-workspace does. */
@@ -389,6 +391,7 @@ button.no-totp, .credential-button, .more-button {
 .empty-brand { display: block; margin-inline: auto; }
 .empty-brand.size-md { width: 62px; height: 62px; margin-bottom: var(--space-5); }
 .empty-brand.size-lg { width: 74px; height: 74px; margin-bottom: var(--space-4); }
+.empty-workspace .empty-brand, .select-entry .empty-brand { margin-bottom: 0; }
 
 .entry-list-panel {
   display: flex;
@@ -672,9 +675,9 @@ button.no-totp:hover { filter: brightness(.97); }
 .field-warning { display: block; margin-top: 5px; color: var(--warn-text); font-size: var(--type-2); font-weight: var(--weight-medium); line-height: 1.4; }
 .notes-section { margin-top: var(--space-4); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface-inset); }
 .notes-section p:last-child { margin: 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.5; }
-.select-entry { display: grid; place-content: center; min-height: 100%; text-align: center; }
-.select-entry h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); }
-.select-entry p { max-width: 260px; color: var(--text-muted); font-size: var(--type-3); line-height: 1.6; }
+.select-entry { min-height: 100%; }
+.select-entry h2 { font-size: var(--type-5); }
+.select-entry p { max-width: 260px; line-height: 1.6; }
 
 
 /* =========================================================================
@@ -735,7 +738,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .cleanup-toolbar { display: flex; flex: none; min-height: 42px; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 .cleanup-toolbar .text-button { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
 .cleanup-toolbar p { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-2); }
-.cleanup-loading { display: grid; min-height: 0; flex: 1; place-content: center; justify-items: center; gap: var(--space-3); color: var(--text-muted); font-size: var(--type-2); }
+.cleanup-loading { min-height: 0; flex: 1; gap: var(--space-3); color: var(--text-muted); }
 .cleanup-confirm-backdrop { z-index: 114; }
 .cleanup-confirm-modal { width: min(100%, 470px); }
 .setup-head { display: flex; align-items: center; justify-content: space-between; }
