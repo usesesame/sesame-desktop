@@ -45,5 +45,4 @@
 
 <style>
   small { display: block; margin-top: 2px; color: var(--text-muted); }
-  .browser-fill-origin code { white-space: normal; }
 </style>

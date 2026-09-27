@@ -87,6 +87,3 @@
   </div>
 </ModalShell>
 
-<style>
-  .identity-fields-requested code { white-space: normal; }
-</style>
