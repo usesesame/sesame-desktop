@@ -447,6 +447,7 @@ fn wait_for_decision(
 }
 
 include!("browser_fill_matching.rs");
+include!("browser_fill_lookalike.rs");
 
 fn emit_approval_cancelled(
     app: &AppHandle,
