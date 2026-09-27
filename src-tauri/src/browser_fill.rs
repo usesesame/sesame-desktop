@@ -18,7 +18,8 @@ use crate::{
     browser_pipe::PipePeer,
     browser_protocol::{
         parse_card_fields, parse_identity_fields, BrowserRequest, BrowserResponse, CardFillFields,
-        IdentityFillFields, MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
+        IdentityFillFields, FILL_MATCH_PROTOCOL_VERSION, MAX_CREDENTIAL_FIELD_BYTES,
+        MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
     vault::{random_id, Card, Identity, TaggedItem, VaultEntry, VaultState},
@@ -494,7 +495,7 @@ fn handle_pipe_payload(
         "save" => save_response(app, &mut request, peer),
         "identity" => identity_response(app, &request, peer),
         "card" => card_response(app, &request, peer),
-        _ => BrowserResponse::error(&request.request_id, "Unsupported browser request."),
+        _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
     response_bytes(response)
 }
@@ -521,35 +522,31 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         .as_deref()
         .and_then(NormalizedOrigin::from_request)
     else {
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
     let vault = app.state::<VaultState>();
     let (epoch, candidates) = {
         let session = match vault.session.lock() {
             Ok(session) => session,
-            Err(_) => {
-                return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable")
-            }
+            Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
         };
         let Some(session) = session.as_ref() else {
             diagnostics::record_browser_host_registration(app, "fill_locked");
-            return BrowserResponse::unavailable(&request.request_id, "locked");
+            return BrowserResponse::unavailable(request, "locked");
         };
         let payload = match session.open_payload() {
             Ok(payload) => payload,
-            Err(_) => {
-                return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable")
-            }
+            Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
         };
         let candidates = matching_entries(&payload.entries, &origin);
         (vault.session_epoch(), candidates)
     };
     if candidates.is_empty() {
         diagnostics::record_browser_host_registration(app, "fill_no_match");
-        return BrowserResponse::unavailable(&request.request_id, "noMatch");
+        return BrowserResponse::unavailable(request, "noMatch");
     }
     if candidates.len() > MAX_MATCHING_CANDIDATES {
-        return BrowserResponse::unavailable(&request.request_id, "multipleMatches");
+        return BrowserResponse::unavailable(request, "multipleMatches");
     }
 
     let candidate_ids: HashSet<String> = candidates
@@ -565,7 +562,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         ApprovalRequest::Fill { candidate_ids },
     ) {
         Ok(value) => value,
-        Err(reason) => return BrowserResponse::unavailable(&request.request_id, reason),
+        Err(reason) => return BrowserResponse::unavailable(request, reason),
     };
 
     // A live grant resolves the approval without prompting. Every check after the
@@ -576,7 +573,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             .is_err()
         {
             fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+            return BrowserResponse::unavailable(request, "approvalUnavailable");
         }
         diagnostics::record_browser_host_registration(app, "fill_auto_approved");
     } else {
@@ -593,7 +590,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             .is_err()
         {
             fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+            return BrowserResponse::unavailable(request, "approvalUnavailable");
         }
         // Publish before focus change: Chromium closes the popup when Sesame comes forward.
         bring_to_foreground(app);
@@ -615,53 +612,64 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         ApprovalKind::Fill,
     ) {
         Ok(decision) => decision,
-        Err(reason) => return BrowserResponse::unavailable(&request.request_id, reason),
+        Err(reason) => return BrowserResponse::unavailable(request, reason),
     };
     let login_id = match decision {
         ApprovalDecision::Selected(login_id) => login_id,
         ApprovalDecision::Denied => {
-            return BrowserResponse::unavailable(&request.request_id, "approvalDeclined")
+            return BrowserResponse::unavailable(request, "approvalDeclined")
         }
         ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
-            return BrowserResponse::unavailable(&request.request_id, "invalidSelection")
+            return BrowserResponse::unavailable(request, "invalidSelection")
         }
     };
     if !peer.is_connected() {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "connectionClosed");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
 
     // Bindings rechecked after approval under the vault lock; no credential is copied before this.
     let session = match vault.session.lock() {
         Ok(session) => session,
-        Err(_) => return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable"),
+        Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
     };
     if vault.session_epoch() != epoch {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "locked");
+        return BrowserResponse::unavailable(request, "locked");
     };
     let Ok(item) = session.open_item(&login_id) else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
     let TaggedItem::Login(entry) = &*item else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
-    if NormalizedOrigin::from_saved_url(&entry.url)
+    let Some(match_kind) = NormalizedOrigin::from_saved_url(&entry.url)
         .as_ref()
         .and_then(|saved| origin_match_kind(saved, &origin))
-        .is_none()
-        || !credential_fields_valid(entry)
-    {
+    else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
+    };
+    if !credential_fields_valid(entry) {
+        emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
-    BrowserResponse::fill_for(request, identity_value(entry), entry.password.clone())
+    if request.version == FILL_MATCH_PROTOCOL_VERSION {
+        BrowserResponse::fill_with_match_kind(
+            request,
+            identity_value(entry),
+            entry.password.clone(),
+            match_kind.as_str(),
+        )
+    } else {
+        BrowserResponse::fill_for(request, identity_value(entry), entry.password.clone())
+    }
 }
 
 fn identity_value(entry: &VaultEntry) -> String {
@@ -1019,13 +1027,16 @@ fn approval_expires_at_unix_ms() -> u64 {
 }
 
 fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
+    let version = response.version;
+    let request_id = response.request_id.clone();
     let bytes = response
         .to_zeroizing_bytes()
         .unwrap_or_else(|_| zeroize::Zeroizing::new(Vec::new()));
     if bytes.is_empty() || bytes.len() > MAX_NATIVE_MESSAGE_BYTES {
         zeroize::Zeroizing::new(
-            serde_json::to_vec(&BrowserResponse::error(
-                "invalid",
+            serde_json::to_vec(&BrowserResponse::error_with_version(
+                version,
+                &request_id,
                 "Browser response unavailable.",
             ))
             .unwrap_or_default(),
@@ -1488,6 +1499,74 @@ mod origin_attacks {
                 "{saved_url} matched {request_url} with the wrong rule"
             );
         }
+    }
+
+    #[test]
+    fn a_v3_fill_response_reports_the_rule_that_matched() {
+        let cases = [
+            ("https://example.test", "https://example.test", "exact"),
+            (
+                "https://www.example.test",
+                "https://example.test",
+                "wwwAlias",
+            ),
+            (
+                "https://example.test",
+                "https://www.example.test",
+                "wwwAlias",
+            ),
+        ];
+        for (saved_url, request_url, expected) in cases {
+            let saved_origin = saved(saved_url).expect("saved origin");
+            let requested = request(request_url).expect("request origin");
+            let kind = origin_match_kind(&saved_origin, &requested)
+                .unwrap_or_else(|| panic!("{saved_url} did not match {request_url}"));
+            let fill = BrowserRequest {
+                version: FILL_MATCH_PROTOCOL_VERSION,
+                message_type: "fill".to_string(),
+                request_id: "fill-1".to_string(),
+                origin: Some(request_url.to_string()),
+                fields: None,
+                username: None,
+                password: None,
+                title: None,
+                kind: None,
+            };
+            assert!(fill.validate());
+
+            let response = BrowserResponse::fill_with_match_kind(
+                &fill,
+                "person@example.test".to_string(),
+                "fictional-example-value".to_string(),
+                kind.as_str(),
+            );
+            assert_eq!(response.match_kind.as_deref(), Some(expected));
+            assert!(response.validate_for(&fill));
+            let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+                .expect("utf8");
+            assert!(wire.contains(&format!("\"matchKind\":\"{expected}\"")));
+        }
+    }
+
+    #[test]
+    fn the_candidate_labels_match_the_fill_match_kinds() {
+        let entries = vec![
+            entry("login-exact", "https://example.test", CANARY_PASSWORD),
+            entry("login-www", "https://www.example.test", CANARY_PASSWORD),
+        ];
+        let candidates =
+            matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| (candidate.id.as_str(), candidate.match_kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("login-exact", OriginMatchKind::Exact.as_str()),
+                ("login-www", OriginMatchKind::WwwAlias.as_str()),
+            ]
+        );
     }
 
     #[test]
