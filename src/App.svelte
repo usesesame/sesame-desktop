@@ -291,6 +291,7 @@
   const allItems = itemController.allItems
   const recentItems = itemController.recentItems
   let focusSearchToken = 0
+  let focusResultsToken = 0
 
   // Universal search means every item, so it clears the filters first.
   function openUniversalSearch() {
@@ -550,6 +551,7 @@
         addMenuOpen={$itemState.addMenuOpen}
         filterMenuOpen={$itemState.filterMenuOpen}
         {focusSearchToken}
+        {focusResultsToken}
         bind:passwordVisible={$loginState.passwordVisible}
         revealedPassword={$loginState.revealedPassword}
         passwordPresenceRequired={$loginState.passwordPresenceRequired}
@@ -566,6 +568,7 @@
         multiSelect={$loginState.multiSelect}
         selectedIds={$loginState.selectedIds}
         bulkFolderId={$loginState.bulkFolderId}
+        bulkTag={$loginState.bulkTag}
         onSelectItem={(id, kind) => void itemController.select(id, kind)}
         onAddItem={itemController.openNew}
         onToggleAddMenu={itemController.toggleAddMenu}
@@ -610,6 +613,8 @@
         onBulkMove={loginController.bulkMoveSelected}
         onBulkFavourite={() => void loginController.bulkFavouriteSelected()}
         onBulkDelete={loginController.bulkDeleteSelected}
+        onSetBulkTag={loginController.setBulkTag}
+        onBulkTag={() => void loginController.bulkTagSelected()}
         onCancelMultiSelect={loginController.clearMultiSelect}
       />
     {:else if $selection.activeView === 'security'}

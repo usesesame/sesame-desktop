@@ -348,7 +348,7 @@ export function createAppStores() {
 }
 
 export type AppStores = ReturnType<typeof createAppStores>
-const APP_STORES = Symbol('sesame-app-stores')
+export const APP_STORES = Symbol('sesame-app-stores')
 
 export function provideAppStores(stores: AppStores): AppStores {
   setContext(APP_STORES, stores)
