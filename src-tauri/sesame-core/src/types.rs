@@ -216,6 +216,15 @@ pub struct PasswordIssue {
 #[derive(Serialize, Clone, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
+pub struct TwoFactorSiteLogin {
+    pub id: String,
+    pub title: String,
+    pub site: String,
+}
+
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, optional_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SecuritySummary {
     pub good: usize,
     pub needs_attention: usize,
@@ -229,6 +238,10 @@ pub struct SecuritySummary {
     pub missing_urls: usize,
     pub no_totp: usize,
     pub missing_recovery: usize,
+    pub expired_cards: usize,
+    pub expiring_cards: usize,
+    pub two_factor_sites: usize,
+    pub two_factor_logins: Vec<TwoFactorSiteLogin>,
 }
 
 #[derive(Serialize, ts_rs::TS)]

@@ -344,8 +344,9 @@
   }
 
   async function refreshActiveView() {
-    if (selection.value().activeView === 'security' && cleanupState.value().duplicateReviewOpen) {
-      await cleanupController.loadDuplicateGroups()
+    if (selection.value().activeView === 'security') {
+      if (cleanupState.value().duplicateReviewOpen) await cleanupController.loadDuplicateGroups()
+      await cleanupController.refreshBreachScan()
     }
     if (selection.value().activeView === 'settings') {
       await Promise.all([
@@ -442,6 +443,7 @@
       .then((stop) => { if (quickAccessListenerDisposed) stop(); else stopQuickAccessOpen = stop })
       .catch(() => void recordDiagnostic('renderer', 'quick_access_listener_failed'))
     const stopSettings = settingsController.start()
+    const stopCleanup = cleanupController.start()
     const stopBrowserFill = browserFillController.start()
     const stopIdentityFill = identityFillController.start()
     const stopCardFill = cardFillController.start()
@@ -464,6 +466,7 @@
       .catch(() => void recordDiagnostic('renderer', 'idle_warning_listener_failed'))
     return () => {
       stopSettings()
+      stopCleanup()
       stopBrowserFill()
       stopIdentityFill()
       stopCardFill()
@@ -649,6 +652,11 @@
         onDelete={cleanupController.requestDelete}
         onOpenDuplicateReview={cleanupController.openDuplicateReview}
         onShowSecurityFilter={cleanupController.showSecurityFilter}
+        onShowCards={cleanupController.showCards}
+        breachScan={$cleanupState.breachScan}
+        breachScanError={$cleanupState.breachScanError}
+        onStartBreachScan={() => void cleanupController.startBreachScan()}
+        onCancelBreachScan={() => void cleanupController.cancelBreachScan()}
       />
     {:else if $selection.activeView === 'authenticator'}
       <AuthenticatorView onOpenImport={importController.open} reloadToken={authenticatorReloadToken} />
