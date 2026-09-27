@@ -299,6 +299,20 @@
     focusSearchToken += 1
   }
 
+  function focusSearchResults() {
+    focusResultsToken += 1
+  }
+
+  function copySelectedTotp() {
+    const code = $vault.loginCard?.totpCode
+    if (code) void loginController.copy(code, '2FA code')
+  }
+
+  function openSelectedSite() {
+    const url = $vault.loginCard?.url
+    if (url) void loginController.openCurrentWebsite(url)
+  }
+
   function historyItemTitle(_kind: string, itemId: string): string | null {
     return vaultItems($vault.snapshot).find((item) => item.id === itemId)?.title ?? null
   }
@@ -540,6 +554,9 @@
     onCopyUsername={() => void loginController.copySelectedField('username')}
     onEditSelected={loginController.openEditor}
     onOpenSearch={openUniversalSearch}
+    onFocusResults={focusSearchResults}
+    onCopyTotp={copySelectedTotp}
+    onOpenSelectedSite={openSelectedSite}
   >
     {#if $selection.activeView === 'vault'}
       <VaultView
