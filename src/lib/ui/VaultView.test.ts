@@ -215,3 +215,14 @@ test('the focus results token moves focus to the first row', async () => {
   await vi.waitFor(() => expect(document.activeElement).toBe(rows[0]))
   expect(onSelectItem).toHaveBeenLastCalledWith('login-a', 'login')
 })
+
+test('a row that needs attention exposes a named status marker with its label', async () => {
+  const items = [item('login-a', 'Northwind', { securityLevel: 'needs-work' }), item('login-b', 'Contoso')]
+  const { rendered } = renderVault({ allItems: items, visibleItems: items })
+  await Promise.resolve()
+
+  const marker = screen.getByRole('img', { name: 'Needs attention' })
+  expect(marker).toBeTruthy()
+  expect(rendered.container.querySelector('.entry-warning-label')?.textContent).toBe('Needs attention')
+  expect(rendered.container.querySelectorAll('.entry-warning')).toHaveLength(1)
+})
