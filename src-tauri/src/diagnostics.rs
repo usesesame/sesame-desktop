@@ -143,6 +143,7 @@ fn severity(code: &str) -> &'static str {
         | "vault_lock_listener_failed"
         | "idle_warning_listener_failed"
         | "quick_access_listener_failed"
+        | "breach_scan_listener_failed"
         | "card_fill_listener_failed" => "error",
         "fill_locked"
         | "fill_no_match"
@@ -514,6 +515,7 @@ fn allowed_code(value: &str) -> bool {
             | "vault_lock_listener_failed"
             | "idle_warning_listener_failed"
             | "quick_access_listener_failed"
+            | "breach_scan_listener_failed"
             | "card_fill_listener_failed"
             | "platform_capabilities_failed"
             | "picker_opened"

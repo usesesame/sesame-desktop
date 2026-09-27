@@ -57,6 +57,9 @@ macro_rules! sesame_invoke_handler {
             commands::suggest_field_values,
             commands::check_password_strength,
             commands::check_password_breach,
+            commands::start_login_breach_scan,
+            commands::get_login_breach_scan_status,
+            commands::cancel_login_breach_scan,
             commands::auto_type,
             commands::get_login_summary,
             commands::get_duplicate_groups,
@@ -271,6 +274,7 @@ pub fn run() {
                 .build(),
         )
         .manage(vault::VaultState::default())
+        .manage(commands::BreachScanState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())
