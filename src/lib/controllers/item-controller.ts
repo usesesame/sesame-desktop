@@ -55,8 +55,8 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
     loading: false,
     addMenuOpen: false,
     filterMenuOpen: false,
-    /** Ids only; which fields matched a search is never held here. */
-    searchMatchIds: new Set<string>(),
+    /** Ranked ids from Rust only; which fields matched a search is never held here. */
+    searchMatchIds: [] as string[],
   })
   let detailRequestToken = 0
   let searchRequestToken = 0
@@ -66,14 +66,23 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
 
   const visibleItems = derived([allItems, selection, state], ([$allItems, $selection, $state]) => {
     const query = $selection.searchQuery.trim().toLowerCase()
+    const rustMatches = new Set($state.searchMatchIds)
     const matched = $allItems.filter((item) => {
       const securityFilter = $selection.securityFilter
       if (securityFilter && !item.issueKinds.includes(securityFilter)) return false
       if ($selection.categoryFilter && item.kind !== $selection.categoryFilter) return false
-      if (query && !itemMatchesQuery(item, query) && !$state.searchMatchIds.has(item.id)) return false
+      if (query && !itemMatchesQuery(item, query) && !rustMatches.has(item.id)) return false
       return itemMatchesCollection(item, $selection.collectionFilter)
     })
-    return sortCollectionItems(matched, $selection.collectionFilter, $selection.sortMode)
+    if (!query || !$state.searchMatchIds.length) {
+      return sortCollectionItems(matched, $selection.collectionFilter, $selection.sortMode)
+    }
+    const rank = new Map($state.searchMatchIds.map((id, index) => [id, index]))
+    const ranked = matched
+      .filter((item) => rank.has(item.id))
+      .sort((left, right) => rank.get(left.id)! - rank.get(right.id)!)
+    const unranked = matched.filter((item) => !rank.has(item.id))
+    return [...ranked, ...sortCollectionItems(unranked, $selection.collectionFilter, $selection.sortMode)]
   })
 
   const recentItems = derived([allItems, selection], ([$allItems, $selection]) => $selection.recentItemIds
@@ -241,22 +250,22 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
       searchRequestToken += 1
       const requestToken = searchRequestToken
       if (!query.trim()) {
-        state.patch({ searchMatchIds: new Set() })
+        state.patch({ searchMatchIds: [] })
         return
       }
       try {
         const ids = await searchItems(query)
         if (requestToken !== searchRequestToken) return
-        state.patch({ searchMatchIds: new Set(ids) })
+        state.patch({ searchMatchIds: ids })
       } catch {
         // A failed search narrows the results rather than emptying them.
-        if (requestToken === searchRequestToken) state.patch({ searchMatchIds: new Set() })
+        if (requestToken === searchRequestToken) state.patch({ searchMatchIds: [] })
       }
     },
     clearSearch() {
       searchRequestToken += 1
       selection.patch({ searchQuery: '' })
-      state.patch({ searchMatchIds: new Set() })
+      state.patch({ searchMatchIds: [] })
     },
     clearSelection() {
       clearDetail()
@@ -266,7 +275,7 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
     clearSecrets() {
       detailRequestToken += 1
       searchRequestToken += 1
-      state.set({ detail: null, loading: false, addMenuOpen: false, filterMenuOpen: false, searchMatchIds: new Set() })
+      state.set({ detail: null, loading: false, addMenuOpen: false, filterMenuOpen: false, searchMatchIds: [] })
       selection.patch({ activeItemId: null, activeItemKind: null, recentItemIds: [] })
     },
   }
