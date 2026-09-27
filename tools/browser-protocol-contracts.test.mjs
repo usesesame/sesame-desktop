@@ -9,6 +9,7 @@ const root = process.cwd()
 const canonical = join(root, 'src-tauri', 'contracts', 'browser', 'v1')
 const cardCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v2')
 const fillMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v3')
+const totpCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v4')
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -138,4 +139,67 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
   assert.match(rust, /pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;/)
   assert.match(rust, /fn valid_match_kind\(value: &str\) -> bool/)
   assert.match(rust, /"exact" \| "wwwAlias"/)
+})
+
+test('totp protocol v4 derives a code only after an origin approval', () => {
+  const contract = json(join(totpCanonical, 'contract.json'))
+  const requestSchema = json(join(totpCanonical, 'request.schema.json'))
+  const responseSchema = json(join(totpCanonical, 'response.schema.json'))
+  const vectors = json(join(totpCanonical, 'vectors.json'))
+  const v3RequestSchema = json(join(fillMatchCanonical, 'request.schema.json'))
+  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+
+  assert.equal(contract.tag, 'browser-protocol-v4')
+  assert.equal(contract.protocolVersion, 4)
+  assert.deepEqual(contract.requestTypes, ['totp'])
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 4)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 4)
+  assert.equal(contract.compatibility.minimumExtensionProtocolVersion, 4)
+  assert.equal(contract.compatibility.currentExtensionProtocolVersion, 4)
+  assert.equal(requestSchema.properties.version.const, 4)
+  assert.equal(requestSchema.properties.type.const, 'totp')
+  assert.equal(requestSchema.additionalProperties, false)
+  assert.deepEqual(requestSchema.required, ['version', 'type', 'requestId', 'origin'])
+  assert.equal(requestSchema.properties.origin.maxLength, contract.limits.originBytes)
+  assert.equal(v3RequestSchema.properties.version.const, 3)
+
+  assert.deepEqual(
+    responseSchema.oneOf.map((branch) => branch.$ref),
+    ['#/$defs/totp', '#/$defs/totpUnavailable', '#/$defs/error'],
+  )
+  assert.deepEqual(responseSchema.$defs.totp.required, ['version', 'type', 'requestId', 'code', 'remainingSeconds'])
+  assert.equal(responseSchema.$defs.totp.additionalProperties, false)
+  assert.equal(responseSchema.$defs.totp.properties.code.pattern, '^[0-9]{1,9}$')
+  assert.equal(responseSchema.$defs.totp.properties.remainingSeconds.minimum, 1)
+  assert.equal(responseSchema.$defs.totp.properties.remainingSeconds.maximum, 3600)
+  assert.deepEqual(responseSchema.$defs.reason.enum, contract.unavailableReasons)
+  assert.equal(responseSchema.$defs.totpUnavailable.additionalProperties, false)
+
+  assert.equal(vectors.protocolVersion, contract.protocolVersion)
+  assert.equal(vectors.fictionalDataOnly, true)
+  assert.ok(
+    vectors.requestCases.some((entry) => entry.valid === false && entry.message.version === 3),
+    'no vector refuses a totp request on protocol three',
+  )
+  assert.ok(
+    vectors.requestCases.some((entry) => entry.valid === false && entry.message.type === 'fill'),
+    'no vector refuses a non-totp request on protocol four',
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) => entry.hostValid === true && entry.message.type === 'totp' && /^[0-9]{1,9}$/.test(entry.message.code),
+    ),
+    'no accepted vector carries a digits-only code',
+  )
+  assert.ok(
+    vectors.responseCases.some((entry) => entry.hostValid === true && entry.message.type === 'totp-unavailable'),
+    'no accepted vector reports totp-unavailable',
+  )
+  assert.ok(
+    vectors.responseCases.some((entry) => entry.hostValid === false),
+    'no rejected response vector',
+  )
+  assert.match(rust, /pub const TOTP_PROTOCOL_VERSION: u8 = 4;/)
+  assert.match(rust, /fn valid_totp_code\(value: &str\) -> bool/)
+  assert.match(rust, /self\.message_type != "totp" && !no_code/)
 })
