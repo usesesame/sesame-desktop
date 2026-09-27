@@ -2,6 +2,7 @@ import type { AppStores } from '../stores/app-stores'
 import type { BreachCheckResult, CleanupEntry, Folder, LoginInput, VaultEntry } from '../types'
 import { derived } from 'svelte/store'
 import {
+  addItemsTag,
   autoType,
   bulkAssignFolder,
   checkPasswordBreach,
@@ -20,7 +21,7 @@ import {
   setItemFavourite,
 } from '../vault'
 import { FAVOURITES_FILTER, RECENT_FILTER, rememberRecent } from '../vault-collections'
-import { vaultItems } from '../vault-items'
+import { uniqueTags, vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
 import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
@@ -77,6 +78,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     multiSelect: false,
     selectedIds: [] as string[],
     bulkFolderId: '',
+    bulkTag: '',
   })
   let selectionRequestToken = 0
   let revealGeneration = 0
@@ -254,7 +256,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   }
 
   function clearMultiSelect() {
-    state.patch({ multiSelect: false, selectedIds: [], bulkFolderId: '' })
+    state.patch({ multiSelect: false, selectedIds: [], bulkFolderId: '', bulkTag: '' })
   }
 
   async function bulkMoveSelected() {
@@ -309,6 +311,31 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       .map((entry) => ({ id: entry.id, title: entry.title, site: entry.site, username: '', initials: entry.initials, reason: '' }))
     if (!entries.length) return
     requestBulkDelete(entries)
+  }
+
+  async function bulkTagSelected() {
+    const current = state.value()
+    const tag = current.bulkTag.trim()
+    if (!current.selectedIds.length || current.folderWorking) return
+    if (!tag) {
+      feedback.setError(new Error('Enter a tag to add.'))
+      return
+    }
+    state.patch({ folderWorking: true })
+    feedback.clearError()
+    try {
+      const snapshot = await addItemsTag(current.selectedIds, tag)
+      vault.patch({ snapshot })
+      const card = vault.value().loginCard
+      if (card && current.selectedIds.includes(card.id)) vault.patch({ loginCard: { ...card, tags: uniqueTags([...(card.tags ?? []), tag]) } })
+      const count = current.selectedIds.length
+      feedback.showNotice('Tag added', `${tag} added to ${count} ${count === 1 ? 'item' : 'items'}.`)
+      clearMultiSelect()
+    } catch (error) {
+      feedback.setError(error)
+    } finally {
+      state.patch({ folderWorking: false })
+    }
   }
 
   return {
@@ -538,9 +565,11 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       state.patch({ multiSelect: true, selectedIds: [...new Set(ids)] })
     },
     setBulkFolderId(bulkFolderId: string) { state.patch({ bulkFolderId }) },
+    setBulkTag(bulkTag: string) { state.patch({ bulkTag }) },
     bulkMoveSelected,
     bulkFavouriteSelected,
     bulkDeleteSelected,
+    bulkTagSelected,
     clearMultiSelect,
     startNewFolderForContext() {
       const menu = state.value().entryMenu
@@ -635,7 +664,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,
         breachCheckEntryId: '', breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '',
         autoTypeEntryId: '', autoTypeCountdown: 0,
-        multiSelect: false, selectedIds: [], bulkFolderId: '',
+        multiSelect: false, selectedIds: [], bulkFolderId: '', bulkTag: '',
       })
       vault.patch({ loginCard: null })
       selection.patch({ activeItemId: null, activeItemKind: null, recentItemIds: [] })

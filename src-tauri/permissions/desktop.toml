@@ -54,6 +54,7 @@ commands.allow = [
   "save_login",
   "set_login_folders",
   "bulk_assign_folder",
+  "add_items_tag",
   "create_folder",
   "rename_folder",
   "delete_folder",

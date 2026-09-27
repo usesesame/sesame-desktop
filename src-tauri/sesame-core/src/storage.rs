@@ -649,6 +649,38 @@ pub fn payload_with_item_favourite(
     Ok(next_payload)
 }
 
+pub const MAX_ITEM_TAG_LENGTH: usize = 50;
+
+pub fn payload_with_added_item_tag(
+    payload: &VaultPayload,
+    ids: &HashSet<String>,
+    tag: &str,
+) -> VaultResult<VaultPayload> {
+    let tag = tag.trim();
+    if tag.is_empty() {
+        return Err("Enter a tag to add.".into());
+    }
+    if tag.chars().count() > MAX_ITEM_TAG_LENGTH {
+        return Err(format!("Keep tags under {MAX_ITEM_TAG_LENGTH} characters."));
+    }
+    let mut next_payload = payload.clone();
+    let now = unix_timestamp();
+    for id in ids {
+        let item = next_payload
+            .item_metadata_mut(id)
+            .ok_or("One of the selected items no longer exists.")?;
+        if !item
+            .item_tags()
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(tag))
+        {
+            item.item_tags_mut().push(tag.to_string());
+        }
+        item.mark_item_changed(now);
+    }
+    Ok(next_payload)
+}
+
 pub fn payload_with_recorded_item_use(
     payload: &VaultPayload,
     id: &str,
@@ -983,6 +1015,53 @@ mod tests {
         assert_eq!(current.vault_name, "Fictional vault");
         assert_eq!(current.revision, 1);
         fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn adding_a_tag_covers_logins_and_other_records_and_dedupes() {
+        use crate::types::Card;
+
+        let mut payload = VaultPayload::default();
+        payload.entries.push(VaultEntry {
+            id: "login-a".to_string(),
+            title: "Northwind".to_string(),
+            tags: vec!["Work".to_string()],
+            ..VaultEntry::default()
+        });
+        payload.cards.push(Card {
+            id: "card-a".to_string(),
+            title: "Travel card".to_string(),
+            ..Card::default()
+        });
+        let ids: HashSet<String> = ["login-a".to_string(), "card-a".to_string()]
+            .into_iter()
+            .collect();
+
+        let next = payload_with_added_item_tag(&payload, &ids, "  Travel  ").expect("tag added");
+        assert_eq!(next.entries[0].tags, vec!["Work", "Travel"]);
+        assert_eq!(next.cards[0].tags, vec!["Travel"]);
+        assert_eq!(next.entries[0].revision, 1);
+
+        let again = payload_with_added_item_tag(&next, &ids, "travel").expect("tag exists");
+        assert_eq!(again.entries[0].tags, vec!["Work", "Travel"]);
+        assert_eq!(again.cards[0].tags, vec!["Travel"]);
+    }
+
+    #[test]
+    fn added_tags_are_rejected_when_empty_overlong_or_for_missing_items() {
+        let mut payload = VaultPayload::default();
+        payload.entries.push(VaultEntry {
+            id: "login-a".to_string(),
+            ..VaultEntry::default()
+        });
+        let ids: HashSet<String> = ["login-a".to_string()].into_iter().collect();
+
+        assert!(payload_with_added_item_tag(&payload, &ids, "   ").is_err());
+        let overlong = "x".repeat(MAX_ITEM_TAG_LENGTH + 1);
+        assert!(payload_with_added_item_tag(&payload, &ids, &overlong).is_err());
+        let missing: HashSet<String> = ["login-missing".to_string()].into_iter().collect();
+        assert!(payload_with_added_item_tag(&payload, &missing, "travel").is_err());
+        assert!(payload.entries[0].tags.is_empty());
     }
 
     #[test]

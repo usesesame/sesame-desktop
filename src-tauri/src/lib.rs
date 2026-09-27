@@ -65,6 +65,7 @@ macro_rules! sesame_invoke_handler {
             commands::save_login,
             commands::set_login_folders,
             commands::bulk_assign_folder,
+            commands::add_items_tag,
             commands::create_folder,
             commands::rename_folder,
             commands::delete_folder,
