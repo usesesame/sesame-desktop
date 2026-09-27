@@ -223,6 +223,26 @@ export interface BrowserCardFillCancelled {
   reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
 }
 
+export interface BrowserTotpFillCandidate {
+  id: string
+  title: string
+  username: string
+}
+
+export interface BrowserTotpFillRequest {
+  approvalId: string
+  origin: string
+  hostname: string
+  candidates: BrowserTotpFillCandidate[]
+  expiresInSeconds: number
+  expiresAtUnixMs: number
+}
+
+export interface BrowserTotpFillCancelled {
+  approvalId: string
+  reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
+}
+
 // No password field: it never leaves the Rust broker until the save is approved.
 export interface BrowserSaveRequest {
   approvalId: string

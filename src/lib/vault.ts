@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -123,6 +123,28 @@ export async function subscribeBrowserCardFill(handlers: {
   const [stopRequests, stopCancellations] = await Promise.all([
     onBrowserCardFillRequest(handlers.request),
     onBrowserCardFillCancelled(handlers.cancelled),
+  ])
+  return () => { stopRequests(); stopCancellations() }
+}
+
+async function onBrowserTotpFillRequest(handler: (payload: BrowserTotpFillRequest) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserTotpFillRequest>('browser-totp-request', ({ payload }) => handler(payload))
+}
+
+async function onBrowserTotpFillCancelled(handler: (payload: BrowserTotpFillCancelled) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserTotpFillCancelled>('browser-totp-cancelled', ({ payload }) => handler(payload))
+}
+
+export async function subscribeBrowserTotpFill(handlers: {
+  request: (payload: BrowserTotpFillRequest) => void
+  cancelled: (payload: BrowserTotpFillCancelled) => void
+}): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  const [stopRequests, stopCancellations] = await Promise.all([
+    onBrowserTotpFillRequest(handlers.request),
+    onBrowserTotpFillCancelled(handlers.cancelled),
   ])
   return () => { stopRequests(); stopCancellations() }
 }
@@ -1365,6 +1387,16 @@ export async function resolveBrowserCardFill(approvalId: string, cardId: string 
 export async function getPendingBrowserCardFill(): Promise<BrowserCardFillRequest | null> {
   if (previewMode) return null
   return invoke<BrowserCardFillRequest | null>('get_pending_browser_card_fill')
+}
+
+export async function resolveBrowserTotpFill(approvalId: string, loginId: string | null): Promise<void> {
+  if (previewMode) return
+  await invoke('resolve_browser_totp_fill', { approvalId, loginId })
+}
+
+export async function getPendingBrowserTotpFill(): Promise<BrowserTotpFillRequest | null> {
+  if (previewMode) return null
+  return invoke<BrowserTotpFillRequest | null>('get_pending_browser_totp_fill')
 }
 
 export async function resolveBrowserSave(
