@@ -15,6 +15,9 @@ enum ApprovalRequest {
     Card {
         candidate_ids: HashSet<String>,
     },
+    Totp {
+        candidate_ids: HashSet<String>,
+    },
 }
 
 impl ApprovalRequest {
@@ -22,7 +25,8 @@ impl ApprovalRequest {
         match self {
             Self::Fill { candidate_ids }
             | Self::Identity { candidate_ids }
-            | Self::Card { candidate_ids } => candidate_ids.contains(id),
+            | Self::Card { candidate_ids }
+            | Self::Totp { candidate_ids } => candidate_ids.contains(id),
             Self::Save { .. } => false,
         }
     }
@@ -34,6 +38,7 @@ enum ApprovalKind {
     Save,
     Identity,
     Card,
+    Totp,
 }
 
 impl ApprovalKind {
@@ -43,6 +48,7 @@ impl ApprovalKind {
             Self::Save => "browser-save-cancelled",
             Self::Identity => "browser-identity-cancelled",
             Self::Card => "browser-card-cancelled",
+            Self::Totp => "browser-totp-cancelled",
         }
     }
 
@@ -52,6 +58,7 @@ impl ApprovalKind {
             Self::Save => "save_timeout",
             Self::Identity => "identity_timeout",
             Self::Card => "card_timeout",
+            Self::Totp => "totp_timeout",
         }
     }
 
@@ -61,6 +68,7 @@ impl ApprovalKind {
             Self::Save => "save_connection_closed",
             Self::Identity => "identity_connection_closed",
             Self::Card => "card_connection_closed",
+            Self::Totp => "totp_connection_closed",
         }
     }
 
@@ -70,6 +78,7 @@ impl ApprovalKind {
             Self::Save => "save_vault_changed",
             Self::Identity => "identity_vault_changed",
             Self::Card => "card_vault_changed",
+            Self::Totp => "totp_vault_changed",
         }
     }
 }
@@ -86,6 +95,7 @@ enum ApprovalEvent {
     Save(BrowserSaveRequestEvent),
     Identity(BrowserIdentityRequestEvent),
     Card(BrowserCardRequestEvent),
+    Totp(BrowserTotpRequestEvent),
 }
 
 struct PendingApproval {
@@ -253,6 +263,13 @@ impl BrowserFillState {
     fn pending_card_request(&self) -> Option<BrowserCardRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Card(event) => Some(event.clone()),
+            _ => None,
+        })
+    }
+
+    fn pending_totp_request(&self) -> Option<BrowserTotpRequestEvent> {
+        self.pending_event(|event| match event {
+            ApprovalEvent::Totp(event) => Some(event.clone()),
             _ => None,
         })
     }
