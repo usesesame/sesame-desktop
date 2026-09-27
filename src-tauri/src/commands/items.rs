@@ -2,21 +2,28 @@
 //! snapshot deliberately omits usernames, network names, and note contents;
 //! only the ids of the matches cross back to the interface.
 
-use crate::vault::{Folder, TaggedItem, VaultResult, VaultState};
+use crate::vault::{Folder, TaggedItem, UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 use tauri::State;
 
 #[tauri::command]
 pub fn search_items(query: String, state: State<'_, VaultState>) -> VaultResult<Vec<String>> {
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return Ok(Vec::new());
-    }
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let index = session.snapshot();
+    search_index(session, &session.snapshot(), &query)
+}
+
+fn search_index(
+    session: &UnlockedVault,
+    index: &VaultSnapshot,
+    query: &str,
+) -> VaultResult<Vec<String>> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut matches = Vec::new();
     for id in index
         .entries
@@ -107,7 +114,12 @@ fn searchable_fields(item: &TaggedItem) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::VaultEntry;
+    use crate::vault::{random_id, VaultEntry};
+    use sesame_core::api::create_vault;
+    use std::time::Instant;
+
+    const LATENCY_VAULT_ITEMS: usize = 5_000;
+    const LATENCY_RUNS: usize = 5;
 
     fn login() -> TaggedItem {
         TaggedItem::Login(VaultEntry {
@@ -136,5 +148,60 @@ mod tests {
     #[test]
     fn search_does_not_match_secret_fields() {
         assert!(!item_matches_search(&[], &login(), "secret-canary"));
+    }
+
+    fn latency_session(count: usize) -> UnlockedVault {
+        let (mut opened, _) =
+            create_vault("fictional master password", "Fictional vault").expect("created vault");
+        for index in 0..count {
+            opened.payload.entries.push(VaultEntry {
+                id: format!("fictional-login-{index:05}"),
+                title: format!("Northwind account {index:05}"),
+                username: format!("casey.{index:05}"),
+                email: format!("casey.{index:05}@northwind.example"),
+                url: format!("https://portal.example/{index:05}"),
+                notes: Some(format!("Fictional note {index:05}")),
+                password: format!("fictional-secret-{index:05}"),
+                updated_at: 41,
+                ..VaultEntry::default()
+            });
+        }
+        let path = std::env::temp_dir().join(format!("sesame-search-{}", random_id()));
+        UnlockedVault::from_opened(path, &opened).expect("unlocked vault")
+    }
+
+    fn measure(
+        session: &UnlockedVault,
+        index: &VaultSnapshot,
+        query: &str,
+    ) -> (usize, std::time::Duration, std::time::Duration) {
+        let mut durations = Vec::with_capacity(LATENCY_RUNS);
+        let mut hits = 0;
+        for _ in 0..LATENCY_RUNS {
+            let started = Instant::now();
+            let ids = search_index(session, index, query).expect("search");
+            durations.push(started.elapsed());
+            hits = ids.len();
+        }
+        durations.sort();
+        (hits, durations[0], durations[LATENCY_RUNS / 2])
+    }
+
+    #[test]
+    fn search_latency_over_a_five_thousand_item_vault() {
+        let session = latency_session(LATENCY_VAULT_ITEMS);
+        let index = session.snapshot();
+        for (query, expected_hits) in [
+            ("northwind", Some(LATENCY_VAULT_ITEMS)),
+            ("casey.00999", Some(1)),
+            ("account 00420", None),
+            ("northwnd", None),
+        ] {
+            let (hits, min, median) = measure(&session, &index, query);
+            println!("search latency query={query:?} hits={hits} min={min:?} median={median:?}");
+            if let Some(expected) = expected_hits {
+                assert_eq!(hits, expected, "query {query:?}");
+            }
+        }
     }
 }
