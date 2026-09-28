@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { fly } from 'svelte/transition'
+  import { cubicOut } from 'svelte/easing'
+  import { beforeUpdate, onMount, tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { issueChipLabel, issueChips, issueFilterLabel, issueKindLabels } from '../issue-kinds'
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
@@ -262,6 +264,25 @@
     onOpenContextMenu({ x: bounds.left + 24, y: bounds.top + 24 }, item.id)
   }
 
+  let entryList: HTMLDivElement | undefined
+  let settledMultiSelect = multiSelect
+  let rowAnimationTimer: ReturnType<typeof setTimeout> | undefined
+
+  beforeUpdate(() => {
+    if (multiSelect === settledMultiSelect) return
+    settledMultiSelect = multiSelect
+    if (!entryList || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const view = entryList.getBoundingClientRect()
+    for (const row of entryList.querySelectorAll<HTMLElement>('.entry-row')) {
+      const box = row.getBoundingClientRect()
+      if (box.bottom >= view.top && box.top <= view.bottom) row.dataset.animate = ''
+    }
+    clearTimeout(rowAnimationTimer)
+    rowAnimationTimer = setTimeout(() => {
+      entryList?.querySelectorAll<HTMLElement>('.entry-row[data-animate]').forEach((row) => delete row.dataset.animate)
+    }, 260)
+  })
+
   function activateRow(item: VaultItem) {
     if (multiSelect) onToggleMultiSelect(item.id, !selectedSet.has(item.id))
     else {
@@ -403,8 +424,12 @@
       {/if}
 
       {#if multiSelect}
-        <div class="bulk-toolbar" role="region" aria-label="Bulk item actions">
+        <div class="bulk-toolbar" role="region" aria-label="Bulk item actions" transition:fly={{ y: 16, duration: 200, easing: cubicOut }}>
           <label class="bulk-select-all"><input type="checkbox" checked={allVisibleSelected} aria-label="Select all visible items" on:change={() => onSelectVisible(allVisibleSelected ? [] : visibleItems.map((item) => item.id))} /><span>{selectedIds.length} selected</span></label>
+          <div class="bulk-toolbar-actions">
+            <button type="button" class="secondary-button" disabled={!selectedIds.length} on:click={onBulkFavourite}>{allSelectedFavourite ? 'Unfavourite' : 'Favourite'}</button>
+            <button type="button" class="editor-delete" disabled={!allSelectedLogins} title={allSelectedLogins ? 'Delete the selected logins' : 'Deleting in bulk covers logins only'} on:click={onBulkDelete}>Delete</button>
+          </div>
           <div class="bulk-destination">
             <div class="sort-control" bind:this={folderContainer}>
               <button
@@ -431,18 +456,14 @@
             </div>
             <button type="button" class="secondary-button bulk-move-button" disabled={!selectedIds.length} on:click={onBulkMove}>Move</button>
           </div>
-          <div class="bulk-toolbar-actions">
-            <button type="button" class="secondary-button" disabled={!selectedIds.length} on:click={onBulkFavourite}>{allSelectedFavourite ? 'Unfavourite' : 'Favourite'}</button>
-            <button type="button" class="editor-delete" disabled={!allSelectedLogins} title={allSelectedLogins ? 'Delete the selected logins' : 'Deleting in bulk covers logins only'} on:click={onBulkDelete}>Delete</button>
-          </div>
         </div>
       {/if}
 
       {#if visibleItems.length}
-        <div class="entry-list" role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
+        <div class="entry-list" class:selecting={multiSelect} bind:this={entryList} role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
             <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
-              {#if multiSelect}<input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />{/if}
+              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
               <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => !multiSelect && keyboardContextMenu(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
@@ -450,7 +471,7 @@
                 <span class="entry-title"><strong>{item.title}</strong><small><span class="entry-subtitle">{item.subtitle || itemKindLabel(item.kind)}</span>{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
                 {#if item.securityLevel === 'needs-work'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
               </button>
-              {#if !multiSelect}<button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>{/if}
+              <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
             </div>
           {/each}
         </div>

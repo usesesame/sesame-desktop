@@ -113,7 +113,7 @@ export const CONTRAST_PAIRS = [
   { name: 'status text on gold background', foreground: '--gold-text', background: '--gold-soft-bg', floor: 4.5 },
   { name: 'on-accent on accent', foreground: '--on-accent', background: '--accent', floor: 4.5 },
   { name: 'on-danger on danger', foreground: '--on-danger', background: '--danger', floor: 4.5 },
-  { name: 'field border on field background', foreground: '--border-input', background: '--field-bg', floor: 3 },
+  { name: 'checkbox border on surface', foreground: '--border-input', background: '--surface', floor: 3 },
   { name: 'focus ring on surface', foreground: '--focus-ring', background: '--surface', floor: 3 },
 ]
 
