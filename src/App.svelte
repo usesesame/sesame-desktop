@@ -555,6 +555,7 @@
         passwordPresenceRequired={$loginState.passwordPresenceRequired}
         bind:passwordPresenceSecret={$loginState.passwordPresenceSecret}
         passwordPresenceError={$loginState.passwordPresenceError}
+        passwordPresenceIntent={$loginState.passwordPresenceIntent}
         onRevealPassword={() => loginController.togglePasswordReveal()}
         onCopyPassword={() => void loginController.copySelectedField('password')}
         onConfirmPasswordPresence={() => void loginController.confirmPasswordPresence()}
