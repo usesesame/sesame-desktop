@@ -3,8 +3,14 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const CARD_PROTOCOL_VERSION: u8 = 2;
+pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
+pub const TOTP_PROTOCOL_VERSION: u8 = 4;
+pub const LOOKALIKE_PROTOCOL_VERSION: u8 = 5;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
+pub const MAX_LOOKALIKE_HOST_CHARS: usize = 128;
+pub const MAX_TOTP_CODE_DIGITS: usize = 9;
+pub const MAX_TOTP_REMAINING_SECONDS: u64 = 3600;
 
 /// Closed set: anything outside it fails validation before it reaches the vault.
 pub const IDENTITY_FIELD_KEYS: [&str; 9] = [
@@ -51,7 +57,21 @@ pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
 }
 
 pub fn supported_protocol_version(version: u8) -> bool {
-    matches!(version, PROTOCOL_VERSION | CARD_PROTOCOL_VERSION)
+    matches!(
+        version,
+        PROTOCOL_VERSION
+            | CARD_PROTOCOL_VERSION
+            | FILL_MATCH_PROTOCOL_VERSION
+            | TOTP_PROTOCOL_VERSION
+            | LOOKALIKE_PROTOCOL_VERSION
+    )
+}
+
+pub fn fill_carries_match_kind(version: u8) -> bool {
+    matches!(
+        version,
+        FILL_MATCH_PROTOCOL_VERSION | LOOKALIKE_PROTOCOL_VERSION
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,6 +112,9 @@ impl BrowserRequest {
         }
         if (self.version == PROTOCOL_VERSION && self.message_type == "card")
             || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
+            || (self.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type != "fill")
+            || (self.version == TOTP_PROTOCOL_VERSION && self.message_type != "totp")
+            || (self.version == LOOKALIKE_PROTOCOL_VERSION && self.message_type != "fill")
         {
             return false;
         }
@@ -135,6 +158,16 @@ impl BrowserRequest {
                         .fields
                         .as_deref()
                         .is_some_and(|fields| parse_card_fields(fields).is_some())
+                    && no_save_payload
+            }
+            "totp" => {
+                self.version == TOTP_PROTOCOL_VERSION
+                    && self.origin.as_deref().is_some_and(|origin| {
+                        !origin.is_empty()
+                            && origin.len() <= 2048
+                            && !origin.chars().any(char::is_control)
+                    })
+                    && self.fields.is_none()
                     && no_save_payload
             }
             "save" => {
@@ -287,15 +320,23 @@ pub struct BrowserResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookalike: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<IdentityFillFields>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card: Option<CardFillFields>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<u64>,
 }
 
 impl BrowserResponse {
@@ -311,11 +352,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -331,11 +376,15 @@ impl BrowserResponse {
             opened: Some(opened),
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -352,19 +401,53 @@ impl BrowserResponse {
             opened: None,
             username: matches!(fields, "username" | "both").then_some(username),
             password: matches!(fields, "password" | "both").then_some(password),
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
-    pub fn unavailable(request_id: &str, reason: &'static str) -> Self {
+    pub fn fill_with_match_kind(
+        request: &BrowserRequest,
+        username: String,
+        password: String,
+        match_kind: &'static str,
+    ) -> Self {
+        let fields = request.fields.as_deref().unwrap_or("both");
         Self {
-            version: PROTOCOL_VERSION,
+            version: request.version,
+            message_type: "fill".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: matches!(fields, "username" | "both").then_some(username),
+            password: matches!(fields, "password" | "both").then_some(password),
+            match_kind: Some(match_kind.into()),
+            reason: None,
+            message: None,
+            lookalike: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: None,
+            remaining_seconds: None,
+        }
+    }
+
+    pub fn unavailable(request: &BrowserRequest, reason: &'static str) -> Self {
+        Self {
+            version: request.version,
             message_type: "fill-unavailable".into(),
-            request_id: request_id.into(),
+            request_id: request.request_id.clone(),
             installed: None,
             desktop_available: None,
             locked: None,
@@ -372,17 +455,49 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
+        }
+    }
+
+    pub fn lookalike_unavailable(request: &BrowserRequest, lookalike: String) -> Self {
+        Self {
+            version: LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "fill-unavailable".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: Some("lookalike".into()),
+            message: None,
+            lookalike: Some(lookalike),
+            saved: None,
+            identity: None,
+            card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
     pub fn error(request_id: &str, message: &'static str) -> Self {
+        Self::error_with_version(PROTOCOL_VERSION, request_id, message)
+    }
+
+    pub fn error_with_version(version: u8, request_id: &str, message: &'static str) -> Self {
         Self {
-            version: PROTOCOL_VERSION,
+            version,
             message_type: "error".into(),
             request_id: request_id.into(),
             installed: None,
@@ -392,12 +507,20 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: Some(message.into()),
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
+    }
+
+    pub fn error_for(request: &BrowserRequest, message: &'static str) -> Self {
+        Self::error_with_version(request.version, &request.request_id, message)
     }
 
     pub fn saved(request_id: &str) -> Self {
@@ -412,11 +535,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: Some(true),
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -432,11 +559,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -453,11 +584,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: Some(fields),
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -473,11 +608,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -493,11 +632,15 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: Some(fields),
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -513,11 +656,63 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
+        }
+    }
+
+    pub fn totp_for(request: &BrowserRequest, code: String, remaining_seconds: u64) -> Self {
+        Self {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: None,
+            message: None,
+            lookalike: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: Some(code),
+            remaining_seconds: Some(remaining_seconds),
+        }
+    }
+
+    pub fn totp_unavailable(request_id: &str, reason: &'static str) -> Self {
+        Self {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp-unavailable".into(),
+            request_id: request_id.into(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: Some(reason.into()),
+            message: None,
+            lookalike: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -537,7 +732,24 @@ impl BrowserResponse {
         let no_saved = self.saved.is_none();
         let no_identity = self.identity.is_none();
         let no_card = self.card.is_none();
+        let no_code = self.code.is_none() && self.remaining_seconds.is_none();
         if request.message_type != "card" && !no_card {
+            return false;
+        }
+        if self.message_type != "totp" && !no_code {
+            return false;
+        }
+        let match_kind_allowed = fill_carries_match_kind(request.version)
+            && request.message_type == "fill"
+            && self.message_type == "fill";
+        if self.match_kind.is_some() && !match_kind_allowed {
+            return false;
+        }
+        let lookalike_allowed = request.version == LOOKALIKE_PROTOCOL_VERSION
+            && request.message_type == "fill"
+            && self.message_type == "fill-unavailable"
+            && self.reason.as_deref() == Some("lookalike");
+        if self.lookalike.is_some() && !lookalike_allowed {
             return false;
         }
         let allowed = match (request.message_type.as_str(), self.message_type.as_str()) {
@@ -624,22 +836,39 @@ impl BrowserResponse {
                     }
                     _ => false,
                 };
+                let match_kind_valid = if fill_carries_match_kind(request.version) {
+                    self.match_kind.as_deref().is_some_and(valid_match_kind)
+                } else {
+                    self.match_kind.is_none()
+                };
                 no_capability
                     && no_activation
                     && credential_valid
+                    && match_kind_valid
                     && self.reason.is_none()
                     && self.message.is_none()
                     && no_saved
                     && no_identity
             }
             ("fill", "fill-unavailable") => {
+                let reason_valid = self.reason.as_deref().is_some_and(|reason| {
+                    valid_reason(reason)
+                        && (reason != "lookalike" || request.version == LOOKALIKE_PROTOCOL_VERSION)
+                });
+                let lookalike_valid = match self.reason.as_deref() {
+                    Some("lookalike") => {
+                        self.lookalike.as_deref().is_some_and(valid_lookalike_host)
+                    }
+                    _ => self.lookalike.is_none(),
+                };
                 no_capability
                     && no_activation
                     && no_credential
                     && no_saved
                     && no_identity
                     && self.message.is_none()
-                    && self.reason.as_deref().is_some_and(valid_reason)
+                    && reason_valid
+                    && lookalike_valid
             }
             ("card", "card") => {
                 let requested = request.fields.as_deref().and_then(parse_card_fields);
@@ -663,6 +892,29 @@ impl BrowserResponse {
                     && no_saved
                     && no_identity
                     && no_card
+                    && self.message.is_none()
+                    && self.reason.as_deref().is_some_and(valid_reason)
+            }
+            ("totp", "totp") => {
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && no_card
+                    && self.reason.is_none()
+                    && self.message.is_none()
+                    && self.code.as_deref().is_some_and(valid_totp_code)
+                    && self.remaining_seconds.is_some_and(valid_totp_remaining)
+            }
+            ("totp", "totp-unavailable") => {
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && no_card
+                    && no_code
                     && self.message.is_none()
                     && self.reason.as_deref().is_some_and(valid_reason)
             }
@@ -697,10 +949,13 @@ impl Drop for BrowserResponse {
         self.request_id.zeroize();
         self.username.zeroize();
         self.password.zeroize();
+        self.match_kind.zeroize();
         self.reason.zeroize();
         self.message.zeroize();
+        self.lookalike.zeroize();
         self.identity.zeroize();
         self.card.zeroize();
+        self.code.zeroize();
     }
 }
 
@@ -723,7 +978,28 @@ fn valid_reason(value: &str) -> bool {
             | "staleRequest"
             | "invalidSelection"
             | "multipleMatches"
+            | "lookalike"
     )
+}
+
+fn valid_lookalike_host(value: &str) -> bool {
+    (1..=MAX_LOOKALIKE_HOST_CHARS).contains(&value.chars().count())
+        && !value.chars().any(char::is_control)
+        && !value.split('.').any(str::is_empty)
+        && matches!(url::Host::parse(value), Ok(url::Host::Domain(domain)) if domain == value)
+}
+
+fn valid_match_kind(value: &str) -> bool {
+    matches!(value, "exact" | "wwwAlias")
+}
+
+fn valid_totp_code(value: &str) -> bool {
+    (1..=MAX_TOTP_CODE_DIGITS).contains(&value.len())
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn valid_totp_remaining(value: u64) -> bool {
+    (1..=MAX_TOTP_REMAINING_SECONDS).contains(&value)
 }
 
 fn valid_error_message(value: &str) -> bool {
@@ -752,6 +1028,283 @@ mod tests {
             title: None,
             kind: None,
         }
+    }
+
+    fn fill_request(version: u8) -> BrowserRequest {
+        BrowserRequest {
+            version,
+            message_type: "fill".to_string(),
+            request_id: "request-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn fill_match_requests_are_fill_only() {
+        assert!(fill_request(FILL_MATCH_PROTOCOL_VERSION).validate());
+
+        let mut capability = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        capability.message_type = "capabilities".to_string();
+        capability.origin = None;
+        assert!(!capability.validate());
+
+        let mut card = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        card.message_type = "card".to_string();
+        card.fields = Some("number".to_string());
+        assert!(!card.validate());
+
+        let future = fill_request(LOOKALIKE_PROTOCOL_VERSION + 1);
+        assert!(!future.validate());
+    }
+
+    #[test]
+    fn fill_match_responses_carry_the_rule_only_on_protocol_v3() {
+        let request = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        let exact = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        assert_eq!(exact.match_kind.as_deref(), Some("exact"));
+        assert!(exact.validate_for(&request));
+
+        let alias = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "wwwAlias",
+        );
+        assert!(alias.validate_for(&request));
+
+        let missing = BrowserResponse::fill_for(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert_eq!(missing.version, PROTOCOL_VERSION);
+        assert!(!missing.validate_for(&request));
+
+        let unknown = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "parentDomain",
+        );
+        assert!(!unknown.validate_for(&request));
+
+        let unavailable = BrowserResponse::unavailable(&request, "noMatch");
+        assert_eq!(unavailable.version, FILL_MATCH_PROTOCOL_VERSION);
+        assert!(unavailable.validate_for(&request));
+    }
+
+    #[test]
+    fn fill_match_responses_do_not_cross_protocol_versions() {
+        let v1_request = fill_request(PROTOCOL_VERSION);
+        assert!(v1_request.validate());
+        let v1_response = BrowserResponse::fill_for(
+            &v1_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert!(v1_response.match_kind.is_none());
+        assert!(v1_response.validate_for(&v1_request));
+
+        let mut smuggled = BrowserResponse::fill_for(
+            &v1_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        smuggled.match_kind = Some("exact".to_string());
+        assert!(!smuggled.validate_for(&v1_request));
+
+        let v3_request = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        let v3_response = BrowserResponse::fill_with_match_kind(
+            &v3_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        assert!(!v3_response.validate_for(&v1_request));
+        assert!(!v1_response.validate_for(&v3_request));
+    }
+
+    fn lookalike_request() -> BrowserRequest {
+        BrowserRequest {
+            version: LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "fill".to_string(),
+            request_id: "fill-5-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn lookalike_requests_are_fill_only_on_protocol_version_five() {
+        assert!(lookalike_request().validate());
+
+        let mut capability = lookalike_request();
+        capability.message_type = "capabilities".to_string();
+        capability.origin = None;
+        assert!(!capability.validate());
+
+        let mut totp = lookalike_request();
+        totp.message_type = "totp".to_string();
+        assert!(!totp.validate());
+
+        let mut with_save_payload = lookalike_request();
+        with_save_payload.password = Some("fictional-example-value".to_string());
+        assert!(!with_save_payload.validate());
+
+        assert!(!fill_request(LOOKALIKE_PROTOCOL_VERSION + 1).validate());
+    }
+
+    #[test]
+    fn a_version_five_fill_response_carries_the_rule_and_no_lookalike_field() {
+        let request = lookalike_request();
+        let fill = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "wwwAlias",
+        );
+        assert_eq!(fill.version, LOOKALIKE_PROTOCOL_VERSION);
+        assert_eq!(fill.match_kind.as_deref(), Some("wwwAlias"));
+        assert!(fill.lookalike.is_none());
+        assert!(fill.validate_for(&request));
+
+        let missing_rule = BrowserResponse::fill_for(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert!(!missing_rule.validate_for(&request));
+
+        let mut with_lookalike = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        with_lookalike.lookalike = Some("apple.com".to_string());
+        assert!(!with_lookalike.validate_for(&request));
+    }
+
+    #[test]
+    fn only_version_five_carries_the_lookalike_reason_and_field() {
+        let request = lookalike_request();
+        let response = BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        assert_eq!(response.version, LOOKALIKE_PROTOCOL_VERSION);
+        assert_eq!(response.message_type, "fill-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("lookalike"));
+        assert_eq!(response.lookalike.as_deref(), Some("apple.com"));
+        assert!(response.username.is_none() && response.password.is_none());
+        assert!(response.validate_for(&request));
+        let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+            .expect("utf8");
+        assert!(wire.contains("\"lookalike\":\"apple.com\""));
+        assert!(!wire.contains("password"));
+
+        let mut without_host = BrowserResponse::unavailable(&request, "lookalike");
+        assert!(!without_host.validate_for(&request));
+        without_host.lookalike = Some(String::new());
+        assert!(!without_host.validate_for(&request));
+
+        let mut unrelated_with_host = BrowserResponse::unavailable(&request, "noMatch");
+        unrelated_with_host.lookalike = Some("apple.com".to_string());
+        assert!(!unrelated_with_host.validate_for(&request));
+
+        let mut reason_swapped =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        reason_swapped.reason = Some("noMatch".to_string());
+        assert!(!reason_swapped.validate_for(&request));
+
+        let mut reason_opened =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        reason_opened.reason = Some("lookalikeDomain".to_string());
+        assert!(!reason_opened.validate_for(&request));
+
+        let mut with_match_kind =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        with_match_kind.match_kind = Some("exact".to_string());
+        assert!(!with_match_kind.validate_for(&request));
+
+        let mut error = BrowserResponse::error_with_version(
+            LOOKALIKE_PROTOCOL_VERSION,
+            &request.request_id,
+            "Browser response unavailable.",
+        );
+        error.lookalike = Some("apple.com".to_string());
+        assert!(!error.validate_for(&request));
+
+        for version in [PROTOCOL_VERSION, FILL_MATCH_PROTOCOL_VERSION] {
+            let mut older = fill_request(version);
+            older.message_type = "fill".to_string();
+            assert!(older.validate());
+            assert!(!BrowserResponse::unavailable(&older, "lookalike").validate_for(&older));
+            assert!(
+                !BrowserResponse::lookalike_unavailable(&older, "apple.com".to_string())
+                    .validate_for(&older)
+            );
+        }
+
+        assert!(
+            !BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string())
+                .validate_for(&fill_request(LOOKALIKE_PROTOCOL_VERSION + 1))
+        );
+    }
+
+    #[test]
+    fn a_lookalike_host_is_a_bounded_normalized_domain() {
+        let request = lookalike_request();
+        let response = |host: &str| {
+            BrowserResponse::lookalike_unavailable(&request, host.to_string())
+                .validate_for(&request)
+        };
+
+        assert!(response("apple.com"));
+        assert!(response(&"a".repeat(MAX_LOOKALIKE_HOST_CHARS)));
+        assert!(!response(&"a".repeat(MAX_LOOKALIKE_HOST_CHARS + 1)));
+        assert!(!response(""));
+        assert!(!response("apple.com/sign-in"));
+        assert!(!response("apple.com?next=/vault"));
+        assert!(!response("casey:fictional@apple.com"));
+        assert!(!response("apple.com."));
+        assert!(!response("127.0.0.1"));
+        assert!(!response("APPLE.COM"));
+        assert!(!response("apple com"));
+        assert!(!response("apple\u{7f}.com"));
+        assert!(!response("[::1]"));
+    }
+
+    #[test]
+    fn the_lookalike_reason_answers_only_a_fill_request() {
+        let request = lookalike_request();
+        let card = BrowserRequest {
+            version: CARD_PROTOCOL_VERSION,
+            message_type: "card".to_string(),
+            request_id: request.request_id.clone(),
+            origin: Some("https://example.test".to_string()),
+            fields: Some("number".to_string()),
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        };
+        assert!(card.validate());
+        assert!(
+            !BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string())
+                .validate_for(&card)
+        );
     }
 
     #[test]
@@ -918,5 +1471,155 @@ mod tests {
         assert!(save.validate());
         let bytes = save.to_zeroizing_bytes().expect("the request encodes");
         assert!(bytes.len() <= MAX_NATIVE_MESSAGE_BYTES);
+    }
+
+    fn totp_request(version: u8) -> BrowserRequest {
+        BrowserRequest {
+            version,
+            message_type: "totp".to_string(),
+            request_id: "totp-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn totp_requests_are_totp_only_on_protocol_version_four() {
+        assert!(totp_request(TOTP_PROTOCOL_VERSION).validate());
+
+        for version in [
+            PROTOCOL_VERSION,
+            CARD_PROTOCOL_VERSION,
+            FILL_MATCH_PROTOCOL_VERSION,
+        ] {
+            assert!(
+                !totp_request(version).validate(),
+                "version {version} accepted a totp request"
+            );
+        }
+
+        let mut fill = totp_request(TOTP_PROTOCOL_VERSION);
+        fill.message_type = "fill".to_string();
+        assert!(!fill.validate());
+
+        let mut with_fields = totp_request(TOTP_PROTOCOL_VERSION);
+        with_fields.fields = Some("password".to_string());
+        assert!(!with_fields.validate());
+
+        let mut without_origin = totp_request(TOTP_PROTOCOL_VERSION);
+        without_origin.origin = None;
+        assert!(!without_origin.validate());
+
+        let mut with_credentials = totp_request(TOTP_PROTOCOL_VERSION);
+        with_credentials.password = Some("fictional-example-value".to_string());
+        assert!(!with_credentials.validate());
+
+        assert!(!totp_request(TOTP_PROTOCOL_VERSION + 1).validate());
+    }
+
+    #[test]
+    fn totp_responses_bind_the_version_the_code_and_the_window() {
+        let request = totp_request(TOTP_PROTOCOL_VERSION);
+        let allowed = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        assert_eq!(allowed.version, TOTP_PROTOCOL_VERSION);
+        assert_eq!(allowed.message_type, "totp");
+        assert!(allowed.validate_for(&request));
+        let wire = String::from_utf8(allowed.to_zeroizing_bytes().expect("encodes").to_vec())
+            .expect("utf8");
+        assert!(wire.contains("\"code\":\"123456\""));
+        assert!(wire.contains("\"remainingSeconds\":30"));
+
+        for code in ["0", "000000", "123456789"] {
+            assert!(
+                BrowserResponse::totp_for(&request, code.to_string(), 30).validate_for(&request),
+                "{code} was refused as a code"
+            );
+        }
+        for code in [
+            "",
+            "1234567890",
+            "12a456",
+            "-12345",
+            " 123456",
+            "１２３４５６",
+        ] {
+            assert!(
+                !BrowserResponse::totp_for(&request, code.to_string(), 30).validate_for(&request),
+                "{code} was accepted as a code"
+            );
+        }
+
+        for remaining in [1, 30, MAX_TOTP_REMAINING_SECONDS] {
+            assert!(
+                BrowserResponse::totp_for(&request, "123456".to_string(), remaining)
+                    .validate_for(&request),
+                "{remaining} seconds was refused"
+            );
+        }
+        for remaining in [0, MAX_TOTP_REMAINING_SECONDS + 1, u64::MAX] {
+            assert!(
+                !BrowserResponse::totp_for(&request, "123456".to_string(), remaining)
+                    .validate_for(&request),
+                "{remaining} seconds was accepted"
+            );
+        }
+
+        let mut missing_remaining = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        missing_remaining.remaining_seconds = None;
+        assert!(!missing_remaining.validate_for(&request));
+
+        let mut missing_code = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        missing_code.code = None;
+        assert!(!missing_code.validate_for(&request));
+    }
+
+    #[test]
+    fn a_totp_response_only_answers_a_totp_request() {
+        let request = totp_request(TOTP_PROTOCOL_VERSION);
+        let v3_fill = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+
+        assert!(
+            !BrowserResponse::totp_for(&request, "123456".to_string(), 30).validate_for(&v3_fill)
+        );
+        assert!(
+            !BrowserResponse::totp_unavailable(&request.request_id, "noMatch")
+                .validate_for(&v3_fill)
+        );
+        assert!(!BrowserResponse::fill_with_match_kind(
+            &v3_fill,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        )
+        .validate_for(&request));
+        assert!(!BrowserResponse::fill_for(
+            &v3_fill,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        )
+        .validate_for(&request));
+        assert!(!BrowserResponse::unavailable(&request, "noMatch").validate_for(&request));
+
+        let unavailable = BrowserResponse::totp_unavailable(&request.request_id, "locked");
+        assert_eq!(unavailable.version, TOTP_PROTOCOL_VERSION);
+        assert_eq!(unavailable.message_type, "totp-unavailable");
+        assert!(unavailable.validate_for(&request));
+
+        let mut smuggled = BrowserResponse::totp_unavailable(&request.request_id, "locked");
+        smuggled.code = Some("123456".to_string());
+        assert!(!smuggled.validate_for(&request));
+
+        let mut error_with_code = BrowserResponse::error_with_version(
+            TOTP_PROTOCOL_VERSION,
+            &request.request_id,
+            "Browser response unavailable.",
+        );
+        assert!(error_with_code.validate_for(&request));
+        error_with_code.code = Some("123456".to_string());
+        assert!(!error_with_code.validate_for(&request));
     }
 }
