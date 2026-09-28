@@ -135,15 +135,17 @@ pub async fn fetch_range(client: &Client, prefix: &str) -> VaultResult<String> {
         .map_err(|_| "Sesame could not read the breach-check response.".to_string())
 }
 
-pub fn count_for_suffix(body: &str, suffix: &str) -> u32 {
+/// `None` means the suffix did not appear in the range at all. A suffix that
+/// did appear counts as a match even if the service sent an unreadable count.
+pub fn count_for_suffix(body: &str, suffix: &str) -> Option<u32> {
     for line in body.lines() {
         if let Some((candidate, count)) = line.split_once(':') {
             if candidate.eq_ignore_ascii_case(suffix) {
-                return count.trim().parse::<u32>().unwrap_or(0);
+                return Some(count.trim().parse::<u32>().unwrap_or(1));
             }
         }
     }
-    0
+    None
 }
 
 /// One range per distinct prefix, in prefix order; a prefix shared by several
@@ -177,7 +179,7 @@ pub async fn scan_logins<F: RangeFetcher>(
             Ok(body) => indexes
                 .iter()
                 .map(|index| {
-                    let count = count_for_suffix(&body, &logins[*index].suffix);
+                    let count = count_for_suffix(&body, &logins[*index].suffix).unwrap_or(0);
                     (
                         *index,
                         if count > 0 {
@@ -218,7 +220,7 @@ pub async fn check_password_breach(password: String) -> VaultResult<BreachCheckR
 
     let client = range_client()?;
     let body = fetch_range(&client, &range.prefix).await?;
-    let count = count_for_suffix(&body, &range.suffix);
+    let count = count_for_suffix(&body, &range.suffix).unwrap_or(0);
     Ok(BreachCheckResult {
         breached: count > 0,
         count,
@@ -406,6 +408,17 @@ mod tests {
         assert_eq!(outcome.checks.len(), 1);
         assert_eq!(outcome.checks[0].verdict, BreachVerdict::Breached);
         assert_eq!(outcome.checks[0].count, 17);
+    }
+
+    #[test]
+    fn a_present_suffix_with_an_unreadable_count_is_still_a_match() {
+        let range = password_range("fictional-one");
+        let body = format!("{}:oops\r\n", *range.suffix);
+        assert_eq!(count_for_suffix(&body, &range.suffix), Some(1));
+        assert_eq!(
+            count_for_suffix(&body, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            None
+        );
     }
 
     #[test]
