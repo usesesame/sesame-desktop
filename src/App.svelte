@@ -301,11 +301,26 @@
   const allItems = itemController.allItems
   const recentItems = itemController.recentItems
   let focusSearchToken = 0
+  let focusResultsToken = 0
 
   // Universal search means every item, so it clears the filters first.
   function openUniversalSearch() {
     selection.patch({ activeView: 'vault', categoryFilter: null, collectionFilter: null, securityFilter: null })
     focusSearchToken += 1
+  }
+
+  function focusSearchResults() {
+    focusResultsToken += 1
+  }
+
+  function copySelectedTotp() {
+    const code = $vault.loginCard?.totpCode
+    if (code) void loginController.copy(code, '2FA code')
+  }
+
+  function openSelectedSite() {
+    const url = $vault.loginCard?.url
+    if (url) void loginController.openCurrentWebsite(url)
   }
 
   function historyItemTitle(_kind: string, itemId: string): string | null {
@@ -553,6 +568,9 @@
     onCopyUsername={() => void loginController.copySelectedField('username')}
     onEditSelected={loginController.openEditor}
     onOpenSearch={openUniversalSearch}
+    onFocusResults={focusSearchResults}
+    onCopyTotp={copySelectedTotp}
+    onOpenSelectedSite={openSelectedSite}
   >
     {#if $selection.activeView === 'vault'}
       <VaultView
@@ -564,6 +582,7 @@
         addMenuOpen={$itemState.addMenuOpen}
         filterMenuOpen={$itemState.filterMenuOpen}
         {focusSearchToken}
+        {focusResultsToken}
         bind:passwordVisible={$loginState.passwordVisible}
         revealedPassword={$loginState.revealedPassword}
         passwordPresenceRequired={$loginState.passwordPresenceRequired}
@@ -580,6 +599,7 @@
         multiSelect={$loginState.multiSelect}
         selectedIds={$loginState.selectedIds}
         bulkFolderId={$loginState.bulkFolderId}
+        bulkTag={$loginState.bulkTag}
         onSelectItem={(id, kind) => void itemController.select(id, kind)}
         onAddItem={itemController.openNew}
         onToggleAddMenu={itemController.toggleAddMenu}
@@ -624,6 +644,8 @@
         onBulkMove={loginController.bulkMoveSelected}
         onBulkFavourite={() => void loginController.bulkFavouriteSelected()}
         onBulkDelete={loginController.bulkDeleteSelected}
+        onSetBulkTag={loginController.setBulkTag}
+        onBulkTag={() => void loginController.bulkTagSelected()}
         onCancelMultiSelect={loginController.clearMultiSelect}
       />
     {:else if $selection.activeView === 'security'}

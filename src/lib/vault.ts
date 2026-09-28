@@ -2,6 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { uniqueTags } from './vault-items'
 import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
@@ -908,6 +909,22 @@ export async function bulkAssignFolder(ids: string[], folderId?: string): Promis
     return previewSnapshot
   }
   return invoke<VaultSnapshot>('bulk_assign_folder', { ids, folderId: folderId || null })
+}
+
+export async function addItemsTag(ids: string[], tag: string): Promise<VaultSnapshot> {
+  const normalized = tag.trim()
+  if (previewMode) {
+    for (const id of ids) {
+      const entry = previewSnapshot.entries.find((saved) => saved.id === id)
+      const item = previewSnapshot.items.find((saved) => saved.id === id)
+      const card = previewCards[id]
+      if (entry) entry.tags = uniqueTags([...(entry.tags ?? []), normalized])
+      if (item) item.tags = uniqueTags([...(item.tags ?? []), normalized])
+      if (card) card.tags = uniqueTags([...(card.tags ?? []), normalized])
+    }
+    return previewSnapshot
+  }
+  return invoke<VaultSnapshot>('add_items_tag', { ids, tag: normalized })
 }
 
 export async function createFolder(name: string): Promise<VaultSnapshot> {

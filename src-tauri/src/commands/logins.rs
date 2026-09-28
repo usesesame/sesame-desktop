@@ -7,9 +7,9 @@ use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{entry_from_input, resolved_totp};
 use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for};
 use crate::vault::storage::{
-    commit_payload_change, materialize_entry_folder, payload_with_item_favourite,
-    payload_with_item_folder_id, payload_with_recorded_item_use, payload_with_saved_login,
-    payload_without_login,
+    commit_payload_change, materialize_entry_folder, payload_with_added_item_tag,
+    payload_with_item_favourite, payload_with_item_folder_id, payload_with_recorded_item_use,
+    payload_with_saved_login, payload_without_login,
 };
 use crate::vault::trash::trash_item;
 use crate::vault::util::unix_timestamp;
@@ -284,6 +284,35 @@ pub fn bulk_assign_folder(
         .ok_or("Unlock your vault before organizing items.")?;
     let payload = session.open_payload()?;
     let next_payload = payload_with_item_folder_id(&payload, &ids, folder_id.as_deref())?;
+    commit_payload_change(session, next_payload)?;
+    state.advance_session_epoch();
+    Ok(session.snapshot())
+}
+
+#[tauri::command]
+pub fn add_items_tag(
+    ids: Vec<String>,
+    tag: String,
+    state: State<'_, VaultState>,
+) -> VaultResult<VaultSnapshot> {
+    add_items_tag_in_state(ids, tag, &state)
+}
+
+fn add_items_tag_in_state(
+    ids: Vec<String>,
+    tag: String,
+    state: &VaultState,
+) -> VaultResult<VaultSnapshot> {
+    let ids = checked_item_ids(ids)?;
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session
+        .as_mut()
+        .ok_or("Unlock your vault before organizing items.")?;
+    let payload = session.open_payload()?;
+    let next_payload = payload_with_added_item_tag(&payload, &ids, &tag)?;
     commit_payload_change(session, next_payload)?;
     state.advance_session_epoch();
     Ok(session.snapshot())
@@ -627,5 +656,47 @@ mod save_login_command_tests {
         let stored = vault.stored_login("login-a");
         assert_eq!(stored.password, "fictional-stored-secret");
         assert_eq!(stored.password_updated_at, 42);
+    }
+}
+
+#[cfg(test)]
+mod add_items_tag_command_tests {
+    use super::*;
+    use crate::commands::test_support::TestVault;
+
+    #[test]
+    fn adding_a_tag_commits_it_to_the_selected_records() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        let snapshot = add_items_tag_in_state(
+            vec!["login-a".to_string()],
+            "  Travel  ".to_string(),
+            &vault.state,
+        )
+        .expect("tag added");
+
+        assert_eq!(snapshot.entries[0].tags, vec!["Travel"]);
+        assert_eq!(vault.stored_login("login-a").tags, vec!["Travel"]);
+    }
+
+    #[test]
+    fn an_empty_selection_or_tag_is_rejected_without_touching_the_record() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        assert!(add_items_tag_in_state(Vec::new(), "travel".to_string(), &vault.state).is_err());
+        assert!(add_items_tag_in_state(
+            vec!["login-a".to_string()],
+            "   ".to_string(),
+            &vault.state
+        )
+        .is_err());
+        assert!(
+            add_items_tag_in_state(vec!["login-a".to_string()], "x".repeat(51), &vault.state)
+                .is_err()
+        );
+
+        let stored = vault.stored_login("login-a");
+        assert!(stored.tags.is_empty());
+        assert_eq!(stored.updated_at, 41);
     }
 }

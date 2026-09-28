@@ -841,6 +841,7 @@ impl TaggedItem {
 pub trait ItemMetadata {
     fn item_title(&self) -> &str;
     fn item_tags(&self) -> &[String];
+    fn item_tags_mut(&mut self) -> &mut Vec<String>;
     fn item_folder_id(&self) -> Option<&str>;
     fn set_item_folder_id(&mut self, folder_id: Option<String>);
     fn item_favourite(&self) -> bool;
@@ -859,6 +860,9 @@ macro_rules! impl_item_metadata {
             }
             fn item_tags(&self) -> &[String] {
                 &self.tags
+            }
+            fn item_tags_mut(&mut self) -> &mut Vec<String> {
+                &mut self.tags
             }
             fn item_folder_id(&self) -> Option<&str> {
                 self.folder_id.as_deref()
@@ -904,6 +908,9 @@ impl ItemMetadata for VaultEntry {
     }
     fn item_tags(&self) -> &[String] {
         &self.tags
+    }
+    fn item_tags_mut(&mut self) -> &mut Vec<String> {
+        &mut self.tags
     }
     fn item_folder_id(&self) -> Option<&str> {
         self.folder_id.as_deref()
