@@ -16,6 +16,9 @@ use crate::vault::VaultResult;
 const SUCCESS_TTL_SECS: u64 = 30 * 24 * 60 * 60;
 const FAILURE_RETRY_SECS: u64 = 6 * 60 * 60;
 const MAX_ICON_BYTES: usize = 128 * 1024;
+const MAX_PAGE_BYTES: usize = 256 * 1024;
+const MAX_ICON_CANDIDATES: usize = 3;
+const MAX_LINK_TAGS: usize = 64;
 const MAX_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 500;
 
@@ -207,8 +210,17 @@ async fn resolve_public_host(host: String) -> VaultResult<ValidatedHost> {
 
 /// One redirect only: HTTPS, same registrable domain, re-checked through the public-address pin.
 async fn fetch_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)> {
-    let mut response = request_icon(validated).await?;
+    match fetch_site_path(validated, "/favicon.ico").await {
+        Ok(response) => match read_icon(response).await {
+            Ok(icon) => Ok(icon),
+            Err(_) => fetch_declared_icon(validated).await,
+        },
+        Err(_) => fetch_declared_icon(validated).await,
+    }
+}
 
+async fn fetch_site_path(validated: &ValidatedHost, path: &str) -> VaultResult<reqwest::Response> {
+    let mut response = request_url(validated, &format!("https://{}{path}", validated.host)).await?;
     if response.status().is_redirection() {
         let location = response
             .headers()
@@ -217,19 +229,47 @@ async fn fetch_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)>
             .ok_or_else(|| "That website did not provide an icon.".to_string())?;
         let target = redirect_target(&validated.host, location)?;
         let hop = resolve_public_host(target).await?;
-        response = request_icon(&hop).await?;
+        response = request_url(&hop, &format!("https://{}{path}", hop.host)).await?;
     }
-
     if !response.status().is_success() {
         return Err("That website did not provide an icon.".to_string());
     }
+    Ok(response)
+}
+
+async fn fetch_declared_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)> {
+    let page = fetch_site_path(validated, "/").await?;
+    let page_url = page.url().clone();
+    let html = read_limited(page, MAX_PAGE_BYTES).await?;
+    let candidates =
+        declared_icon_urls(&String::from_utf8_lossy(&html), &page_url, &validated.host);
+    for candidate in candidates.into_iter().take(MAX_ICON_CANDIDATES) {
+        let Some(host) = candidate.host_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(target) = resolve_public_host(host).await else {
+            continue;
+        };
+        let Ok(response) = request_url(&target, candidate.as_str()).await else {
+            continue;
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        if let Ok(icon) = read_icon(response).await {
+            return Ok(icon);
+        }
+    }
+    Err("That website did not provide an icon.".to_string())
+}
+
+async fn read_icon(mut response: reqwest::Response) -> VaultResult<(Vec<u8>, String)> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_ICON_BYTES as u64)
     {
         return Err("That website icon is too large.".to_string());
     }
-
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
@@ -246,12 +286,186 @@ async fn fetch_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)>
     Ok((bytes, media_type.to_string()))
 }
 
-async fn request_icon(validated: &ValidatedHost) -> VaultResult<reqwest::Response> {
+async fn read_limited(mut response: reqwest::Response, limit: usize) -> VaultResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "Sesame could not read that website.".to_string())?
+    {
+        let room = limit.saturating_sub(bytes.len());
+        bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        if bytes.len() >= limit {
+            break;
+        }
+    }
+    Ok(bytes)
+}
+
+async fn request_url(validated: &ValidatedHost, url: &str) -> VaultResult<reqwest::Response> {
     icon_client(&validated.host, &validated.addresses)?
-        .get(format!("https://{}/favicon.ico", validated.host))
+        .get(url)
         .send()
         .await
         .map_err(|_| "Sesame could not fetch that website icon.".to_string())
+}
+
+fn declared_icon_urls(html: &str, page_url: &url::Url, site_host: &str) -> Vec<url::Url> {
+    let head = match find_ascii_case_insensitive(html, "</head") {
+        Some(end) => &html[..end],
+        None => html,
+    };
+    let mut ranked: Vec<(u8, usize, url::Url)> = Vec::new();
+    let mut cursor = 0;
+    let mut seen = 0;
+    while let Some(offset) = find_ascii_case_insensitive(&head[cursor..], "<link") {
+        let start = cursor + offset;
+        let Some(length) = head[start..].find('>') else {
+            break;
+        };
+        let tag = &head[start + 5..start + length];
+        cursor = start + length + 1;
+        seen += 1;
+        if seen > MAX_LINK_TAGS {
+            break;
+        }
+        let attributes = tag_attributes(tag);
+        let rel = attribute(&attributes, "rel")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let Some(rank) = rel
+            .split_ascii_whitespace()
+            .filter_map(|token| match token {
+                "icon" => Some(0u8),
+                "apple-touch-icon" | "apple-touch-icon-precomposed" => Some(1u8),
+                _ => None,
+            })
+            .min()
+        else {
+            continue;
+        };
+        let media_type = attribute(&attributes, "type")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let Some(href) = attribute(&attributes, "href") else {
+            continue;
+        };
+        let href = href.trim().replace("&amp;", "&");
+        if href.is_empty() || media_type.contains("svg") {
+            continue;
+        }
+        let Ok(candidate) = page_url.join(&href) else {
+            continue;
+        };
+        if candidate.path().to_ascii_lowercase().ends_with(".svg")
+            || !allowed_icon_url(&candidate, site_host)
+        {
+            continue;
+        }
+        let size = attribute(&attributes, "sizes")
+            .and_then(|sizes| {
+                sizes
+                    .split(['x', 'X'])
+                    .next()
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+        let distance = if size == 0 { 1_000 } else { size.abs_diff(64) };
+        if !ranked.iter().any(|(_, _, existing)| existing == &candidate) {
+            ranked.push((rank, distance, candidate));
+        }
+    }
+    ranked.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+    ranked
+        .into_iter()
+        .map(|(_, _, candidate)| candidate)
+        .collect()
+}
+
+fn allowed_icon_url(candidate: &url::Url, site_host: &str) -> bool {
+    if candidate.scheme() != "https"
+        || candidate.port().is_some_and(|port| port != 443)
+        || !candidate.username().is_empty()
+        || candidate.password().is_some()
+    {
+        return false;
+    }
+    let Some(host) = candidate.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    if host.parse::<IpAddr>().is_ok() || host.starts_with('[') {
+        return false;
+    }
+    let site = site_host.to_ascii_lowercase();
+    let base = site.strip_prefix("www.").unwrap_or(&site);
+    host == base || host.ends_with(&format!(".{base}"))
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle))
+}
+
+fn tag_attributes(tag: &str) -> Vec<(String, String)> {
+    let bytes = tag.as_bytes();
+    let mut attributes = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() && attributes.len() < 32 {
+        while index < bytes.len() && (bytes[index].is_ascii_whitespace() || bytes[index] == b'/') {
+            index += 1;
+        }
+        let name_start = index;
+        while index < bytes.len()
+            && !bytes[index].is_ascii_whitespace()
+            && bytes[index] != b'='
+            && bytes[index] != b'/'
+        {
+            index += 1;
+        }
+        if name_start == index {
+            index += 1;
+            continue;
+        }
+        let name = tag[name_start..index].to_ascii_lowercase();
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        let mut value = String::new();
+        if index < bytes.len() && bytes[index] == b'=' {
+            index += 1;
+            while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+            if index < bytes.len() && (bytes[index] == b'"' || bytes[index] == b'\'') {
+                let quote = bytes[index];
+                index += 1;
+                let value_start = index;
+                while index < bytes.len() && bytes[index] != quote {
+                    index += 1;
+                }
+                value = tag[value_start..index].to_string();
+                index += 1;
+            } else {
+                let value_start = index;
+                while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+                    index += 1;
+                }
+                value = tag[value_start..index].to_string();
+            }
+        }
+        attributes.push((name, value));
+    }
+    attributes
+}
+
+fn attribute(attributes: &[(String, String)], name: &str) -> Option<String> {
+    attributes
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.clone())
 }
 
 /// Only the bare/www equivalence is followed; anything else would let a site pick an arbitrary URL.
@@ -497,4 +711,198 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
         || (segments[0] & 0xfe00) == 0xfc00
         || (segments[0] & 0xffc0) == 0xfe80
         || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn page(url: &str) -> url::Url {
+        url::Url::parse(url).unwrap()
+    }
+
+    fn declared(html: &str) -> Vec<String> {
+        declared_icon_urls(html, &page("https://www.example.test/"), "example.test")
+            .into_iter()
+            .map(|candidate| candidate.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_relative_icon_resolves_against_the_page() {
+        assert_eq!(
+            declared(
+                r#"<head><link rel="icon" type="image/x-icon" href="/res/favicon.ico?v1" /></head>"#
+            ),
+            ["https://www.example.test/res/favicon.ico?v1"]
+        );
+    }
+
+    #[test]
+    fn a_subdomain_of_the_saved_site_is_allowed() {
+        assert_eq!(
+            declared(
+                r#"<link rel="shortcut icon" href="https://cdn-resources.example.test/static/favicon.ico">"#
+            ),
+            ["https://cdn-resources.example.test/static/favicon.ico"]
+        );
+        assert_eq!(
+            declared(r#"<link rel="icon" href="//static.example.test/icon.png">"#),
+            ["https://static.example.test/icon.png"]
+        );
+    }
+
+    #[test]
+    fn a_foreign_or_lookalike_host_is_refused() {
+        assert!(declared(r#"<link rel="icon" href="https://evil.test/favicon.ico">"#).is_empty());
+        assert!(
+            declared(r#"<link rel="icon" href="https://evilexample.test/favicon.ico">"#).is_empty()
+        );
+        assert!(
+            declared(r#"<link rel="icon" href="https://example.test.evil.test/favicon.ico">"#)
+                .is_empty()
+        );
+        assert!(
+            declared(r#"<link rel="icon" href="https://93.184.216.34/favicon.ico">"#).is_empty()
+        );
+    }
+
+    #[test]
+    fn insecure_schemes_ports_and_credentials_are_refused() {
+        for href in [
+            "http://www.example.test/favicon.ico",
+            "javascript:alert(1)",
+            "data:image/png;base64,AAAA",
+            "file:///etc/passwd",
+            "https://www.example.test:8443/favicon.ico",
+            "https://user:secret@www.example.test/favicon.ico",
+        ] {
+            assert!(
+                declared(&format!(r#"<link rel="icon" href="{href}">"#)).is_empty(),
+                "{href}"
+            );
+        }
+    }
+
+    #[test]
+    fn vector_icons_and_unrelated_links_are_skipped() {
+        assert!(declared(r#"<link rel="icon" type="image/svg+xml" href="/icon.svg">"#).is_empty());
+        assert!(declared(r#"<link rel="icon" href="/logo.SVG">"#).is_empty());
+        assert!(declared(
+            r#"<link rel="mask-icon" href="/mask.png"><link rel="stylesheet" href="/site.css">"#
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn icons_are_ranked_by_kind_then_size() {
+        let html = r#"
+            <LINK REL="apple-touch-icon" HREF="/apple.png">
+            <link rel='icon' sizes='16x16' href='/16.png'>
+            <link rel=icon sizes=64x64 href=/64.png>
+            <link rel="icon" sizes="32x32" href="/32.png">
+        "#;
+        assert_eq!(
+            declared(html),
+            [
+                "https://www.example.test/64.png",
+                "https://www.example.test/32.png",
+                "https://www.example.test/16.png",
+                "https://www.example.test/apple.png",
+            ]
+        );
+    }
+
+    #[test]
+    fn links_after_the_head_and_duplicates_are_ignored() {
+        let html = r#"<link rel="icon" href="/a.ico"><link rel="icon" href="/a.ico"></head><link rel="icon" href="/body.ico">"#;
+        assert_eq!(declared(html), ["https://www.example.test/a.ico"]);
+    }
+
+    #[test]
+    fn entities_in_the_address_are_decoded() {
+        assert_eq!(
+            declared(r#"<link rel="icon" href="/favicon.ico?a=1&amp;b=2">"#),
+            ["https://www.example.test/favicon.ico?a=1&b=2"]
+        );
+    }
+
+    #[test]
+    fn malformed_markup_never_panics() {
+        for html in [
+            "<link",
+            "<link rel=\"icon\" href=\"/unterminated",
+            "<link rel=\"icon\" href=\"/a.ico\"",
+            "<link ==== rel icon href>",
+            "<link rel=\"icon\" href=\"\u{00e9}\u{1f600}/icon.png\">",
+            "\u{1f600}<LiNk rel=icon href=/x.ico>",
+            "",
+        ] {
+            let _ = declared(html);
+        }
+    }
+
+    #[test]
+    fn the_number_of_link_tags_read_is_bounded() {
+        let mut html = String::new();
+        for index in 0..(MAX_LINK_TAGS + 10) {
+            html.push_str(&format!("<link rel=\"stylesheet\" href=\"/{index}.css\">"));
+        }
+        html.push_str(r#"<link rel="icon" href="/late.ico">"#);
+        assert!(declared(&html).is_empty());
+    }
+
+    #[test]
+    fn a_www_saved_site_accepts_the_bare_domain_and_its_subdomains() {
+        let page_url = page("https://www.example.test/");
+        let found = declared_icon_urls(
+            r#"<link rel="icon" href="https://example.test/i.ico">"#,
+            &page_url,
+            "www.example.test",
+        );
+        assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn redirects_follow_only_the_bare_and_www_forms() {
+        assert_eq!(
+            redirect_target("example.test", "https://www.example.test/favicon.ico").unwrap(),
+            "www.example.test"
+        );
+        assert!(redirect_target("example.test", "https://cdn.evil.test/favicon.ico").is_err());
+        assert!(redirect_target("example.test", "http://www.example.test/favicon.ico").is_err());
+    }
+
+    #[test]
+    fn private_and_reserved_addresses_are_not_public() {
+        for address in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "169.254.1.1",
+            "100.64.0.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:10.0.0.1",
+        ] {
+            assert!(!is_public_ip(address.parse().unwrap()), "{address}");
+        }
+        assert!(is_public_ip("93.184.216.34".parse().unwrap()));
+    }
+
+    #[test]
+    fn saved_sites_that_cannot_be_fetched_are_refused() {
+        for site in [
+            "",
+            "localhost",
+            "printer.local",
+            "192.168.1.1",
+            "intranet",
+            "-bad.example.test",
+        ] {
+            assert!(normalized_host(site).is_err(), "{site}");
+        }
+        assert_eq!(normalized_host(" Example.TEST. ").unwrap(), "example.test");
+    }
 }
