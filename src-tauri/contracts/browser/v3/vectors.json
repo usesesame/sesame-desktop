@@ -1,0 +1,97 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 3,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "fill match request defaults to both fields",
+      "valid": true,
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill match request names only the password field",
+      "valid": true,
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-2", "origin": "https://www.example.test", "fields": "password" }
+    },
+    {
+      "name": "fill match protocol rejects a non-fill request",
+      "valid": false,
+      "message": { "version": 3, "type": "capabilities", "requestId": "fill-3-3" }
+    },
+    {
+      "name": "fill match request rejects an unknown property",
+      "valid": false,
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-4", "origin": "https://example.test", "token": "fictional-non-secret" }
+    },
+    {
+      "name": "fill match request rejects a future protocol version",
+      "valid": false,
+      "message": { "version": 4, "type": "fill", "requestId": "fill-4-1", "origin": "https://example.test" }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "exact origin fill reports the exact rule",
+      "hostValid": true,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-1", "origin": "https://example.test" },
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-1", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "fictional-example-value" }, "matchKind": "exact" }
+    },
+    {
+      "name": "www alias fill reports the wwwAlias rule",
+      "hostValid": true,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-2", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-2", "password": "fictional-example-value", "matchKind": "wwwAlias" },
+      "extensionResult": { "ok": true, "credential": { "username": "", "password": "fictional-example-value" }, "matchKind": "wwwAlias" }
+    },
+    {
+      "name": "locked fill match is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-3", "origin": "https://example.test" },
+      "message": { "version": 3, "type": "fill-unavailable", "requestId": "fill-3-3", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "vault-locked" }
+    },
+    {
+      "name": "version three fill without matchKind is rejected",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-4", "origin": "https://example.test" },
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-4", "username": "person@example.test", "password": "fictional-example-value" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "unknown matchKind is rejected",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-5", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 3, "type": "fill", "requestId": "fill-3-5", "password": "fictional-example-value", "matchKind": "parentDomain" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "version one response carrying matchKind is rejected",
+      "hostValid": false,
+      "request": { "version": 1, "type": "fill", "requestId": "fill-1-1", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "fill", "requestId": "fill-1-1", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "version three request answered as version one",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-6", "origin": "https://example.test" },
+      "message": { "version": 1, "type": "fill", "requestId": "fill-3-6", "username": "person@example.test", "password": "fictional-example-value" },
+      "extensionResult": { "ok": false, "code": "protocol-mismatch" }
+    },
+    {
+      "name": "fill unavailable cannot carry the matching rule",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-7", "origin": "https://example.test" },
+      "message": { "version": 3, "type": "fill-unavailable", "requestId": "fill-3-7", "reason": "noMatch", "matchKind": "exact" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "response request id mismatch",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-8", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 3, "type": "fill", "requestId": "other-request", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": false, "code": "request-mismatch" }
+    }
+  ]
+}

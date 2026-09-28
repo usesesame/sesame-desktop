@@ -52,7 +52,7 @@
         {/each}
       </div>
     {:else}
-      <div class="empty-state">
+      <div class="empty-state state-panel">
         <span aria-hidden="true"><Icon name="check" size={18} /></span>
         <strong>No duplicates found</strong>
         <p>Your saved logins do not have any obvious matches.</p>
@@ -113,7 +113,7 @@
         </button>
       </footer>
     {:else}
-      <div class="review-empty">
+      <div class="review-empty state-panel">
         <Icon name="shield" size={24} />
         <h2>Nothing to review</h2>
         <p>Duplicate groups will appear here when Sesame finds them.</p>
@@ -349,14 +349,10 @@
 
   .empty-state,
   .review-empty {
-    display: grid;
     min-height: 0;
     flex: 1;
-    place-content: center;
-    justify-items: center;
     padding: var(--space-6);
     color: var(--ok-text);
-    text-align: center;
   }
 
   .empty-state > span {

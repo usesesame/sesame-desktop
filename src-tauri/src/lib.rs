@@ -57,6 +57,9 @@ macro_rules! sesame_invoke_handler {
             commands::suggest_field_values,
             commands::check_password_strength,
             commands::check_password_breach,
+            commands::start_login_breach_scan,
+            commands::get_login_breach_scan_status,
+            commands::cancel_login_breach_scan,
             commands::auto_type,
             commands::get_login_summary,
             commands::get_duplicate_groups,
@@ -65,6 +68,7 @@ macro_rules! sesame_invoke_handler {
             commands::save_login,
             commands::set_login_folders,
             commands::bulk_assign_folder,
+            commands::add_items_tag,
             commands::create_folder,
             commands::rename_folder,
             commands::delete_folder,
@@ -138,6 +142,8 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_browser_identity_fill,
             commands::get_pending_browser_card_fill,
             commands::resolve_browser_card_fill,
+            commands::get_pending_browser_totp_fill,
+            commands::resolve_browser_totp_fill,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
@@ -270,6 +276,7 @@ pub fn run() {
                 .build(),
         )
         .manage(vault::VaultState::default())
+        .manage(commands::BreachScanState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())
