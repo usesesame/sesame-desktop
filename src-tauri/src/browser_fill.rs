@@ -17,10 +17,12 @@ use zeroize::Zeroize;
 use crate::{
     browser_pipe::PipePeer,
     browser_protocol::{
-        parse_card_fields, parse_identity_fields, BrowserRequest, BrowserResponse, CardFillFields,
-        IdentityFillFields, MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
+        fill_carries_match_kind, parse_card_fields, parse_identity_fields, BrowserRequest,
+        BrowserResponse, CardFillFields, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION,
+        MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
+    vault::snapshot::{current_totp, totp_from_value},
     vault::{random_id, Card, Identity, TaggedItem, VaultEntry, VaultState},
 };
 
@@ -268,6 +270,26 @@ pub struct BrowserCardRequestEvent {
     expires_at_unix_ms: u64,
 }
 
+/// Display fields only: neither the seed nor a derived code enters the prompt.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpFillCandidate {
+    id: String,
+    title: String,
+    username: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTotpRequestEvent {
+    approval_id: String,
+    origin: String,
+    hostname: String,
+    candidates: Vec<TotpFillCandidate>,
+    expires_in_seconds: u64,
+    expires_at_unix_ms: u64,
+}
+
 include!("browser_fill_broker.rs");
 
 pub fn start(app: AppHandle) -> io::Result<()> {
@@ -403,6 +425,10 @@ pub fn pending_card(state: State<'_, BrowserFillState>) -> Option<BrowserCardReq
     state.pending_card_request()
 }
 
+pub fn pending_totp(state: State<'_, BrowserFillState>) -> Option<BrowserTotpRequestEvent> {
+    state.pending_totp_request()
+}
+
 pub fn resolve_identity(
     app: &AppHandle,
     state: State<'_, BrowserFillState>,
@@ -473,6 +499,42 @@ pub fn resolve_card(
     }
 }
 
+/// Every TOTP release needs its own approval; no grant is ever recorded.
+pub fn resolve_totp(
+    app: &AppHandle,
+    state: State<'_, BrowserFillState>,
+    approval_id: String,
+    login_id: Option<String>,
+) -> Result<(), String> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err("That browser approval is no longer available.".into());
+    }
+    let denied = login_id.is_none();
+    let decision = login_id
+        .map(ApprovalDecision::Selected)
+        .unwrap_or(ApprovalDecision::Denied);
+    match state.decide(&approval_id, decision, false) {
+        Ok(()) => {
+            diagnostics::record_browser_host_registration(
+                app,
+                if denied {
+                    "totp_denied"
+                } else {
+                    "totp_approved"
+                },
+            );
+            if denied {
+                emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "denied");
+            }
+            Ok(())
+        }
+        Err(_) => {
+            emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "expired");
+            Err("That browser approval expired or is no longer available.".into())
+        }
+    }
+}
+
 fn handle_pipe_payload(
     app: &AppHandle,
     payload: Vec<u8>,
@@ -494,7 +556,8 @@ fn handle_pipe_payload(
         "save" => save_response(app, &mut request, peer),
         "identity" => identity_response(app, &request, peer),
         "card" => card_response(app, &request, peer),
-        _ => BrowserResponse::error(&request.request_id, "Unsupported browser request."),
+        "totp" => totp_response(app, &request, peer),
+        _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
     response_bytes(response)
 }
@@ -521,35 +584,39 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         .as_deref()
         .and_then(NormalizedOrigin::from_request)
     else {
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
     let vault = app.state::<VaultState>();
-    let (epoch, candidates) = {
+    let (epoch, candidates, lookalike) = {
         let session = match vault.session.lock() {
             Ok(session) => session,
-            Err(_) => {
-                return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable")
-            }
+            Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
         };
         let Some(session) = session.as_ref() else {
             diagnostics::record_browser_host_registration(app, "fill_locked");
-            return BrowserResponse::unavailable(&request.request_id, "locked");
+            return BrowserResponse::unavailable(request, "locked");
         };
         let payload = match session.open_payload() {
             Ok(payload) => payload,
-            Err(_) => {
-                return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable")
-            }
+            Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
         };
         let candidates = matching_entries(&payload.entries, &origin);
-        (vault.session_epoch(), candidates)
+        let lookalike = if candidates.is_empty() && request.version == LOOKALIKE_PROTOCOL_VERSION {
+            lookalike_host(&payload.entries, &origin)
+        } else {
+            None
+        };
+        (vault.session_epoch(), candidates, lookalike)
     };
     if candidates.is_empty() {
+        if let Some(lookalike) = lookalike {
+            return BrowserResponse::lookalike_unavailable(request, lookalike);
+        }
         diagnostics::record_browser_host_registration(app, "fill_no_match");
-        return BrowserResponse::unavailable(&request.request_id, "noMatch");
+        return BrowserResponse::unavailable(request, "noMatch");
     }
     if candidates.len() > MAX_MATCHING_CANDIDATES {
-        return BrowserResponse::unavailable(&request.request_id, "multipleMatches");
+        return BrowserResponse::unavailable(request, "multipleMatches");
     }
 
     let candidate_ids: HashSet<String> = candidates
@@ -565,7 +632,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         ApprovalRequest::Fill { candidate_ids },
     ) {
         Ok(value) => value,
-        Err(reason) => return BrowserResponse::unavailable(&request.request_id, reason),
+        Err(reason) => return BrowserResponse::unavailable(request, reason),
     };
 
     // A live grant resolves the approval without prompting. Every check after the
@@ -576,7 +643,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             .is_err()
         {
             fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+            return BrowserResponse::unavailable(request, "approvalUnavailable");
         }
         diagnostics::record_browser_host_registration(app, "fill_auto_approved");
     } else {
@@ -593,7 +660,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             .is_err()
         {
             fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable");
+            return BrowserResponse::unavailable(request, "approvalUnavailable");
         }
         // Publish before focus change: Chromium closes the popup when Sesame comes forward.
         bring_to_foreground(app);
@@ -615,53 +682,64 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         ApprovalKind::Fill,
     ) {
         Ok(decision) => decision,
-        Err(reason) => return BrowserResponse::unavailable(&request.request_id, reason),
+        Err(reason) => return BrowserResponse::unavailable(request, reason),
     };
     let login_id = match decision {
         ApprovalDecision::Selected(login_id) => login_id,
         ApprovalDecision::Denied => {
-            return BrowserResponse::unavailable(&request.request_id, "approvalDeclined")
+            return BrowserResponse::unavailable(request, "approvalDeclined")
         }
         ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
-            return BrowserResponse::unavailable(&request.request_id, "invalidSelection")
+            return BrowserResponse::unavailable(request, "invalidSelection")
         }
     };
     if !peer.is_connected() {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "connectionClosed");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
 
     // Bindings rechecked after approval under the vault lock; no credential is copied before this.
     let session = match vault.session.lock() {
         Ok(session) => session,
-        Err(_) => return BrowserResponse::unavailable(&request.request_id, "approvalUnavailable"),
+        Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
     };
     if vault.session_epoch() != epoch {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "locked");
+        return BrowserResponse::unavailable(request, "locked");
     };
     let Ok(item) = session.open_item(&login_id) else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
     let TaggedItem::Login(entry) = &*item else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
     };
-    if NormalizedOrigin::from_saved_url(&entry.url)
+    let Some(match_kind) = NormalizedOrigin::from_saved_url(&entry.url)
         .as_ref()
         .and_then(|saved| origin_match_kind(saved, &origin))
-        .is_none()
-        || !credential_fields_valid(entry)
-    {
+    else {
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
-        return BrowserResponse::unavailable(&request.request_id, "staleRequest");
+        return BrowserResponse::unavailable(request, "staleRequest");
+    };
+    if !credential_fields_valid(entry) {
+        emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
+        return BrowserResponse::unavailable(request, "staleRequest");
     }
-    BrowserResponse::fill_for(request, identity_value(entry), entry.password.clone())
+    if fill_carries_match_kind(request.version) {
+        BrowserResponse::fill_with_match_kind(
+            request,
+            identity_value(entry),
+            entry.password.clone(),
+            match_kind.as_str(),
+        )
+    } else {
+        BrowserResponse::fill_for(request, identity_value(entry), entry.password.clone())
+    }
 }
 
 fn identity_value(entry: &VaultEntry) -> String {
@@ -1007,6 +1085,7 @@ fn selected_card_fields(card: &Card, requested: &[String]) -> CardFillFields {
 }
 
 include!("browser_fill_identity_approval.rs");
+include!("browser_fill_totp_approval.rs");
 
 fn approval_expires_at_unix_ms() -> u64 {
     SystemTime::now()
@@ -1019,13 +1098,16 @@ fn approval_expires_at_unix_ms() -> u64 {
 }
 
 fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
+    let version = response.version;
+    let request_id = response.request_id.clone();
     let bytes = response
         .to_zeroizing_bytes()
         .unwrap_or_else(|_| zeroize::Zeroizing::new(Vec::new()));
     if bytes.is_empty() || bytes.len() > MAX_NATIVE_MESSAGE_BYTES {
         zeroize::Zeroizing::new(
-            serde_json::to_vec(&BrowserResponse::error(
-                "invalid",
+            serde_json::to_vec(&BrowserResponse::error_with_version(
+                version,
+                &request_id,
                 "Browser response unavailable.",
             ))
             .unwrap_or_default(),
@@ -1381,6 +1463,7 @@ mod grant_tests {
 #[cfg(test)]
 mod origin_attacks {
     use super::*;
+    use crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION;
 
     const CANARY_PASSWORD: &str = "fictional-secret-canary";
 
@@ -1491,6 +1574,74 @@ mod origin_attacks {
     }
 
     #[test]
+    fn a_v3_fill_response_reports_the_rule_that_matched() {
+        let cases = [
+            ("https://example.test", "https://example.test", "exact"),
+            (
+                "https://www.example.test",
+                "https://example.test",
+                "wwwAlias",
+            ),
+            (
+                "https://example.test",
+                "https://www.example.test",
+                "wwwAlias",
+            ),
+        ];
+        for (saved_url, request_url, expected) in cases {
+            let saved_origin = saved(saved_url).expect("saved origin");
+            let requested = request(request_url).expect("request origin");
+            let kind = origin_match_kind(&saved_origin, &requested)
+                .unwrap_or_else(|| panic!("{saved_url} did not match {request_url}"));
+            let fill = BrowserRequest {
+                version: FILL_MATCH_PROTOCOL_VERSION,
+                message_type: "fill".to_string(),
+                request_id: "fill-1".to_string(),
+                origin: Some(request_url.to_string()),
+                fields: None,
+                username: None,
+                password: None,
+                title: None,
+                kind: None,
+            };
+            assert!(fill.validate());
+
+            let response = BrowserResponse::fill_with_match_kind(
+                &fill,
+                "person@example.test".to_string(),
+                "fictional-example-value".to_string(),
+                kind.as_str(),
+            );
+            assert_eq!(response.match_kind.as_deref(), Some(expected));
+            assert!(response.validate_for(&fill));
+            let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+                .expect("utf8");
+            assert!(wire.contains(&format!("\"matchKind\":\"{expected}\"")));
+        }
+    }
+
+    #[test]
+    fn the_candidate_labels_match_the_fill_match_kinds() {
+        let entries = vec![
+            entry("login-exact", "https://example.test", CANARY_PASSWORD),
+            entry("login-www", "https://www.example.test", CANARY_PASSWORD),
+        ];
+        let candidates =
+            matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| (candidate.id.as_str(), candidate.match_kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("login-exact", OriginMatchKind::Exact.as_str()),
+                ("login-www", OriginMatchKind::WwwAlias.as_str()),
+            ]
+        );
+    }
+
+    #[test]
     fn http_is_local_development_only() {
         assert!(request("http://localhost:3000/").is_some());
         assert!(request("http://127.0.0.1:3000/").is_some());
@@ -1578,6 +1729,327 @@ mod origin_attacks {
 
         let candidates =
             matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
+    }
+}
+
+#[cfg(test)]
+mod totp_flow_tests {
+    use super::*;
+    use crate::browser_protocol::TOTP_PROTOCOL_VERSION;
+
+    const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    fn origin(value: &str) -> NormalizedOrigin {
+        NormalizedOrigin::from_request(value).expect("origin")
+    }
+
+    fn ids(values: &[&str]) -> HashSet<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn totp_entry(id: &str, url: &str, seed: Option<&str>) -> VaultEntry {
+        VaultEntry {
+            id: id.to_string(),
+            title: format!("Entry {id}"),
+            username: "casey".to_string(),
+            url: url.to_string(),
+            totp: seed.map(str::to_string),
+            ..VaultEntry::default()
+        }
+    }
+
+    fn totp_request(origin_url: &str) -> BrowserRequest {
+        BrowserRequest {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp".to_string(),
+            request_id: "totp-1".to_string(),
+            origin: Some(origin_url.to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    fn begin_totp(
+        state: &BrowserFillState,
+        request_id: &str,
+        epoch: u64,
+    ) -> (String, Receiver<ApprovalDecision>) {
+        let (approval_id, _, receiver) = state
+            .begin(
+                request_id,
+                origin("https://example.test"),
+                epoch,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            )
+            .expect("begin totp");
+        (approval_id, receiver)
+    }
+
+    #[test]
+    fn a_totp_request_only_offers_logins_saved_at_that_origin() {
+        let entries = vec![
+            totp_entry("login-a", "https://bank.test", Some(RFC_KEY)),
+            totp_entry("login-other", "https://other.test", Some(RFC_KEY)),
+            totp_entry(
+                "login-lookalike",
+                "https://bank.test.evil.test",
+                Some(RFC_KEY),
+            ),
+            totp_entry("login-trailing-dot", "https://bank.test./", Some(RFC_KEY)),
+            totp_entry("login-port", "https://bank.test:8443", Some(RFC_KEY)),
+            totp_entry("login-http", "http://bank.test", Some(RFC_KEY)),
+            totp_entry("login-www", "https://www.bank.test", Some(RFC_KEY)),
+            totp_entry("login-local-http", "http://localhost:3000", Some(RFC_KEY)),
+        ];
+
+        let offered = |value: &str| {
+            matching_totp_entries(&entries, &origin(value))
+                .into_iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(offered("https://bank.test"), vec!["login-a", "login-www"]);
+        assert_eq!(
+            offered("https://www.bank.test"),
+            vec!["login-www", "login-a"]
+        );
+        assert_eq!(offered("https://other.test"), vec!["login-other"]);
+        assert_eq!(
+            offered("https://bank.test.evil.test"),
+            vec!["login-lookalike"]
+        );
+        assert_eq!(offered("https://bank.test:8443"), vec!["login-port"]);
+        assert_eq!(offered("http://localhost:3000"), vec!["login-local-http"]);
+        assert!(offered("https://localhost:3000").is_empty());
+        assert!(offered("https://bank.test.evil.test.evil.test").is_empty());
+        assert!(NormalizedOrigin::from_request("https://bank.test./").is_none());
+        assert!(
+            !offered("https://bank.test").contains(&"login-trailing-dot".to_string()),
+            "a trailing-dot login leaked into the candidates"
+        );
+    }
+
+    #[test]
+    fn a_login_without_a_usable_totp_secret_is_never_offered_or_selected() {
+        let entries = vec![
+            totp_entry("login-nothing", "https://example.test", None),
+            totp_entry("login-empty", "https://example.test", Some("")),
+            totp_entry("login-short", "https://example.test", Some("GEZDGNBV")),
+            totp_entry(
+                "login-garbage",
+                "https://example.test",
+                Some("not base32 at all!!"),
+            ),
+            totp_entry("login-valid", "https://example.test", Some(RFC_KEY)),
+        ];
+
+        let candidates = matching_totp_entries(&entries, &origin("https://example.test"));
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["login-valid"]
+        );
+
+        let state = BrowserFillState::default();
+        let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        assert_eq!(
+            state.decide(
+                &approval_id,
+                ApprovalDecision::Selected("login-short".to_string()),
+                false,
+            ),
+            Err("selectionNotOffered")
+        );
+        assert!(matches!(
+            receiver.recv(),
+            Ok(ApprovalDecision::InvalidSelection)
+        ));
+        assert!(state.pending_totp_request().is_none());
+    }
+
+    #[test]
+    fn a_totp_approval_is_consumed_and_cannot_be_replayed() {
+        let state = BrowserFillState::default();
+        let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        let event = BrowserTotpRequestEvent {
+            approval_id: approval_id.clone(),
+            origin: "https://example.test".to_string(),
+            hostname: "example.test".to_string(),
+            candidates: Vec::new(),
+            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+            expires_at_unix_ms: 0,
+        };
+        state
+            .publish(&approval_id, ApprovalEvent::Totp(event))
+            .expect("publish");
+        assert!(state.pending_totp_request().is_some());
+
+        state
+            .decide(
+                &approval_id,
+                ApprovalDecision::Selected("login-a".to_string()),
+                false,
+            )
+            .expect("decide");
+        assert!(
+            matches!(receiver.recv(), Ok(ApprovalDecision::Selected(login_id)) if login_id == "login-a")
+        );
+        assert!(state.pending_totp_request().is_none());
+        assert_eq!(
+            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            Err("approvalExpired")
+        );
+        assert!(matches!(
+            state.begin(
+                "totp-1",
+                origin("https://example.test"),
+                7,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            ),
+            Err("staleRequest")
+        ));
+    }
+
+    #[test]
+    fn a_second_totp_prompt_is_refused_while_one_waits() {
+        let state = BrowserFillState::default();
+        let (_approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+
+        assert!(matches!(
+            state.begin(
+                "totp-2",
+                origin("https://example.test"),
+                7,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            ),
+            Err("approvalUnavailable")
+        ));
+    }
+
+    #[test]
+    fn an_expired_totp_approval_refuses_every_step() {
+        let state = BrowserFillState::default();
+        let (approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+        {
+            let mut inner = state.inner.lock().expect("inner");
+            let pending = inner.pending.as_mut().expect("pending");
+            pending.deadline = Instant::now() - Duration::from_secs(1);
+        }
+
+        assert_eq!(
+            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            Err("approvalExpired")
+        );
+        assert!(state.pending_totp_request().is_none());
+        assert_eq!(
+            state.publish(
+                &approval_id,
+                ApprovalEvent::Totp(BrowserTotpRequestEvent {
+                    approval_id: approval_id.clone(),
+                    origin: "https://example.test".to_string(),
+                    hostname: "example.test".to_string(),
+                    candidates: Vec::new(),
+                    expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+                    expires_at_unix_ms: 0,
+                }),
+            ),
+            Err("approvalExpired")
+        );
+    }
+
+    #[test]
+    fn a_totp_binding_requires_the_same_request_origin_and_epoch() {
+        let state = BrowserFillState::default();
+        let (approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+
+        assert!(state.is_bound(&approval_id, "totp-1", &origin("https://example.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-2", &origin("https://example.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-1", &origin("https://other.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-1", &origin("https://example.test"), 8));
+    }
+
+    #[test]
+    fn the_released_code_equals_current_totp_for_the_approved_secret() {
+        let request = totp_request("https://example.test");
+        assert!(request.validate());
+
+        let mut matched = false;
+        for _ in 0..4 {
+            let before = current_totp(RFC_KEY).expect("a current code");
+            let response = totp_response_for_secret(&request, RFC_KEY).expect("a response");
+            let after = current_totp(RFC_KEY).expect("a current code");
+            if before != after {
+                continue;
+            }
+            assert_eq!(response.version, TOTP_PROTOCOL_VERSION);
+            assert_eq!(response.message_type, "totp");
+            assert_eq!(response.code.as_deref(), Some(before.0.as_str()));
+            assert_eq!(response.remaining_seconds, Some(before.1));
+            assert!((1..=before.2).contains(&before.1));
+            assert!(response.validate_for(&request));
+            let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+                .expect("utf8");
+            assert!(wire.contains(&before.0));
+            assert!(!wire.contains(RFC_KEY));
+            matched = true;
+            break;
+        }
+        assert!(
+            matched,
+            "the clock crossed a window boundary on every attempt"
+        );
+
+        assert!(totp_response_for_secret(&request, "").is_none());
+        assert!(totp_response_for_secret(&request, "not base32 at all!!").is_none());
+    }
+
+    #[test]
+    fn a_totp_prompt_and_candidate_carry_no_secret() {
+        let candidate = TotpFillCandidate {
+            id: "login-a".to_string(),
+            title: "Northwind".to_string(),
+            username: "casey".to_string(),
+        };
+        let event = BrowserTotpRequestEvent {
+            approval_id: "approval-a".to_string(),
+            origin: "https://example.test".to_string(),
+            hostname: "example.test".to_string(),
+            candidates: vec![candidate],
+            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+            expires_at_unix_ms: 0,
+        };
+        let wire = serde_json::to_string(&event).expect("serialized prompt");
+        assert!(!wire.contains(RFC_KEY));
+        assert!(wire.contains("casey"));
+    }
+
+    #[test]
+    fn the_totp_candidate_list_is_bounded() {
+        let entries: Vec<VaultEntry> = (0..64)
+            .map(|index| {
+                totp_entry(
+                    &format!("login-{index}"),
+                    "https://example.test",
+                    Some(RFC_KEY),
+                )
+            })
+            .collect();
+
+        let candidates = matching_totp_entries(&entries, &origin("https://example.test"));
 
         assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
     }

@@ -159,6 +159,8 @@ commands.allow = [
   "resolve_browser_identity_fill",
   "get_pending_browser_card_fill",
   "resolve_browser_card_fill",
+  "get_pending_browser_totp_fill",
+  "resolve_browser_totp_fill",
 ]
 
 [[permission]]

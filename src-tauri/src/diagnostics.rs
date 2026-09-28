@@ -144,7 +144,8 @@ fn severity(code: &str) -> &'static str {
         | "idle_warning_listener_failed"
         | "quick_access_listener_failed"
         | "breach_scan_listener_failed"
-        | "card_fill_listener_failed" => "error",
+        | "card_fill_listener_failed"
+        | "totp_fill_listener_failed" => "error",
         "fill_locked"
         | "fill_no_match"
         | "fill_denied"
@@ -172,7 +173,13 @@ fn severity(code: &str) -> &'static str {
         | "card_denied"
         | "card_timeout"
         | "card_connection_closed"
-        | "card_vault_changed" => "warn",
+        | "card_vault_changed"
+        | "totp_locked"
+        | "totp_no_match"
+        | "totp_denied"
+        | "totp_timeout"
+        | "totp_connection_closed"
+        | "totp_vault_changed" => "warn",
         "started"
         | "registration_ok"
         | "host_started"
@@ -189,7 +196,9 @@ fn severity(code: &str) -> &'static str {
         | "unregister_ok"
         | "card_requested"
         | "card_approved"
-        | "fill_auto_approved" => "info",
+        | "fill_auto_approved"
+        | "totp_requested"
+        | "totp_approved" => "info",
         // Unknown or retired codes are routine, never misclassified failures.
         _ => "info",
     }
@@ -517,6 +526,7 @@ fn allowed_code(value: &str) -> bool {
             | "quick_access_listener_failed"
             | "breach_scan_listener_failed"
             | "card_fill_listener_failed"
+            | "totp_fill_listener_failed"
             | "platform_capabilities_failed"
             | "picker_opened"
             | "picker_cancelled"
@@ -578,5 +588,13 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "card_timeout"
             | "card_connection_closed"
             | "card_vault_changed"
+            | "totp_requested"
+            | "totp_approved"
+            | "totp_denied"
+            | "totp_locked"
+            | "totp_no_match"
+            | "totp_timeout"
+            | "totp_connection_closed"
+            | "totp_vault_changed"
     )
 }

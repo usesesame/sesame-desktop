@@ -1,0 +1,109 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 4,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "totp request carries only the page origin",
+      "valid": true,
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "totp request rejects an unknown property",
+      "valid": false,
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-2", "origin": "https://example.test", "code": "123456" }
+    },
+    {
+      "name": "totp request requires an origin",
+      "valid": false,
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-3" }
+    },
+    {
+      "name": "protocol three cannot request a totp",
+      "valid": false,
+      "message": { "version": 3, "type": "totp", "requestId": "totp-3-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "protocol four rejects a fill request",
+      "valid": false,
+      "message": { "version": 4, "type": "fill", "requestId": "totp-4-4", "origin": "https://example.test" }
+    },
+    {
+      "name": "totp request rejects a future protocol version",
+      "valid": false,
+      "message": { "version": 5, "type": "totp", "requestId": "totp-5-1", "origin": "https://example.test" }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "approved origin returns the current code and its window",
+      "hostValid": true,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-1", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-1", "code": "287082", "remainingSeconds": 18 },
+      "extensionResult": { "ok": true, "code": "287082", "remainingSeconds": 18 }
+    },
+    {
+      "name": "an eight digit secret keeps its own digit count",
+      "hostValid": true,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-5", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-5", "code": "12345678", "remainingSeconds": 4 },
+      "extensionResult": { "ok": true, "code": "12345678", "remainingSeconds": 4 }
+    },
+    {
+      "name": "no saved login at the origin is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-6", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp-unavailable", "requestId": "totp-4-6", "reason": "noMatch" },
+      "extensionResult": { "ok": false, "code": "no-match" }
+    },
+    {
+      "name": "locked vault is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-7", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp-unavailable", "requestId": "totp-4-7", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "vault-locked" }
+    },
+    {
+      "name": "declined approval is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-8", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp-unavailable", "requestId": "totp-4-8", "reason": "approvalDeclined" },
+      "extensionResult": { "ok": false, "code": "approval-declined" }
+    },
+    {
+      "name": "totp response for a fill request is refused",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-1", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "fill-3-1", "code": "287082", "remainingSeconds": 18 },
+      "extensionResult": { "ok": false, "code": "protocol-mismatch" }
+    },
+    {
+      "name": "totp response without the window is refused",
+      "hostValid": false,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-9", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-9", "code": "287082" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "a non digit code is refused",
+      "hostValid": false,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-10", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "totp-4-10", "code": "28a082", "remainingSeconds": 18 },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "totp unavailable cannot carry a code",
+      "hostValid": false,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-11", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp-unavailable", "requestId": "totp-4-11", "reason": "noMatch", "code": "287082" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "response request id mismatch",
+      "hostValid": false,
+      "request": { "version": 4, "type": "totp", "requestId": "totp-4-12", "origin": "https://example.test" },
+      "message": { "version": 4, "type": "totp", "requestId": "other-request", "code": "287082", "remainingSeconds": 18 },
+      "extensionResult": { "ok": false, "code": "request-mismatch" }
+    }
+  ]
+}
