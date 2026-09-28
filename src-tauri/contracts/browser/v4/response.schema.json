@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v4/response.schema.json",
+  "title": "Sesame browser response v4",
+  "oneOf": [
+    { "$ref": "#/$defs/totp" },
+    { "$ref": "#/$defs/totpUnavailable" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "reason": {
+      "enum": [
+        "desktopUnavailable",
+        "locked",
+        "noMatch",
+        "approvalUnavailable",
+        "approvalDeclined",
+        "approvalTimeout",
+        "staleRequest",
+        "invalidSelection",
+        "multipleMatches"
+      ]
+    },
+    "totp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "code", "remainingSeconds"],
+      "properties": {
+        "version": { "const": 4 },
+        "type": { "const": "totp" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{1,9}$",
+          "description": "Derived digits only; the seed never crosses the boundary."
+        },
+        "remainingSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Seconds left in the window that produced the code."
+        }
+      }
+    },
+    "totpUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "reason"],
+      "properties": {
+        "version": { "const": 4 },
+        "type": { "const": "totp-unavailable" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "message"],
+      "properties": {
+        "version": { "const": 4 },
+        "type": { "const": "error" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "message": {
+          "enum": [
+            "Unsupported protocol version.",
+            "Invalid browser request.",
+            "Unsupported browser request.",
+            "Browser response unavailable."
+          ]
+        }
+      }
+    }
+  }
+}

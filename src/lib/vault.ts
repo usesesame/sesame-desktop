@@ -2,7 +2,8 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import { uniqueTags } from './vault-items'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -53,6 +54,16 @@ export async function onQuickAccessOpenItem(handler: (id: string) => void): Prom
 export async function onDesktopUpdateProgress(handler: (progress: DesktopUpdateProgress) => void): Promise<UnlistenFn> {
   if (previewMode) return () => {}
   return listen<DesktopUpdateProgress>('desktop-update-progress', ({ payload }) => handler(payload))
+}
+
+export async function onBreachScanProgress(handler: (progress: BreachScanProgress) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BreachScanProgress>('breach-scan-progress', ({ payload }) => handler(payload))
+}
+
+export async function onBreachScanFinished(handler: () => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen('breach-scan-finished', handler)
 }
 
 async function onBrowserFillRequest(handler: (payload: BrowserFillRequest) => void): Promise<UnlistenFn> {
@@ -127,6 +138,28 @@ export async function subscribeBrowserCardFill(handlers: {
   return () => { stopRequests(); stopCancellations() }
 }
 
+async function onBrowserTotpFillRequest(handler: (payload: BrowserTotpFillRequest) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserTotpFillRequest>('browser-totp-request', ({ payload }) => handler(payload))
+}
+
+async function onBrowserTotpFillCancelled(handler: (payload: BrowserTotpFillCancelled) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserTotpFillCancelled>('browser-totp-cancelled', ({ payload }) => handler(payload))
+}
+
+export async function subscribeBrowserTotpFill(handlers: {
+  request: (payload: BrowserTotpFillRequest) => void
+  cancelled: (payload: BrowserTotpFillCancelled) => void
+}): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  const [stopRequests, stopCancellations] = await Promise.all([
+    onBrowserTotpFillRequest(handlers.request),
+    onBrowserTotpFillCancelled(handlers.cancelled),
+  ])
+  return () => { stopRequests(); stopCancellations() }
+}
+
 async function onBrowserSaveRequest(handler: (payload: BrowserSaveRequest) => void): Promise<UnlistenFn> {
   if (previewMode) return () => {}
   return listen<BrowserSaveRequest>('browser-save-request', ({ payload }) => handler(payload))
@@ -165,7 +198,10 @@ const previewSnapshot: VaultSnapshot = {
   items: [],
   trash: [],
   history: [],
-  security: { good: 1, needsAttention: 3, duplicateCandidates: 0, weakOrReused: 1, weakPasswords: 1, commonPasswords: 0, reusedPasswords: 0, compromisedPatterns: 0, oldPasswords: 0, missingUrls: 0, noTotp: 2, missingRecovery: 1 },
+  security: { good: 1, needsAttention: 3, duplicateCandidates: 0, weakOrReused: 1, weakPasswords: 1, commonPasswords: 0, reusedPasswords: 0, compromisedPatterns: 0, oldPasswords: 0, missingUrls: 0, noTotp: 2, missingRecovery: 1, expiredCards: 0, expiringCards: 0, twoFactorSites: 2, twoFactorLogins: [
+    { id: 'gmail', title: 'Gmail', site: 'mail.google.com' },
+    { id: 'github', title: 'GitHub', site: 'github.com' },
+  ] },
 }
 
 function upsertPreviewItem(kind: ItemKind, id: string, title: string, subtitle: string, tags: string[]): void {
@@ -732,6 +768,22 @@ export async function checkPasswordBreach(password: string): Promise<BreachCheck
   return invoke<BreachCheckResult>('check_password_breach', { password })
 }
 
+// The whole-vault scan runs in Rust. Browser preview cannot reach it.
+export async function startLoginBreachScan(): Promise<BreachScanReport> {
+  if (previewMode) throw new Error('The breach check runs in the installed Sesame app.')
+  return invoke<BreachScanReport>('start_login_breach_scan')
+}
+
+export async function getLoginBreachScanStatus(): Promise<BreachScanReport> {
+  if (previewMode) return { phase: 'idle', checked: 0, total: 0, results: [] }
+  return invoke<BreachScanReport>('get_login_breach_scan_status')
+}
+
+export async function cancelLoginBreachScan(): Promise<void> {
+  if (previewMode) return
+  await invoke('cancel_login_breach_scan')
+}
+
 // Purely local keyboard synthesis, no network. Callers give the target window focus first.
 export async function autoType(id: string): Promise<void> {
   if (previewMode) throw new Error('Auto-type is not available in the browser preview. Use the installed desktop app.')
@@ -886,6 +938,22 @@ export async function bulkAssignFolder(ids: string[], folderId?: string): Promis
     return previewSnapshot
   }
   return invoke<VaultSnapshot>('bulk_assign_folder', { ids, folderId: folderId || null })
+}
+
+export async function addItemsTag(ids: string[], tag: string): Promise<VaultSnapshot> {
+  const normalized = tag.trim()
+  if (previewMode) {
+    for (const id of ids) {
+      const entry = previewSnapshot.entries.find((saved) => saved.id === id)
+      const item = previewSnapshot.items.find((saved) => saved.id === id)
+      const card = previewCards[id]
+      if (entry) entry.tags = uniqueTags([...(entry.tags ?? []), normalized])
+      if (item) item.tags = uniqueTags([...(item.tags ?? []), normalized])
+      if (card) card.tags = uniqueTags([...(card.tags ?? []), normalized])
+    }
+    return previewSnapshot
+  }
+  return invoke<VaultSnapshot>('add_items_tag', { ids, tag: normalized })
 }
 
 export async function createFolder(name: string): Promise<VaultSnapshot> {
@@ -1365,6 +1433,16 @@ export async function resolveBrowserCardFill(approvalId: string, cardId: string 
 export async function getPendingBrowserCardFill(): Promise<BrowserCardFillRequest | null> {
   if (previewMode) return null
   return invoke<BrowserCardFillRequest | null>('get_pending_browser_card_fill')
+}
+
+export async function resolveBrowserTotpFill(approvalId: string, loginId: string | null): Promise<void> {
+  if (previewMode) return
+  await invoke('resolve_browser_totp_fill', { approvalId, loginId })
+}
+
+export async function getPendingBrowserTotpFill(): Promise<BrowserTotpFillRequest | null> {
+  if (previewMode) return null
+  return invoke<BrowserTotpFillRequest | null>('get_pending_browser_totp_fill')
 }
 
 export async function resolveBrowserSave(

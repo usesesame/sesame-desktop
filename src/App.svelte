@@ -14,6 +14,7 @@
   import { createBrowserFillController } from './lib/controllers/browser-fill-controller'
   import { createIdentityFillController } from './lib/controllers/identity-fill-controller'
   import { createCardFillController } from './lib/controllers/card-fill-controller'
+  import { createTotpFillController } from './lib/controllers/totp-fill-controller'
   import { createBrowserSaveController } from './lib/controllers/browser-save-controller'
   import { createSettingsController } from './lib/controllers/settings-controller'
   import { createBackupController } from './lib/controllers/backup-controller'
@@ -67,6 +68,7 @@
   import BrowserFillApprovalModal from './lib/ui/BrowserFillApprovalModal.svelte'
   import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
   import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
+  import BrowserTotpFillApprovalModal from './lib/ui/BrowserTotpFillApprovalModal.svelte'
   import BrowserSaveApprovalModal from './lib/ui/BrowserSaveApprovalModal.svelte'
   import PinSetupModal from './lib/ui/PinSetupModal.svelte'
   import ChangeMasterPasswordModal from './lib/ui/ChangeMasterPasswordModal.svelte'
@@ -76,7 +78,7 @@
 
   const appStores = provideAppStores(createAppStores())
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the import flow reads the store through the controller.
-  const { browserFill, browserIdentityFill, browserCardFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
+  const { browserFill, browserIdentityFill, browserCardFill, browserTotpFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
   vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 } })
 
   const feedbackController = createFeedbackController()
@@ -179,6 +181,14 @@
   })
 
   const cardFillController = createCardFillController({
+    stores: appStores,
+    feedback: feedbackController,
+    onVaultLocked: () => onNativeVaultLocked(),
+    modal: modalController,
+    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const totpFillController = createTotpFillController({
     stores: appStores,
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
@@ -291,11 +301,26 @@
   const allItems = itemController.allItems
   const recentItems = itemController.recentItems
   let focusSearchToken = 0
+  let focusResultsToken = 0
 
   // Universal search means every item, so it clears the filters first.
   function openUniversalSearch() {
     selection.patch({ activeView: 'vault', categoryFilter: null, collectionFilter: null, securityFilter: null })
     focusSearchToken += 1
+  }
+
+  function focusSearchResults() {
+    focusResultsToken += 1
+  }
+
+  function copySelectedTotp() {
+    const code = $vault.loginCard?.totpCode
+    if (code) void loginController.copy(code, '2FA code')
+  }
+
+  function openSelectedSite() {
+    const url = $vault.loginCard?.url
+    if (url) void loginController.openCurrentWebsite(url)
   }
 
   function historyItemTitle(_kind: string, itemId: string): string | null {
@@ -311,6 +336,7 @@
     browserFillController.clearSecrets()
     identityFillController.clearSecrets()
     cardFillController.clearSecrets()
+    totpFillController.clearSecrets()
     browserSaveController.clearSecrets()
     identityController.clearSecrets()
     secureNoteController.clearSecrets()
@@ -329,8 +355,9 @@
   }
 
   async function refreshActiveView() {
-    if (selection.value().activeView === 'security' && cleanupState.value().duplicateReviewOpen) {
-      await cleanupController.loadDuplicateGroups()
+    if (selection.value().activeView === 'security') {
+      if (cleanupState.value().duplicateReviewOpen) await cleanupController.loadDuplicateGroups()
+      await cleanupController.refreshBreachScan()
     }
     if (selection.value().activeView === 'settings') {
       await Promise.all([
@@ -358,6 +385,7 @@
       if (browserFill.value().request) await browserFillController.resolve(null)
       if (browserIdentityFill.value().request) await identityFillController.resolve(null)
       if (browserCardFill.value().request) await cardFillController.resolve(null)
+      if (browserTotpFill.value().request) await totpFillController.resolve(null)
       if (browserSave.value().request) await browserSaveController.resolve(false)
     },
     refreshActiveView,
@@ -427,9 +455,11 @@
       .then((stop) => { if (quickAccessListenerDisposed) stop(); else stopQuickAccessOpen = stop })
       .catch(() => void recordDiagnostic('renderer', 'quick_access_listener_failed'))
     const stopSettings = settingsController.start()
+    const stopCleanup = cleanupController.start()
     const stopBrowserFill = browserFillController.start()
     const stopIdentityFill = identityFillController.start()
     const stopCardFill = cardFillController.start()
+    const stopTotpFill = totpFillController.start()
     const stopBrowserSave = browserSaveController.start()
     void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
     void unlockController.loadStatus()
@@ -449,9 +479,11 @@
       .catch(() => void recordDiagnostic('renderer', 'idle_warning_listener_failed'))
     return () => {
       stopSettings()
+      stopCleanup()
       stopBrowserFill()
       stopIdentityFill()
       stopCardFill()
+      stopTotpFill()
       stopBrowserSave()
       idleListenersDisposed = true
       quickAccessListenerDisposed = true
@@ -488,7 +520,7 @@
 <AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} />
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
-  <main class="loading-screen" aria-live="polite">
+  <main class="loading-screen state-panel" aria-live="polite">
     <div class="loading-mark"><img class="sesame-mark large" src="/favicon.svg" alt="" width="512" height="512" /><span class="loading-spinner" aria-hidden="true"></span></div>
     <p>Opening Sesame…</p>
   </main>
@@ -539,6 +571,9 @@
     onCopyUsername={() => void loginController.copySelectedField('username')}
     onEditSelected={loginController.openEditor}
     onOpenSearch={openUniversalSearch}
+    onFocusResults={focusSearchResults}
+    onCopyTotp={copySelectedTotp}
+    onOpenSelectedSite={openSelectedSite}
   >
     {#if $selection.activeView === 'vault'}
       <VaultView
@@ -550,6 +585,7 @@
         addMenuOpen={$itemState.addMenuOpen}
         filterMenuOpen={$itemState.filterMenuOpen}
         {focusSearchToken}
+        {focusResultsToken}
         bind:passwordVisible={$loginState.passwordVisible}
         revealedPassword={$loginState.revealedPassword}
         passwordPresenceRequired={$loginState.passwordPresenceRequired}
@@ -567,6 +603,7 @@
         multiSelect={$loginState.multiSelect}
         selectedIds={$loginState.selectedIds}
         bulkFolderId={$loginState.bulkFolderId}
+        bulkTag={$loginState.bulkTag}
         onSelectItem={(id, kind) => void itemController.select(id, kind)}
         onAddItem={itemController.openNew}
         onToggleAddMenu={itemController.toggleAddMenu}
@@ -611,6 +648,8 @@
         onBulkMove={loginController.bulkMoveSelected}
         onBulkFavourite={() => void loginController.bulkFavouriteSelected()}
         onBulkDelete={loginController.bulkDeleteSelected}
+        onSetBulkTag={loginController.setBulkTag}
+        onBulkTag={() => void loginController.bulkTagSelected()}
         onCancelMultiSelect={loginController.clearMultiSelect}
       />
     {:else if $selection.activeView === 'security'}
@@ -628,6 +667,11 @@
         onDelete={cleanupController.requestDelete}
         onOpenDuplicateReview={cleanupController.openDuplicateReview}
         onShowSecurityFilter={cleanupController.showSecurityFilter}
+        onShowCards={cleanupController.showCards}
+        breachScan={$cleanupState.breachScan}
+        breachScanError={$cleanupState.breachScanError}
+        onStartBreachScan={() => void cleanupController.startBreachScan()}
+        onCancelBreachScan={() => void cleanupController.cancelBreachScan()}
       />
     {:else if $selection.activeView === 'authenticator'}
       <AuthenticatorView onOpenImport={importController.open} reloadToken={authenticatorReloadToken} />
@@ -746,6 +790,8 @@
     <BrowserIdentityFillApprovalModal request={$browserIdentityFill.request} working={$browserIdentityFill.working} onCancel={() => void identityFillController.resolve(null)} onConfirm={() => void identityFillController.resolve($browserIdentityFill.selectedId)} />
   {:else if $browserCardFill.request}
     <BrowserCardFillApprovalModal request={$browserCardFill.request} working={$browserCardFill.working} onCancel={() => void cardFillController.resolve(null)} onConfirm={() => void cardFillController.resolve($browserCardFill.selectedId)} />
+  {:else if $browserTotpFill.request}
+    <BrowserTotpFillApprovalModal request={$browserTotpFill.request} working={$browserTotpFill.working} onCancel={() => void totpFillController.resolve(null)} onConfirm={() => void totpFillController.resolve($browserTotpFill.selectedId)} />
   {:else if $browserSave.request}
     <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} />
   {/if}

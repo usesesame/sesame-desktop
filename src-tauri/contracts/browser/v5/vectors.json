@@ -1,0 +1,123 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 5,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "fill request defaults to both fields",
+      "valid": true,
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill request names only the password field",
+      "valid": true,
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-2", "origin": "https://www.example.test", "fields": "password" }
+    },
+    {
+      "name": "protocol five rejects a non-fill request",
+      "valid": false,
+      "message": { "version": 5, "type": "totp", "requestId": "totp-5-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill request rejects an unknown property",
+      "valid": false,
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-3", "origin": "https://example.test", "token": "fictional-non-secret" }
+    },
+    {
+      "name": "protocol four rejects a fill request",
+      "valid": false,
+      "message": { "version": 4, "type": "fill", "requestId": "fill-4-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill request rejects a future protocol version",
+      "valid": false,
+      "message": { "version": 6, "type": "fill", "requestId": "fill-6-1", "origin": "https://example.test" }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "exact origin fill reports the exact rule",
+      "hostValid": true,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-1", "origin": "https://example.test" },
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-1", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "fictional-example-value" }, "matchKind": "exact" }
+    },
+    {
+      "name": "www alias fill reports the wwwAlias rule",
+      "hostValid": true,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-2", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-2", "password": "fictional-example-value", "matchKind": "wwwAlias" },
+      "extensionResult": { "ok": true, "credential": { "username": "", "password": "fictional-example-value" }, "matchKind": "wwwAlias" }
+    },
+    {
+      "name": "a lookalike host answers with the stored host and no credential",
+      "hostValid": true,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-4", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-4", "reason": "lookalike", "lookalike": "apple.com" },
+      "extensionResult": { "ok": false, "code": "lookalike-domain", "lookalike": "apple.com" }
+    },
+    {
+      "name": "no saved login at the origin is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-5", "origin": "https://unrelated.test" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-5", "reason": "noMatch" },
+      "extensionResult": { "ok": false, "code": "no-match" }
+    },
+    {
+      "name": "locked vault is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-6", "origin": "https://example.test" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-6", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "vault-locked" }
+    },
+    {
+      "name": "version five fill without matchKind is rejected",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-7", "origin": "https://example.test" },
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-7", "username": "person@example.test", "password": "fictional-example-value" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "lookalike reason without the host is rejected",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-8", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-8", "reason": "lookalike" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "a no-match answer cannot carry a lookalike host",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-9", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-9", "reason": "noMatch", "lookalike": "apple.com" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "a lookalike host with a path is rejected",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-10", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-10", "reason": "lookalike", "lookalike": "apple.com/sign-in" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "a lookalike host over the display bound is rejected",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-11", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-11", "reason": "lookalike", "lookalike": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "version three cannot answer with the lookalike reason",
+      "hostValid": false,
+      "request": { "version": 3, "type": "fill", "requestId": "fill-3-9", "origin": "https://xn--pple-43d.com" },
+      "message": { "version": 3, "type": "fill-unavailable", "requestId": "fill-3-9", "reason": "lookalike", "lookalike": "apple.com" },
+      "extensionResult": { "ok": false, "code": "protocol-mismatch" }
+    },
+    {
+      "name": "response request id mismatch",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-12", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 5, "type": "fill", "requestId": "other-request", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": false, "code": "request-mismatch" }
+    }
+  ]
+}
