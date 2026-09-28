@@ -2,8 +2,8 @@
   import Icon from '../Icon.svelte'
   import DuplicateReview from './DuplicateReview.svelte'
   import ViewHeader from './ViewHeader.svelte'
-  import { issueKindLabels, issueSeverityWeight } from '../issue-kinds'
-  import type { CleanupEntry, DuplicateGroup, IssueKind, VaultSnapshot } from '../types'
+  import { issueKindLabels } from '../issue-kinds'
+  import type { BreachScanReport, CleanupEntry, DuplicateGroup, IssueKind, TwoFactorSiteLogin, VaultSnapshot } from '../types'
 
   export let duplicateReviewOpen = false
   export let duplicateReviewLoading = false
@@ -18,25 +18,59 @@
   export let onDelete: (entry: CleanupEntry) => void
   export let onOpenDuplicateReview: () => void
   export let onShowSecurityFilter: (filter: Exclude<IssueKind, 'duplicate'>) => void
+  export let onShowCards: () => void
+  export let breachScan: BreachScanReport | null = null
+  export let breachScanError = ''
+  export let onStartBreachScan: () => void
+  export let onCancelBreachScan: () => void
 
-  type Finding = { kind: IssueKind; icon: string; count: number; activeText: string; clearText: string; onClick: () => void }
+  type Finding = {
+    key: string
+    title: string
+    icon: string
+    count: number
+    activeText: string
+    clearText: string
+    weight: number
+    danger?: boolean
+    onClick?: () => void
+    logins?: TwoFactorSiteLogin[]
+  }
+
+  const DISPLAY_LIMIT = 5
 
   $: goodCount = snapshot?.security.good ?? 0
+  $: security = snapshot?.security
+
+  function loginFinding(kind: Exclude<IssueKind, 'duplicate'>, icon: string, count: number, activeText: string, clearText: string, weight: number): Finding {
+    return { key: kind, title: issueKindLabels[kind].title, icon, count, activeText, clearText, weight, onClick: () => onShowSecurityFilter(kind) }
+  }
 
   $: findings = ([
-    { kind: 'reused-password', icon: 'copy', count: snapshot?.security.reusedPasswords ?? 0, activeText: 'One leaked account could expose another', clearText: 'No reused passwords found', onClick: () => onShowSecurityFilter('reused-password') },
-    { kind: 'compromised-pattern', icon: 'shield-alert', count: snapshot?.security.compromisedPatterns ?? 0, activeText: 'Predictable sequences and breached-style patterns', clearText: 'No unsafe password patterns found', onClick: () => onShowSecurityFilter('compromised-pattern') },
-    { kind: 'weak-password', icon: 'key', count: snapshot?.security.weakPasswords ?? 0, activeText: 'Short or low-variety passwords to replace', clearText: 'No weak passwords found', onClick: () => onShowSecurityFilter('weak-password') },
-    { kind: 'common-password', icon: 'alert', count: snapshot?.security.commonPasswords ?? 0, activeText: 'Passwords attackers are likely to try first', clearText: 'No common passwords found', onClick: () => onShowSecurityFilter('common-password') },
-    { kind: 'old-password', icon: 'refresh', count: snapshot?.security.oldPasswords ?? 0, activeText: 'Not changed in over a year', clearText: 'Every password was changed in the last year', onClick: () => onShowSecurityFilter('old-password') },
-    { kind: 'totp', icon: 'shield-alert', count: snapshot?.security.noTotp ?? 0, activeText: 'Accounts without a stored code', clearText: 'Every login has 2FA saved', onClick: () => onShowSecurityFilter('totp') },
-    { kind: 'recovery', icon: 'file-key', count: snapshot?.security.missingRecovery ?? 0, activeText: 'Logins with no saved recovery option', clearText: "Every login's recovery is reviewed", onClick: () => onShowSecurityFilter('recovery') },
-    { kind: 'duplicate', icon: 'copy', count: snapshot?.security.duplicateCandidates ?? 0, activeText: 'Review and merge likely matches', clearText: 'Nothing to merge', onClick: onOpenDuplicateReview },
-    { kind: 'url', icon: 'globe', count: snapshot?.security.missingUrls ?? 0, activeText: 'Add the sign-in site to these logins', clearText: 'Every login has a website', onClick: () => onShowSecurityFilter('url') },
-  ] as Finding[]).sort((a, b) => issueSeverityWeight[a.kind] - issueSeverityWeight[b.kind])
+    { key: 'expired-cards', title: 'Expired cards', icon: 'card', count: security?.expiredCards ?? 0, activeText: 'Replace these cards before a payment fails', clearText: 'No expired cards on file', weight: 0, danger: true, onClick: onShowCards },
+    loginFinding('reused-password', 'copy', security?.reusedPasswords ?? 0, 'One leaked account could expose another', 'No reused passwords found', 1),
+    loginFinding('compromised-pattern', 'shield-alert', security?.compromisedPatterns ?? 0, 'Predictable sequences and breached-style patterns', 'No unsafe password patterns found', 2),
+    loginFinding('weak-password', 'key', security?.weakPasswords ?? 0, 'Short or low-variety passwords to replace', 'No weak passwords found', 3),
+    loginFinding('common-password', 'alert', security?.commonPasswords ?? 0, 'Passwords attackers are likely to try first', 'No common passwords found', 4),
+    loginFinding('totp', 'shield-alert', security?.noTotp ?? 0, 'Accounts without a stored code', 'Every login has 2FA saved', 5),
+    { key: 'expiring-cards', title: 'Cards expiring soon', icon: 'card', count: security?.expiringCards ?? 0, activeText: 'These cards stop working within 30 days', clearText: 'No cards expire in the next 30 days', weight: 6, onClick: onShowCards },
+    loginFinding('recovery', 'file-key', security?.missingRecovery ?? 0, 'Logins with no saved recovery option', "Every login's recovery is reviewed", 7),
+    loginFinding('old-password', 'refresh', security?.oldPasswords ?? 0, 'Not changed in over a year', 'Every password was changed in the last year', 8),
+    { key: 'duplicate', title: issueKindLabels.duplicate.title, icon: 'copy', count: security?.duplicateCandidates ?? 0, activeText: 'Review and merge likely matches', clearText: 'Nothing to merge', weight: 9, onClick: onOpenDuplicateReview },
+    loginFinding('url', 'globe', security?.missingUrls ?? 0, 'Add the sign-in site to these logins', 'Every login has a website', 10),
+    { key: 'two-factor-sites', title: 'Sites that offer 2FA', icon: 'shield', count: security?.twoFactorSites ?? 0, activeText: 'These sites support 2FA or passkeys. Sesame does not know whether it is switched on.', clearText: 'No saved site is on the bundled 2FA list', weight: 11, logins: security?.twoFactorLogins ?? [] },
+  ] as Finding[]).sort((a, b) => a.weight - b.weight)
 
   $: actionableFindings = findings.filter((finding) => finding.count > 0)
   $: clearFindings = findings.filter((finding) => finding.count === 0)
+
+  $: breachedResults = breachScan?.phase === 'finished' ? breachScan.results.filter((result) => result.verdict === 'breached') : []
+  $: unknownResults = breachScan?.phase === 'finished' ? breachScan.results.filter((result) => result.verdict === 'unknown') : []
+  $: progressPercent = breachScan?.total ? Math.round((breachScan.checked / breachScan.total) * 100) : 0
+
+  function loginTitle(id: string): string {
+    return snapshot?.entries.find((entry) => entry.id === id)?.title ?? 'Saved login'
+  }
 </script>
 
 {#if duplicateReviewOpen}
@@ -63,18 +97,68 @@
     <div slot="aside" class="view-header-aside"><strong>{goodCount}</strong><span>{goodCount === 1 ? 'account ready' : 'accounts ready'}</span></div>
   </ViewHeader>
   <section class="findings-list" aria-label="Security findings">
-    {#each actionableFindings as finding (finding.kind)}
-      <button class="finding-row" on:click={finding.onClick}><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{issueKindLabels[finding.kind].title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong><Icon name="chevron-right" size={18} /></button>
+    {#each actionableFindings as finding (finding.key)}
+      {#if finding.onClick}
+        <button class="finding-row" class:danger={finding.danger} on:click={finding.onClick}><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong><Icon name="chevron-right" size={18} /></button>
+      {:else}
+        <div class="finding-row"><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong></div>
+      {/if}
+      {#if finding.logins?.length}
+        <ul class="finding-logins" aria-label={finding.title}>
+          {#each finding.logins as login (login.id)}<li><strong>{login.title}</strong><span>{login.site}</span></li>{/each}
+          {#if finding.count > finding.logins.length}<li class="finding-logins-more">and {finding.count - finding.logins.length} more</li>{/if}
+        </ul>
+      {/if}
     {/each}
     {#if clearFindings.length}
       <details class="clear-findings">
         <summary><Icon name="chevron-right" size={15} /><span>No issues</span><span class="clear-findings-count">{clearFindings.length} {clearFindings.length === 1 ? 'category' : 'categories'} clear</span></summary>
         <ul class="clear-list">
-          {#each clearFindings as finding (finding.kind)}
-            <li class="finding-row clear"><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{issueKindLabels[finding.kind].title}</h3><p>{finding.clearText}</p></div></li>
+          {#each clearFindings as finding (finding.key)}
+            <li class="finding-row clear"><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.clearText}</p></div></li>
           {/each}
         </ul>
       </details>
+    {/if}
+  </section>
+
+  <section class="breach-check" aria-label="Breach check">
+    <div class="breach-check-head">
+      <span class="breach-check-icon" class:found={breachedResults.length > 0}><Icon name={breachedResults.length ? 'shield-alert' : 'shield'} size={17} /></span>
+      <div>
+        <h3>Breach check</h3>
+        {#if breachScan?.phase === 'running'}
+          <p aria-live="polite">Checked {breachScan.checked} of {breachScan.total} logins. Only five-character hash prefixes leave this device.</p>
+        {:else if breachedResults.length}
+          <p class="breach-check-found">{breachedResults.length} {breachedResults.length === 1 ? 'password appears' : 'passwords appear'} in known breaches. Replace these first:</p>
+        {:else if breachScan?.phase === 'finished' && !unknownResults.length}
+          <p>No saved password appears in known breaches.</p>
+        {:else if breachScan?.phase === 'cancelled'}
+          <p>The check stopped before it finished. Nothing was verified.</p>
+        {:else if breachScan?.phase !== 'finished'}
+          <p>Not checked yet. Only the first five characters of each password's SHA-1 hash leave this device.</p>
+        {/if}
+        {#if unknownResults.length}
+          <p>{unknownResults.length} {unknownResults.length === 1 ? 'password' : 'passwords'} could not be checked because the service did not answer. Sesame does not know whether {unknownResults.length === 1 ? 'it is' : 'they are'} safe.</p>
+        {/if}
+      </div>
+    </div>
+    {#if breachScanError}
+      <p class="breach-check-error" role="alert">{breachScanError}</p>
+      <button type="button" class="secondary-button" on:click={onStartBreachScan}>Try again</button>
+    {:else if breachScan?.phase === 'running'}
+      <div class="breach-check-bar" role="progressbar" aria-valuemin="0" aria-valuemax={breachScan.total} aria-valuenow={breachScan.checked}><span style={`width: ${progressPercent}%`}></span></div>
+      <button type="button" class="text-button" on:click={onCancelBreachScan}>Cancel</button>
+    {:else if breachScan?.phase === 'finished' || breachScan?.phase === 'cancelled'}
+      {#if breachedResults.length}
+        <ul class="breach-check-list">
+          {#each breachedResults.slice(0, DISPLAY_LIMIT) as result (result.id)}<li>{loginTitle(result.id)}</li>{/each}
+          {#if breachedResults.length > DISPLAY_LIMIT}<li class="finding-logins-more">and {breachedResults.length - DISPLAY_LIMIT} more</li>{/if}
+        </ul>
+      {/if}
+      <button type="button" class="secondary-button" on:click={onStartBreachScan}>Check again</button>
+    {:else}
+      <button type="button" class="secondary-button" on:click={onStartBreachScan}>Check saved passwords</button>
     {/if}
   </section>
 </section>

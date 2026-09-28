@@ -732,6 +732,25 @@ button.no-totp:hover { filter: brightness(.97); }
 .clear-findings-count { margin-left: auto; color: var(--text-faint); font-weight: var(--weight-regular); }
 .clear-list { margin: 0; padding: 0; list-style: none; }
 .clear-list .finding-row:last-child { border-bottom: 0; }
+.finding-row.danger { color: var(--danger); }
+.finding-row.danger .finding-icon { color: var(--danger); }
+.finding-logins { display: grid; gap: 2px; margin: 0; border-bottom: 1px solid var(--border-soft); padding: 0 var(--space-3) var(--space-3) 46px; list-style: none; }
+.finding-logins li { display: flex; gap: var(--space-2); color: var(--text-muted); font-size: var(--type-2); }
+.finding-logins strong { color: var(--text-2); font-weight: var(--weight-medium); }
+.finding-logins span { color: var(--text-faint); }
+.finding-logins-more { color: var(--text-faint); }
+.breach-check { display: grid; gap: var(--space-3); margin-top: var(--space-4); border-radius: var(--radius-xl); padding: var(--space-4); background: var(--surface); box-shadow: var(--shadow-raised); }
+.breach-check-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); }
+.breach-check-head h3 { margin: 0; color: var(--text); font-size: var(--type-3); font-weight: var(--weight-bold); }
+.breach-check-head p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
+.breach-check-head p.breach-check-found { color: var(--danger); font-weight: var(--weight-bold); }
+.breach-check-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: var(--radius-md); color: var(--chip-icon); background: var(--chip-bg); }
+.breach-check-icon.found { color: var(--danger); background: var(--danger-tint); }
+.breach-check-bar { height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-inset); }
+.breach-check-bar span { display: block; height: 100%; background: var(--accent); }
+.breach-check-list { display: grid; gap: 2px; margin: 0; padding-left: 18px; color: var(--text-muted); font-size: var(--type-2); }
+.breach-check-error { margin: 0; color: var(--danger); font-size: var(--type-2); }
+.breach-check > button { justify-self: start; }
 
 /* =========================================================================
    Feature: duplicate / cleanup review

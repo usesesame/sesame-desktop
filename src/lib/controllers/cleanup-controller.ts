@@ -1,15 +1,20 @@
 import type { AppStores } from '../stores/app-stores'
-import type { CleanupEntry, DuplicateGroup, IssueKind, MergeChoices, MergeComparison, SecurityFilter } from '../types'
+import type { BreachScanReport, CleanupEntry, DuplicateGroup, IssueKind, MergeChoices, MergeComparison, SecurityFilter } from '../types'
 import {
+  cancelLoginBreachScan,
   deleteLocalVault,
   deleteLogin,
   exportVaultCsv,
   getDuplicateGroups,
+  getLoginBreachScanStatus,
   getMergeComparison,
   grantPresence,
   mergeDuplicateLogins,
+  onBreachScanFinished,
+  onBreachScanProgress,
   PRESENCE_REQUIRED,
   recordDiagnostic,
+  startLoginBreachScan,
 } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
@@ -47,10 +52,26 @@ export function createCleanupController(options: CleanupControllerOptions) {
     exportPresencePassword: '',
     deleteVaultPassword: '',
     dataActionWorking: false,
+    breachScan: null as BreachScanReport | null,
+    breachScanError: '',
   })
 
   function matchesFilter(issueKinds: IssueKind[], filter: Exclude<SecurityFilter, null>) {
     return issueKinds.includes(filter)
+  }
+
+  let breachScanDisposed = false
+  let stopBreachScanProgress: (() => void) | undefined
+  let stopBreachScanFinished: (() => void) | undefined
+
+  async function refreshBreachScan() {
+    try {
+      const report = await getLoginBreachScanStatus()
+      if (!breachScanDisposed) state.patch({ breachScan: report })
+    } catch {
+      void recordDiagnostic('ui', 'handled_error')
+      void options.refreshDiagnostics()
+    }
   }
 
   let duplicateLoadGeneration = 0
@@ -234,6 +255,55 @@ export function createCleanupController(options: CleanupControllerOptions) {
         .sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: 'base' }))[0]
       if (first) await options.selectEntry(first.id)
     },
+    showCards() {
+      selection.patch({ categoryFilter: 'card', securityFilter: null, collectionFilter: null, searchQuery: '', activeView: 'vault' })
+    },
+    async startBreachScan() {
+      if (state.value().breachScan?.phase === 'running') return
+      state.patch({ breachScanError: '', breachScan: { phase: 'running', checked: 0, total: 0, results: [] } })
+      try {
+        const report = await startLoginBreachScan()
+        if (!breachScanDisposed) state.patch({ breachScan: report })
+      } catch (error) {
+        if (breachScanDisposed) return
+        state.patch({
+          breachScan: null,
+          breachScanError: error instanceof Error ? error.message : 'Sesame could not start the breach check.',
+        })
+      }
+    },
+    async cancelBreachScan() {
+      if (state.value().breachScan?.phase !== 'running') return
+      try {
+        await cancelLoginBreachScan()
+      } catch {
+        void recordDiagnostic('ui', 'handled_error')
+      }
+    },
+    async refreshBreachScan() {
+      await refreshBreachScan()
+    },
+    start() {
+      breachScanDisposed = false
+      void onBreachScanProgress((progress) => {
+        const current = state.value().breachScan
+        if (!current || current.phase !== 'running') return
+        state.patch({ breachScan: { ...current, phase: 'running', checked: progress.checked, total: progress.total } })
+      })
+        .then((stop) => { if (breachScanDisposed) stop(); else stopBreachScanProgress = stop })
+        .catch(() => void recordDiagnostic('renderer', 'breach_scan_listener_failed'))
+      void onBreachScanFinished(() => { if (!breachScanDisposed) void refreshBreachScan() })
+        .then((stop) => { if (breachScanDisposed) stop(); else stopBreachScanFinished = stop })
+        .catch(() => void recordDiagnostic('renderer', 'breach_scan_listener_failed'))
+      void refreshBreachScan()
+      return () => {
+        breachScanDisposed = true
+        stopBreachScanProgress?.()
+        stopBreachScanFinished?.()
+        stopBreachScanProgress = undefined
+        stopBreachScanFinished = undefined
+      }
+    },
     openDataControls() {
       state.patch({ readableExportConfirmed: false, exportPresenceRequired: false, exportPresencePassword: '' })
       modal.open({ kind: 'data-controls' })
@@ -295,7 +365,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
         duplicateReviewLoading: false, cleanupWorking: false, deleteCandidate: null, deleteBatch: [], mergeCandidate: null,
         mergeKeepId: '', mergeComparison: null, mergeChoices: {}, readableExportConfirmed: false,
         exportPresenceRequired: false, exportPresencePassword: '',
-        deleteVaultPassword: '', dataActionWorking: false,
+        deleteVaultPassword: '', dataActionWorking: false, breachScan: null, breachScanError: '',
       })
     },
   }

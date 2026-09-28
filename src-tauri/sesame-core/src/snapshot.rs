@@ -3,7 +3,9 @@ use totp_rs::{Algorithm as TotpAlgorithm, Builder as TotpBuilder, Secret, Totp};
 use zeroize::Zeroize;
 
 use crate::{
+    card_expiry::{card_expiry, CardExpiry},
     password_analysis::analyse_password,
+    two_factor::{site_offers_two_factor, MAX_TWO_FACTOR_LOGINS},
     types::*,
     util::{domain_from_url, initials_for, unix_timestamp},
     VaultEntry, VaultPayload,
@@ -97,6 +99,19 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
     let mut missing_urls = 0;
     let mut no_totp = 0;
     let mut missing_recovery = 0;
+    let mut expired_cards = 0;
+    let mut expiring_cards = 0;
+    let mut two_factor_sites = 0;
+    let mut two_factor_logins = Vec::new();
+
+    let today = chrono::Utc::now().date_naive();
+    for card in &payload.cards {
+        match card_expiry(&card.expiry_month, &card.expiry_year, today) {
+            CardExpiry::Expired => expired_cards += 1,
+            CardExpiry::Expiring => expiring_cards += 1,
+            CardExpiry::Current | CardExpiry::Unreadable => {}
+        }
+    }
 
     for entry in &payload.entries {
         let duplicate = duplicate_keys
@@ -146,6 +161,20 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
         if recovery_missing {
             missing_recovery += 1;
         }
+        let matched_site = std::iter::once(&entry.url)
+            .chain(entry.urls.iter())
+            .map(|url| domain_from_url(url))
+            .find(|site| site_offers_two_factor(site));
+        if let Some(site) = matched_site {
+            two_factor_sites += 1;
+            if two_factor_logins.len() < MAX_TWO_FACTOR_LOGINS {
+                two_factor_logins.push(TwoFactorSiteLogin {
+                    id: entry.id.clone(),
+                    title: entry.title.clone(),
+                    site,
+                });
+            }
+        }
     }
 
     SecuritySummary {
@@ -154,7 +183,10 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
             + weak_or_reused_count
             + missing_urls
             + no_totp
-            + missing_recovery,
+            + missing_recovery
+            + expired_cards
+            + expiring_cards
+            + two_factor_sites,
         duplicate_candidates,
         weak_or_reused: weak_or_reused_count,
         weak_passwords,
@@ -165,6 +197,10 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
         missing_urls,
         no_totp,
         missing_recovery,
+        expired_cards,
+        expiring_cards,
+        two_factor_sites,
+        two_factor_logins,
     }
 }
 

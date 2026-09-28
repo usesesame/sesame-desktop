@@ -90,6 +90,9 @@ description = "Local password analysis, deliberate breach checking, and auto-typ
 commands.allow = [
   "check_password_strength",
   "check_password_breach",
+  "start_login_breach_scan",
+  "get_login_breach_scan_status",
+  "cancel_login_breach_scan",
   "auto_type",
 ]
 

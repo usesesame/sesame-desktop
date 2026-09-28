@@ -2,6 +2,7 @@
 //! Keep this file as the public registry only; behavior lives in the domain modules.
 
 mod backups;
+mod breach_scan;
 mod cards;
 mod custom_records;
 mod documents;
@@ -35,6 +36,7 @@ mod updater;
 pub(crate) use crate::adapters::network::account_api::*;
 pub(crate) use crate::adapters::platform::autotype::*;
 pub use backups::*;
+pub use breach_scan::*;
 pub use cards::*;
 pub use custom_records::*;
 pub use documents::*;
