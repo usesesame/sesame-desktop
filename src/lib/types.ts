@@ -107,6 +107,12 @@ export type { QuickAccessValue } from './generated/QuickAccessValue'
 export type IssueKind = 'duplicate' | 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern' | 'old-password' | 'url' | 'totp' | 'recovery'
 
 export type { BreachCheckResult } from './generated/BreachCheckResult'
+export type { BreachScanPhase } from './generated/BreachScanPhase'
+export type { BreachScanProgress } from './generated/BreachScanProgress'
+export type { BreachScanReport } from './generated/BreachScanReport'
+export type { BreachVerdict } from './generated/BreachVerdict'
+export type { LoginBreachCheck } from './generated/LoginBreachCheck'
+export type { TwoFactorSiteLogin } from './generated/TwoFactorSiteLogin'
 
 export type ItemKind =
   | 'login'
@@ -219,6 +225,26 @@ export interface BrowserCardFillRequest {
 }
 
 export interface BrowserCardFillCancelled {
+  approvalId: string
+  reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
+}
+
+export interface BrowserTotpFillCandidate {
+  id: string
+  title: string
+  username: string
+}
+
+export interface BrowserTotpFillRequest {
+  approvalId: string
+  origin: string
+  hostname: string
+  candidates: BrowserTotpFillCandidate[]
+  expiresInSeconds: number
+  expiresAtUnixMs: number
+}
+
+export interface BrowserTotpFillCancelled {
   approvalId: string
   reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
 }

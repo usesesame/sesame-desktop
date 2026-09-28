@@ -81,6 +81,9 @@ pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResul
     if let Some(presence) = app.try_state::<crate::release::ReleasePresence>() {
         presence.revoke();
     }
+    if let Some(scan) = app.try_state::<crate::commands::BreachScanState>() {
+        scan.cancel();
+    }
     app.emit("vault-locked", ())
         .map_err(|_| "Sesame could not notify the interface that the vault locked.".to_string())?;
     Ok(())

@@ -27,6 +27,7 @@
   export let addMenuOpen = false
   export let filterMenuOpen = false
   export let focusSearchToken = 0
+  export let focusResultsToken = 0
   export let passwordVisible = false
   export let siteIconsEnabled = false
   export let totpRemaining = 0
@@ -35,6 +36,7 @@
   export let multiSelect = false
   export let selectedIds: string[] = []
   export let bulkFolderId = ''
+  export let bulkTag = ''
   export let recoveryActionWorking = false
   export let onSelectItem: (id: string, kind: ItemKind) => void
   export let onAddItem: (kind: ItemKind) => void
@@ -88,6 +90,8 @@
   export let onBulkMove: () => void
   export let onBulkFavourite: () => void
   export let onBulkDelete: () => void
+  export let onSetBulkTag: (tag: string) => void
+  export let onBulkTag: () => void
   export let onCancelMultiSelect: () => void
 
   const { selection, vault } = useAppStores()
@@ -291,6 +295,36 @@
     }
   }
 
+  function rowButtons(): HTMLButtonElement[] {
+    return [...(entryList?.querySelectorAll<HTMLButtonElement>('.entry-row-main') ?? [])]
+  }
+
+  function focusResult(index: number) {
+    const button = rowButtons()[index]
+    if (!button) return
+    button.focus()
+    const item = visibleItems[index]
+    if (!multiSelect && item && item.id !== $selection.activeItemId) {
+      onSelectItem(item.id, item.kind)
+      pane = 'detail'
+    }
+  }
+
+  function handleRowKeydown(event: KeyboardEvent, item: VaultItem) {
+    if (!multiSelect) keyboardContextMenu(event, item)
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return
+    event.preventDefault()
+    const buttons = rowButtons()
+    const current = buttons.indexOf(event.currentTarget as HTMLButtonElement)
+    if (current < 0) return
+    const next = event.key === 'ArrowDown'
+      ? Math.min(current + 1, buttons.length - 1)
+      : event.key === 'ArrowUp'
+        ? Math.max(current - 1, 0)
+        : event.key === 'Home' ? 0 : buttons.length - 1
+    focusResult(next)
+  }
+
   function selectRecent(item: VaultItem) {
     onSelectItem(item.id, item.kind)
     pane = 'detail'
@@ -303,6 +337,12 @@
       searchInput?.focus()
       searchInput?.select()
     })
+  }
+
+  let lastFocusResultsToken = 0
+  $: if (focusResultsToken !== lastFocusResultsToken) {
+    lastFocusResultsToken = focusResultsToken
+    void tick().then(() => focusResult(0))
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
@@ -352,7 +392,7 @@
 </header>
 
 {#if !allItems.length}
-  <section class="empty-workspace">
+  <section class="empty-workspace state-panel">
     <img class="empty-brand size-md" src="/favicon.svg" alt="" width="512" height="512" />
     <h2>Bring in your logins</h2>
     <p>Import an export from another password manager. Sesame reads it on this device.</p>
@@ -427,6 +467,18 @@
         <div class="bulk-toolbar" role="region" aria-label="Bulk item actions" transition:fly={{ y: 16, duration: 200, easing: cubicOut }}>
           <label class="bulk-select-all"><input type="checkbox" checked={allVisibleSelected} aria-label="Select all visible items" on:change={() => onSelectVisible(allVisibleSelected ? [] : visibleItems.map((item) => item.id))} /><span>{selectedIds.length} selected</span></label>
           <div class="bulk-toolbar-actions">
+            <div class="bulk-tag-control">
+              <input
+                type="text"
+                value={bulkTag}
+                maxlength="50"
+                placeholder="Add tag…"
+                aria-label="Tag to add to the selected items"
+                on:input={(event) => onSetBulkTag(event.currentTarget.value)}
+                on:keydown={(event) => { if (event.key === 'Enter' && selectedIds.length && bulkTag.trim()) { event.preventDefault(); onBulkTag() } }}
+              />
+              <button type="button" class="secondary-button" disabled={!selectedIds.length || !bulkTag.trim()} on:click={onBulkTag}>Tag</button>
+            </div>
             <button type="button" class="secondary-button" disabled={!selectedIds.length} on:click={onBulkFavourite}>{allSelectedFavourite ? 'Unfavourite' : 'Favourite'}</button>
             <button type="button" class="editor-delete" disabled={!allSelectedLogins} title={allSelectedLogins ? 'Delete the selected logins' : 'Deleting in bulk covers logins only'} on:click={onBulkDelete}>Delete</button>
           </div>
@@ -463,20 +515,20 @@
         <div class="entry-list" class:selecting={multiSelect} bind:this={entryList} role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
             <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
-              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
-              <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => !multiSelect && keyboardContextMenu(event, item)}>
+              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
+              <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => handleRowKeydown(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
                 </span>
                 <span class="entry-title"><strong>{item.title}</strong><small><span class="entry-subtitle">{item.subtitle || itemKindLabel(item.kind)}</span>{#if item.folder}<span class="entry-folder">{item.folder}</span>{/if}</small></span>
-                {#if item.securityLevel === 'needs-work'}<span class="entry-warning" title="Needs attention" aria-label="Needs attention"></span>{/if}
+                {#if item.securityLevel === 'needs-work'}<span class="entry-warning" role="img" aria-label="Needs attention"><span class="entry-warning-label" aria-hidden="true">Needs attention</span></span>{/if}
               </button>
               <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
             </div>
           {/each}
         </div>
       {:else}
-        <div class="empty-vault"><Icon name="search" size={24} /><h3>No matching items</h3><p>Try another search, category, or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show everything</button></div>
+        <div class="empty-vault state-panel"><Icon name="search" size={24} /><h3>No matching items</h3><p>Try another search, category, or collection.</p><button class="secondary-button" on:click={clearEmptyStateFilters}>Show everything</button></div>
       {/if}
     </section>
 
@@ -518,7 +570,7 @@
             onShowTag={(tag) => onShowCollection(tagFilter(tag))}
           />
         {:else}
-          <div class="select-entry" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item'}</h2><p>Its details will appear here.</p></div>
+          <div class="select-entry state-panel" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item'}</h2><p>Its details will appear here.</p></div>
         {/if}
       {:else if $vault.loginCard}
         {@const loginCard = $vault.loginCard}
@@ -616,7 +668,7 @@
           </section>
         {/if}
       {:else}
-        <div class="select-entry"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item</h2><p>Its details will appear here.</p></div>
+        <div class="select-entry state-panel"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item</h2><p>Its details will appear here.</p></div>
       {/if}
     </section>
 

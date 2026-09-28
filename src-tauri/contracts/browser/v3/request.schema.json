@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v3/request.schema.json",
+  "title": "Sesame browser request v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "type", "requestId", "origin"],
+  "properties": {
+    "version": { "const": 3 },
+    "type": { "const": "fill" },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "origin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "fields": { "enum": ["username", "password", "both"] }
+  }
+}

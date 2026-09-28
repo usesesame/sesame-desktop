@@ -16,6 +16,7 @@
     "desktop:linux:package:gate": "node tools/linux-installed-package-gate.mjs",
     "desktop:dependency:admission": "node ./tools/dependency-admission.mjs",
     "desktop:host:stage": "node tools/stage-browser-host.mjs",
+    "desktop:sites:refresh": "node tools/refresh-two-factor-sites.mjs",
     "desktop:lint:rust": "npm run desktop:host:stage && cargo fmt --manifest-path src-tauri/Cargo.toml --all --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets",
     "desktop:check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run desktop:test:unit",
     "desktop:test:unit": "vitest run",
@@ -75,12 +76,12 @@
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.12.0",
     "jsdom": "^30.1.1",
-    "svelte": "^5.57.0",
+    "svelte": "^5.57.1",
     "svelte-check": "^4.7.6",
     "svelte-eslint-parser": "^1.8.1",
     "typescript": "npm:@typescript/typescript6@~6.0.2",
     "typescript-eslint": "^8.70.0",
-    "vite": "^8.3.0",
+    "vite": "^8.3.1",
     "vitest": "^5.0.1"
   },
   "dependencies": {

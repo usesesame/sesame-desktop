@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod backup;
+pub mod card_expiry;
 pub mod crypto;
 pub mod ffi;
 pub mod history;
@@ -17,6 +18,8 @@ pub mod snapshot;
 pub mod storage;
 pub mod throttle;
 pub mod trash;
+pub mod two_factor;
+pub mod two_factor_sites;
 pub mod types;
 pub mod util;
 pub mod vault_key;
@@ -24,6 +27,8 @@ pub mod windows_hello;
 
 #[allow(unused_imports)]
 pub use backup::*;
+#[allow(unused_imports)]
+pub use card_expiry::*;
 #[allow(unused_imports)]
 pub use crypto::*;
 // `capabilities` stays in the desktop crate: it reaches out over HTTP, which a mobile build would not need.
@@ -49,6 +54,10 @@ pub use storage::*;
 pub use throttle::*;
 #[allow(unused_imports)]
 pub use trash::*;
+#[allow(unused_imports)]
+pub use two_factor::*;
+#[allow(unused_imports)]
+pub use two_factor_sites::*;
 #[allow(unused_imports)]
 pub use types::*;
 #[allow(unused_imports)]

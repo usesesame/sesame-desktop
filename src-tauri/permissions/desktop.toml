@@ -54,6 +54,7 @@ commands.allow = [
   "save_login",
   "set_login_folders",
   "bulk_assign_folder",
+  "add_items_tag",
   "create_folder",
   "rename_folder",
   "delete_folder",
@@ -89,6 +90,9 @@ description = "Local password analysis, deliberate breach checking, and auto-typ
 commands.allow = [
   "check_password_strength",
   "check_password_breach",
+  "start_login_breach_scan",
+  "get_login_breach_scan_status",
+  "cancel_login_breach_scan",
   "auto_type",
 ]
 
@@ -155,6 +159,8 @@ commands.allow = [
   "resolve_browser_identity_fill",
   "get_pending_browser_card_fill",
   "resolve_browser_card_fill",
+  "get_pending_browser_totp_fill",
+  "resolve_browser_totp_fill",
 ]
 
 [[permission]]

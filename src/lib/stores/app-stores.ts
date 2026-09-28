@@ -3,7 +3,7 @@ import { get, writable } from 'svelte/store'
 import { generatorEntropy, makePassword, strengthLabel } from '../generator'
 import { makePassphrase, passphraseEntropy } from '../passphrase'
 import { DEFAULT_SORT_MODE, type SortMode } from '../vault-collections'
-import type { BrowserCardFillRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, GeneratorOption, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
+import type { BrowserCardFillRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, BrowserTotpFillRequest, GeneratorOption, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
 import { refreshTotp } from '../vault'
 
 export interface VaultStoreState {
@@ -55,6 +55,14 @@ export interface BrowserIdentityFillStoreState {
 
 export interface BrowserCardFillStoreState {
   request: BrowserCardFillRequest | null
+  selectedId: string
+  working: boolean
+  syncWorking: boolean
+  syncFailed: boolean
+}
+
+export interface BrowserTotpFillStoreState {
+  request: BrowserTotpFillRequest | null
   selectedId: string
   working: boolean
   syncWorking: boolean
@@ -342,13 +350,14 @@ export function createAppStores() {
     browserFill: patchable<BrowserFillStoreState>({ request: null, selectedId: '', remember: false, working: false, syncWorking: false, syncFailed: false }),
     browserIdentityFill: patchable<BrowserIdentityFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserCardFill: patchable<BrowserCardFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    browserTotpFill: patchable<BrowserTotpFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserSave: patchable<BrowserSaveStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     settings: patchable<SettingsStoreState>({ theme: 'auto', siteIconsEnabled: false, autoLockMinutes: 5, clipboardClearSeconds: 30, keepInTray: true, quickAccessShortcut: 'Ctrl+Alt+S' }),
   }
 }
 
 export type AppStores = ReturnType<typeof createAppStores>
-const APP_STORES = Symbol('sesame-app-stores')
+export const APP_STORES = Symbol('sesame-app-stores')
 
 export function provideAppStores(stores: AppStores): AppStores {
   setContext(APP_STORES, stores)

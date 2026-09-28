@@ -247,6 +247,23 @@ pub fn get_pending_browser_card_fill(
     browser_fill::pending_card(state)
 }
 
+#[tauri::command]
+pub fn resolve_browser_totp_fill(
+    app: AppHandle,
+    state: State<'_, browser_fill::BrowserFillState>,
+    approval_id: String,
+    login_id: Option<String>,
+) -> VaultResult<()> {
+    browser_fill::resolve_totp(&app, state, approval_id, login_id)
+}
+
+#[tauri::command]
+pub fn get_pending_browser_totp_fill(
+    state: State<'_, browser_fill::BrowserFillState>,
+) -> Option<browser_fill::BrowserTotpRequestEvent> {
+    browser_fill::pending_totp(state)
+}
+
 #[cfg(test)]
 mod browser_update_tests {
     use super::save_login_update;

@@ -18,6 +18,9 @@
   export let onCopyUsername: () => void = () => {}
   export let onEditSelected: () => void = () => {}
   export let onOpenSearch: () => void = () => {}
+  export let onFocusResults: () => void = () => {}
+  export let onCopyTotp: () => void = () => {}
+  export let onOpenSelectedSite: () => void = () => {}
 
   const { selection, settings, vault } = useAppStores()
 
@@ -31,6 +34,11 @@
     if (chord && key === 'l') {
       event.preventDefault()
       onLock()
+      return
+    }
+    if (chord && key === 'j' && $selection.activeView === 'vault' && $vault.status.unlocked) {
+      event.preventDefault()
+      onFocusResults()
       return
     }
     if (typing) return
@@ -51,6 +59,12 @@
       event.preventDefault()
       if (event.shiftKey) onCopyUsername()
       else onCopyPassword()
+    } else if (key === 't' && $selection.activeView === 'vault' && $vault.loginCard?.totpCode) {
+      event.preventDefault()
+      onCopyTotp()
+    } else if (key === 'o' && $selection.activeView === 'vault' && $vault.loginCard?.url) {
+      event.preventDefault()
+      onOpenSelectedSite()
     } else if (key === 'e' && $selection.activeView === 'vault' && $vault.loginCard) {
       event.preventDefault()
       onEditSelected()

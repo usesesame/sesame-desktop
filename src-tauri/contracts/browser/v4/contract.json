@@ -1,0 +1,56 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v4",
+  "protocolVersion": 4,
+  "compatibility": {
+    "minimumHostProtocolVersion": 4,
+    "currentHostProtocolVersion": 4,
+    "minimumExtensionProtocolVersion": 4,
+    "currentExtensionProtocolVersion": 4
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "totpCodeDigits": 9,
+    "totpRemainingSeconds": 3600,
+    "approvalSeconds": 30
+  },
+  "requestTypes": [
+    "totp"
+  ],
+  "responseTypes": [
+    "totp",
+    "totp-unavailable",
+    "error"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch and the desktop refuses a replayed id.",
+    "origin": "The totp request carries one normalized page origin. The desktop offers only logins saved at that origin or its www alias, and every release rechecks under the vault lock after a fresh approval for that exact origin.",
+    "code": "A derived code only, never the seed. The desktop computes it after approval and zeroizes it on drop; it is never written to the pending request, diagnostics, or the clipboard.",
+    "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json"
+}
