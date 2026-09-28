@@ -66,6 +66,7 @@
   export let passwordPresenceRequired = false
   export let passwordPresenceSecret = ''
   export let passwordPresenceError = ''
+  export let passwordPresenceIntent: 'reveal' | 'copy' = 'reveal'
   export let onRevealPassword: () => Promise<void>
   export let onCopyPassword: () => void
   export let onConfirmPasswordPresence: () => void
@@ -587,9 +588,6 @@
           <div class="credential-row"><div class="credential-label"><Icon name="user" size={16} /><span>Username</span></div><code>{loginCard.username || 'No username saved'}</code><button type="button" class="credential-button" aria-label="Copy username" disabled={!loginCard.username} on:click={() => onCopy(loginCard.username, 'Username')}><Icon name="copy" size={15} /></button></div>
           {#if loginCard.email}<div class="credential-row"><div class="credential-label"><Icon name="mail" size={16} /><span>Email</span></div><code>{loginCard.email}</code><button type="button" class="credential-button" aria-label="Copy email" on:click={() => onCopy(loginCard.email, 'Email')}><Icon name="copy" size={15} /></button></div>{/if}
           <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{passwordVisible ? revealedPassword : '••••••••••••••••'}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
-          {#if passwordPresenceRequired}
-            <PasswordPresenceModal bind:presenceSecret={passwordPresenceSecret} errorMessage={passwordPresenceError} onConfirm={onConfirmPasswordPresence} onCancel={onCancelPasswordPresence} />
-          {/if}
         </section>
 
         {#if breachCheckOpen}
@@ -655,4 +653,8 @@
     </section>
 
   </div>
+{/if}
+
+{#if passwordPresenceRequired}
+  <PasswordPresenceModal intent={passwordPresenceIntent} bind:presenceSecret={passwordPresenceSecret} errorMessage={passwordPresenceError} onConfirm={onConfirmPasswordPresence} onCancel={onCancelPasswordPresence} />
 {/if}

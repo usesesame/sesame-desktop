@@ -29,6 +29,8 @@ import type { ModalController } from './modal-controller'
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
 const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
 
+export type PasswordIntent = 'reveal' | 'copy'
+
   function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
   return field === 'username' ? 'Username' : field === 'email' ? 'Email' : 'Password'
 }
@@ -56,6 +58,8 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     revealedPassword: '',
     revealedFor: '',
     passwordPresenceRequired: false,
+    passwordPresenceFor: '',
+    passwordPresenceIntent: 'reveal' as PasswordIntent,
     passwordPresenceSecret: '',
     passwordPresenceError: '',
     savingLogin: false,
@@ -108,25 +112,39 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     : null)
   const loginIds = derived(vault, ($vault) => new Set(($vault.snapshot?.entries ?? []).map((entry) => entry.id)))
 
-  async function ensureRevealed(id: string): Promise<string> {
+  async function readPassword(id: string, intent: PasswordIntent): Promise<string> {
     if (state.value().revealedFor === id && state.value().revealedPassword) {
       return state.value().revealedPassword
     }
     const generation = revealGeneration
     try {
       const secret = await revealLoginSecret(id)
-      if (generation !== revealGeneration || !vault.value().status.unlocked || selection.value().activeItemId !== id) return ''
-      state.patch({ revealedPassword: secret, revealedFor: id, passwordPresenceRequired: false })
+      if (generation !== revealGeneration || !vault.value().status.unlocked) return ''
+      state.patch({ passwordPresenceRequired: false })
       return secret
     } catch (error) {
       if (generation !== revealGeneration) return ''
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
-        state.patch({ passwordPresenceRequired: true, revealedFor: id, passwordPresenceSecret: '', passwordPresenceError: '' })
+        state.patch({ passwordPresenceRequired: true, passwordPresenceFor: id, passwordPresenceIntent: intent, passwordPresenceSecret: '', passwordPresenceError: '' })
       } else {
         feedback.setError(error)
       }
       return ''
     }
+  }
+
+  async function ensureRevealed(id: string): Promise<string> {
+    const secret = await readPassword(id, 'reveal')
+    if (!secret || selection.value().activeItemId !== id) return ''
+    state.patch({ revealedPassword: secret, revealedFor: id })
+    return secret
+  }
+
+  async function copyPassword(id: string): Promise<boolean> {
+    const secret = await readPassword(id, 'copy')
+    if (!secret) return false
+    await copy(secret, copyFieldLabel('password'), id)
+    return true
   }
 
   async function selectEntry(id: string) {
@@ -148,7 +166,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       vault.patch({ loginCard: card })
       selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
       clearPasswordHideTimer()
-      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
+      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '' })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
         if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !current) return
@@ -162,11 +180,10 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     }
   }
 
-  async function copy(value: string, label: string) {
+  async function copy(value: string, label: string, itemId = selection.value().activeItemId) {
     try {
       await copyToClipboard(value)
-      const activeId = selection.value().activeItemId
-      if (activeId && ['Username', 'Email', 'Password', '2FA code', 'Backup codes'].includes(label)) void markUsed(activeId)
+      if (itemId && ['Username', 'Email', 'Password', '2FA code', 'Backup codes'].includes(label)) void markUsed(itemId)
       const clearSeconds = settings.value().clipboardClearSeconds
       feedback.showNotice(`${label} copied`, `Clears after ${clearSeconds} seconds if the clipboard has not changed.`)
     } catch (error) {
@@ -372,8 +389,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       }
     },
     async confirmPasswordPresence() {
-      const secret = state.value().passwordPresenceSecret
-      const id = state.value().revealedFor
+      const { passwordPresenceSecret: secret, passwordPresenceFor: id, passwordPresenceIntent: intent } = state.value()
       if (!secret || !id) return
       state.patch({ passwordPresenceSecret: '' })
       try {
@@ -382,14 +398,18 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         state.patch({ passwordPresenceError: messageFor(error) })
         return
       }
+      if (intent === 'copy') {
+        if (await copyPassword(id)) state.patch({ passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceError: '' })
+        return
+      }
       const revealed = await ensureRevealed(id)
       if (revealed) {
-        state.patch({ passwordPresenceRequired: false, passwordVisible: true, passwordPresenceError: '' })
+        state.patch({ passwordPresenceRequired: false, passwordPresenceFor: '', passwordVisible: true, passwordPresenceError: '' })
         armPasswordHideTimer()
       }
     },
     cancelPasswordPresence() {
-      state.patch({ passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '' })
+      state.patch({ passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceSecret: '', passwordPresenceError: '' })
     },
     toggleBreachCheck() {
       const card = vault.value().loginCard
@@ -517,16 +537,25 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     async copySelectedField(field: 'username' | 'email' | 'password') {
       const card = vault.value().loginCard
       if (!card) return
-      const value = field === 'password' ? await ensureRevealed(card.id) : card[field]
+      if (field === 'password' && card.hasPassword) {
+        await copyPassword(card.id)
+        return
+      }
+      const value = field === 'password' ? '' : card[field]
       if (value) await copy(value, copyFieldLabel(field))
-      else if (!state.value().passwordPresenceRequired && (field !== 'password' || !card.hasPassword)) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
+      else feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
     async copyContextField(id: string, field: 'username' | 'email' | 'password') {
       const card = await contextCard(id)
       state.patch({ entryMenu: null })
-      const value = field === 'password' ? await ensureRevealed(id) : card?.[field]
-      if (value) await copy(value, copyFieldLabel(field))
-      else if (!state.value().passwordPresenceRequired && card) feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
+      if (!card) return
+      if (field === 'password' && card.hasPassword) {
+        await copyPassword(id)
+        return
+      }
+      const value = field === 'password' ? '' : card[field]
+      if (value) await copy(value, copyFieldLabel(field), id)
+      else feedback.showNotice('Nothing to copy', `No ${field} is saved for this login.`)
     },
     async editContext(id: string) {
       state.patch({ entryMenu: null })
@@ -658,7 +687,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       // A countdown in flight must not fire after the lock it was racing against.
       stopAutoTypeCountdown()
       state.set({
-        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceSecret: '', passwordPresenceError: '',
+        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
         savingLogin: false, editorTitle: 'Add a login',
         editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,

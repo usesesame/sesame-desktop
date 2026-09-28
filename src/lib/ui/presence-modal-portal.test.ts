@@ -35,3 +35,11 @@ test('unmounting removes the portalled shell from the document', async () => {
   await Promise.resolve()
   expect(document.querySelector('[data-modal-shell]')).toBeNull()
 })
+
+test('a copy check names the copy and never offers to show the password', async () => {
+  render(PasswordPresenceModal, { intent: 'copy', presenceSecret: 'x', errorMessage: '', onCancel: vi.fn(), onConfirm: vi.fn() })
+  await Promise.resolve()
+  expect(screen.getByRole('heading', { name: 'Copy this password' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Copy password' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show password' })).toBeNull()
+})
