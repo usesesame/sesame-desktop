@@ -10,6 +10,7 @@ const canonical = join(root, 'src-tauri', 'contracts', 'browser', 'v1')
 const cardCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v2')
 const fillMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v3')
 const totpCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v4')
+const lookalikeCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v5')
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -139,6 +140,106 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
   assert.match(rust, /pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;/)
   assert.match(rust, /fn valid_match_kind\(value: &str\) -> bool/)
   assert.match(rust, /"exact" \| "wwwAlias"/)
+})
+
+test('lookalike protocol v5 warns with a bounded stored host and is regression-vectored', () => {
+  const contract = json(join(lookalikeCanonical, 'contract.json'))
+  const requestSchema = json(join(lookalikeCanonical, 'request.schema.json'))
+  const responseSchema = json(join(lookalikeCanonical, 'response.schema.json'))
+  const vectors = json(join(lookalikeCanonical, 'vectors.json'))
+  const v3RequestSchema = json(join(fillMatchCanonical, 'request.schema.json'))
+  const v3ResponseSchema = json(join(fillMatchCanonical, 'response.schema.json'))
+  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+
+  assert.equal(contract.tag, 'browser-protocol-v5')
+  assert.equal(contract.protocolVersion, 5)
+  assert.deepEqual(contract.requestTypes, ['fill'])
+  assert.deepEqual(contract.matchKinds, ['exact', 'wwwAlias'])
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 5)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 5)
+  assert.equal(contract.compatibility.minimumExtensionProtocolVersion, 5)
+  assert.equal(contract.compatibility.currentExtensionProtocolVersion, 5)
+  assert.equal(requestSchema.properties.version.const, 5)
+  assert.equal(requestSchema.properties.type.const, 'fill')
+  assert.equal(requestSchema.additionalProperties, false)
+  assert.deepEqual(requestSchema.required, ['version', 'type', 'requestId', 'origin'])
+  assert.equal(requestSchema.properties.origin.maxLength, contract.limits.originBytes)
+  assert.equal(v3RequestSchema.properties.version.const, 3)
+
+  assert.deepEqual(
+    responseSchema.oneOf.map((branch) => branch.$ref),
+    [
+      '#/$defs/fillBoth',
+      '#/$defs/fillUsername',
+      '#/$defs/fillPassword',
+      '#/$defs/fillUnavailable',
+      '#/$defs/lookalikeUnavailable',
+      '#/$defs/error',
+    ],
+  )
+  for (const name of ['fillBoth', 'fillUsername', 'fillPassword']) {
+    assert.ok(responseSchema.$defs[name].required.includes('matchKind'), `${name} requires matchKind`)
+    assert.equal(responseSchema.$defs[name].properties.version.const, 5)
+  }
+  assert.deepEqual(responseSchema.$defs.lookalikeUnavailable.required, [
+    'version',
+    'type',
+    'requestId',
+    'reason',
+    'lookalike',
+  ])
+  assert.equal(responseSchema.$defs.lookalikeUnavailable.properties.reason.const, 'lookalike')
+  assert.equal(responseSchema.$defs.lookalikeUnavailable.additionalProperties, false)
+  assert.equal(responseSchema.$defs.lookalikeHost.minLength, 1)
+  assert.equal(responseSchema.$defs.lookalikeHost.maxLength, contract.limits.lookalikeHostChars)
+  assert.equal(responseSchema.$defs.fillUnavailable.properties.reason.$ref, '#/$defs/reason')
+  assert.equal(responseSchema.$defs.reason.enum.includes('lookalike'), false)
+  assert.deepEqual(
+    [...responseSchema.$defs.reason.enum, 'lookalike'].sort(),
+    contract.unavailableReasons.slice().sort(),
+  )
+  assert.equal(v3ResponseSchema.$defs.reason.enum.includes('lookalike'), false)
+
+  assert.equal(vectors.protocolVersion, contract.protocolVersion)
+  assert.equal(vectors.fictionalDataOnly, true)
+  assert.ok(
+    vectors.requestCases.some((entry) => entry.valid === false && entry.message.version === 4),
+    'no vector refuses a fill request on protocol four',
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) =>
+        entry.hostValid === true &&
+        entry.message.reason === 'lookalike' &&
+        entry.message.lookalike === 'apple.com',
+    ),
+    'no accepted vector reports the stored lookalike host',
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) =>
+        entry.hostValid === false &&
+        entry.message.reason === 'lookalike' &&
+        entry.message.lookalike === undefined,
+    ),
+    'no vector refuses a lookalike reason without the host',
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) =>
+        entry.hostValid === false &&
+        entry.message.lookalike !== undefined &&
+        entry.message.lookalike.length > contract.limits.lookalikeHostChars,
+    ),
+    'no vector refuses an over-bound lookalike host',
+  )
+  assert.ok(
+    vectors.responseCases.some((entry) => entry.hostValid === false && entry.message.version === 3),
+    'no vector refuses the lookalike reason on protocol three',
+  )
+  assert.match(rust, /pub const LOOKALIKE_PROTOCOL_VERSION: u8 = 5;/)
+  assert.match(rust, /fn valid_lookalike_host\(value: &str\) -> bool/)
+  assert.match(rust, /"multipleMatches"\s*\|\s*"lookalike"/)
 })
 
 test('totp protocol v4 derives a code only after an origin approval', () => {

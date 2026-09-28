@@ -17,9 +17,9 @@ use zeroize::Zeroize;
 use crate::{
     browser_pipe::PipePeer,
     browser_protocol::{
-        parse_card_fields, parse_identity_fields, BrowserRequest, BrowserResponse, CardFillFields,
-        IdentityFillFields, FILL_MATCH_PROTOCOL_VERSION, MAX_CREDENTIAL_FIELD_BYTES,
-        MAX_NATIVE_MESSAGE_BYTES,
+        fill_carries_match_kind, parse_card_fields, parse_identity_fields, BrowserRequest,
+        BrowserResponse, CardFillFields, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION,
+        MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
     vault::snapshot::{current_totp, totp_from_value},
@@ -587,7 +587,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         return BrowserResponse::unavailable(request, "staleRequest");
     };
     let vault = app.state::<VaultState>();
-    let (epoch, candidates) = {
+    let (epoch, candidates, lookalike) = {
         let session = match vault.session.lock() {
             Ok(session) => session,
             Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
@@ -601,9 +601,17 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
             Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
         };
         let candidates = matching_entries(&payload.entries, &origin);
-        (vault.session_epoch(), candidates)
+        let lookalike = if candidates.is_empty() && request.version == LOOKALIKE_PROTOCOL_VERSION {
+            lookalike_host(&payload.entries, &origin)
+        } else {
+            None
+        };
+        (vault.session_epoch(), candidates, lookalike)
     };
     if candidates.is_empty() {
+        if let Some(lookalike) = lookalike {
+            return BrowserResponse::lookalike_unavailable(request, lookalike);
+        }
         diagnostics::record_browser_host_registration(app, "fill_no_match");
         return BrowserResponse::unavailable(request, "noMatch");
     }
@@ -722,7 +730,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "vaultChanged");
         return BrowserResponse::unavailable(request, "staleRequest");
     }
-    if request.version == FILL_MATCH_PROTOCOL_VERSION {
+    if fill_carries_match_kind(request.version) {
         BrowserResponse::fill_with_match_kind(
             request,
             identity_value(entry),
@@ -1455,6 +1463,7 @@ mod grant_tests {
 #[cfg(test)]
 mod origin_attacks {
     use super::*;
+    use crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION;
 
     const CANARY_PASSWORD: &str = "fictional-secret-canary";
 

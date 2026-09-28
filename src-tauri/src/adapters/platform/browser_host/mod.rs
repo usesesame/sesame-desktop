@@ -835,6 +835,67 @@ mod boundary_tests {
         assert!(response.validate_for(&request));
     }
 
+    fn v5_fill_request() -> BrowserRequest {
+        BrowserRequest {
+            version: crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "fill".to_string(),
+            request_id: "fill-5-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn a_version_five_fill_survives_the_host_relay() {
+        let request = v5_fill_request();
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+        let mut output = Vec::new();
+        let response_count = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
+            BrowserResponse::lookalike_unavailable(request, "apple.com".to_string())
+        })
+        .expect("the relay serves the request");
+
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION
+        );
+        assert_eq!(response.message_type, "fill-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("lookalike"));
+        assert_eq!(response.lookalike.as_deref(), Some("apple.com"));
+    }
+
+    #[test]
+    fn the_desktop_unavailable_fallback_binds_version_five() {
+        let request = v5_fill_request();
+        assert!(request.validate());
+        let response = unavailable_without_desktop(&request);
+        assert_eq!(response.message_type, "fill-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("desktopUnavailable"));
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION
+        );
+        assert!(response.validate_for(&request));
+    }
+
+    #[test]
+    fn a_version_five_request_that_is_not_fill_is_refused() {
+        for message_type in ["totp", "identity", "card", "save", "capabilities"] {
+            let mut request = v5_fill_request();
+            request.message_type = message_type.to_string();
+            assert!(
+                !request.validate(),
+                "version five accepted a {message_type} request"
+            );
+        }
+    }
+
     #[test]
     fn a_totp_request_on_an_older_protocol_is_refused() {
         for version in [

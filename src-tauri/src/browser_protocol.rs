@@ -5,8 +5,10 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const CARD_PROTOCOL_VERSION: u8 = 2;
 pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
 pub const TOTP_PROTOCOL_VERSION: u8 = 4;
+pub const LOOKALIKE_PROTOCOL_VERSION: u8 = 5;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
+pub const MAX_LOOKALIKE_HOST_CHARS: usize = 128;
 pub const MAX_TOTP_CODE_DIGITS: usize = 9;
 pub const MAX_TOTP_REMAINING_SECONDS: u64 = 3600;
 
@@ -61,6 +63,14 @@ pub fn supported_protocol_version(version: u8) -> bool {
             | CARD_PROTOCOL_VERSION
             | FILL_MATCH_PROTOCOL_VERSION
             | TOTP_PROTOCOL_VERSION
+            | LOOKALIKE_PROTOCOL_VERSION
+    )
+}
+
+pub fn fill_carries_match_kind(version: u8) -> bool {
+    matches!(
+        version,
+        FILL_MATCH_PROTOCOL_VERSION | LOOKALIKE_PROTOCOL_VERSION
     )
 }
 
@@ -104,6 +114,7 @@ impl BrowserRequest {
             || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
             || (self.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type != "fill")
             || (self.version == TOTP_PROTOCOL_VERSION && self.message_type != "totp")
+            || (self.version == LOOKALIKE_PROTOCOL_VERSION && self.message_type != "fill")
         {
             return false;
         }
@@ -315,6 +326,8 @@ pub struct BrowserResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookalike: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<IdentityFillFields>,
@@ -342,6 +355,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -365,6 +379,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -389,6 +404,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -405,7 +421,7 @@ impl BrowserResponse {
     ) -> Self {
         let fields = request.fields.as_deref().unwrap_or("both");
         Self {
-            version: FILL_MATCH_PROTOCOL_VERSION,
+            version: request.version,
             message_type: "fill".into(),
             request_id: request.request_id.clone(),
             installed: None,
@@ -418,6 +434,7 @@ impl BrowserResponse {
             match_kind: Some(match_kind.into()),
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -441,6 +458,31 @@ impl BrowserResponse {
             match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: None,
+            remaining_seconds: None,
+        }
+    }
+
+    pub fn lookalike_unavailable(request: &BrowserRequest, lookalike: String) -> Self {
+        Self {
+            version: LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "fill-unavailable".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: Some("lookalike".into()),
+            message: None,
+            lookalike: Some(lookalike),
             saved: None,
             identity: None,
             card: None,
@@ -468,6 +510,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: Some(message.into()),
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -495,6 +538,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: Some(true),
             identity: None,
             card: None,
@@ -518,6 +562,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -542,6 +587,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: Some(fields),
             card: None,
@@ -565,6 +611,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -588,6 +635,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: Some(fields),
@@ -611,6 +659,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -634,6 +683,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: None,
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -657,6 +707,7 @@ impl BrowserResponse {
             match_kind: None,
             reason: Some(reason.into()),
             message: None,
+            lookalike: None,
             saved: None,
             identity: None,
             card: None,
@@ -688,9 +739,17 @@ impl BrowserResponse {
         if self.message_type != "totp" && !no_code {
             return false;
         }
-        let match_kind_allowed =
-            request.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type == "fill";
+        let match_kind_allowed = fill_carries_match_kind(request.version)
+            && request.message_type == "fill"
+            && self.message_type == "fill";
         if self.match_kind.is_some() && !match_kind_allowed {
+            return false;
+        }
+        let lookalike_allowed = request.version == LOOKALIKE_PROTOCOL_VERSION
+            && request.message_type == "fill"
+            && self.message_type == "fill-unavailable"
+            && self.reason.as_deref() == Some("lookalike");
+        if self.lookalike.is_some() && !lookalike_allowed {
             return false;
         }
         let allowed = match (request.message_type.as_str(), self.message_type.as_str()) {
@@ -777,7 +836,7 @@ impl BrowserResponse {
                     }
                     _ => false,
                 };
-                let match_kind_valid = if request.version == FILL_MATCH_PROTOCOL_VERSION {
+                let match_kind_valid = if fill_carries_match_kind(request.version) {
                     self.match_kind.as_deref().is_some_and(valid_match_kind)
                 } else {
                     self.match_kind.is_none()
@@ -792,13 +851,24 @@ impl BrowserResponse {
                     && no_identity
             }
             ("fill", "fill-unavailable") => {
+                let reason_valid = self.reason.as_deref().is_some_and(|reason| {
+                    valid_reason(reason)
+                        && (reason != "lookalike" || request.version == LOOKALIKE_PROTOCOL_VERSION)
+                });
+                let lookalike_valid = match self.reason.as_deref() {
+                    Some("lookalike") => {
+                        self.lookalike.as_deref().is_some_and(valid_lookalike_host)
+                    }
+                    _ => self.lookalike.is_none(),
+                };
                 no_capability
                     && no_activation
                     && no_credential
                     && no_saved
                     && no_identity
                     && self.message.is_none()
-                    && self.reason.as_deref().is_some_and(valid_reason)
+                    && reason_valid
+                    && lookalike_valid
             }
             ("card", "card") => {
                 let requested = request.fields.as_deref().and_then(parse_card_fields);
@@ -882,6 +952,7 @@ impl Drop for BrowserResponse {
         self.match_kind.zeroize();
         self.reason.zeroize();
         self.message.zeroize();
+        self.lookalike.zeroize();
         self.identity.zeroize();
         self.card.zeroize();
         self.code.zeroize();
@@ -907,7 +978,15 @@ fn valid_reason(value: &str) -> bool {
             | "staleRequest"
             | "invalidSelection"
             | "multipleMatches"
+            | "lookalike"
     )
+}
+
+fn valid_lookalike_host(value: &str) -> bool {
+    (1..=MAX_LOOKALIKE_HOST_CHARS).contains(&value.chars().count())
+        && !value.chars().any(char::is_control)
+        && !value.split('.').any(str::is_empty)
+        && matches!(url::Host::parse(value), Ok(url::Host::Domain(domain)) if domain == value)
 }
 
 fn valid_match_kind(value: &str) -> bool {
@@ -979,7 +1058,7 @@ mod tests {
         card.fields = Some("number".to_string());
         assert!(!card.validate());
 
-        let future = fill_request(FILL_MATCH_PROTOCOL_VERSION + 1);
+        let future = fill_request(LOOKALIKE_PROTOCOL_VERSION + 1);
         assert!(!future.validate());
     }
 
@@ -1053,6 +1132,179 @@ mod tests {
         );
         assert!(!v3_response.validate_for(&v1_request));
         assert!(!v1_response.validate_for(&v3_request));
+    }
+
+    fn lookalike_request() -> BrowserRequest {
+        BrowserRequest {
+            version: LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "fill".to_string(),
+            request_id: "fill-5-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn lookalike_requests_are_fill_only_on_protocol_version_five() {
+        assert!(lookalike_request().validate());
+
+        let mut capability = lookalike_request();
+        capability.message_type = "capabilities".to_string();
+        capability.origin = None;
+        assert!(!capability.validate());
+
+        let mut totp = lookalike_request();
+        totp.message_type = "totp".to_string();
+        assert!(!totp.validate());
+
+        let mut with_save_payload = lookalike_request();
+        with_save_payload.password = Some("fictional-example-value".to_string());
+        assert!(!with_save_payload.validate());
+
+        assert!(!fill_request(LOOKALIKE_PROTOCOL_VERSION + 1).validate());
+    }
+
+    #[test]
+    fn a_version_five_fill_response_carries_the_rule_and_no_lookalike_field() {
+        let request = lookalike_request();
+        let fill = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "wwwAlias",
+        );
+        assert_eq!(fill.version, LOOKALIKE_PROTOCOL_VERSION);
+        assert_eq!(fill.match_kind.as_deref(), Some("wwwAlias"));
+        assert!(fill.lookalike.is_none());
+        assert!(fill.validate_for(&request));
+
+        let missing_rule = BrowserResponse::fill_for(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert!(!missing_rule.validate_for(&request));
+
+        let mut with_lookalike = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        with_lookalike.lookalike = Some("apple.com".to_string());
+        assert!(!with_lookalike.validate_for(&request));
+    }
+
+    #[test]
+    fn only_version_five_carries_the_lookalike_reason_and_field() {
+        let request = lookalike_request();
+        let response = BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        assert_eq!(response.version, LOOKALIKE_PROTOCOL_VERSION);
+        assert_eq!(response.message_type, "fill-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("lookalike"));
+        assert_eq!(response.lookalike.as_deref(), Some("apple.com"));
+        assert!(response.username.is_none() && response.password.is_none());
+        assert!(response.validate_for(&request));
+        let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+            .expect("utf8");
+        assert!(wire.contains("\"lookalike\":\"apple.com\""));
+        assert!(!wire.contains("password"));
+
+        let mut without_host = BrowserResponse::unavailable(&request, "lookalike");
+        assert!(!without_host.validate_for(&request));
+        without_host.lookalike = Some(String::new());
+        assert!(!without_host.validate_for(&request));
+
+        let mut unrelated_with_host = BrowserResponse::unavailable(&request, "noMatch");
+        unrelated_with_host.lookalike = Some("apple.com".to_string());
+        assert!(!unrelated_with_host.validate_for(&request));
+
+        let mut reason_swapped =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        reason_swapped.reason = Some("noMatch".to_string());
+        assert!(!reason_swapped.validate_for(&request));
+
+        let mut reason_opened =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        reason_opened.reason = Some("lookalikeDomain".to_string());
+        assert!(!reason_opened.validate_for(&request));
+
+        let mut with_match_kind =
+            BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        with_match_kind.match_kind = Some("exact".to_string());
+        assert!(!with_match_kind.validate_for(&request));
+
+        let mut error = BrowserResponse::error_with_version(
+            LOOKALIKE_PROTOCOL_VERSION,
+            &request.request_id,
+            "Browser response unavailable.",
+        );
+        error.lookalike = Some("apple.com".to_string());
+        assert!(!error.validate_for(&request));
+
+        for version in [PROTOCOL_VERSION, FILL_MATCH_PROTOCOL_VERSION] {
+            let mut older = fill_request(version);
+            older.message_type = "fill".to_string();
+            assert!(older.validate());
+            assert!(!BrowserResponse::unavailable(&older, "lookalike").validate_for(&older));
+            assert!(
+                !BrowserResponse::lookalike_unavailable(&older, "apple.com".to_string())
+                    .validate_for(&older)
+            );
+        }
+
+        assert!(
+            !BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string())
+                .validate_for(&fill_request(LOOKALIKE_PROTOCOL_VERSION + 1))
+        );
+    }
+
+    #[test]
+    fn a_lookalike_host_is_a_bounded_normalized_domain() {
+        let request = lookalike_request();
+        let response = |host: &str| {
+            BrowserResponse::lookalike_unavailable(&request, host.to_string())
+                .validate_for(&request)
+        };
+
+        assert!(response("apple.com"));
+        assert!(response(&"a".repeat(MAX_LOOKALIKE_HOST_CHARS)));
+        assert!(!response(&"a".repeat(MAX_LOOKALIKE_HOST_CHARS + 1)));
+        assert!(!response(""));
+        assert!(!response("apple.com/sign-in"));
+        assert!(!response("apple.com?next=/vault"));
+        assert!(!response("casey:fictional@apple.com"));
+        assert!(!response("apple.com."));
+        assert!(!response("127.0.0.1"));
+        assert!(!response("APPLE.COM"));
+        assert!(!response("apple com"));
+        assert!(!response("apple\u{7f}.com"));
+        assert!(!response("[::1]"));
+    }
+
+    #[test]
+    fn the_lookalike_reason_answers_only_a_fill_request() {
+        let request = lookalike_request();
+        let card = BrowserRequest {
+            version: CARD_PROTOCOL_VERSION,
+            message_type: "card".to_string(),
+            request_id: request.request_id.clone(),
+            origin: Some("https://example.test".to_string()),
+            fields: Some("number".to_string()),
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        };
+        assert!(card.validate());
+        assert!(
+            !BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string())
+                .validate_for(&card)
+        );
     }
 
     #[test]
