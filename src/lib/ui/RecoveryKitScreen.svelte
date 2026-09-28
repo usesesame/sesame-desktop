@@ -289,20 +289,6 @@
     font-size: var(--type-2);
     color: var(--text-muted);
   }
-  .primary-button {
-    padding: 12px 18px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: var(--accent);
-    color: var(--on-accent);
-    font-size: var(--type-2);
-    font-weight: var(--weight-medium);
-    cursor: pointer;
-  }
-  .primary-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
   .full { width: 100%; }
   .tiny-note {
     margin: 12px 0 0;

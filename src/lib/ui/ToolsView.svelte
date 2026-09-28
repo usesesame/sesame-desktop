@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { useAppStores } from '../stores/app-stores'
@@ -63,7 +64,7 @@
     </section>
   {/if}
 
-  <div class="settings-tabs" role="tablist" aria-label="Tools">
+  <div class="settings-tabs" role="tablist" aria-label="Tools" use:slidingSelection>
     {#each tabs as item, index (item.id)}
       <button
         bind:this={tabButtons[index]}

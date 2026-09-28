@@ -30,6 +30,17 @@ const REQUIRED_TOKENS = [
   'surface',
   'border',
   'text',
+  'control-h-sm',
+  'control-h-md',
+  'control-h-lg',
+  'control-radius',
+  'control-press',
+  'focus-outline',
+  'button-shadow',
+  'button-secondary-border',
+  'check-bg',
+  'chip-radius',
+  'card-radius',
 ]
 
 function sourceFiles(dir) {

@@ -84,9 +84,12 @@
   --border-input: #878e85;
 
   /* ---- Fields ----------------------------------------------------------- */
-  --field-bg: var(--surface-inset);
-  --field-border: var(--border-input);
-  --field-border-hover: color-mix(in srgb, var(--text-2) 25%, var(--field-border));
+  --field-bg: color-mix(in srgb, var(--text) 6%, var(--surface));
+  --field-bg-hover: color-mix(in srgb, var(--text) 9%, var(--surface));
+  --control-raised-bg: var(--surface);
+  --popover-bg: var(--surface);
+  --field-border: transparent;
+  --field-border-hover: transparent;
   --field-ring: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 28%, transparent);
   --field-ring-danger: 0 0 0 3px color-mix(in srgb, var(--danger) 26%, transparent);
 
@@ -153,6 +156,31 @@
   --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .8);
   --control-active-lift: 0 1px 3px rgba(45, 55, 45, .12);
   --button-edge: rgba(255, 255, 255, .14);
+
+  /* ---- Controls: one size, shape, and state system shared by every surface */
+  --control-h-sm: 2rem;
+  --control-h-md: 2.5rem;
+  --control-h-lg: 3rem;
+  --control-px-sm: 0.75rem;
+  --control-px-md: 1rem;
+  --control-px-lg: 1.375rem;
+  --control-radius: var(--radius-md);
+  --control-gap: 0.5rem;
+  --control-weight: var(--weight-medium);
+  --control-press: scale(.97);
+  --control-disabled: .5;
+  --control-transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, color .16s ease, transform .1s ease;
+  --focus-outline: 2px solid var(--focus-ring);
+  --focus-offset: 2px;
+  --button-shadow: 0 1px 2px rgba(35, 48, 38, .16);
+  --button-shadow-pressed: none;
+  --button-secondary-bg: color-mix(in srgb, var(--text) 7%, var(--surface));
+  --button-secondary-hover-bg: color-mix(in srgb, var(--text) 11%, var(--surface));
+  --button-secondary-border: transparent;
+  --button-secondary-shadow: none;
+  --check-bg: var(--accent);
+  --chip-radius: var(--radius-pill);
+  --card-radius: var(--radius-lg);
 
   /* ---- Effects */
   --focus-ring: #27613a;
@@ -272,6 +300,13 @@
     --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .09);
     --control-active-lift: 0 1px 3px rgba(0, 0, 0, .25);
   --button-edge: rgba(255, 255, 255, .08);
+  --button-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+  --button-secondary-bg: color-mix(in srgb, var(--text) 9%, var(--surface));
+  --button-secondary-hover-bg: color-mix(in srgb, var(--text) 14%, var(--surface));
+  --field-bg: color-mix(in srgb, var(--text) 8%, var(--surface));
+  --field-bg-hover: color-mix(in srgb, var(--text) 12%, var(--surface));
+  --control-raised-bg: color-mix(in srgb, var(--text) 15%, var(--surface));
+  --popover-bg: color-mix(in srgb, var(--text) 9%, var(--surface));
 
     --edge-highlight: rgba(255, 255, 255, .05);
     --scrollbar-thumb: rgba(200, 214, 196, .18);
@@ -365,6 +400,13 @@
   --control-active-edge: inset 0 1px 0 rgba(255, 255, 255, .09);
   --control-active-lift: 0 1px 3px rgba(0, 0, 0, .25);
   --button-edge: rgba(255, 255, 255, .08);
+  --button-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+  --button-secondary-bg: color-mix(in srgb, var(--text) 9%, var(--surface));
+  --button-secondary-hover-bg: color-mix(in srgb, var(--text) 14%, var(--surface));
+  --field-bg: color-mix(in srgb, var(--text) 8%, var(--surface));
+  --field-bg-hover: color-mix(in srgb, var(--text) 12%, var(--surface));
+  --control-raised-bg: color-mix(in srgb, var(--text) 15%, var(--surface));
+  --popover-bg: color-mix(in srgb, var(--text) 9%, var(--surface));
 
   --edge-highlight: rgba(255, 255, 255, .05);
   --scrollbar-thumb: rgba(200, 214, 196, .18);

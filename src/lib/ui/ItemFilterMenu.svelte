@@ -91,6 +91,7 @@
 
   {#if open}
     <div id="item-filter-options" class="filter-options" role="menu" aria-label="Filter items">
+      <div class="filter-options-scroll" role="none">
       <p class="filter-group-label">Types</p>
       <button type="button" role="menuitemradio" aria-checked={categoryFilter === null} tabindex="-1" on:click={() => choose(() => onSetCategory(null))} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
         <Icon name="vault" size={14} /><span>All items</span><small>{items.length}</small>
@@ -129,6 +130,7 @@
         {/each}
       {/if}
 
+      </div>
       <div class="filter-menu-footer">
         <button type="button" role="menuitem" tabindex="-1" on:click={() => choose(onOrganizeFolders)} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
           <Icon name="settings" size={14} /><span>Organize folders</span>

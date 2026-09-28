@@ -81,24 +81,46 @@
   </div>
 </div>
 
-{#if detail.fields.length}
+{#if detail.fields.some((field) => !field.multiline)}
   <section class="credentials-panel" aria-label={`${itemKindLabel(kind)} details`}>
     {#each detail.fields as field, index (index)}
-      <div class="credential-row" class:credential-row-multiline={field.multiline}>
+      {#if !field.multiline}
+      <div class="credential-row">
         <div class="credential-label"><Icon name={field.icon} size={16} /><span>{field.label}</span></div>
         {#if field.secret && !revealed[index]}
           <code class="concealed">••••••••••••••••</code>
         {:else}
-          <code class:credential-block={field.multiline}>{field.value}</code>
+          <code>{field.value}</code>
         {/if}
         {#if field.secret}
           <button type="button" class="credential-button" aria-label={revealed[index] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[index]} on:click={() => toggleReveal(index)}><Icon name={revealed[index] ? 'eye-off' : 'eye'} size={16} /></button>
         {/if}
         <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
       </div>
+      {/if}
     {/each}
   </section>
 {/if}
+{#each detail.fields as field, index (index)}
+  {#if field.multiline}
+    <section class="details-section multiline-field" aria-label={field.label}>
+      <div class="section-heading">
+        <h3>{field.label}</h3>
+        <div class="multiline-field-actions">
+          {#if field.secret}
+            <button type="button" class="credential-button" aria-label={revealed[index] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[index]} on:click={() => toggleReveal(index)}><Icon name={revealed[index] ? 'eye-off' : 'eye'} size={16} /></button>
+          {/if}
+          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
+        </div>
+      </div>
+      {#if field.secret && !revealed[index]}
+        <p class="multiline-value concealed">••••••••••••••••</p>
+      {:else}
+        <p class="multiline-value" class:mono={kind !== 'secure_note'}>{field.value}</p>
+      {/if}
+    </section>
+  {/if}
+{/each}
 
 {#if detail.attachments.length}
   <section class="details-section">
