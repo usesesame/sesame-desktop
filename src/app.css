@@ -406,6 +406,7 @@ button.no-totp, .credential-button, .more-button {
 
 .entry-list-panel {
   position: relative;
+  container-type: inline-size;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -519,7 +520,7 @@ button.no-totp, .credential-button, .more-button {
 .bulk-destination .sort-control { flex: 1; min-width: 0; }
 .bulk-destination .sort-select-trigger { width: 100%; height: var(--control-h-sm); background: var(--control-raised-bg); }
 .bulk-move-button, .bulk-toolbar-actions .secondary-button, .bulk-toolbar-actions .editor-delete { min-height: var(--control-h-sm); padding: 0 var(--control-px-sm); }
-.bulk-toolbar-actions { display: flex; align-items: center; gap: var(--space-1); }
+.bulk-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .bulk-toolbar .secondary-button { background: var(--control-raised-bg); }
 .bulk-toolbar .secondary-button:hover:not(:disabled) { background: var(--button-secondary-hover-bg); }
 .bulk-tag-control { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -1255,6 +1256,11 @@ button.no-totp:hover { filter: brightness(.97); }
 @media (max-width: 680px) {
   .generator-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .generator-footer { align-items: stretch; flex-direction: column; }
+}
+
+@container (max-width: 380px) {
+  .bulk-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .bulk-toolbar-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }
 
 /* ---- Recently viewed -----------------------------------------------------
