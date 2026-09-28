@@ -3,6 +3,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const CARD_PROTOCOL_VERSION: u8 = 2;
+pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
 
@@ -51,7 +52,10 @@ pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
 }
 
 pub fn supported_protocol_version(version: u8) -> bool {
-    matches!(version, PROTOCOL_VERSION | CARD_PROTOCOL_VERSION)
+    matches!(
+        version,
+        PROTOCOL_VERSION | CARD_PROTOCOL_VERSION | FILL_MATCH_PROTOCOL_VERSION
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,6 +96,7 @@ impl BrowserRequest {
         }
         if (self.version == PROTOCOL_VERSION && self.message_type == "card")
             || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
+            || (self.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type != "fill")
         {
             return false;
         }
@@ -287,6 +292,8 @@ pub struct BrowserResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -311,6 +318,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
             saved: None,
@@ -331,6 +339,7 @@ impl BrowserResponse {
             opened: Some(opened),
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
             saved: None,
@@ -352,6 +361,7 @@ impl BrowserResponse {
             opened: None,
             username: matches!(fields, "username" | "both").then_some(username),
             password: matches!(fields, "password" | "both").then_some(password),
+            match_kind: None,
             reason: None,
             message: None,
             saved: None,
@@ -360,11 +370,38 @@ impl BrowserResponse {
         }
     }
 
-    pub fn unavailable(request_id: &str, reason: &'static str) -> Self {
+    pub fn fill_with_match_kind(
+        request: &BrowserRequest,
+        username: String,
+        password: String,
+        match_kind: &'static str,
+    ) -> Self {
+        let fields = request.fields.as_deref().unwrap_or("both");
         Self {
-            version: PROTOCOL_VERSION,
+            version: FILL_MATCH_PROTOCOL_VERSION,
+            message_type: "fill".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: matches!(fields, "username" | "both").then_some(username),
+            password: matches!(fields, "password" | "both").then_some(password),
+            match_kind: Some(match_kind.into()),
+            reason: None,
+            message: None,
+            saved: None,
+            identity: None,
+            card: None,
+        }
+    }
+
+    pub fn unavailable(request: &BrowserRequest, reason: &'static str) -> Self {
+        Self {
+            version: request.version,
             message_type: "fill-unavailable".into(),
-            request_id: request_id.into(),
+            request_id: request.request_id.clone(),
             installed: None,
             desktop_available: None,
             locked: None,
@@ -372,6 +409,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
             saved: None,
@@ -381,8 +419,12 @@ impl BrowserResponse {
     }
 
     pub fn error(request_id: &str, message: &'static str) -> Self {
+        Self::error_with_version(PROTOCOL_VERSION, request_id, message)
+    }
+
+    pub fn error_with_version(version: u8, request_id: &str, message: &'static str) -> Self {
         Self {
-            version: PROTOCOL_VERSION,
+            version,
             message_type: "error".into(),
             request_id: request_id.into(),
             installed: None,
@@ -392,12 +434,17 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: Some(message.into()),
             saved: None,
             identity: None,
             card: None,
         }
+    }
+
+    pub fn error_for(request: &BrowserRequest, message: &'static str) -> Self {
+        Self::error_with_version(request.version, &request.request_id, message)
     }
 
     pub fn saved(request_id: &str) -> Self {
@@ -412,6 +459,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
             saved: Some(true),
@@ -432,6 +480,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
             saved: None,
@@ -453,6 +502,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
             saved: None,
@@ -473,6 +523,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
             saved: None,
@@ -493,6 +544,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: None,
             message: None,
             saved: None,
@@ -513,6 +565,7 @@ impl BrowserResponse {
             opened: None,
             username: None,
             password: None,
+            match_kind: None,
             reason: Some(reason.into()),
             message: None,
             saved: None,
@@ -538,6 +591,11 @@ impl BrowserResponse {
         let no_identity = self.identity.is_none();
         let no_card = self.card.is_none();
         if request.message_type != "card" && !no_card {
+            return false;
+        }
+        let match_kind_allowed =
+            request.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type == "fill";
+        if self.match_kind.is_some() && !match_kind_allowed {
             return false;
         }
         let allowed = match (request.message_type.as_str(), self.message_type.as_str()) {
@@ -624,9 +682,15 @@ impl BrowserResponse {
                     }
                     _ => false,
                 };
+                let match_kind_valid = if request.version == FILL_MATCH_PROTOCOL_VERSION {
+                    self.match_kind.as_deref().is_some_and(valid_match_kind)
+                } else {
+                    self.match_kind.is_none()
+                };
                 no_capability
                     && no_activation
                     && credential_valid
+                    && match_kind_valid
                     && self.reason.is_none()
                     && self.message.is_none()
                     && no_saved
@@ -697,6 +761,7 @@ impl Drop for BrowserResponse {
         self.request_id.zeroize();
         self.username.zeroize();
         self.password.zeroize();
+        self.match_kind.zeroize();
         self.reason.zeroize();
         self.message.zeroize();
         self.identity.zeroize();
@@ -726,6 +791,10 @@ fn valid_reason(value: &str) -> bool {
     )
 }
 
+fn valid_match_kind(value: &str) -> bool {
+    matches!(value, "exact" | "wwwAlias")
+}
+
 fn valid_error_message(value: &str) -> bool {
     matches!(
         value,
@@ -752,6 +821,110 @@ mod tests {
             title: None,
             kind: None,
         }
+    }
+
+    fn fill_request(version: u8) -> BrowserRequest {
+        BrowserRequest {
+            version,
+            message_type: "fill".to_string(),
+            request_id: "request-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn fill_match_requests_are_fill_only() {
+        assert!(fill_request(FILL_MATCH_PROTOCOL_VERSION).validate());
+
+        let mut capability = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        capability.message_type = "capabilities".to_string();
+        capability.origin = None;
+        assert!(!capability.validate());
+
+        let mut card = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        card.message_type = "card".to_string();
+        card.fields = Some("number".to_string());
+        assert!(!card.validate());
+
+        let future = fill_request(FILL_MATCH_PROTOCOL_VERSION + 1);
+        assert!(!future.validate());
+    }
+
+    #[test]
+    fn fill_match_responses_carry_the_rule_only_on_protocol_v3() {
+        let request = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        let exact = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        assert_eq!(exact.match_kind.as_deref(), Some("exact"));
+        assert!(exact.validate_for(&request));
+
+        let alias = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "wwwAlias",
+        );
+        assert!(alias.validate_for(&request));
+
+        let missing = BrowserResponse::fill_for(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert_eq!(missing.version, PROTOCOL_VERSION);
+        assert!(!missing.validate_for(&request));
+
+        let unknown = BrowserResponse::fill_with_match_kind(
+            &request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "parentDomain",
+        );
+        assert!(!unknown.validate_for(&request));
+
+        let unavailable = BrowserResponse::unavailable(&request, "noMatch");
+        assert_eq!(unavailable.version, FILL_MATCH_PROTOCOL_VERSION);
+        assert!(unavailable.validate_for(&request));
+    }
+
+    #[test]
+    fn fill_match_responses_do_not_cross_protocol_versions() {
+        let v1_request = fill_request(PROTOCOL_VERSION);
+        assert!(v1_request.validate());
+        let v1_response = BrowserResponse::fill_for(
+            &v1_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        assert!(v1_response.match_kind.is_none());
+        assert!(v1_response.validate_for(&v1_request));
+
+        let mut smuggled = BrowserResponse::fill_for(
+            &v1_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        );
+        smuggled.match_kind = Some("exact".to_string());
+        assert!(!smuggled.validate_for(&v1_request));
+
+        let v3_request = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+        let v3_response = BrowserResponse::fill_with_match_kind(
+            &v3_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        );
+        assert!(!v3_response.validate_for(&v1_request));
+        assert!(!v1_response.validate_for(&v3_request));
     }
 
     #[test]

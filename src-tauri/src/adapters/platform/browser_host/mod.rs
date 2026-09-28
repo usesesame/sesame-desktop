@@ -459,7 +459,7 @@ where
         if !supported_protocol_version(request.version) {
             write_message(
                 output,
-                &BrowserResponse::error(&request.request_id, "Unsupported protocol version."),
+                &BrowserResponse::error_for(&request, "Unsupported protocol version."),
             )?;
             response_count += 1;
             continue;
@@ -467,7 +467,7 @@ where
         if !request.validate() {
             write_message(
                 output,
-                &BrowserResponse::error(&request.request_id, "Invalid browser request."),
+                &BrowserResponse::error_for(&request, "Invalid browser request."),
             )?;
             response_count += 1;
             continue;
@@ -510,7 +510,7 @@ fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
         }
         "save" => BrowserResponse::save_unavailable(&request.request_id, "desktopUnavailable"),
         "card" => BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable"),
-        _ => BrowserResponse::unavailable(&request.request_id, "desktopUnavailable"),
+        _ => BrowserResponse::unavailable(request, "desktopUnavailable"),
     }
 }
 
@@ -720,6 +720,104 @@ mod boundary_tests {
                 "{expected} binds to its request"
             );
         }
+    }
+
+    fn frame(payload: &[u8]) -> Vec<u8> {
+        let mut framed = (payload.len() as u32).to_le_bytes().to_vec();
+        framed.extend_from_slice(payload);
+        framed
+    }
+
+    fn decode_frame(bytes: &[u8]) -> BrowserResponse {
+        let size = u32::from_le_bytes(bytes[..4].try_into().expect("a frame size")) as usize;
+        serde_json::from_slice(&bytes[4..4 + size]).expect("a framed response")
+    }
+
+    fn v3_fill_request() -> BrowserRequest {
+        BrowserRequest {
+            version: crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION,
+            message_type: "fill".to_string(),
+            request_id: "fill-3-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn a_version_three_fill_survives_the_host_relay() {
+        let request = v3_fill_request();
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+        let mut output = Vec::new();
+        let response_count = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
+            BrowserResponse::fill_with_match_kind(
+                request,
+                "person@example.test".to_string(),
+                "fictional-example-value".to_string(),
+                "wwwAlias",
+            )
+        })
+        .expect("the relay serves the request");
+
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
+        );
+        assert_eq!(response.match_kind.as_deref(), Some("wwwAlias"));
+    }
+
+    #[test]
+    fn the_desktop_unavailable_fallback_binds_version_three() {
+        let request = v3_fill_request();
+        assert!(request.validate());
+        let response = unavailable_without_desktop(&request);
+        assert_eq!(response.message_type, "fill-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("desktopUnavailable"));
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
+        );
+        assert!(response.validate_for(&request));
+    }
+
+    #[test]
+    fn host_errors_are_bound_to_the_request_version() {
+        let future = br#"{"version":9,"type":"fill","requestId":"fill-future-1","origin":"https://example.test"}"#;
+        let input = frame(future);
+        let mut output = Vec::new();
+        let response_count =
+            serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                .expect("the host answers an unsupported version");
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(response.version, 9);
+        assert_eq!(response.message_type, "error");
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Unsupported protocol version.")
+        );
+
+        let invalid = br#"{"version":3,"type":"fill","requestId":"fill-3-invalid"}"#;
+        let input = frame(invalid);
+        let mut output = Vec::new();
+        let response_count =
+            serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                .expect("the host answers an invalid request");
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Invalid browser request.")
+        );
     }
 
     #[test]
