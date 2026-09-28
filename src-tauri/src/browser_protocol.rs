@@ -4,8 +4,11 @@ use zeroize::{Zeroize, Zeroizing};
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const CARD_PROTOCOL_VERSION: u8 = 2;
 pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
+pub const TOTP_PROTOCOL_VERSION: u8 = 4;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
+pub const MAX_TOTP_CODE_DIGITS: usize = 9;
+pub const MAX_TOTP_REMAINING_SECONDS: u64 = 3600;
 
 /// Closed set: anything outside it fails validation before it reaches the vault.
 pub const IDENTITY_FIELD_KEYS: [&str; 9] = [
@@ -54,7 +57,10 @@ pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
 pub fn supported_protocol_version(version: u8) -> bool {
     matches!(
         version,
-        PROTOCOL_VERSION | CARD_PROTOCOL_VERSION | FILL_MATCH_PROTOCOL_VERSION
+        PROTOCOL_VERSION
+            | CARD_PROTOCOL_VERSION
+            | FILL_MATCH_PROTOCOL_VERSION
+            | TOTP_PROTOCOL_VERSION
     )
 }
 
@@ -97,6 +103,7 @@ impl BrowserRequest {
         if (self.version == PROTOCOL_VERSION && self.message_type == "card")
             || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
             || (self.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type != "fill")
+            || (self.version == TOTP_PROTOCOL_VERSION && self.message_type != "totp")
         {
             return false;
         }
@@ -140,6 +147,16 @@ impl BrowserRequest {
                         .fields
                         .as_deref()
                         .is_some_and(|fields| parse_card_fields(fields).is_some())
+                    && no_save_payload
+            }
+            "totp" => {
+                self.version == TOTP_PROTOCOL_VERSION
+                    && self.origin.as_deref().is_some_and(|origin| {
+                        !origin.is_empty()
+                            && origin.len() <= 2048
+                            && !origin.chars().any(char::is_control)
+                    })
+                    && self.fields.is_none()
                     && no_save_payload
             }
             "save" => {
@@ -303,6 +320,10 @@ pub struct BrowserResponse {
     pub identity: Option<IdentityFillFields>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card: Option<CardFillFields>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<u64>,
 }
 
 impl BrowserResponse {
@@ -324,6 +345,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -345,6 +368,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -367,6 +392,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -394,6 +421,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -415,6 +444,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -440,6 +471,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -465,6 +498,8 @@ impl BrowserResponse {
             saved: Some(true),
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -486,6 +521,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -508,6 +545,8 @@ impl BrowserResponse {
             saved: None,
             identity: Some(fields),
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -529,6 +568,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -550,6 +591,8 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: Some(fields),
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -571,6 +614,54 @@ impl BrowserResponse {
             saved: None,
             identity: None,
             card: None,
+            code: None,
+            remaining_seconds: None,
+        }
+    }
+
+    pub fn totp_for(request: &BrowserRequest, code: String, remaining_seconds: u64) -> Self {
+        Self {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp".into(),
+            request_id: request.request_id.clone(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: None,
+            message: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: Some(code),
+            remaining_seconds: Some(remaining_seconds),
+        }
+    }
+
+    pub fn totp_unavailable(request_id: &str, reason: &'static str) -> Self {
+        Self {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp-unavailable".into(),
+            request_id: request_id.into(),
+            installed: None,
+            desktop_available: None,
+            locked: None,
+            fill_available: None,
+            opened: None,
+            username: None,
+            password: None,
+            match_kind: None,
+            reason: Some(reason.into()),
+            message: None,
+            saved: None,
+            identity: None,
+            card: None,
+            code: None,
+            remaining_seconds: None,
         }
     }
 
@@ -590,7 +681,11 @@ impl BrowserResponse {
         let no_saved = self.saved.is_none();
         let no_identity = self.identity.is_none();
         let no_card = self.card.is_none();
+        let no_code = self.code.is_none() && self.remaining_seconds.is_none();
         if request.message_type != "card" && !no_card {
+            return false;
+        }
+        if self.message_type != "totp" && !no_code {
             return false;
         }
         let match_kind_allowed =
@@ -730,6 +825,29 @@ impl BrowserResponse {
                     && self.message.is_none()
                     && self.reason.as_deref().is_some_and(valid_reason)
             }
+            ("totp", "totp") => {
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && no_card
+                    && self.reason.is_none()
+                    && self.message.is_none()
+                    && self.code.as_deref().is_some_and(valid_totp_code)
+                    && self.remaining_seconds.is_some_and(valid_totp_remaining)
+            }
+            ("totp", "totp-unavailable") => {
+                no_capability
+                    && no_activation
+                    && no_credential
+                    && no_saved
+                    && no_identity
+                    && no_card
+                    && no_code
+                    && self.message.is_none()
+                    && self.reason.as_deref().is_some_and(valid_reason)
+            }
             (_, "error") => {
                 no_capability
                     && no_activation
@@ -766,6 +884,7 @@ impl Drop for BrowserResponse {
         self.message.zeroize();
         self.identity.zeroize();
         self.card.zeroize();
+        self.code.zeroize();
     }
 }
 
@@ -793,6 +912,15 @@ fn valid_reason(value: &str) -> bool {
 
 fn valid_match_kind(value: &str) -> bool {
     matches!(value, "exact" | "wwwAlias")
+}
+
+fn valid_totp_code(value: &str) -> bool {
+    (1..=MAX_TOTP_CODE_DIGITS).contains(&value.len())
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn valid_totp_remaining(value: u64) -> bool {
+    (1..=MAX_TOTP_REMAINING_SECONDS).contains(&value)
 }
 
 fn valid_error_message(value: &str) -> bool {
@@ -1091,5 +1219,155 @@ mod tests {
         assert!(save.validate());
         let bytes = save.to_zeroizing_bytes().expect("the request encodes");
         assert!(bytes.len() <= MAX_NATIVE_MESSAGE_BYTES);
+    }
+
+    fn totp_request(version: u8) -> BrowserRequest {
+        BrowserRequest {
+            version,
+            message_type: "totp".to_string(),
+            request_id: "totp-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn totp_requests_are_totp_only_on_protocol_version_four() {
+        assert!(totp_request(TOTP_PROTOCOL_VERSION).validate());
+
+        for version in [
+            PROTOCOL_VERSION,
+            CARD_PROTOCOL_VERSION,
+            FILL_MATCH_PROTOCOL_VERSION,
+        ] {
+            assert!(
+                !totp_request(version).validate(),
+                "version {version} accepted a totp request"
+            );
+        }
+
+        let mut fill = totp_request(TOTP_PROTOCOL_VERSION);
+        fill.message_type = "fill".to_string();
+        assert!(!fill.validate());
+
+        let mut with_fields = totp_request(TOTP_PROTOCOL_VERSION);
+        with_fields.fields = Some("password".to_string());
+        assert!(!with_fields.validate());
+
+        let mut without_origin = totp_request(TOTP_PROTOCOL_VERSION);
+        without_origin.origin = None;
+        assert!(!without_origin.validate());
+
+        let mut with_credentials = totp_request(TOTP_PROTOCOL_VERSION);
+        with_credentials.password = Some("fictional-example-value".to_string());
+        assert!(!with_credentials.validate());
+
+        assert!(!totp_request(TOTP_PROTOCOL_VERSION + 1).validate());
+    }
+
+    #[test]
+    fn totp_responses_bind_the_version_the_code_and_the_window() {
+        let request = totp_request(TOTP_PROTOCOL_VERSION);
+        let allowed = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        assert_eq!(allowed.version, TOTP_PROTOCOL_VERSION);
+        assert_eq!(allowed.message_type, "totp");
+        assert!(allowed.validate_for(&request));
+        let wire = String::from_utf8(allowed.to_zeroizing_bytes().expect("encodes").to_vec())
+            .expect("utf8");
+        assert!(wire.contains("\"code\":\"123456\""));
+        assert!(wire.contains("\"remainingSeconds\":30"));
+
+        for code in ["0", "000000", "123456789"] {
+            assert!(
+                BrowserResponse::totp_for(&request, code.to_string(), 30).validate_for(&request),
+                "{code} was refused as a code"
+            );
+        }
+        for code in [
+            "",
+            "1234567890",
+            "12a456",
+            "-12345",
+            " 123456",
+            "１２３４５６",
+        ] {
+            assert!(
+                !BrowserResponse::totp_for(&request, code.to_string(), 30).validate_for(&request),
+                "{code} was accepted as a code"
+            );
+        }
+
+        for remaining in [1, 30, MAX_TOTP_REMAINING_SECONDS] {
+            assert!(
+                BrowserResponse::totp_for(&request, "123456".to_string(), remaining)
+                    .validate_for(&request),
+                "{remaining} seconds was refused"
+            );
+        }
+        for remaining in [0, MAX_TOTP_REMAINING_SECONDS + 1, u64::MAX] {
+            assert!(
+                !BrowserResponse::totp_for(&request, "123456".to_string(), remaining)
+                    .validate_for(&request),
+                "{remaining} seconds was accepted"
+            );
+        }
+
+        let mut missing_remaining = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        missing_remaining.remaining_seconds = None;
+        assert!(!missing_remaining.validate_for(&request));
+
+        let mut missing_code = BrowserResponse::totp_for(&request, "123456".to_string(), 30);
+        missing_code.code = None;
+        assert!(!missing_code.validate_for(&request));
+    }
+
+    #[test]
+    fn a_totp_response_only_answers_a_totp_request() {
+        let request = totp_request(TOTP_PROTOCOL_VERSION);
+        let v3_fill = fill_request(FILL_MATCH_PROTOCOL_VERSION);
+
+        assert!(
+            !BrowserResponse::totp_for(&request, "123456".to_string(), 30).validate_for(&v3_fill)
+        );
+        assert!(
+            !BrowserResponse::totp_unavailable(&request.request_id, "noMatch")
+                .validate_for(&v3_fill)
+        );
+        assert!(!BrowserResponse::fill_with_match_kind(
+            &v3_fill,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "exact",
+        )
+        .validate_for(&request));
+        assert!(!BrowserResponse::fill_for(
+            &v3_fill,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+        )
+        .validate_for(&request));
+        assert!(!BrowserResponse::unavailable(&request, "noMatch").validate_for(&request));
+
+        let unavailable = BrowserResponse::totp_unavailable(&request.request_id, "locked");
+        assert_eq!(unavailable.version, TOTP_PROTOCOL_VERSION);
+        assert_eq!(unavailable.message_type, "totp-unavailable");
+        assert!(unavailable.validate_for(&request));
+
+        let mut smuggled = BrowserResponse::totp_unavailable(&request.request_id, "locked");
+        smuggled.code = Some("123456".to_string());
+        assert!(!smuggled.validate_for(&request));
+
+        let mut error_with_code = BrowserResponse::error_with_version(
+            TOTP_PROTOCOL_VERSION,
+            &request.request_id,
+            "Browser response unavailable.",
+        );
+        assert!(error_with_code.validate_for(&request));
+        error_with_code.code = Some("123456".to_string());
+        assert!(!error_with_code.validate_for(&request));
     }
 }

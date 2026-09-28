@@ -138,6 +138,8 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_browser_identity_fill,
             commands::get_pending_browser_card_fill,
             commands::resolve_browser_card_fill,
+            commands::get_pending_browser_totp_fill,
+            commands::resolve_browser_totp_fill,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,

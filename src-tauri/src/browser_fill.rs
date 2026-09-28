@@ -22,6 +22,7 @@ use crate::{
         MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
+    vault::snapshot::{current_totp, totp_from_value},
     vault::{random_id, Card, Identity, TaggedItem, VaultEntry, VaultState},
 };
 
@@ -269,6 +270,26 @@ pub struct BrowserCardRequestEvent {
     expires_at_unix_ms: u64,
 }
 
+/// Display fields only: neither the seed nor a derived code enters the prompt.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpFillCandidate {
+    id: String,
+    title: String,
+    username: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTotpRequestEvent {
+    approval_id: String,
+    origin: String,
+    hostname: String,
+    candidates: Vec<TotpFillCandidate>,
+    expires_in_seconds: u64,
+    expires_at_unix_ms: u64,
+}
+
 include!("browser_fill_broker.rs");
 
 pub fn start(app: AppHandle) -> io::Result<()> {
@@ -404,6 +425,10 @@ pub fn pending_card(state: State<'_, BrowserFillState>) -> Option<BrowserCardReq
     state.pending_card_request()
 }
 
+pub fn pending_totp(state: State<'_, BrowserFillState>) -> Option<BrowserTotpRequestEvent> {
+    state.pending_totp_request()
+}
+
 pub fn resolve_identity(
     app: &AppHandle,
     state: State<'_, BrowserFillState>,
@@ -474,6 +499,42 @@ pub fn resolve_card(
     }
 }
 
+/// Every TOTP release needs its own approval; no grant is ever recorded.
+pub fn resolve_totp(
+    app: &AppHandle,
+    state: State<'_, BrowserFillState>,
+    approval_id: String,
+    login_id: Option<String>,
+) -> Result<(), String> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err("That browser approval is no longer available.".into());
+    }
+    let denied = login_id.is_none();
+    let decision = login_id
+        .map(ApprovalDecision::Selected)
+        .unwrap_or(ApprovalDecision::Denied);
+    match state.decide(&approval_id, decision, false) {
+        Ok(()) => {
+            diagnostics::record_browser_host_registration(
+                app,
+                if denied {
+                    "totp_denied"
+                } else {
+                    "totp_approved"
+                },
+            );
+            if denied {
+                emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "denied");
+            }
+            Ok(())
+        }
+        Err(_) => {
+            emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "expired");
+            Err("That browser approval expired or is no longer available.".into())
+        }
+    }
+}
+
 fn handle_pipe_payload(
     app: &AppHandle,
     payload: Vec<u8>,
@@ -495,6 +556,7 @@ fn handle_pipe_payload(
         "save" => save_response(app, &mut request, peer),
         "identity" => identity_response(app, &request, peer),
         "card" => card_response(app, &request, peer),
+        "totp" => totp_response(app, &request, peer),
         _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
     response_bytes(response)
@@ -1015,6 +1077,7 @@ fn selected_card_fields(card: &Card, requested: &[String]) -> CardFillFields {
 }
 
 include!("browser_fill_identity_approval.rs");
+include!("browser_fill_totp_approval.rs");
 
 fn approval_expires_at_unix_ms() -> u64 {
     SystemTime::now()
@@ -1657,6 +1720,327 @@ mod origin_attacks {
 
         let candidates =
             matching_entries(&entries, &request("https://example.test").expect("origin"));
+
+        assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
+    }
+}
+
+#[cfg(test)]
+mod totp_flow_tests {
+    use super::*;
+    use crate::browser_protocol::TOTP_PROTOCOL_VERSION;
+
+    const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    fn origin(value: &str) -> NormalizedOrigin {
+        NormalizedOrigin::from_request(value).expect("origin")
+    }
+
+    fn ids(values: &[&str]) -> HashSet<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    fn totp_entry(id: &str, url: &str, seed: Option<&str>) -> VaultEntry {
+        VaultEntry {
+            id: id.to_string(),
+            title: format!("Entry {id}"),
+            username: "casey".to_string(),
+            url: url.to_string(),
+            totp: seed.map(str::to_string),
+            ..VaultEntry::default()
+        }
+    }
+
+    fn totp_request(origin_url: &str) -> BrowserRequest {
+        BrowserRequest {
+            version: TOTP_PROTOCOL_VERSION,
+            message_type: "totp".to_string(),
+            request_id: "totp-1".to_string(),
+            origin: Some(origin_url.to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    fn begin_totp(
+        state: &BrowserFillState,
+        request_id: &str,
+        epoch: u64,
+    ) -> (String, Receiver<ApprovalDecision>) {
+        let (approval_id, _, receiver) = state
+            .begin(
+                request_id,
+                origin("https://example.test"),
+                epoch,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            )
+            .expect("begin totp");
+        (approval_id, receiver)
+    }
+
+    #[test]
+    fn a_totp_request_only_offers_logins_saved_at_that_origin() {
+        let entries = vec![
+            totp_entry("login-a", "https://bank.test", Some(RFC_KEY)),
+            totp_entry("login-other", "https://other.test", Some(RFC_KEY)),
+            totp_entry(
+                "login-lookalike",
+                "https://bank.test.evil.test",
+                Some(RFC_KEY),
+            ),
+            totp_entry("login-trailing-dot", "https://bank.test./", Some(RFC_KEY)),
+            totp_entry("login-port", "https://bank.test:8443", Some(RFC_KEY)),
+            totp_entry("login-http", "http://bank.test", Some(RFC_KEY)),
+            totp_entry("login-www", "https://www.bank.test", Some(RFC_KEY)),
+            totp_entry("login-local-http", "http://localhost:3000", Some(RFC_KEY)),
+        ];
+
+        let offered = |value: &str| {
+            matching_totp_entries(&entries, &origin(value))
+                .into_iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(offered("https://bank.test"), vec!["login-a", "login-www"]);
+        assert_eq!(
+            offered("https://www.bank.test"),
+            vec!["login-www", "login-a"]
+        );
+        assert_eq!(offered("https://other.test"), vec!["login-other"]);
+        assert_eq!(
+            offered("https://bank.test.evil.test"),
+            vec!["login-lookalike"]
+        );
+        assert_eq!(offered("https://bank.test:8443"), vec!["login-port"]);
+        assert_eq!(offered("http://localhost:3000"), vec!["login-local-http"]);
+        assert!(offered("https://localhost:3000").is_empty());
+        assert!(offered("https://bank.test.evil.test.evil.test").is_empty());
+        assert!(NormalizedOrigin::from_request("https://bank.test./").is_none());
+        assert!(
+            !offered("https://bank.test").contains(&"login-trailing-dot".to_string()),
+            "a trailing-dot login leaked into the candidates"
+        );
+    }
+
+    #[test]
+    fn a_login_without_a_usable_totp_secret_is_never_offered_or_selected() {
+        let entries = vec![
+            totp_entry("login-nothing", "https://example.test", None),
+            totp_entry("login-empty", "https://example.test", Some("")),
+            totp_entry("login-short", "https://example.test", Some("GEZDGNBV")),
+            totp_entry(
+                "login-garbage",
+                "https://example.test",
+                Some("not base32 at all!!"),
+            ),
+            totp_entry("login-valid", "https://example.test", Some(RFC_KEY)),
+        ];
+
+        let candidates = matching_totp_entries(&entries, &origin("https://example.test"));
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["login-valid"]
+        );
+
+        let state = BrowserFillState::default();
+        let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        assert_eq!(
+            state.decide(
+                &approval_id,
+                ApprovalDecision::Selected("login-short".to_string()),
+                false,
+            ),
+            Err("selectionNotOffered")
+        );
+        assert!(matches!(
+            receiver.recv(),
+            Ok(ApprovalDecision::InvalidSelection)
+        ));
+        assert!(state.pending_totp_request().is_none());
+    }
+
+    #[test]
+    fn a_totp_approval_is_consumed_and_cannot_be_replayed() {
+        let state = BrowserFillState::default();
+        let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        let event = BrowserTotpRequestEvent {
+            approval_id: approval_id.clone(),
+            origin: "https://example.test".to_string(),
+            hostname: "example.test".to_string(),
+            candidates: Vec::new(),
+            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+            expires_at_unix_ms: 0,
+        };
+        state
+            .publish(&approval_id, ApprovalEvent::Totp(event))
+            .expect("publish");
+        assert!(state.pending_totp_request().is_some());
+
+        state
+            .decide(
+                &approval_id,
+                ApprovalDecision::Selected("login-a".to_string()),
+                false,
+            )
+            .expect("decide");
+        assert!(
+            matches!(receiver.recv(), Ok(ApprovalDecision::Selected(login_id)) if login_id == "login-a")
+        );
+        assert!(state.pending_totp_request().is_none());
+        assert_eq!(
+            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            Err("approvalExpired")
+        );
+        assert!(matches!(
+            state.begin(
+                "totp-1",
+                origin("https://example.test"),
+                7,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            ),
+            Err("staleRequest")
+        ));
+    }
+
+    #[test]
+    fn a_second_totp_prompt_is_refused_while_one_waits() {
+        let state = BrowserFillState::default();
+        let (_approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+
+        assert!(matches!(
+            state.begin(
+                "totp-2",
+                origin("https://example.test"),
+                7,
+                ApprovalRequest::Totp {
+                    candidate_ids: ids(&["login-a"]),
+                },
+            ),
+            Err("approvalUnavailable")
+        ));
+    }
+
+    #[test]
+    fn an_expired_totp_approval_refuses_every_step() {
+        let state = BrowserFillState::default();
+        let (approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+        {
+            let mut inner = state.inner.lock().expect("inner");
+            let pending = inner.pending.as_mut().expect("pending");
+            pending.deadline = Instant::now() - Duration::from_secs(1);
+        }
+
+        assert_eq!(
+            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            Err("approvalExpired")
+        );
+        assert!(state.pending_totp_request().is_none());
+        assert_eq!(
+            state.publish(
+                &approval_id,
+                ApprovalEvent::Totp(BrowserTotpRequestEvent {
+                    approval_id: approval_id.clone(),
+                    origin: "https://example.test".to_string(),
+                    hostname: "example.test".to_string(),
+                    candidates: Vec::new(),
+                    expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+                    expires_at_unix_ms: 0,
+                }),
+            ),
+            Err("approvalExpired")
+        );
+    }
+
+    #[test]
+    fn a_totp_binding_requires_the_same_request_origin_and_epoch() {
+        let state = BrowserFillState::default();
+        let (approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
+
+        assert!(state.is_bound(&approval_id, "totp-1", &origin("https://example.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-2", &origin("https://example.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-1", &origin("https://other.test"), 7));
+        assert!(!state.is_bound(&approval_id, "totp-1", &origin("https://example.test"), 8));
+    }
+
+    #[test]
+    fn the_released_code_equals_current_totp_for_the_approved_secret() {
+        let request = totp_request("https://example.test");
+        assert!(request.validate());
+
+        let mut matched = false;
+        for _ in 0..4 {
+            let before = current_totp(RFC_KEY).expect("a current code");
+            let response = totp_response_for_secret(&request, RFC_KEY).expect("a response");
+            let after = current_totp(RFC_KEY).expect("a current code");
+            if before != after {
+                continue;
+            }
+            assert_eq!(response.version, TOTP_PROTOCOL_VERSION);
+            assert_eq!(response.message_type, "totp");
+            assert_eq!(response.code.as_deref(), Some(before.0.as_str()));
+            assert_eq!(response.remaining_seconds, Some(before.1));
+            assert!((1..=before.2).contains(&before.1));
+            assert!(response.validate_for(&request));
+            let wire = String::from_utf8(response.to_zeroizing_bytes().expect("encodes").to_vec())
+                .expect("utf8");
+            assert!(wire.contains(&before.0));
+            assert!(!wire.contains(RFC_KEY));
+            matched = true;
+            break;
+        }
+        assert!(
+            matched,
+            "the clock crossed a window boundary on every attempt"
+        );
+
+        assert!(totp_response_for_secret(&request, "").is_none());
+        assert!(totp_response_for_secret(&request, "not base32 at all!!").is_none());
+    }
+
+    #[test]
+    fn a_totp_prompt_and_candidate_carry_no_secret() {
+        let candidate = TotpFillCandidate {
+            id: "login-a".to_string(),
+            title: "Northwind".to_string(),
+            username: "casey".to_string(),
+        };
+        let event = BrowserTotpRequestEvent {
+            approval_id: "approval-a".to_string(),
+            origin: "https://example.test".to_string(),
+            hostname: "example.test".to_string(),
+            candidates: vec![candidate],
+            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+            expires_at_unix_ms: 0,
+        };
+        let wire = serde_json::to_string(&event).expect("serialized prompt");
+        assert!(!wire.contains(RFC_KEY));
+        assert!(wire.contains("casey"));
+    }
+
+    #[test]
+    fn the_totp_candidate_list_is_bounded() {
+        let entries: Vec<VaultEntry> = (0..64)
+            .map(|index| {
+                totp_entry(
+                    &format!("login-{index}"),
+                    "https://example.test",
+                    Some(RFC_KEY),
+                )
+            })
+            .collect();
+
+        let candidates = matching_totp_entries(&entries, &origin("https://example.test"));
 
         assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
     }

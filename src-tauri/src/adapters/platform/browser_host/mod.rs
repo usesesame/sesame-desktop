@@ -510,6 +510,7 @@ fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
         }
         "save" => BrowserResponse::save_unavailable(&request.request_id, "desktopUnavailable"),
         "card" => BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable"),
+        "totp" => BrowserResponse::totp_unavailable(&request.request_id, "desktopUnavailable"),
         _ => BrowserResponse::unavailable(request, "desktopUnavailable"),
     }
 }
@@ -783,6 +784,95 @@ mod boundary_tests {
             crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
         );
         assert!(response.validate_for(&request));
+    }
+
+    fn v4_totp_request() -> BrowserRequest {
+        BrowserRequest {
+            version: crate::browser_protocol::TOTP_PROTOCOL_VERSION,
+            message_type: "totp".to_string(),
+            request_id: "totp-4-1".to_string(),
+            origin: Some("https://example.test".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn a_version_four_totp_survives_the_host_relay() {
+        let request = v4_totp_request();
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+        let mut output = Vec::new();
+        let response_count = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
+            BrowserResponse::totp_for(request, "287082".to_string(), 18)
+        })
+        .expect("the relay serves the request");
+
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::TOTP_PROTOCOL_VERSION
+        );
+        assert_eq!(response.message_type, "totp");
+        assert_eq!(response.code.as_deref(), Some("287082"));
+        assert_eq!(response.remaining_seconds, Some(18));
+    }
+
+    #[test]
+    fn the_desktop_unavailable_fallback_binds_version_four() {
+        let request = v4_totp_request();
+        assert!(request.validate());
+        let response = unavailable_without_desktop(&request);
+        assert_eq!(response.message_type, "totp-unavailable");
+        assert_eq!(response.reason.as_deref(), Some("desktopUnavailable"));
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::TOTP_PROTOCOL_VERSION
+        );
+        assert!(response.validate_for(&request));
+    }
+
+    #[test]
+    fn a_totp_request_on_an_older_protocol_is_refused() {
+        for version in [
+            crate::browser_protocol::PROTOCOL_VERSION,
+            crate::browser_protocol::CARD_PROTOCOL_VERSION,
+            crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION,
+        ] {
+            let mut request = v4_totp_request();
+            request.version = version;
+            assert!(
+                !request.validate(),
+                "version {version} accepted a totp request"
+            );
+            let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+            let mut output = Vec::new();
+            let response_count =
+                serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                    .expect("the host answers an invalid request");
+            assert_eq!(response_count, 1);
+            let response = decode_frame(&output);
+            assert_eq!(response.message_type, "error");
+            assert_eq!(
+                response.message.as_deref(),
+                Some("Invalid browser request.")
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_four_request_that_is_not_totp_is_refused() {
+        for message_type in ["fill", "identity", "card", "save", "capabilities"] {
+            let mut request = v4_totp_request();
+            request.message_type = message_type.to_string();
+            assert!(
+                !request.validate(),
+                "version four accepted a {message_type} request"
+            );
+        }
     }
 
     #[test]
