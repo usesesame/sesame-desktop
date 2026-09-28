@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v3/response.schema.json",
+  "title": "Sesame browser response v3",
+  "oneOf": [
+    { "$ref": "#/$defs/fillBoth" },
+    { "$ref": "#/$defs/fillUsername" },
+    { "$ref": "#/$defs/fillPassword" },
+    { "$ref": "#/$defs/fillUnavailable" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "possiblyEmptyUsername": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "matchKind": {
+      "enum": ["exact", "wwwAlias"],
+      "description": "The matching rule the desktop enforced before releasing the credential."
+    },
+    "reason": {
+      "enum": [
+        "desktopUnavailable",
+        "locked",
+        "noMatch",
+        "approvalUnavailable",
+        "approvalDeclined",
+        "approvalTimeout",
+        "staleRequest",
+        "invalidSelection",
+        "multipleMatches"
+      ]
+    },
+    "fillBoth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "username", "password", "matchKind"],
+      "properties": {
+        "version": { "const": 3 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "username": { "$ref": "#/$defs/possiblyEmptyUsername" },
+        "password": { "$ref": "#/$defs/credential" },
+        "matchKind": { "$ref": "#/$defs/matchKind" }
+      }
+    },
+    "fillUsername": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "username", "matchKind"],
+      "properties": {
+        "version": { "const": 3 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "username": { "$ref": "#/$defs/credential" },
+        "matchKind": { "$ref": "#/$defs/matchKind" }
+      }
+    },
+    "fillPassword": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "password", "matchKind"],
+      "properties": {
+        "version": { "const": 3 },
+        "type": { "const": "fill" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "password": { "$ref": "#/$defs/credential" },
+        "matchKind": { "$ref": "#/$defs/matchKind" }
+      }
+    },
+    "unavailableBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "reason"],
+      "properties": {
+        "version": { "const": 3 },
+        "type": { "type": "string" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "fillUnavailable": {
+      "allOf": [
+        { "$ref": "#/$defs/unavailableBase" },
+        { "properties": { "type": { "const": "fill-unavailable" } } }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "type", "requestId", "message"],
+      "properties": {
+        "version": { "const": 3 },
+        "type": { "const": "error" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "message": {
+          "enum": [
+            "Unsupported protocol version.",
+            "Invalid browser request.",
+            "Unsupported browser request.",
+            "Browser response unavailable."
+          ]
+        }
+      }
+    }
+  }
+}

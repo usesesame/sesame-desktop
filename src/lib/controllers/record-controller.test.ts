@@ -33,6 +33,7 @@ function fakeStores(): AppStores {
     browserFill: noRequest,
     browserIdentityFill: noRequest,
     browserCardFill: noRequest,
+    browserTotpFill: noRequest,
     browserSave: noRequest,
   } as unknown as AppStores
 }

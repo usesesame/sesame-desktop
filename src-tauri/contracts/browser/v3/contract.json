@@ -1,0 +1,59 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v3",
+  "protocolVersion": 3,
+  "compatibility": {
+    "minimumHostProtocolVersion": 3,
+    "currentHostProtocolVersion": 3,
+    "minimumExtensionProtocolVersion": 3,
+    "currentExtensionProtocolVersion": 3
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "credentialFieldBytes": 4096,
+    "approvalSeconds": 30
+  },
+  "requestTypes": [
+    "fill"
+  ],
+  "responseTypes": [
+    "fill",
+    "fill-unavailable",
+    "error"
+  ],
+  "matchKinds": [
+    "exact",
+    "wwwAlias"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
+    "origin": "The fill request carries one normalized page origin. The desktop matches it against saved login URLs and rechecks the same relationship under the vault lock before release.",
+    "matchKind": "Names the rule the desktop enforced when it released the credential: exact, or wwwAlias for the single www form of a bare hostname. The desktop recomputes the rule before release; the extension reads it to explain the match.",
+    "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json"
+}

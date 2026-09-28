@@ -42,6 +42,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "idna",
+      "version": "1",
+      "reason": "Decodes punycode host labels for the FILL-03 lookalike comparison; psl reads only ASCII and does not decode. Already in the lock through url. Owner approved 2026-09-27."
+    },
+    {
       "name": "libc",
       "version": "0.2",
       "reason": "In use before this gate was adopted."
@@ -50,6 +55,11 @@
       "name": "minisign-verify",
       "version": "0.2.5",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "psl",
+      "version": "2",
+      "reason": "Compile-time public suffix list for registrable domain comparison in the FILL-03 lookalike check. Owner approved 2026-09-27."
     },
     {
       "name": "rand",
@@ -135,6 +145,11 @@
       "name": "ts-rs",
       "version": "12.0.1",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "unicode-security",
+      "version": "0.1",
+      "reason": "UTS #39 confusable skeletons and mixed-script detection for the FILL-03 lookalike check. Owner approved 2026-09-27."
     },
     {
       "name": "url",
