@@ -515,7 +515,7 @@
         <div class="entry-list" class:selecting={multiSelect} bind:this={entryList} role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
             <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
-              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
+              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
               <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => handleRowKeydown(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
