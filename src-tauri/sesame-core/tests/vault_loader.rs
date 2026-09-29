@@ -4,7 +4,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use sesame_core::{
     api, backup, encrypt_bytes,
     loader::{Credential, FormatState, LoadFailure, VaultLoader},
-    payload_aad_for_file, random_id, CipherBlob, VaultFile, MAX_VAULT_FILE_BYTES,
+    payload_aad_for_file, random_id, CipherBlob, VaultFile, MAX_KDF_PARALLELISM,
+    MAX_VAULT_FILE_BYTES, MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB,
 };
 
 const PASSWORD: &str = "fictional master password 01";
@@ -147,6 +148,16 @@ fn envelope_failures_are_bounded_and_do_not_become_wrong_password() {
     );
     file = fixture();
     file.kdf.memory_kib = 1;
+    assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
+    file = fixture();
+    file.kdf.memory_kib = MIN_KDF_MEMORY_KIB - 1;
+    assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
+    file = fixture();
+    file.kdf.iterations = MIN_KDF_ITERATIONS - 1;
+    assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
+    file = fixture();
+    file.kdf.parallelism = MAX_KDF_PARALLELISM;
+    file.kdf.memory_kib = 8 * MAX_KDF_PARALLELISM - 1;
     assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
     file = fixture();
     file.recovery_wrap = None;

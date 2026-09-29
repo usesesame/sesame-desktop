@@ -89,6 +89,8 @@ pub const MAX_VAULT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// The plaintext encoding is always smaller than the encoded file, so rejecting it at
 /// this bound can never refuse a save the file limit would have accepted.
 pub const VAULT_SIZE_LIMIT_MESSAGE: &str = "This change would exceed the vault's 64 MiB storage limit. Remove unneeded attachments or records and try again. Your saved vault has not changed.";
+pub const MIN_KDF_MEMORY_KIB: u32 = 65_536;
+pub const MIN_KDF_ITERATIONS: u32 = 3;
 pub const MAX_KDF_MEMORY_KIB: u32 = 262_144;
 pub const MAX_KDF_ITERATIONS: u32 = 10;
 pub const MAX_KDF_PARALLELISM: u32 = 16;

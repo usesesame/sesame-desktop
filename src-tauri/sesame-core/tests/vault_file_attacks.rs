@@ -9,7 +9,8 @@ use sesame_core::{
     default_kdf_params, derive_key, encrypt_bytes, random_id, serialize_payload,
     validate_kdf_params, verify_backup_file, CipherBlob, KdfParams, VaultEntry, VaultFile,
     VaultPayload, MAX_BACKUP_BYTES, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB, MAX_KDF_PARALLELISM,
-    MAX_KDF_TOTAL_WORK, PAYLOAD_AAD, PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
+    MAX_KDF_TOTAL_WORK, MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB, PAYLOAD_AAD,
+    PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
 };
 
 const PASSWORD_A: &str = "fictional master password one";
@@ -287,6 +288,33 @@ fn kdf_parameters_outside_the_limits_are_refused_before_any_work() {
     let mut hostile_file = file.clone();
     hostile_file.kdf.memory_kib = MAX_KDF_MEMORY_KIB + 1;
     assert!(open_vault_with_password(&hostile_file, PASSWORD_A).is_err());
+}
+
+#[test]
+fn kdf_parameters_below_the_floor_are_refused() {
+    let mut memory_below = default_kdf_params();
+    memory_below.memory_kib = MIN_KDF_MEMORY_KIB - 1;
+    assert!(validate_kdf_params(&memory_below).is_err());
+    assert!(derive_key(PASSWORD_A, &memory_below).is_err());
+
+    let mut iterations_below = default_kdf_params();
+    iterations_below.iterations = MIN_KDF_ITERATIONS - 1;
+    assert!(validate_kdf_params(&iterations_below).is_err());
+    assert!(derive_key(PASSWORD_A, &iterations_below).is_err());
+
+    let mut at_floor = default_kdf_params();
+    at_floor.memory_kib = MIN_KDF_MEMORY_KIB;
+    at_floor.iterations = MIN_KDF_ITERATIONS;
+    assert!(validate_kdf_params(&at_floor).is_ok());
+    assert!(derive_key(PASSWORD_A, &at_floor).is_ok());
+
+    let mut widest_parallelism = at_floor.clone();
+    widest_parallelism.parallelism = MAX_KDF_PARALLELISM;
+    assert!(validate_kdf_params(&widest_parallelism).is_ok());
+
+    let mut memory_below_eight_times_parallelism = at_floor.clone();
+    memory_below_eight_times_parallelism.memory_kib = 8 * MAX_KDF_PARALLELISM - 1;
+    assert!(validate_kdf_params(&memory_below_eight_times_parallelism).is_err());
 }
 
 #[test]

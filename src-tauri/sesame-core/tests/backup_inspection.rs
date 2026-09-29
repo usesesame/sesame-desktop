@@ -7,7 +7,7 @@ use sesame_core::{
     loader::{Credential, VaultLoader},
     payload_aad_for_file, random_id,
     types::{BackupCompatibility, CipherBlob, KdfParams, VaultFile},
-    VAULT_FORMAT_VERSION,
+    MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB, VAULT_FORMAT_VERSION,
 };
 
 const PASSWORD: &str = "fictional master password 01";
@@ -39,8 +39,8 @@ fn kdf() -> KdfParams {
     KdfParams {
         algorithm: "argon2id".into(),
         salt: URL_SAFE_NO_PAD.encode([7_u8; 16]),
-        memory_kib: 19 * 1024,
-        iterations: 2,
+        memory_kib: MIN_KDF_MEMORY_KIB,
+        iterations: MIN_KDF_ITERATIONS,
         parallelism: 1,
     }
 }
