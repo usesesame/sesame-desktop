@@ -1,16 +1,13 @@
 //! The C-ABI boundary a future mobile build links against.
-//! Every export: validate declared pointer and length pairs, catch panics, and
-//! never expose an opened vault as a raw pointer.
+//! Every export: null-check raw pointers, catch panics, and never expose an opened vault as a raw pointer.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use crate::api::OpenedVault;
 
-/// Largest caller-declared input length the C ABI accepts, in bytes.
 pub const MAX_FFI_INPUT_BYTES: usize = crate::MAX_VAULT_FILE_BYTES as usize;
 
-/// Most vault handles the C ABI keeps open at once.
 pub const MAX_FFI_OPEN_HANDLES: usize = 32;
 
 #[repr(i32)]
@@ -22,7 +19,6 @@ pub enum ErrorCode {
     OperationFailed = 3,
     /// A caught panic; reaching it from a real caller is a bug, but it fails safely.
     InternalPanic = 4,
-    /// The open-handle table is full; close a vault before opening another.
     HandleLimitReached = 5,
 }
 
@@ -66,9 +62,7 @@ fn with_handle<T>(handle: u64, f: impl FnOnce(&OpenedVault) -> T) -> Option<T> {
 }
 
 /// # Safety
-/// A non-null `bytes` must be valid for reads of `len` bytes. A null `bytes`
-/// is accepted only when `len` is 0, and `len` must not exceed
-/// [`MAX_FFI_INPUT_BYTES`].
+/// `bytes` must be valid for reads of `len` bytes, or `len` must be 0.
 unsafe fn read_slice<'a>(bytes: *const u8, len: usize) -> Option<&'a [u8]> {
     if len > MAX_FFI_INPUT_BYTES {
         return None;
@@ -90,12 +84,11 @@ pub extern "C" fn sesame_core_api_version() -> u32 {
 /// Opens a vault from raw bytes; `out_handle` is written only on success.
 ///
 /// # Safety
-/// A non-null `file_bytes` must be valid for reads of `file_len` bytes, and a
-/// non-null `secret` valid for reads of `secret_len` bytes. `out_handle` must
-/// be valid for a single `u64` write. A null input pointer with a non-zero
-/// length, or any length above [`MAX_FFI_INPUT_BYTES`], is rejected with
-/// [`ErrorCode::InvalidArgument`]. `out_handle` is only written when the
-/// return value is [`ErrorCode::Ok`].
+/// `file_bytes` must be valid for reads of `file_len` bytes, `secret` valid
+/// for reads of `secret_len` bytes, and `out_handle` valid for a single
+/// `u64` write. All three must be non-null; `file_len`/`secret_len` may be
+/// 0. `out_handle` is only written when the return value is
+/// [`ErrorCode::Ok`].
 #[no_mangle]
 pub unsafe extern "C" fn sesame_core_open_vault(
     file_bytes: *const u8,
