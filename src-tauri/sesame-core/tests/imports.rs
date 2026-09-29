@@ -24,11 +24,11 @@ fn a_password_keeps_an_interior_comma_and_quote() {
 }
 
 #[test]
-fn a_password_keeps_an_embedded_newline() {
+fn a_quoted_multiline_password_stays_one_field_with_its_controls_stripped() {
     let entries = chrome(
         "name,url,username,password\nExample,https://example.test,person,\"line1\nline2\"\n",
     );
-    assert_eq!(entries[0].password, "line1\nline2");
+    assert_eq!(entries[0].password, "line1line2");
 }
 
 #[test]
@@ -90,6 +90,70 @@ fn an_unreasonably_large_file_is_refused_before_it_is_parsed() {
         panic!("a file past the ceiling must be refused");
     };
     assert!(error.to_string().contains("too large"), "{error}");
+}
+
+#[test]
+fn a_csv_past_the_item_cap_fails_before_the_trailing_row_is_read() {
+    let mut csv = String::from("name,url,username,password\n");
+    for _ in 0..100_001 {
+        csv.push_str("Example,,,\n");
+    }
+    csv.push_str("\"a row that never terminates\n");
+    let error = parse_import_entries(&csv, "chrome-csv")
+        .err()
+        .expect("the item cap must refuse the import");
+    assert!(error.contains("too many entries"), "{error}");
+}
+
+#[test]
+fn a_json_past_the_item_cap_fails_before_the_trailing_item_is_converted() {
+    let mut json = String::from("{\"items\":[");
+    for index in 0..=100_001 {
+        if index > 0 {
+            json.push(',');
+        }
+        if index == 100_001 {
+            json.push_str("{\"type\":1,\"name\":\"a\",\"notes\":\"");
+            json.push_str(&"x".repeat(64 * 1024 + 1));
+            json.push_str("\",\"login\":{}}");
+        } else {
+            json.push_str("{\"type\":1,\"name\":\"a\",\"login\":{}}");
+        }
+    }
+    json.push_str("]}");
+    let error = parse_import_entries(&json, "bitwarden-json")
+        .err()
+        .expect("the item cap must refuse the import");
+    assert!(error.contains("too many entries"), "{error}");
+}
+
+#[test]
+fn a_field_past_the_field_limit_is_refused_with_its_name() {
+    let oversized = "x".repeat(64 * 1024 + 1);
+    let csv =
+        format!("name,url,username,password\n{oversized},https://example.test,person,secret\n");
+    let error = parse_import_entries(&csv, "chrome-csv")
+        .err()
+        .expect("an oversized field must be refused");
+    assert!(error.contains("login name"), "{error}");
+
+    let json = format!(
+        r#"{{"items":[{{"type":1,"name":"Example","notes":"{oversized}","login":{{"username":"person","password":"secret"}}}}]}}"#
+    );
+    let error = parse_import_entries(&json, "bitwarden-json")
+        .err()
+        .expect("an oversized field must be refused");
+    assert!(error.contains("notes"), "{error}");
+}
+
+#[test]
+fn control_and_bidi_characters_are_stripped_without_touching_normal_text() {
+    let csv = "name,url,username,password\n\"Ex\u{0007}ám\u{202E}ple😀\",https://example.test,\"per\u{000A}son\",\"se\u{2066}cr\u{0085}et\"\n";
+    let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
+    let entry = &parsed.entries[0];
+    assert_eq!(entry.title, "Exámple😀");
+    assert_eq!(entry.username, "person");
+    assert_eq!(entry.password, "secret");
 }
 
 #[test]

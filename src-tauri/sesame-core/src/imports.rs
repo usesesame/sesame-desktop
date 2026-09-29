@@ -14,6 +14,38 @@ use crate::{
 };
 
 const MAX_IMPORT_BYTES: u64 = 25 * 1024 * 1024;
+const MAX_IMPORT_ITEMS: usize = 100_000;
+const MAX_IMPORT_FIELD_BYTES: usize = 64 * 1024;
+const IMPORT_TOO_MANY_ENTRIES: &str =
+    "That import contains too many entries for Sesame to process safely.";
+
+fn check_import_item_count(count: usize) -> VaultResult<()> {
+    if count > MAX_IMPORT_ITEMS {
+        Err(IMPORT_TOO_MANY_ENTRIES.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn clean_import_field(field: &str, mut value: String) -> VaultResult<String> {
+    if value.len() > MAX_IMPORT_FIELD_BYTES {
+        return Err(format!(
+            "The {field} field in this import is larger than Sesame can import safely."
+        ));
+    }
+    value.retain(|character| !is_import_control(character));
+    Ok(value)
+}
+
+fn is_import_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0000}'..='\u{001F}'
+            | '\u{0080}'..='\u{009F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
 
 /// The plaintext export never crosses the IPC boundary; Rust reads the file the user picked.
 pub fn read_import_file(path: &Path) -> VaultResult<Zeroizing<String>> {
@@ -168,15 +200,13 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
     {
         return Err("No login entries were found in that import file.".into());
     }
-    if parsed.entries.len()
-        + parsed.secure_notes.len()
-        + parsed.cards.len()
-        + parsed.identities.len()
-        + parsed.ssh_keys.len()
-        > 100_000
-    {
-        return Err("That import contains too many entries for Sesame to process safely.".into());
-    }
+    check_import_item_count(
+        parsed.entries.len()
+            + parsed.secure_notes.len()
+            + parsed.cards.len()
+            + parsed.identities.len()
+            + parsed.ssh_keys.len(),
+    )?;
     for entry in &mut parsed.entries {
         entry.import_source = Some(source.to_string());
     }
@@ -227,7 +257,7 @@ pub fn import_bitwarden_csv_entries(
         if row.name.is_empty() && row.login_username.is_empty() && row.login_password.is_empty() {
             continue;
         }
-        let folder = normalise_folder(&row.folder);
+        let folder = normalise_folder(&row.folder)?;
         let mut entry = imported_entry(
             row.name,
             row.login_uri,
@@ -239,9 +269,10 @@ pub fn import_bitwarden_csv_entries(
             None,
             non_empty(row.notes),
             &mut fidelity,
-        );
+        )?;
         entry.folder = folder;
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity, intentionally_omitted))
 }
@@ -254,13 +285,14 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
     let folders = export
         .folders
         .into_iter()
-        .map(|folder| (folder.id, normalise_folder(&folder.name)))
-        .collect::<HashMap<_, _>>();
+        .map(|folder| Ok((folder.id, normalise_folder(&folder.name)?)))
+        .collect::<VaultResult<HashMap<String, String>>>()?;
     let mut imported = Vec::new();
     let mut secure_notes = Vec::new();
     let mut cards = Vec::new();
     let mut identities = Vec::new();
     let mut ssh_keys = Vec::new();
+    let mut imported_count = 0;
     let mut passkeys_not_imported = 0;
     let mut intentionally_omitted_items = 0;
     let mut fidelity = ImportFidelity::default();
@@ -268,19 +300,30 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         // Bitwarden item types: 1 login, 2 note, 3 card, 4 identity, 5 SSH key; anything past 5 is counted as omitted.
         match item.item_type {
             Some(2) => {
-                secure_notes.push(bitwarden_json_secure_note(item, &mut fidelity.secure_notes));
+                secure_notes.push(bitwarden_json_secure_note(
+                    item,
+                    &mut fidelity.secure_notes,
+                )?);
+                imported_count += 1;
+                check_import_item_count(imported_count)?;
                 continue;
             }
             Some(3) => {
-                cards.push(bitwarden_json_card(item, &mut fidelity.cards));
+                cards.push(bitwarden_json_card(item, &mut fidelity.cards)?);
+                imported_count += 1;
+                check_import_item_count(imported_count)?;
                 continue;
             }
             Some(4) => {
-                identities.push(bitwarden_json_identity(item, &mut fidelity.identities));
+                identities.push(bitwarden_json_identity(item, &mut fidelity.identities)?);
+                imported_count += 1;
+                check_import_item_count(imported_count)?;
                 continue;
             }
             Some(5) => {
-                ssh_keys.push(bitwarden_json_ssh_key(item, &mut fidelity.ssh_keys));
+                ssh_keys.push(bitwarden_json_ssh_key(item, &mut fidelity.ssh_keys)?);
+                imported_count += 1;
+                check_import_item_count(imported_count)?;
                 continue;
             }
             Some(other) if other != 1 => {
@@ -299,9 +342,15 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             .cloned()
             .unwrap_or_default();
         let attachment_count = item.attachments.len();
-        let Some(login) = item.login else {
+        let Some(mut login) = item.login else {
             continue;
         };
+        login.username = clean_import_field("username", login.username)?;
+        login.password = clean_import_field("password", login.password)?;
+        login.totp = clean_import_field("2FA secret", login.totp)?;
+        for uri in &mut login.uris {
+            uri.uri = clean_import_field("website address", std::mem::take(&mut uri.uri))?;
+        }
         for _ in 0..attachment_count {
             fidelity
                 .logins
@@ -313,7 +362,9 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
                 .passkeys
                 .record(FieldDisposition::IntentionallyOmitted);
         }
-        if item.name.is_empty() && login.username.is_empty() && login.password.is_empty() {
+        let item_name = clean_import_field("login name", item.name)?;
+        let item_notes = clean_import_field("notes", item.notes)?;
+        if item_name.is_empty() && login.username.is_empty() && login.password.is_empty() {
             continue;
         }
         let mut backup_codes = Vec::new();
@@ -325,6 +376,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             let Some(value) = field.value.and_then(non_empty) else {
                 continue;
             };
+            let value = clean_import_field("custom field", value)?;
             if field_name.contains("backup") && field_name.contains("code") {
                 backup_codes.extend(split_backup_codes(&value));
             } else if field_name.contains("recovery") && field_name.contains("email") {
@@ -333,7 +385,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
                 && (field_name.contains("phone") || field_name.contains("mobile"))
             {
                 recovery_phone = Some(value);
-            } else if let Some(field) = legacy_field(&field.name, value, field.field_type) {
+            } else if let Some(field) = legacy_field(&field.name, value, field.field_type)? {
                 fidelity.logins.record(FieldDisposition::Legacy);
                 legacy_fields.push(field);
             }
@@ -352,7 +404,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             });
         let url = urls.first().cloned().unwrap_or_default();
         let mut entry = imported_entry(
-            item.name,
+            item_name,
             url,
             login.username,
             login.password,
@@ -360,13 +412,15 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             backup_codes,
             recovery_email,
             recovery_phone,
-            non_empty(item.notes),
+            non_empty(item_notes),
             &mut fidelity.logins,
-        );
+        )?;
         entry.folder = folder;
         entry.urls = urls;
         entry.legacy_fields = legacy_fields;
         imported.push(entry);
+        imported_count += 1;
+        check_import_item_count(imported_count)?;
     }
     Ok(ParsedImport {
         entries: imported,
@@ -380,12 +434,21 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
     })
 }
 
-fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> Card {
+fn bitwarden_json_card(
+    item: BitwardenJsonItem,
+    fidelity: &mut FidelityCounts,
+) -> VaultResult<Card> {
     for _ in 0..item.attachments.len() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
-    let card = item.card.unwrap_or_default();
-    let notes = item.notes;
+    let mut card = item.card.unwrap_or_default();
+    card.cardholder_name = clean_import_field("cardholder name", card.cardholder_name)?;
+    card.number = clean_import_field("card number", card.number)?;
+    card.exp_month = clean_import_field("expiry month", card.exp_month)?;
+    card.exp_year = clean_import_field("expiry year", card.exp_year)?;
+    card.code = clean_import_field("security code", card.code)?;
+    card.brand = clean_import_field("card brand", card.brand)?;
+    let notes = clean_import_field("notes", item.notes)?;
     if !notes.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
@@ -394,7 +457,7 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
         let Some(value) = field.value.and_then(non_empty) else {
             continue;
         };
-        if let Some(field) = legacy_field(&field.name, value, field.field_type) {
+        if let Some(field) = legacy_field(&field.name, value, field.field_type)? {
             fidelity.record(FieldDisposition::Legacy);
             legacy_fields.push(field);
         }
@@ -411,10 +474,11 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
             fidelity.record(FieldDisposition::Imported);
         }
     }
+    let title = clean_import_field("card name", item.name)?;
     let now = unix_timestamp();
-    Card {
+    Ok(Card {
         id: random_id(),
-        title: non_empty(item.name).unwrap_or_else(|| "Imported card".to_string()),
+        title: non_empty(title).unwrap_or_else(|| "Imported card".to_string()),
         cardholder_name: card.cardholder_name.trim().to_string(),
         number: card.number.trim().to_string(),
         expiry_month: card.exp_month.trim().to_string(),
@@ -430,14 +494,19 @@ fn bitwarden_json_card(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -
         folder_id: None,
         favourite: false,
         last_used_at: None,
-    }
+    })
 }
 
-fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> SshKey {
+fn bitwarden_json_ssh_key(
+    item: BitwardenJsonItem,
+    fidelity: &mut FidelityCounts,
+) -> VaultResult<SshKey> {
     for _ in 0..item.attachments.len() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
-    let key = item.ssh_key.unwrap_or_default();
+    let mut key = item.ssh_key.unwrap_or_default();
+    key.private_key = clean_import_field("private key", key.private_key)?;
+    key.public_key = clean_import_field("public key", key.public_key)?;
     for value in [&key.private_key, &key.public_key] {
         if !value.trim().is_empty() {
             fidelity.record(FieldDisposition::Imported);
@@ -450,7 +519,8 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
         .next()
         .unwrap_or_default()
         .to_string();
-    if !item.notes.is_empty() {
+    let notes = clean_import_field("notes", item.notes)?;
+    if !notes.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
     // The fingerprint has no Sesame field and is derivable from the public key.
@@ -468,15 +538,16 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
             fidelity.record(FieldDisposition::IntentionallyOmitted);
         }
     }
+    let title = clean_import_field("SSH key name", item.name)?;
     let now = unix_timestamp();
-    SshKey {
+    Ok(SshKey {
         id: random_id(),
-        title: non_empty(item.name).unwrap_or_else(|| "Imported SSH key".to_string()),
+        title: non_empty(title).unwrap_or_else(|| "Imported SSH key".to_string()),
         key_type,
         private_key: key.private_key.trim().to_string(),
         public_key: key.public_key.trim().to_string(),
         passphrase: String::new(),
-        notes: item.notes,
+        notes,
         tags: Vec::new(),
         created_at: now,
         updated_at: now,
@@ -484,17 +555,17 @@ fn bitwarden_json_ssh_key(item: BitwardenJsonItem, fidelity: &mut FidelityCounts
         folder_id: None,
         favourite: false,
         last_used_at: None,
-    }
+    })
 }
 
 fn bitwarden_json_secure_note(
     item: BitwardenJsonItem,
     fidelity: &mut FidelityCounts,
-) -> SecureNote {
+) -> VaultResult<SecureNote> {
     for _ in 0..item.attachments.len() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
-    let content = item.notes;
+    let content = clean_import_field("notes", item.notes)?;
     if !content.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
@@ -503,15 +574,16 @@ fn bitwarden_json_secure_note(
         let Some(value) = field.value.and_then(non_empty) else {
             continue;
         };
-        if let Some(field) = legacy_field(&field.name, value, field.field_type) {
+        if let Some(field) = legacy_field(&field.name, value, field.field_type)? {
             fidelity.record(FieldDisposition::Legacy);
             legacy_fields.push(field);
         }
     }
+    let title = clean_import_field("note name", item.name)?;
     let now = unix_timestamp();
-    SecureNote {
+    Ok(SecureNote {
         id: random_id(),
-        title: non_empty(item.name).unwrap_or_else(|| "Imported note".to_string()),
+        title: non_empty(title).unwrap_or_else(|| "Imported note".to_string()),
         content,
         tags: Vec::new(),
         legacy_fields,
@@ -521,14 +593,40 @@ fn bitwarden_json_secure_note(
         folder_id: None,
         favourite: false,
         last_used_at: None,
-    }
+    })
 }
 
-fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCounts) -> Identity {
+fn bitwarden_json_identity(
+    item: BitwardenJsonItem,
+    fidelity: &mut FidelityCounts,
+) -> VaultResult<Identity> {
     for _ in 0..item.attachments.len() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
-    let identity = item.identity.unwrap_or_default();
+    let mut identity = item.identity.unwrap_or_default();
+    for (label, value) in [
+        ("identity title", &mut identity.title),
+        ("first name", &mut identity.first_name),
+        ("middle name", &mut identity.middle_name),
+        ("last name", &mut identity.last_name),
+        ("address", &mut identity.address1),
+        ("address", &mut identity.address2),
+        ("address", &mut identity.address3),
+        ("city", &mut identity.city),
+        ("region", &mut identity.state),
+        ("postal code", &mut identity.postal_code),
+        ("country", &mut identity.country),
+        ("company", &mut identity.company),
+        ("email", &mut identity.email),
+        ("phone", &mut identity.phone),
+        ("social security number", &mut identity.ssn),
+        ("username", &mut identity.username),
+        ("passport number", &mut identity.passport_number),
+        ("licence number", &mut identity.license_number),
+    ] {
+        *value = clean_import_field(label, std::mem::take(value))?;
+    }
+    let identity_name = clean_import_field("identity name", item.name)?;
     let mut legacy_fields = Vec::new();
 
     let name_parts = [
@@ -571,7 +669,7 @@ fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCount
         ("Licence number", identity.license_number),
     ] {
         if let Some(value) = non_empty(value) {
-            if let Some(field) = legacy_field(label, value, None) {
+            if let Some(field) = legacy_field(label, value, None)? {
                 fidelity.record(FieldDisposition::Legacy);
                 legacy_fields.push(field);
             }
@@ -582,16 +680,16 @@ fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCount
         let Some(value) = field.value.and_then(non_empty) else {
             continue;
         };
-        if let Some(field) = legacy_field(&field.name, value, field.field_type) {
+        if let Some(field) = legacy_field(&field.name, value, field.field_type)? {
             fidelity.record(FieldDisposition::Legacy);
             legacy_fields.push(field);
         }
     }
 
     let now = unix_timestamp();
-    Identity {
+    Ok(Identity {
         id: random_id(),
-        label: non_empty(item.name).unwrap_or_else(|| "Imported identity".to_string()),
+        label: non_empty(identity_name).unwrap_or_else(|| "Imported identity".to_string()),
         full_name,
         email: identity.email.trim().to_string(),
         phone: identity.phone.trim().to_string(),
@@ -609,7 +707,7 @@ fn bitwarden_json_identity(item: BitwardenJsonItem, fidelity: &mut FidelityCount
         folder_id: None,
         favourite: false,
         last_used_at: None,
-    }
+    })
 }
 
 pub fn import_lastpass_csv_entries(
@@ -629,7 +727,7 @@ pub fn import_lastpass_csv_entries(
         if row.name.is_empty() && row.username.is_empty() && row.password.is_empty() {
             continue;
         }
-        let folder = normalise_folder(&row.grouping);
+        let folder = normalise_folder(&row.grouping)?;
         let mut entry = imported_entry(
             row.name,
             row.url,
@@ -641,9 +739,10 @@ pub fn import_lastpass_csv_entries(
             None,
             non_empty(row.extra),
             &mut fidelity,
-        );
+        )?;
         entry.folder = folder;
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity))
 }
@@ -695,7 +794,8 @@ pub fn import_dashlane_csv_entries(
             None,
             notes,
             &mut fidelity,
-        ));
+        )?);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity))
 }
@@ -837,10 +937,13 @@ pub fn import_proton_pass_csv_entries(
         let raw_url = record_value(&record, &headers, &["url"]);
         let mut raw_urls = raw_url.split(", ").filter(|value| !value.trim().is_empty());
         let first_url = raw_urls.next().unwrap_or_default().to_string();
-        let extra_urls = raw_urls
-            .map(normalise_url)
-            .filter(|value| usable_web_url(value))
-            .collect::<Vec<_>>();
+        let mut extra_urls = Vec::new();
+        for value in raw_urls {
+            let url = normalise_url(&clean_import_field("website address", value.to_string())?);
+            if usable_web_url(&url) {
+                extra_urls.push(url);
+            }
+        }
         let mut entry = imported_entry(
             title,
             first_url,
@@ -852,7 +955,7 @@ pub fn import_proton_pass_csv_entries(
             None,
             non_empty(record_value(&record, &headers, &["note"])),
             &mut fidelity,
-        );
+        )?;
         if !extra_urls.is_empty() {
             fidelity.record(FieldDisposition::Transformed);
             let mut urls = Vec::new();
@@ -867,31 +970,37 @@ pub fn import_proton_pass_csv_entries(
             entry.urls = urls;
         }
         if let Some(email) = non_empty(email) {
-            entry.email = email;
+            entry.email = clean_import_field("email", email)?;
             fidelity.record(FieldDisposition::Imported);
         }
         let vault = record_value(&record, &headers, &["vault"]);
         if !vault.is_empty() {
-            entry.folder = normalise_folder(&vault);
+            entry.folder = normalise_folder(&vault)?;
             fidelity.record(FieldDisposition::Transformed);
         }
-        let mut legacy_columns = headers
-            .iter()
-            .filter(|(name, _)| !mapped_headers.contains(name.as_str()))
-            .filter_map(|(name, index)| {
-                record
-                    .get(*index)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .and_then(|value| legacy_field(name, value.to_string(), None))
-            })
-            .collect::<Vec<_>>();
+        let mut legacy_columns = Vec::new();
+        for (name, index) in &headers {
+            if mapped_headers.contains(name.as_str()) {
+                continue;
+            }
+            let Some(value) = record
+                .get(*index)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if let Some(field) = legacy_field(name, value.to_string(), None)? {
+                legacy_columns.push(field);
+            }
+        }
         legacy_columns.sort_by(|left, right| left.label.cmp(&right.label));
         for _ in &legacy_columns {
             fidelity.record(FieldDisposition::Legacy);
         }
         entry.legacy_fields.append(&mut legacy_columns);
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity, intentionally_omitted))
 }
@@ -928,8 +1037,14 @@ pub fn import_keeper_csv_entries(
         let mut legacy_fields = Vec::new();
         let mut index = 7; // Column 6 is the shared-folder name; custom fields start at 7.
         while index + 1 < record.len() {
-            let name = record.get(index).unwrap_or_default().trim().to_string();
-            let value = record.get(index + 1).unwrap_or_default().trim().to_string();
+            let name = clean_import_field(
+                "custom field name",
+                record.get(index).unwrap_or_default().trim().to_string(),
+            )?;
+            let value = clean_import_field(
+                "custom field value",
+                record.get(index + 1).unwrap_or_default().trim().to_string(),
+            )?;
             index += 2;
             if name.is_empty() || value.is_empty() {
                 continue;
@@ -943,7 +1058,7 @@ pub fn import_keeper_csv_entries(
                 continue;
             }
             let label = name.strip_prefix('$').unwrap_or(&name);
-            if let Some(field) = legacy_field(label, value, None) {
+            if let Some(field) = legacy_field(label, value, None)? {
                 fidelity.record(FieldDisposition::Legacy);
                 legacy_fields.push(field);
             }
@@ -968,10 +1083,11 @@ pub fn import_keeper_csv_entries(
             None,
             non_empty(notes),
             &mut fidelity,
-        );
-        entry.folder = normalise_folder(&folder);
+        )?;
+        entry.folder = normalise_folder(&folder)?;
         entry.legacy_fields = legacy_fields;
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     if !saw_a_row {
         return Err("That file does not look like a Keeper password export.".to_string());
@@ -1046,10 +1162,10 @@ pub fn import_nordpass_csv_entries(
             None,
             non_empty(record_value(&record, &headers, &["note"])),
             &mut fidelity,
-        );
+        )?;
         let folder = record_value(&record, &headers, &["folder"]);
         if !folder.is_empty() {
-            entry.folder = normalise_folder(&folder);
+            entry.folder = normalise_folder(&folder)?;
         }
         let mut urls = if entry.url.is_empty() {
             Vec::new()
@@ -1065,7 +1181,7 @@ pub fn import_nordpass_csv_entries(
                 .into_iter()
                 .filter_map(|value| value.as_str().map(str::to_string))
             {
-                let url = normalise_url(&value);
+                let url = normalise_url(&clean_import_field("website address", value)?);
                 if usable_web_url(&url) && !urls.iter().any(|saved| saved == &url) {
                     urls.push(url);
                     added_any = true;
@@ -1103,11 +1219,11 @@ pub fn import_nordpass_csv_entries(
                         || (normalised.contains("onetime") && normalised.contains("code"))
                 };
                 if looks_like_totp && entry.totp.is_none() {
-                    entry.totp = non_empty(value);
+                    entry.totp = non_empty(clean_import_field("2FA secret", value)?);
                     fidelity.record(FieldDisposition::Imported);
                     continue;
                 }
-                if let Some(field) = legacy_field(label, value, None) {
+                if let Some(field) = legacy_field(label, value, None)? {
                     fidelity.record(FieldDisposition::Legacy);
                     legacy_fields.push(field);
                 }
@@ -1116,17 +1232,22 @@ pub fn import_nordpass_csv_entries(
             fidelity.record(FieldDisposition::Malformed);
         }
         // Stray card/identity values on a password row stay Legacy, never dropped.
-        let mut stray_columns = headers
-            .iter()
-            .filter(|(name, _)| !mapped_headers.contains(name.as_str()))
-            .filter_map(|(name, index)| {
-                record
-                    .get(*index)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .and_then(|value| legacy_field(name, value.to_string(), None))
-            })
-            .collect::<Vec<_>>();
+        let mut stray_columns = Vec::new();
+        for (name, index) in &headers {
+            if mapped_headers.contains(name.as_str()) {
+                continue;
+            }
+            let Some(value) = record
+                .get(*index)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if let Some(field) = legacy_field(name, value.to_string(), None)? {
+                stray_columns.push(field);
+            }
+        }
         stray_columns.sort_by(|left, right| left.label.cmp(&right.label));
         for _ in &stray_columns {
             fidelity.record(FieldDisposition::Legacy);
@@ -1134,6 +1255,7 @@ pub fn import_nordpass_csv_entries(
         legacy_fields.append(&mut stray_columns);
         entry.legacy_fields = legacy_fields;
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity, intentionally_omitted))
 }
@@ -1205,29 +1327,35 @@ pub fn import_flexible_csv_entries(
             None,
             non_empty(record_value(&record, &headers, note_names)),
             &mut fidelity,
-        );
+        )?;
         let raw_tags = record_value(&record, &headers, tag_names);
-        entry.tags = normalise_tags(vec![raw_tags.clone()]);
+        entry.tags = normalise_tags(vec![raw_tags.clone()])?;
         if !entry.tags.is_empty() {
             fidelity.record(FieldDisposition::Transformed);
         }
-        let mut legacy_columns = headers
-            .iter()
-            .filter(|(name, _)| !mapped_headers.contains(name.as_str()))
-            .filter_map(|(name, index)| {
-                record
-                    .get(*index)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .and_then(|value| legacy_field(name, value.to_string(), None))
-            })
-            .collect::<Vec<_>>();
+        let mut legacy_columns = Vec::new();
+        for (name, index) in &headers {
+            if mapped_headers.contains(name.as_str()) {
+                continue;
+            }
+            let Some(value) = record
+                .get(*index)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if let Some(field) = legacy_field(name, value.to_string(), None)? {
+                legacy_columns.push(field);
+            }
+        }
         legacy_columns.sort_by(|left, right| left.label.cmp(&right.label));
         for _ in &legacy_columns {
             fidelity.record(FieldDisposition::Legacy);
         }
         entry.legacy_fields.append(&mut legacy_columns);
         imported.push(entry);
+        check_import_item_count(imported.len())?;
     }
     Ok((imported, fidelity))
 }
@@ -1238,10 +1366,13 @@ fn totp_entry(
     account: &str,
     otpauth: String,
     fidelity: &mut FidelityCounts,
-) -> Option<VaultEntry> {
+) -> VaultResult<Option<VaultEntry>> {
+    let issuer = clean_import_field("issuer", issuer.to_string())?;
+    let account = clean_import_field("account", account.to_string())?;
+    let otpauth = clean_import_field("2FA secret", otpauth)?;
     if totp_from_value(&otpauth).is_none() {
         fidelity.record(FieldDisposition::Malformed);
-        return None;
+        return Ok(None);
     }
     // A link may carry no label at all. The secret is the valuable part and the
     // name can be edited, so name it rather than dropping it in silence.
@@ -1251,7 +1382,7 @@ fn totp_entry(
         (issuer, _) => issuer.to_string(),
     };
     fidelity.record(FieldDisposition::Imported);
-    Some(imported_entry(
+    Ok(Some(imported_entry(
         title,
         String::new(),
         account.trim().to_string(),
@@ -1262,7 +1393,7 @@ fn totp_entry(
         None,
         None,
         fidelity,
-    ))
+    )?))
 }
 
 /// Aegis, Ente Auth and KeePassXC all export a plain list of otpauth links.
@@ -1277,8 +1408,9 @@ pub fn import_otpauth_list_entries(
             continue;
         }
         let (issuer, account) = otpauth_labels(line);
-        if let Some(entry) = totp_entry(&issuer, &account, line.to_string(), &mut fidelity) {
+        if let Some(entry) = totp_entry(&issuer, &account, line.to_string(), &mut fidelity)? {
             entries.push(entry);
+            check_import_item_count(entries.len())?;
         }
     }
     if entries.is_empty() {
@@ -1415,8 +1547,9 @@ pub fn import_aegis_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>,
             item.info.period.unwrap_or(30),
             algorithm,
         );
-        if let Some(entry) = totp_entry(&item.issuer, &item.name, url, &mut fidelity) {
+        if let Some(entry) = totp_entry(&item.issuer, &item.name, url, &mut fidelity)? {
             entries.push(entry);
+            check_import_item_count(entries.len())?;
         }
     }
     if entries.is_empty() {
@@ -1459,8 +1592,9 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
             otp.period.unwrap_or(30),
             algorithm,
         );
-        if let Some(entry) = totp_entry(&issuer, &otp.account, url, &mut fidelity) {
+        if let Some(entry) = totp_entry(&issuer, &otp.account, url, &mut fidelity)? {
             entries.push(entry);
+            check_import_item_count(entries.len())?;
         }
     }
     if entries.is_empty() {
@@ -1480,7 +1614,27 @@ pub fn imported_entry(
     recovery_phone: Option<String>,
     notes: Option<String>,
     fidelity: &mut FidelityCounts,
-) -> VaultEntry {
+) -> VaultResult<VaultEntry> {
+    let title = clean_import_field("login name", title)?;
+    let url = clean_import_field("website address", url)?;
+    let username = clean_import_field("username", username)?;
+    let password = clean_import_field("password", password)?;
+    let totp = totp
+        .map(|value| clean_import_field("2FA secret", value))
+        .transpose()?;
+    let backup_codes = backup_codes
+        .into_iter()
+        .map(|code| clean_import_field("backup code", code))
+        .collect::<VaultResult<Vec<_>>>()?;
+    let recovery_email = recovery_email
+        .map(|value| clean_import_field("recovery email", value))
+        .transpose()?;
+    let recovery_phone = recovery_phone
+        .map(|value| clean_import_field("recovery phone", value))
+        .transpose()?;
+    let notes = notes
+        .map(|value| clean_import_field("notes", value))
+        .transpose()?;
     let trimmed_url = url.trim();
     let normalised_url = normalise_url(&url);
     if !trimmed_url.is_empty() {
@@ -1512,7 +1666,7 @@ pub fn imported_entry(
         fidelity.record(FieldDisposition::Imported);
     }
     let now = unix_timestamp();
-    VaultEntry {
+    Ok(VaultEntry {
         id: random_id(),
         title: if title.trim().is_empty() {
             domain_from_url(&normalised_url)
@@ -1543,39 +1697,51 @@ pub fn imported_entry(
         // parse_import_entries stamps the importer that produced this entry.
         import_source: None,
         legacy_fields: Vec::new(),
-    }
+    })
 }
 
-fn legacy_field(label: &str, value: String, field_type: Option<u8>) -> Option<LegacyField> {
+fn legacy_field(
+    label: &str,
+    value: String,
+    field_type: Option<u8>,
+) -> VaultResult<Option<LegacyField>> {
+    let label = clean_import_field("custom field name", label.to_string())?;
+    let value = clean_import_field("custom field value", value)?;
     let label = label.trim();
     if label.is_empty() || label.chars().count() > 160 || value.chars().count() > 20_000 {
-        return None;
+        return Ok(None);
     }
-    Some(LegacyField {
+    Ok(Some(LegacyField {
         label: label.to_string(),
         value,
         // Unknown field types are concealed: an importer must not decide a value is safe to show.
         secret: field_type != Some(0),
-    })
+    }))
 }
 
-fn normalise_folder(value: &str) -> String {
-    value.trim().chars().take(100).collect()
+fn normalise_folder(value: &str) -> VaultResult<String> {
+    let value = clean_import_field("folder", value.to_string())?;
+    Ok(value.trim().chars().take(100).collect())
 }
 
-fn normalise_tags(values: Vec<String>) -> Vec<String> {
+fn normalise_tags(values: Vec<String>) -> VaultResult<Vec<String>> {
     let mut tags = Vec::new();
     for value in values {
+        if value.len() > MAX_IMPORT_FIELD_BYTES {
+            return Err(
+                "The tag field in this import is larger than Sesame can import safely.".to_string(),
+            );
+        }
         for tag in value.split([',', '\n', ';']) {
-            let tag = tag.trim();
-            if tag.is_empty() || tag.chars().count() > 100 || tags.iter().any(|saved| saved == tag)
+            let tag = clean_import_field("tag", tag.trim().to_string())?;
+            if tag.is_empty() || tag.chars().count() > 100 || tags.iter().any(|saved| saved == &tag)
             {
                 continue;
             }
-            tags.push(tag.to_string());
+            tags.push(tag);
         }
     }
-    tags
+    Ok(tags)
 }
 
 pub fn resolved_totp(input_totp: Option<String>, stored_totp: Option<String>) -> Option<String> {
@@ -1660,7 +1826,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         title: title.to_string(),
         url: canonical_url,
         urls,
-        tags: normalise_tags(input.tags),
+        tags: normalise_tags(input.tags)?,
         username: input.username.trim().to_string(),
         email: input.email.trim().to_string(),
         password: input.password,
