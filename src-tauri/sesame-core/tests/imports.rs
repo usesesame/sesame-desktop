@@ -24,11 +24,11 @@ fn a_password_keeps_an_interior_comma_and_quote() {
 }
 
 #[test]
-fn a_quoted_multiline_password_stays_one_field_with_its_controls_stripped() {
+fn a_password_keeps_an_embedded_newline() {
     let entries = chrome(
         "name,url,username,password\nExample,https://example.test,person,\"line1\nline2\"\n",
     );
-    assert_eq!(entries[0].password, "line1line2");
+    assert_eq!(entries[0].password, "line1\nline2");
 }
 
 #[test]
@@ -147,13 +147,72 @@ fn a_field_past_the_field_limit_is_refused_with_its_name() {
 }
 
 #[test]
-fn control_and_bidi_characters_are_stripped_without_touching_normal_text() {
-    let csv = "name,url,username,password\n\"Ex\u{0007}ám\u{202E}ple😀\",https://example.test,\"per\u{000A}son\",\"se\u{2066}cr\u{0085}et\"\n";
+fn an_oversized_secret_is_refused_with_its_name() {
+    let oversized = "x".repeat(64 * 1024 + 1);
+    let csv =
+        format!("name,url,username,password\nExample,https://example.test,person,{oversized}\n");
+    let error = parse_import_entries(&csv, "chrome-csv")
+        .err()
+        .expect("an oversized password must be refused");
+    assert!(error.contains("password"), "{error}");
+
+    let json = format!(
+        r#"{{"items":[{{"type":5,"name":"Deploy key","sshKey":{{"privateKey":"{oversized}","publicKey":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 comment"}}}}]}}"#
+    );
+    let error = parse_import_entries(&json, "bitwarden-json")
+        .err()
+        .expect("an oversized private key must be refused");
+    assert!(error.contains("private key"), "{error}");
+}
+
+#[test]
+fn exact_values_keep_their_control_characters_through_the_import() {
+    let export = r#"{
+      "items": [
+        {
+          "type": 1,
+          "name": "Example",
+          "login": {
+            "username": "person",
+            "password": "line1\nline2\tend",
+            "totp": "abc\tdef",
+            "uris": [{ "uri": "https://example.test" }]
+          },
+          "fields": [
+            { "name": "Backup codes", "value": "AB\tCD", "type": 0 }
+          ]
+        },
+        {
+          "type": 5,
+          "name": "Deploy key",
+          "sshKey": {
+            "privateKey": "-----BEGIN KEY-----\nrow\tone\nrow two\n-----END KEY-----",
+            "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 comment"
+          }
+        }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    let login = &parsed.entries[0];
+    assert_eq!(login.password, "line1\nline2\tend");
+    assert_eq!(login.totp.as_deref(), Some("abc\tdef"));
+    assert_eq!(login.backup_codes, vec!["AB\tCD".to_string()]);
+    let key = &parsed.ssh_keys[0];
+    assert_eq!(
+        key.private_key,
+        "-----BEGIN KEY-----\nrow\tone\nrow two\n-----END KEY-----"
+    );
+}
+
+#[test]
+fn control_and_bidi_characters_are_stripped_from_display_text() {
+    let csv = "name,url,username,password,note\n\"Ex\u{0007}ám\u{202E}ple😀\",https://example.test,\"per\u{000A}son\",secret,\"no\u{0085}te\u{2066}s\"\n";
     let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
     let entry = &parsed.entries[0];
     assert_eq!(entry.title, "Exámple😀");
     assert_eq!(entry.username, "person");
     assert_eq!(entry.password, "secret");
+    assert_eq!(entry.notes.as_deref(), Some("notes"));
 }
 
 #[test]

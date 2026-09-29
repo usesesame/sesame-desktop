@@ -27,12 +27,17 @@ fn check_import_item_count(count: usize) -> VaultResult<()> {
     }
 }
 
-fn clean_import_field(field: &str, mut value: String) -> VaultResult<String> {
+fn bounded_import_field(field: &str, value: String) -> VaultResult<String> {
     if value.len() > MAX_IMPORT_FIELD_BYTES {
         return Err(format!(
             "The {field} field in this import is larger than Sesame can import safely."
         ));
     }
+    Ok(value)
+}
+
+fn clean_import_field(field: &str, value: String) -> VaultResult<String> {
+    let mut value = bounded_import_field(field, value)?;
     value.retain(|character| !is_import_control(character));
     Ok(value)
 }
@@ -346,8 +351,8 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             continue;
         };
         login.username = clean_import_field("username", login.username)?;
-        login.password = clean_import_field("password", login.password)?;
-        login.totp = clean_import_field("2FA secret", login.totp)?;
+        login.password = bounded_import_field("password", login.password)?;
+        login.totp = bounded_import_field("2FA secret", login.totp)?;
         for uri in &mut login.uris {
             uri.uri = clean_import_field("website address", std::mem::take(&mut uri.uri))?;
         }
@@ -376,7 +381,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             let Some(value) = field.value.and_then(non_empty) else {
                 continue;
             };
-            let value = clean_import_field("custom field", value)?;
+            let value = bounded_import_field("custom field value", value)?;
             if field_name.contains("backup") && field_name.contains("code") {
                 backup_codes.extend(split_backup_codes(&value));
             } else if field_name.contains("recovery") && field_name.contains("email") {
@@ -443,10 +448,10 @@ fn bitwarden_json_card(
     }
     let mut card = item.card.unwrap_or_default();
     card.cardholder_name = clean_import_field("cardholder name", card.cardholder_name)?;
-    card.number = clean_import_field("card number", card.number)?;
-    card.exp_month = clean_import_field("expiry month", card.exp_month)?;
-    card.exp_year = clean_import_field("expiry year", card.exp_year)?;
-    card.code = clean_import_field("security code", card.code)?;
+    card.number = bounded_import_field("card number", card.number)?;
+    card.exp_month = bounded_import_field("expiry month", card.exp_month)?;
+    card.exp_year = bounded_import_field("expiry year", card.exp_year)?;
+    card.code = bounded_import_field("security code", card.code)?;
     card.brand = clean_import_field("card brand", card.brand)?;
     let notes = clean_import_field("notes", item.notes)?;
     if !notes.is_empty() {
@@ -505,8 +510,8 @@ fn bitwarden_json_ssh_key(
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
     let mut key = item.ssh_key.unwrap_or_default();
-    key.private_key = clean_import_field("private key", key.private_key)?;
-    key.public_key = clean_import_field("public key", key.public_key)?;
+    key.private_key = bounded_import_field("private key", key.private_key)?;
+    key.public_key = bounded_import_field("public key", key.public_key)?;
     for value in [&key.private_key, &key.public_key] {
         if !value.trim().is_empty() {
             fidelity.record(FieldDisposition::Imported);
@@ -1041,7 +1046,7 @@ pub fn import_keeper_csv_entries(
                 "custom field name",
                 record.get(index).unwrap_or_default().trim().to_string(),
             )?;
-            let value = clean_import_field(
+            let value = bounded_import_field(
                 "custom field value",
                 record.get(index + 1).unwrap_or_default().trim().to_string(),
             )?;
@@ -1219,7 +1224,7 @@ pub fn import_nordpass_csv_entries(
                         || (normalised.contains("onetime") && normalised.contains("code"))
                 };
                 if looks_like_totp && entry.totp.is_none() {
-                    entry.totp = non_empty(clean_import_field("2FA secret", value)?);
+                    entry.totp = non_empty(bounded_import_field("2FA secret", value)?);
                     fidelity.record(FieldDisposition::Imported);
                     continue;
                 }
@@ -1369,7 +1374,7 @@ fn totp_entry(
 ) -> VaultResult<Option<VaultEntry>> {
     let issuer = clean_import_field("issuer", issuer.to_string())?;
     let account = clean_import_field("account", account.to_string())?;
-    let otpauth = clean_import_field("2FA secret", otpauth)?;
+    let otpauth = bounded_import_field("2FA secret", otpauth)?;
     if totp_from_value(&otpauth).is_none() {
         fidelity.record(FieldDisposition::Malformed);
         return Ok(None);
@@ -1618,13 +1623,13 @@ pub fn imported_entry(
     let title = clean_import_field("login name", title)?;
     let url = clean_import_field("website address", url)?;
     let username = clean_import_field("username", username)?;
-    let password = clean_import_field("password", password)?;
+    let password = bounded_import_field("password", password)?;
     let totp = totp
-        .map(|value| clean_import_field("2FA secret", value))
+        .map(|value| bounded_import_field("2FA secret", value))
         .transpose()?;
     let backup_codes = backup_codes
         .into_iter()
-        .map(|code| clean_import_field("backup code", code))
+        .map(|code| bounded_import_field("backup code", code))
         .collect::<VaultResult<Vec<_>>>()?;
     let recovery_email = recovery_email
         .map(|value| clean_import_field("recovery email", value))
@@ -1706,7 +1711,7 @@ fn legacy_field(
     field_type: Option<u8>,
 ) -> VaultResult<Option<LegacyField>> {
     let label = clean_import_field("custom field name", label.to_string())?;
-    let value = clean_import_field("custom field value", value)?;
+    let value = bounded_import_field("custom field value", value)?;
     let label = label.trim();
     if label.is_empty() || label.chars().count() > 160 || value.chars().count() > 20_000 {
         return Ok(None);
