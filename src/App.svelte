@@ -814,6 +814,7 @@
         bind:newPassword={$settingsState.newMasterPassword}
         bind:confirmPassword={$settingsState.confirmNewMasterPassword}
         bind:recoveryKit={$settingsState.newRecoveryKit}
+        backupsRemaining={$settingsState.newBackupsRemaining}
         bind:recoveryConfirmed={$settingsState.newRecoveryConfirmed}
         errorMessage={$feedbackState.errorMessage}
         working={$settingsState.changingMasterPassword}

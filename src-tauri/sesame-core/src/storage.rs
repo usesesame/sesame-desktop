@@ -257,12 +257,17 @@ pub fn complete_recovery_setup_for_session(
     Ok(())
 }
 
+pub struct MasterPasswordRotation {
+    pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
+}
+
 /// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
 pub fn rotate_master_password_for_session(
     session: &mut UnlockedVault,
     current_password: &str,
     new_password: &str,
-) -> VaultResult<String> {
+) -> VaultResult<MasterPasswordRotation> {
     if new_password.chars().count() < 12 {
         return Err("Use a new master password with at least 12 characters.".into());
     }
@@ -314,8 +319,14 @@ pub fn rotate_master_password_for_session(
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
-    let _ = crate::backup::prune_vault_backups(&session.path);
-    Ok(recovery_kit_for_display)
+    let backups_remaining = match crate::backup::prune_vault_backups(&session.path) {
+        Ok(outcome) => Some(outcome.remaining),
+        Err(_) => None,
+    };
+    Ok(MasterPasswordRotation {
+        recovery_kit: recovery_kit_for_display,
+        backups_remaining,
+    })
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
@@ -1074,9 +1085,10 @@ mod tests {
         let mut session = unlocked_at(path.clone(), old_password);
         persist_session(&mut session).expect("initial persisted session");
 
-        let recovery_kit =
-            rotate_master_password_for_session(&mut session, old_password, new_password)
-                .expect("rotated password");
+        let rotation = rotate_master_password_for_session(&mut session, old_password, new_password)
+            .expect("rotated password");
+        let recovery_kit = rotation.recovery_kit;
+        assert_eq!(rotation.backups_remaining, Some(0));
 
         let bytes = fs::read(&path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
@@ -1110,9 +1122,10 @@ mod tests {
         )
         .expect("revision copy");
 
-        rotate_master_password_for_session(&mut session, old_password, new_password)
+        let rotation = rotate_master_password_for_session(&mut session, old_password, new_password)
             .expect("rotated password");
 
+        assert_eq!(rotation.backups_remaining, Some(0));
         assert_eq!(fs::read_dir(&backup_dir).expect("backup folder").count(), 0);
         fs::remove_dir_all(directory).expect("removed test directory");
     }
@@ -1125,12 +1138,13 @@ mod tests {
         persist_session(&mut session).expect("initial persisted session");
         assert!(!directory.join("backups").exists());
 
-        rotate_master_password_for_session(
+        let rotation = rotate_master_password_for_session(
             &mut session,
             "fictional old password",
             "fictional new password",
         )
         .expect("rotated password");
+        assert_eq!(rotation.backups_remaining, Some(0));
 
         fs::remove_dir_all(directory).expect("removed test directory");
     }

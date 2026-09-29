@@ -6,6 +6,7 @@
   export let newPassword = ''
   export let confirmPassword = ''
   export let recoveryKit = ''
+  export let backupsRemaining: number | null = null
   export let recoveryConfirmed = false
   export let errorMessage = ''
   export let working = false
@@ -38,7 +39,14 @@
   {#if showingRecoveryKit}
     <span class="confirm-icon"><Icon name="file-key" size={20} /></span>
     <h2 id="change-master-password-heading">Save this new kit</h2>
-    <p id="change-master-password-description">Your vault now uses a new encryption key. Your old recovery kit no longer opens it. Sesame removed its local backup copies in this vault folder, but backups you exported or saved elsewhere still open with your old password. PIN and Windows Hello unlock were turned off and can be enabled again after you save this new kit.</p>
+    <p id="change-master-password-description">Your vault now uses a new encryption key. Your old recovery kit no longer opens it. Backups you exported or saved elsewhere still open with your old password. PIN and Windows Hello unlock were turned off and can be enabled again after you save this new kit.</p>
+    {#if backupsRemaining === 0}
+      <p class="backup-removal-note">Sesame removed its local backup copies in this vault folder.</p>
+    {:else if backupsRemaining === null}
+      <p class="backup-removal-warning" role="alert">Sesame could not check whether it removed its local backup copies in this vault folder. Any copies that remain still open with your old password.</p>
+    {:else}
+      <p class="backup-removal-warning" role="alert">Sesame could not remove {backupsRemaining} local backup {backupsRemaining === 1 ? 'copy' : 'copies'} in this vault folder. {backupsRemaining === 1 ? 'It still opens' : 'They still open'} with your old password. Remove {backupsRemaining === 1 ? 'it' : 'them'} before relying on the change.</p>
+    {/if}
     <code class="recovery-code">{recoveryKit}</code>
     <label class="recovery-confirm"><input name="replacement-recovery-kit-saved" type="checkbox" bind:checked={recoveryConfirmed} /> <span>I saved this outside Sesame.</span></label>
     <div class="confirm-actions"><button type="button" class="primary-button" disabled={!recoveryConfirmed} on:click={onDone}>Done</button></div>

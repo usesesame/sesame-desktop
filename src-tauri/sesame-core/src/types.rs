@@ -22,6 +22,7 @@ pub struct ChangeMasterPasswordRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeMasterPasswordResult {
     pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
 }
 
 #[derive(Serialize, ts_rs::TS)]

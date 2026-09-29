@@ -302,33 +302,60 @@ pub fn snapshot_vault_revision(vault: &Path, label: &str) -> VaultResult<Option<
     Ok(Some(name))
 }
 
-pub fn prune_vault_backups(vault: &Path) -> VaultResult<usize> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BackupPruneOutcome {
+    pub removed: usize,
+    pub remaining: usize,
+}
+
+pub fn prune_vault_backups(vault: &Path) -> VaultResult<BackupPruneOutcome> {
+    prune_vault_backups_with(vault, |path, is_dir| {
+        if is_dir {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        }
+    })
+}
+
+fn prune_vault_backups_with<F>(vault: &Path, mut remove_entry: F) -> VaultResult<BackupPruneOutcome>
+where
+    F: FnMut(&Path, bool) -> std::io::Result<()>,
+{
     let backup_dir = vault
         .parent()
         .ok_or("Sesame could not find the vault folder.")?
         .join("backups");
     let entries = match fs::read_dir(&backup_dir) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BackupPruneOutcome {
+                removed: 0,
+                remaining: 0,
+            })
+        }
         Err(_) => return Err("Sesame could not read the local backup folder.".to_string()),
     };
     let mut removed = 0;
+    let mut remaining = 0;
     for entry in entries {
-        let entry =
-            entry.map_err(|_| "Sesame could not read the local backup folder.".to_string())?;
-        let file_type = entry
-            .file_type()
-            .map_err(|_| "Sesame could not read the local backup folder.".to_string())?;
-        if file_type.is_dir() {
-            fs::remove_dir_all(entry.path())
-                .map_err(|_| "Sesame could not remove the local backup copies.".to_string())?;
-        } else {
-            fs::remove_file(entry.path())
-                .map_err(|_| "Sesame could not remove the local backup copies.".to_string())?;
-            removed += 1;
+        let Ok(entry) = entry else {
+            remaining += 1;
+            continue;
+        };
+        let is_dir = match entry.file_type() {
+            Ok(file_type) => file_type.is_dir(),
+            Err(_) => {
+                remaining += 1;
+                continue;
+            }
+        };
+        match remove_entry(&entry.path(), is_dir) {
+            Ok(()) => removed += 1,
+            Err(_) => remaining += 1,
         }
     }
-    Ok(removed)
+    Ok(BackupPruneOutcome { removed, remaining })
 }
 
 pub struct PreparedRestore {
@@ -1150,7 +1177,13 @@ mod tests {
         let vault = directory.0.join("vault.sesame");
         let backups = directory.0.join("backups");
         fs::create_dir(&backups).expect("backup folder");
-        assert_eq!(prune_vault_backups(&vault).expect("empty folder"), 0);
+        assert_eq!(
+            prune_vault_backups(&vault).expect("empty folder"),
+            BackupPruneOutcome {
+                removed: 0,
+                remaining: 0
+            }
+        );
 
         fs::write(
             backups.join("sesame-backup-fictional.sesame"),
@@ -1162,9 +1195,52 @@ mod tests {
             b"fictional copy",
         )
         .expect("revision copy");
-        assert_eq!(prune_vault_backups(&vault).expect("pruned"), 2);
+        assert_eq!(
+            prune_vault_backups(&vault).expect("pruned"),
+            BackupPruneOutcome {
+                removed: 2,
+                remaining: 0
+            }
+        );
         assert_eq!(fs::read_dir(&backups).expect("backup folder").count(), 0);
-        assert_eq!(prune_vault_backups(&vault).expect("pruned again"), 0);
+        assert_eq!(
+            prune_vault_backups(&vault).expect("pruned again"),
+            BackupPruneOutcome {
+                removed: 0,
+                remaining: 0
+            }
+        );
+    }
+
+    #[test]
+    fn pruning_continues_after_one_copy_cannot_be_removed() {
+        let directory = TestDirectory::new("prune-backups-failure");
+        let vault = directory.0.join("vault.sesame");
+        let backups = directory.0.join("backups");
+        fs::create_dir(&backups).expect("backup folder");
+        let blocked = backups.join("sesame-backup-fictional.sesame");
+        let removed = backups.join("sesame-before-import-fictional.sesame");
+        fs::write(&blocked, b"fictional copy").expect("backup copy");
+        fs::write(&removed, b"fictional copy").expect("revision copy");
+
+        let outcome = prune_vault_backups_with(&vault, |path, _is_dir| {
+            if path == blocked.as_path() {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                fs::remove_file(path)
+            }
+        })
+        .expect("pruned");
+
+        assert_eq!(
+            outcome,
+            BackupPruneOutcome {
+                removed: 1,
+                remaining: 1
+            }
+        );
+        assert!(blocked.exists());
+        assert!(!removed.exists());
     }
 
     #[test]

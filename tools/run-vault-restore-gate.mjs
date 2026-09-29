@@ -45,6 +45,32 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   const beforeDigest = sha256(await readFile(fixture))
   const activeDigestBefore = sha256(await readFile(vaultPath))
 
+  recordStep(steps, 'lock.before_locked_refusal', await bridge.call('lock_vault', {}))
+  const lockedRefusal = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  const lockedRefusalMessage = String(lockedRefusal.error ?? '')
+  recordStep(steps, 'restore_backup.locked', {
+    ok: lockedRefusal.ok === false && lockedRefusalMessage.includes('Unlock your vault before restoring a backup.'),
+    error: lockedRefusalMessage || 'the restore while locked was not refused',
+    value: { refused: true },
+  })
+  recordStep(steps, 'active_vault.unchanged_after_locked_refusal', {
+    ok: sha256(await readFile(vaultPath)) === activeDigestBefore,
+    error: 'the active vault file changed after the refused locked restore',
+  })
+  recordStep(steps, 'unlock.after_locked_refusal', await bridge.call('unlock_vault', { request: { masterPassword: createdPassword } }))
+
+  const presenceRefusal = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  const presenceRefusalMessage = String(presenceRefusal.error ?? '')
+  recordStep(steps, 'restore_backup.without_presence', {
+    ok: presenceRefusal.ok === false && presenceRefusalMessage.includes('presenceRequired'),
+    error: presenceRefusalMessage || 'the restore without a presence grant was not refused',
+    value: { refused: true },
+  })
+  recordStep(steps, 'active_vault.unchanged_after_presence_refusal', {
+    ok: sha256(await readFile(vaultPath)) === activeDigestBefore,
+    error: 'the active vault file changed after the refused presence restore',
+  })
+
   recordStep(steps, 'grant_presence.active', await bridge.call('grant_presence', { secret: createdPassword }))
   const refused = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
   const refusalMessage = String(refused.error ?? '')
