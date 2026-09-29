@@ -36,6 +36,7 @@ target/
 .envrc
 .direnv/
 .npmrc
+!/.npmrc
 
 # Signing and private keys
 *.pem

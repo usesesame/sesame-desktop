@@ -12,6 +12,7 @@
     ".gitattributes",
     ".gitignore",
     ".node-version",
+    ".npmrc",
     "CONTRIBUTING.md",
     "LICENSE",
     "README.md",
