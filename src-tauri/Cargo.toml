@@ -17,6 +17,11 @@ opt-level = 3
 [profile.test.package.blake2]
 opt-level = 3
 
+[profile.release]
+lto = true
+strip = "symbols"
+overflow-checks = true
+
 [package]
 name = "sesame"
 version = "0.3.0"
