@@ -1,6 +1,8 @@
 use super::ensure_crypto_provider;
 use crate::desktop_settings;
+use crate::vault::VaultResult;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use rand::Rng;
 use reqwest::{redirect::Policy, Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,8 +14,6 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
-use crate::vault::VaultResult;
-
 const SUCCESS_TTL_SECS: u64 = 30 * 24 * 60 * 60;
 const FAILURE_RETRY_SECS: u64 = 6 * 60 * 60;
 const MAX_ICON_BYTES: usize = 128 * 1024;
@@ -22,6 +22,17 @@ const MAX_ICON_CANDIDATES: usize = 3;
 const MAX_LINK_TAGS: usize = 64;
 const MAX_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 500;
+const CACHE_SALT_FILE: &str = "icon-cache-salt.bin";
+const CACHE_SALT_BYTES: usize = 32;
+const ALLOWED_ICON_MEDIA_TYPES: [&str; 7] = [
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+];
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +42,7 @@ struct CacheMetadata {
     media_type: Option<String>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct CachePaths {
     metadata: PathBuf,
     image: PathBuf,
@@ -69,7 +81,8 @@ pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Optio
         run_cache_work(move || {
             fs::create_dir_all(&cache_dir)
                 .map_err(|_| "Sesame could not create the website icon cache.".to_string())?;
-            let paths = cache_paths(&cache_dir, &host);
+            let salt = cache_salt(&cache_dir)?;
+            let paths = cache_paths(&cache_dir, &salt, &host);
             let metadata = read_metadata(&paths.metadata);
             let now = unix_time();
             let cached = read_cached_icon(&paths.image, metadata.media_type.as_deref());
@@ -150,14 +163,56 @@ fn cache_dir(app: &AppHandle) -> VaultResult<PathBuf> {
         .map_err(|_| "Sesame could not locate its website icon cache.".to_string())
 }
 
-fn cache_paths(cache_dir: &Path, host: &str) -> CachePaths {
-    let key = Sha256::digest(host.as_bytes())
+fn cache_paths(cache_dir: &Path, salt: &[u8; CACHE_SALT_BYTES], host: &str) -> CachePaths {
+    let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update([0_u8]);
+    hasher.update(host.as_bytes());
+    let key = hasher
+        .finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     CachePaths {
         metadata: cache_dir.join(format!("{key}.json")),
         image: cache_dir.join(format!("{key}.img")),
+    }
+}
+
+fn cache_salt(cache_dir: &Path) -> VaultResult<[u8; CACHE_SALT_BYTES]> {
+    let path = cache_dir.join(CACHE_SALT_FILE);
+    if let Some(salt) = read_cache_salt(&path) {
+        return Ok(salt);
+    }
+    let mut salt = [0_u8; CACHE_SALT_BYTES];
+    rand::rng().fill_bytes(&mut salt);
+    match crate::vault::storage::atomic_replace(&path, &salt) {
+        Ok(()) => {
+            clear_unsalted_cache_entries(cache_dir);
+            Ok(salt)
+        }
+        Err(_) => read_cache_salt(&path)
+            .ok_or_else(|| "Sesame could not prepare the website icon cache.".to_string()),
+    }
+}
+
+fn read_cache_salt(path: &Path) -> Option<[u8; CACHE_SALT_BYTES]> {
+    let bytes = fs::read(path).ok()?;
+    bytes.as_slice().try_into().ok()
+}
+
+fn clear_unsalted_cache_entries(cache_dir: &Path) {
+    let Ok(items) = fs::read_dir(cache_dir) else {
+        return;
+    };
+    for item in items.flatten() {
+        let path = item.path();
+        if matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("json" | "img")
+        ) {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -266,6 +321,12 @@ async fn fetch_declared_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>,
 }
 
 async fn read_icon(mut response: reqwest::Response) -> VaultResult<(Vec<u8>, String)> {
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    accepted_icon_media_type(content_type.as_deref())?;
     if response
         .content_length()
         .is_some_and(|length| length > MAX_ICON_BYTES as u64)
@@ -283,9 +344,34 @@ async fn read_icon(mut response: reqwest::Response) -> VaultResult<(Vec<u8>, Str
         }
         bytes.extend_from_slice(&chunk);
     }
-    let media_type = detect_image_type(&bytes)
-        .ok_or_else(|| "That website returned an unsupported icon format.".to_string())?;
+    let media_type = accepted_icon_body(content_type.as_deref(), &bytes)?;
     Ok((bytes, media_type.to_string()))
+}
+
+fn accepted_icon_media_type(content_type: Option<&str>) -> VaultResult<()> {
+    let Some(value) = content_type else {
+        return Ok(());
+    };
+    let media_type = value
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if ALLOWED_ICON_MEDIA_TYPES.contains(&media_type.as_str()) {
+        Ok(())
+    } else {
+        Err("That website returned an unsupported icon format.".to_string())
+    }
+}
+
+fn accepted_icon_body(content_type: Option<&str>, bytes: &[u8]) -> VaultResult<&'static str> {
+    accepted_icon_media_type(content_type)?;
+    if bytes.len() > MAX_ICON_BYTES {
+        return Err("That website icon is too large.".to_string());
+    }
+    detect_image_type(bytes)
+        .ok_or_else(|| "That website returned an unsupported icon format.".to_string())
 }
 
 async fn read_limited(mut response: reqwest::Response, limit: usize) -> VaultResult<Vec<u8>> {
@@ -493,6 +579,7 @@ fn redirect_target(original: &str, location: &str) -> VaultResult<String> {
 fn icon_client(host: &str, pinned: &[SocketAddr]) -> VaultResult<Client> {
     ensure_crypto_provider();
     Client::builder()
+        .https_only(true)
         .redirect(Policy::none())
         .connect_timeout(Duration::from_secs(4))
         .timeout(Duration::from_secs(8))
@@ -906,5 +993,146 @@ mod tests {
             assert!(normalized_host(site).is_err(), "{site}");
         }
         assert_eq!(normalized_host(" Example.TEST. ").unwrap(), "example.test");
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sesame-website-icons-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("test directory");
+        dir
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    const _: () = assert!(MAX_ICON_BYTES <= 512 * 1024);
+
+    #[test]
+    fn icon_fetch_is_refused_when_the_opt_in_is_off() {
+        let settings = test_dir("opt-in").join("desktop-settings.json");
+        assert!(desktop_settings::require_website_icons_enabled(&settings).is_err());
+        desktop_settings::write_settings_at(
+            &settings,
+            &desktop_settings::DesktopSettings {
+                website_icons_enabled: true,
+            },
+        )
+        .expect("enable setting");
+        assert!(desktop_settings::require_website_icons_enabled(&settings).is_ok());
+        desktop_settings::write_settings_at(
+            &settings,
+            &desktop_settings::DesktopSettings {
+                website_icons_enabled: false,
+            },
+        )
+        .expect("disable setting");
+        assert!(desktop_settings::require_website_icons_enabled(&settings).is_err());
+        let _ = fs::remove_dir_all(settings.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn a_non_image_body_is_refused() {
+        assert!(accepted_icon_body(Some("text/html"), b"<!doctype html>").is_err());
+        assert!(accepted_icon_body(Some("application/json"), b"{}").is_err());
+        assert!(accepted_icon_body(Some("application/octet-stream"), b"\x00\x00\x01\x00").is_err());
+        assert!(accepted_icon_body(None, b"fictional not an icon").is_err());
+        assert_eq!(
+            accepted_icon_body(Some("image/png; charset=binary"), b"\x89PNG\r\n\x1a\n")
+                .expect("png accepted"),
+            "image/png"
+        );
+        assert_eq!(
+            accepted_icon_body(Some("image/x-icon"), b"\x00\x00\x01\x00").expect("icon accepted"),
+            "image/x-icon"
+        );
+    }
+
+    #[test]
+    fn an_oversized_body_is_refused() {
+        let mut png = vec![0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
+        png.resize(MAX_ICON_BYTES + 1, 0);
+        assert!(accepted_icon_body(Some("image/png"), &png).is_err());
+        assert_eq!(
+            accepted_icon_body(Some("image/png"), &png[..MAX_ICON_BYTES])
+                .expect("boundary accepted"),
+            "image/png"
+        );
+    }
+
+    #[test]
+    fn the_cache_name_is_salted_and_stable_for_this_device() {
+        let dir = test_dir("salt");
+        let salt = cache_salt(&dir).expect("cache salt");
+        assert_eq!(salt, cache_salt(&dir).expect("persisted salt"));
+        let paths = cache_paths(&dir, &salt, "example.test");
+        assert_eq!(paths, cache_paths(&dir, &salt, "example.test"));
+
+        let plain = hex(&Sha256::digest(b"example.test"));
+        assert_ne!(
+            paths.metadata.file_stem().and_then(|value| value.to_str()),
+            Some(plain.as_str())
+        );
+        assert_ne!(
+            paths.image.file_stem().and_then(|value| value.to_str()),
+            Some(plain.as_str())
+        );
+
+        let mut other = salt;
+        other[0] ^= 0xff;
+        assert_ne!(cache_paths(&dir, &other, "example.test"), paths);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.join(CACHE_SALT_FILE))
+                .expect("salt metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn creating_the_salt_removes_unsalted_entries() {
+        let dir = test_dir("legacy");
+        let legacy = hex(&Sha256::digest(b"legacy.test"));
+        let legacy_metadata = dir.join(format!("{legacy}.json"));
+        let legacy_image = dir.join(format!("{legacy}.img"));
+        fs::write(&legacy_metadata, b"{}").expect("legacy metadata");
+        fs::write(&legacy_image, b"png").expect("legacy image");
+        let _ = cache_salt(&dir).expect("cache salt");
+        assert!(!legacy_metadata.exists());
+        assert!(!legacy_image.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_eviction_ignores_the_salt_file() {
+        let dir = test_dir("eviction");
+        let salt = cache_salt(&dir).expect("cache salt");
+        let first = cache_paths(&dir, &salt, "first.example.test");
+        fs::write(&first.metadata, b"{}").expect("first metadata");
+        fs::write(&first.image, b"png").expect("first image");
+        std::thread::sleep(Duration::from_millis(20));
+        let second = cache_paths(&dir, &salt, "second.example.test");
+        fs::write(&second.metadata, b"{}").expect("second metadata");
+        fs::write(&second.image, b"png").expect("second image");
+
+        prune_cache_to_limits(&dir, &second.metadata, &second.image, 1, u64::MAX);
+
+        assert!(dir.join(CACHE_SALT_FILE).exists());
+        let remaining = fs::read_dir(&dir)
+            .expect("cache directory")
+            .flatten()
+            .filter(|item| item.path().extension().and_then(|value| value.to_str()) == Some("json"))
+            .count();
+        assert_eq!(remaining, 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
