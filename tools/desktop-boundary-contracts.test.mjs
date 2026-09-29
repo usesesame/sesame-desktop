@@ -140,7 +140,7 @@ test('desktop Sync fixtures are digest-bound local snapshots', () => {
 test('every registered command is reachable through a permission group', () => {
   const lib = read('src-tauri', 'src', 'lib.rs')
   const handler = lib.slice(lib.indexOf('generate_handler!'))
-  const registered = [...handler.matchAll(/commands::([a-z0-9_]+)\s*,/g)].map((match) => match[1])
+  const registered = [...handler.matchAll(/(?:commands|desktop_settings)::([a-z0-9_]+)\s*,/g)].map((match) => match[1])
   assert.ok(registered.length > 50, `expected the full command surface, found ${registered.length}`)
 
   const permissions = read('src-tauri', 'permissions', 'desktop.toml')

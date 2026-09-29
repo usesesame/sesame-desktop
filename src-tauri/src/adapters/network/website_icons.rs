@@ -1,4 +1,5 @@
 use super::ensure_crypto_provider;
+use crate::desktop_settings;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::{redirect::Policy, Client};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,7 @@ async fn run_cache_work<T: Send + 'static>(
 
 #[tauri::command]
 pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Option<String>> {
+    desktop_settings::require_website_icons_enabled(&desktop_settings::settings_path(&app)?)?;
     let host = normalized_host(&site)?;
     let cache_dir = cache_dir(&app)?;
     let (paths, mut metadata, now, cached) = {

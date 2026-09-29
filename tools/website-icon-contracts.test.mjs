@@ -23,3 +23,14 @@ test('desktop icon requests cannot bypass the native cache', () => {
   assert.doesNotMatch(vaultView, /https:\/\/\$?\{?.*favicon\.ico/)
   assert.match(vaultView, /<WebsiteIcon/)
 })
+
+test('desktop icon fetches require the persisted website icon opt-in', () => {
+  const icons = read('src-tauri', 'src', 'adapters', 'network', 'website_icons.rs')
+  const settings = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_settings.rs')
+  const controller = read('src', 'lib', 'controllers', 'settings-controller.ts')
+  assert.match(icons, /require_website_icons_enabled\(&desktop_settings::settings_path/)
+  assert.match(settings, /app_local_data_dir\(\)/)
+  assert.match(settings, /atomic_replace/)
+  assert.match(controller, /const stored = await getWebsiteIconsEnabled\(\)/)
+  assert.match(controller, /await setWebsiteIconsEnabled\(enabled\)/)
+})

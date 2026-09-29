@@ -165,13 +165,15 @@ commands.allow = [
 
 [[permission]]
 identifier = "desktop-settings"
-description = "Tray, quick-access shortcut, and autostart settings for the main window."
+description = "Tray, quick-access shortcut, autostart, and website icon settings for the main window."
 commands.allow = [
   "set_tray_enabled",
   "set_quick_access_shortcut",
   "get_autostart_enabled",
   "set_autostart_enabled",
   "get_platform_capabilities",
+  "get_website_icons_enabled",
+  "set_website_icons_enabled",
 ]
 
 [[permission]]

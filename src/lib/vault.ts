@@ -1349,6 +1349,16 @@ export async function getWebsiteIcon(site: string): Promise<string | null> {
   return invoke<string | null>('get_website_icon', { site })
 }
 
+export async function getWebsiteIconsEnabled(): Promise<boolean | null> {
+  if (previewMode) return null
+  return invoke<boolean | null>('get_website_icons_enabled')
+}
+
+export async function setWebsiteIconsEnabled(enabled: boolean): Promise<void> {
+  if (previewMode) return
+  await invoke('set_website_icons_enabled', { enabled })
+}
+
 export async function clearWebsiteIconCache(): Promise<void> {
   if (previewMode) return
   await invoke('clear_website_icon_cache')

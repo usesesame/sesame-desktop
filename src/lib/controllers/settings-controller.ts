@@ -36,6 +36,7 @@ import {
   getServiceConnectionStatus,
   getVaultStatus,
   getWebsiteIconCacheStatus,
+  getWebsiteIconsEnabled,
 	linkDesktopService,
 	onDesktopUpdateProgress,
   previewMode,
@@ -48,6 +49,7 @@ import {
   setQuickAccessShortcut,
   setTrayEnabled,
   setUnlockPin,
+  setWebsiteIconsEnabled,
 } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
@@ -120,6 +122,19 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   async function refreshWebsiteIconCache() {
     try { state.patch({ websiteIconCache: await getWebsiteIconCacheStatus() }) } catch { /* non-critical */ }
+  }
+
+  async function applyStoredWebsiteIconsSetting() {
+    const stored = await getWebsiteIconsEnabled().catch(() => undefined)
+    if (stored === undefined) return
+    if (stored === null) {
+      if (settings.value().siteIconsEnabled) await setWebsiteIconsEnabled(true).catch(() => undefined)
+      return
+    }
+    if (stored !== settings.value().siteIconsEnabled) {
+      settings.patch({ siteIconsEnabled: stored })
+      storeSiteIcons(stored)
+    }
   }
 
   async function refreshAutostartStatus() {
@@ -233,6 +248,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
       void refreshDiagnosticStatus()
       void refreshWebsiteIconCache()
+      void applyStoredWebsiteIconsSetting()
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
@@ -279,7 +295,13 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     cycleTheme() {
       setTheme(nextTheme(settings.value().theme))
     },
-    setSiteIconsEnabled(enabled: boolean) {
+    async setSiteIconsEnabled(enabled: boolean) {
+      try {
+        await setWebsiteIconsEnabled(enabled)
+      } catch (error) {
+        feedback.setError(error)
+        return
+      }
       settings.patch({ siteIconsEnabled: enabled })
       storeSiteIcons(enabled)
       feedback.showNotice(enabled ? 'Website icons enabled' : 'Website icons disabled', enabled ? 'Sesame will reuse each downloaded icon for up to 30 days.' : 'Saved logins will use their initials instead.')
