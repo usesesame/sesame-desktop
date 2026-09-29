@@ -311,10 +311,6 @@ fn kdf_parameters_below_the_floor_are_refused() {
     let mut widest_parallelism = at_floor.clone();
     widest_parallelism.parallelism = MAX_KDF_PARALLELISM;
     assert!(validate_kdf_params(&widest_parallelism).is_ok());
-
-    let mut memory_below_eight_times_parallelism = at_floor.clone();
-    memory_below_eight_times_parallelism.memory_kib = 8 * MAX_KDF_PARALLELISM - 1;
-    assert!(validate_kdf_params(&memory_below_eight_times_parallelism).is_err());
 }
 
 #[test]

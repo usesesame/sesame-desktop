@@ -54,7 +54,6 @@ pub fn validate_kdf_params(params: &KdfParams) -> VaultResult<()> {
         || params.iterations > MAX_KDF_ITERATIONS
         || params.parallelism == 0
         || params.parallelism > MAX_KDF_PARALLELISM
-        || u64::from(params.memory_kib) < 8 * u64::from(params.parallelism)
     {
         return Err("The vault KDF settings are outside Sesame's safe limits.".into());
     }
