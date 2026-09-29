@@ -3,10 +3,8 @@ use sesame_core::types::{Identity, VaultEntry, VaultPayload};
 use sesame_core::util::split_backup_codes;
 
 fn export_with(entry: VaultEntry) -> String {
-    let payload = VaultPayload {
-        entries: vec![entry],
-        ..VaultPayload::default()
-    };
+    let mut payload = VaultPayload::default();
+    payload.entries = vec![entry];
     String::from_utf8(csv_export_bytes(&payload).expect("export")).expect("utf8")
 }
 
@@ -27,29 +25,27 @@ fn reimport(csv: &str) -> VaultEntry {
             .to_string()
     };
     let joined_backup_codes = value("backup_codes");
-    VaultEntry {
-        title: value("name"),
-        url: value("url"),
-        username: value("username"),
-        email: value("email"),
-        password: value("password"),
-        totp: Some(value("totp")),
-        backup_codes: split_backup_codes(&joined_backup_codes),
-        recovery_email: Some(value("recovery_email")),
-        recovery_phone: Some(value("recovery_phone")),
-        notes: Some(value("notes")),
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.title = value("name");
+    entry.url = value("url");
+    entry.username = value("username");
+    entry.email = value("email");
+    entry.password = value("password");
+    entry.totp = Some(value("totp"));
+    entry.backup_codes = split_backup_codes(&joined_backup_codes);
+    entry.recovery_email = Some(value("recovery_email"));
+    entry.recovery_phone = Some(value("recovery_phone"));
+    entry.notes = Some(value("notes"));
+    entry
 }
 
 #[test]
 fn a_password_that_looks_like_a_formula_survives_export_and_reimport() {
     let password = "=cmd|'/c calc'!A1";
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        password: password.into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.password = password.into();
+    let csv = export_with(entry);
 
     assert!(
         csv.contains(password),
@@ -62,12 +58,11 @@ fn a_password_that_looks_like_a_formula_survives_export_and_reimport() {
 fn a_totp_seed_and_a_backup_code_survive_export_and_reimport() {
     let totp = "=JBSWY3DPEHPK3PXP";
     let backup_code = "=1234-5678";
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        totp: Some(totp.into()),
-        backup_codes: vec![backup_code.into()],
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.totp = Some(totp.into());
+    entry.backup_codes = vec![backup_code.into()];
+    let csv = export_with(entry);
 
     let reimported = reimport(&csv);
     assert_eq!(reimported.totp.as_deref(), Some(totp));
@@ -77,10 +72,9 @@ fn a_totp_seed_and_a_backup_code_survive_export_and_reimport() {
 #[test]
 fn a_leading_control_character_survives_export_and_reimport() {
     let title = "\tExample".to_string();
-    let csv = export_with(VaultEntry {
-        title: title.clone(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = title.clone();
+    let csv = export_with(entry);
 
     assert!(csv.contains(&title), "the title was rewritten:\n{csv}");
     assert_eq!(reimport(&csv).title, title);
@@ -89,13 +83,10 @@ fn a_leading_control_character_survives_export_and_reimport() {
 #[test]
 fn an_identity_that_looks_like_a_formula_is_exported_unchanged() {
     let full_name = "=cmd|'/c calc'!A1".to_string();
-    let payload = VaultPayload {
-        identities: vec![Identity {
-            full_name: full_name.clone(),
-            ..Identity::default()
-        }],
-        ..VaultPayload::default()
-    };
+    let mut identity = Identity::default();
+    identity.full_name = full_name.clone();
+    let mut payload = VaultPayload::default();
+    payload.identities = vec![identity];
     let csv = String::from_utf8(identities_csv_bytes(&payload).expect("export")).expect("utf8");
 
     assert!(
@@ -106,12 +97,11 @@ fn an_identity_that_looks_like_a_formula_is_exported_unchanged() {
 
 #[test]
 fn an_ordinary_value_is_exported_unchanged() {
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        username: "person@example.test".into(),
-        password: "ordinary-secret".into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.username = "person@example.test".into();
+    entry.password = "ordinary-secret".into();
+    let csv = export_with(entry);
     assert!(csv.contains("ordinary-secret"), "{csv}");
     assert!(!csv.contains("'ordinary-secret"), "{csv}");
 }
@@ -125,11 +115,10 @@ fn an_exported_file_is_private_on_unix() {
         std::env::temp_dir().join(format!("sesame-export-{}", sesame_core::util::random_id()));
     std::fs::create_dir_all(&directory).expect("test directory");
     let path = directory.join("export.csv");
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        password: "ordinary-secret".into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.password = "ordinary-secret".into();
+    let csv = export_with(entry);
 
     sesame_core::storage::write_export_file(&path, csv.as_bytes()).expect("export written");
     let mode = || {
