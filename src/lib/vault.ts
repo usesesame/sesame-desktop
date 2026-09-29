@@ -826,7 +826,6 @@ export async function refreshTotp(id: string): Promise<TotpRefresh> {
   return invoke<TotpRefresh>('refresh_totp', { id })
 }
 
-// The file is chosen and parsed in Rust; its path and contents never enter the webview.
 export async function chooseImportFile(source: ImportSource): Promise<ChosenFile | null> {
   if (previewMode) return { token: 'preview-import-token', fileName: 'preview-export.csv' }
   return invoke<ChosenFile | null>('choose_import_file', { source })

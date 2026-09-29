@@ -138,8 +138,6 @@ export type { RecoveryHealth } from './generated/RecoveryHealth'
 export type { DiagnosticStatus } from './generated/DiagnosticStatus'
 export type { WebsiteIconCacheStatus } from './generated/WebsiteIconCacheStatus'
 
-// Hand-written: no dedicated Rust struct of this shape, a frontend-only
-// extension of the generated `BackupInspection` with the file's picked token.
 export interface BackupSelection extends BackupInspection {
   token: string
 }
