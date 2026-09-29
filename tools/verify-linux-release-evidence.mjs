@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 
 import { validateLinuxEvidenceDirectory } from './linux-release-evidence.mjs'
 import { validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 
 const [directoryInput, manifestFilename] = process.argv.slice(2)
 if (!directoryInput || !manifestFilename) {
@@ -14,8 +14,12 @@ if (!directoryInput || !manifestFilename) {
 const root = path.resolve(directoryInput)
 const { manifest, paths } = await validateLinuxEvidenceDirectory(root, manifestFilename)
 const shipped = JSON.parse(await readFile(path.join(root, manifest.linuxLifecycle.shipped.filename), 'utf8'))
+const rpm = JSON.parse(await readFile(path.join(root, manifest.linuxLifecycle.rpm.filename), 'utf8'))
+const appimage = JSON.parse(await readFile(path.join(root, manifest.linuxLifecycle.appimage.filename), 'utf8'))
 const vault = JSON.parse(await readFile(path.join(root, manifest.linuxLifecycle.vault.filename), 'utf8'))
 validateLinuxShippedEvidence(shipped)
+validateLinuxRpmShippedEvidence(rpm)
+validateLinuxAppImageShippedEvidence(appimage)
 validateLinuxPackageEvidence(vault)
 
 const cosign = process.env.SESAME_COSIGN_BIN?.trim() || 'cosign'
@@ -25,4 +29,4 @@ for (const artifact of manifest.artifacts) {
   await verify(paths.artifacts[artifact.filename], paths.bundles[artifact.filename])
 }
 await verify(paths.manifest, path.join(root, `${manifestFilename}.sigstore.json`))
-process.stdout.write(`Verified Sesame ${manifest.version} ${manifest.architecture} Linux release evidence and both installed-package gates.\n`)
+process.stdout.write(`Verified Sesame ${manifest.version} ${manifest.architecture} Linux release evidence and every installed-package gate.\n`)
