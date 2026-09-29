@@ -50,7 +50,6 @@ fn totp_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         &request.request_id,
         origin.clone(),
         epoch,
-        peer.identity(),
         ApprovalRequest::Totp { candidate_ids },
     ) {
         Ok(value) => value,

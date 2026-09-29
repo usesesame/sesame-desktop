@@ -56,9 +56,6 @@ pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
     Some(fields)
 }
 
-/// Only the current contract version of a message type is accepted. Older
-/// versions have no fallback path, so a stale extension is refused instead of
-/// being served a narrower contract than it expects.
 pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
     match message_type {
         "fill" => version == LOOKALIKE_PROTOCOL_VERSION,

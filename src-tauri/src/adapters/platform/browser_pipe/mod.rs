@@ -8,23 +8,13 @@ use zeroize::Zeroizing;
 
 pub const MAX_PIPE_MESSAGE_BYTES: usize = 16 * 1024;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PeerIdentity {
-    pub(crate) pid: u32,
-    pub(crate) start_time: u64,
-}
-
 #[cfg(windows)]
 mod windows;
-#[cfg(all(windows, test))]
-pub(crate) use windows::current_process_identity;
 #[cfg(windows)]
 pub use windows::{request, serve_forever, PipePeer};
 
 #[cfg(target_os = "linux")]
 mod unix;
-#[cfg(all(target_os = "linux", test))]
-pub(crate) use unix::current_process_identity;
 #[cfg(target_os = "linux")]
 pub use unix::{request, serve_forever, PipePeer};
 
@@ -37,26 +27,12 @@ pub fn request(_payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-impl PeerIdentity {
-    pub fn is_alive(&self) -> bool {
-        false
-    }
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
 pub struct PipePeer;
 
 #[cfg(not(any(windows, target_os = "linux")))]
 impl PipePeer {
     pub fn is_connected(&self) -> bool {
         false
-    }
-
-    pub fn identity(&self) -> PeerIdentity {
-        PeerIdentity {
-            pid: 0,
-            start_time: 0,
-        }
     }
 }
 

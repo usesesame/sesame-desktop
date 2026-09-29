@@ -103,7 +103,6 @@ struct PendingApproval {
     request_id: String,
     origin: NormalizedOrigin,
     session_epoch: u64,
-    peer: PeerIdentity,
     request: ApprovalRequest,
     request_event: Option<ApprovalEvent>,
     deadline: Instant,
@@ -141,19 +140,7 @@ pub struct SavePayload {
 struct FillInner {
     pending: Option<PendingApproval>,
     recent_request_ids: VecDeque<String>,
-    grants: Vec<FillGrant>,
     last_activation: Option<Instant>,
-}
-
-/// One approval the user chose to extend to a single origin and login for a short window.
-/// Bound to the session epoch and to the peer process that asked, so locking, rotating
-/// the vault, or a different host process discards it.
-struct FillGrant {
-    origin: String,
-    login_id: String,
-    session_epoch: u64,
-    peer: PeerIdentity,
-    expires: Instant,
 }
 
 #[derive(Default)]
@@ -167,38 +154,9 @@ impl BrowserFillState {
             if let Some(pending) = inner.pending.take() {
                 let _ = pending.sender.send(ApprovalDecision::Denied);
             }
-            inner.grants.clear();
         }
     }
 
-    /// An unexpired grant for this exact origin and epoch whose login is still
-    /// offered to the same peer process that earned it. Grants whose process is
-    /// gone are dropped here.
-    fn granted_login(
-        &self,
-        peer: &PeerIdentity,
-        origin: &NormalizedOrigin,
-        session_epoch: u64,
-        candidate_ids: &HashSet<String>,
-    ) -> Option<String> {
-        let mut inner = self.inner.lock().ok()?;
-        let now = Instant::now();
-        inner.grants.retain(|grant| {
-            grant.expires > now && grant.session_epoch == session_epoch && grant.peer.is_alive()
-        });
-        let canonical = origin.canonical();
-        inner
-            .grants
-            .iter()
-            .find(|grant| {
-                grant.peer == *peer
-                    && grant.origin == canonical
-                    && candidate_ids.contains(&grant.login_id)
-            })
-            .map(|grant| grant.login_id.clone())
-    }
-
-    /// True when this raise is allowed; the first raise after the interval wins.
     fn note_activation(&self, now: Instant) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return false;
@@ -233,14 +191,9 @@ impl BrowserFillState {
         request_id: &str,
         origin: NormalizedOrigin,
         session_epoch: u64,
-        peer: PeerIdentity,
         request: ApprovalRequest,
     ) -> Result<(String, Instant, Receiver<ApprovalDecision>), &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
-        let now = Instant::now();
-        inner
-            .grants
-            .retain(|grant| grant.expires > now && grant.peer.is_alive());
         Self::note_request_id(&mut inner, request_id)?;
         if inner.pending.is_some() {
             return Err("approvalUnavailable");
@@ -253,7 +206,6 @@ impl BrowserFillState {
             request_id: request_id.to_string(),
             origin,
             session_epoch,
-            peer,
             request,
             request_event: None,
             deadline,
@@ -344,12 +296,7 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn decide(
-        &self,
-        approval_id: &str,
-        decision: ApprovalDecision,
-        remember: bool,
-    ) -> Result<(), &'static str> {
+    fn decide(&self, approval_id: &str, decision: ApprovalDecision) -> Result<(), &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let pending = inner.pending.as_ref().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -365,29 +312,11 @@ impl BrowserFillState {
                 return Err("selectionNotOffered");
             }
         }
-        let grant = match (&decision, remember, &pending.request) {
-            (ApprovalDecision::Selected(login_id), true, ApprovalRequest::Fill { .. }) => {
-                Some(FillGrant {
-                    origin: pending.origin.canonical(),
-                    login_id: login_id.clone(),
-                    session_epoch: pending.session_epoch,
-                    peer: pending.peer,
-                    expires: Instant::now() + FILL_GRANT_DURATION,
-                })
-            }
-            _ => None,
-        };
         pending
             .sender
             .send(decision)
             .map_err(|_| "approvalExpired")?;
         inner.pending = None;
-        if let Some(grant) = grant {
-            inner
-                .grants
-                .retain(|held| held.origin != grant.origin || held.login_id != grant.login_id);
-            inner.grants.push(grant);
-        }
         Ok(())
     }
 

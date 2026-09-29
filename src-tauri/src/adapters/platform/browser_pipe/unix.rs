@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use zeroize::Zeroizing;
 
-use super::{PeerIdentity, MAX_PIPE_MESSAGE_BYTES};
+use super::MAX_PIPE_MESSAGE_BYTES;
 
 const IO_TIMEOUT: Duration = Duration::from_millis(1_500);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -25,28 +25,6 @@ pub struct PipePeer {
 impl PipePeer {
     pub fn is_connected(&self) -> bool {
         process_start_time(self.pid).is_some_and(|current| current == self.start_time)
-    }
-
-    pub fn identity(&self) -> PeerIdentity {
-        PeerIdentity {
-            pid: self.pid,
-            start_time: self.start_time,
-        }
-    }
-}
-
-impl PeerIdentity {
-    pub fn is_alive(&self) -> bool {
-        process_start_time(self.pid).is_some_and(|current| current == self.start_time)
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn current_process_identity() -> PeerIdentity {
-    let pid = std::process::id();
-    PeerIdentity {
-        pid,
-        start_time: process_start_time(pid).unwrap_or(0),
     }
 }
 

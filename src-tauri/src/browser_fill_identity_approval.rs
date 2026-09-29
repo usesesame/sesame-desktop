@@ -65,7 +65,6 @@ fn identity_response(
         &request.request_id,
         origin.clone(),
         epoch,
-        peer.identity(),
         ApprovalRequest::Identity { candidate_ids },
     ) {
         Ok(value) => value,

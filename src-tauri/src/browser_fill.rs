@@ -15,7 +15,7 @@ use url::{Host, Url};
 use zeroize::Zeroize;
 
 use crate::{
-    browser_pipe::{PeerIdentity, PipePeer},
+    browser_pipe::PipePeer,
     browser_protocol::{
         fill_carries_match_kind, parse_card_fields, parse_identity_fields, BrowserRequest,
         BrowserResponse, CardFillFields, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION,
@@ -32,8 +32,6 @@ const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
 const APPROVAL_POLL: Duration = Duration::from_millis(200);
 const ACTIVATE_MIN_INTERVAL: Duration = Duration::from_secs(5);
 const REPLAY_CACHE_SIZE: usize = 128;
-/// How long an explicit "allow this site" choice lasts. Memory only, and never written to disk.
-const FILL_GRANT_DURATION: Duration = Duration::from_secs(15 * 60);
 const MAX_MATCHING_CANDIDATES: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -329,7 +327,7 @@ pub fn resolve_save(
     } else {
         ApprovalDecision::Denied
     };
-    match state.decide(approval_id, decision, false) {
+    match state.decide(approval_id, decision) {
         Ok(()) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -383,7 +381,6 @@ pub fn resolve(
     state: State<'_, BrowserFillState>,
     approval_id: String,
     login_id: Option<String>,
-    remember: bool,
 ) -> Result<(), String> {
     if approval_id.is_empty() || approval_id.len() > 64 {
         return Err("That browser approval is no longer available.".into());
@@ -392,7 +389,7 @@ pub fn resolve(
     let decision = login_id
         .map(ApprovalDecision::Selected)
         .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision, remember) {
+    match state.decide(&approval_id, decision) {
         Ok(()) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -443,7 +440,7 @@ pub fn resolve_identity(
     let decision = identity_id
         .map(ApprovalDecision::Selected)
         .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision, false) {
+    match state.decide(&approval_id, decision) {
         Ok(()) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -478,7 +475,7 @@ pub fn resolve_card(
     let decision = card_id
         .map(ApprovalDecision::Selected)
         .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision, false) {
+    match state.decide(&approval_id, decision) {
         Ok(()) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -514,7 +511,7 @@ pub fn resolve_totp(
     let decision = login_id
         .map(ApprovalDecision::Selected)
         .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision, false) {
+    match state.decide(&approval_id, decision) {
         Ok(()) => {
             diagnostics::record_browser_host_registration(
                 app,
@@ -623,50 +620,35 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         .map(|candidate| candidate.id.clone())
         .collect();
     let fill_state = app.state::<BrowserFillState>();
-    let granted = fill_state.granted_login(&peer.identity(), &origin, epoch, &candidate_ids);
     let (approval_id, deadline, receiver) = match fill_state.begin(
         &request.request_id,
         origin.clone(),
         epoch,
-        peer.identity(),
         ApprovalRequest::Fill { candidate_ids },
     ) {
         Ok(value) => value,
         Err(reason) => return BrowserResponse::unavailable(request, reason),
     };
 
-    // A live grant resolves the approval without prompting. Every check after the
-    // decision still runs, so the vault, origin, and peer are revalidated as usual.
-    if let Some(login_id) = granted {
-        if fill_state
-            .decide(&approval_id, ApprovalDecision::Selected(login_id), false)
-            .is_err()
-        {
-            fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(request, "approvalUnavailable");
-        }
-        diagnostics::record_browser_host_registration(app, "fill_auto_approved");
-    } else {
-        let event = BrowserFillRequestEvent {
-            approval_id: approval_id.clone(),
-            origin: origin.canonical(),
-            hostname: origin.hostname.clone(),
-            candidates,
-            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
-            expires_at_unix_ms: approval_expires_at_unix_ms(),
-        };
-        if fill_state
-            .publish(&approval_id, ApprovalEvent::Fill(event.clone()))
-            .is_err()
-        {
-            fill_state.revoke(&approval_id);
-            return BrowserResponse::unavailable(request, "approvalUnavailable");
-        }
-        // Publish before focus change: Chromium closes the popup when Sesame comes forward.
-        bring_to_foreground(app);
-        // The webview also polls the durable request so a listener race cannot hide the prompt.
-        let _ = app.emit("browser-fill-request", event);
+    let event = BrowserFillRequestEvent {
+        approval_id: approval_id.clone(),
+        origin: origin.canonical(),
+        hostname: origin.hostname.clone(),
+        candidates,
+        expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
+        expires_at_unix_ms: approval_expires_at_unix_ms(),
+    };
+    if fill_state
+        .publish(&approval_id, ApprovalEvent::Fill(event.clone()))
+        .is_err()
+    {
+        fill_state.revoke(&approval_id);
+        return BrowserResponse::unavailable(request, "approvalUnavailable");
     }
+    // Publish before focus change: Chromium closes the popup when Sesame comes forward.
+    bring_to_foreground(app);
+    // The webview also polls the durable request so a listener race cannot hide the prompt.
+    let _ = app.emit("browser-fill-request", event);
 
     let decision = match wait_for_decision(
         app,
@@ -833,7 +815,6 @@ fn save_response(
         &request.request_id,
         origin.clone(),
         epoch,
-        peer.identity(),
         ApprovalRequest::Save {
             kind,
             title: title.clone(),
@@ -947,7 +928,6 @@ fn card_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         &request.request_id,
         origin.clone(),
         epoch,
-        peer.identity(),
         ApprovalRequest::Card { candidate_ids },
     ) {
         Ok(value) => value,
@@ -1120,7 +1100,7 @@ fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod grant_tests {
+mod approval_tests {
     use super::*;
 
     fn origin(value: &str) -> NormalizedOrigin {
@@ -1129,10 +1109,6 @@ mod grant_tests {
 
     fn ids(values: &[&str]) -> HashSet<String> {
         values.iter().map(|value| value.to_string()).collect()
-    }
-
-    fn live_peer() -> PeerIdentity {
-        crate::browser_pipe::current_process_identity()
     }
 
     fn begin_fill(
@@ -1145,7 +1121,6 @@ mod grant_tests {
                 request_id,
                 origin("https://example.test"),
                 epoch,
-                live_peer(),
                 ApprovalRequest::Fill {
                     candidate_ids: ids(&["login-a"]),
                 },
@@ -1163,199 +1138,12 @@ mod grant_tests {
                 request_id,
                 origin("https://checkout.example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Card {
                     candidate_ids: ids(&["card-a"]),
                 },
             )
             .expect("begin card");
         (approval_id, receiver)
-    }
-
-    /// Approve once with remember, and the next request for the same origin and login needs no prompt.
-    fn approve(state: &BrowserFillState, request_id: &str, epoch: u64, remember: bool) {
-        let (approval_id, _receiver) = begin_fill(state, request_id, epoch);
-        state
-            .decide(
-                &approval_id,
-                ApprovalDecision::Selected("login-a".to_string()),
-                remember,
-            )
-            .expect("decide");
-    }
-
-    fn approve_for(state: &BrowserFillState, request_id: &str, epoch: u64, peer: PeerIdentity) {
-        let (approval_id, _, _receiver) = state
-            .begin(
-                request_id,
-                origin("https://example.test"),
-                epoch,
-                peer,
-                ApprovalRequest::Fill {
-                    candidate_ids: ids(&["login-a"]),
-                },
-            )
-            .expect("begin");
-        state
-            .decide(
-                &approval_id,
-                ApprovalDecision::Selected("login-a".to_string()),
-                true,
-            )
-            .expect("decide");
-    }
-
-    #[test]
-    fn a_remembered_approval_answers_the_next_request_for_the_same_login() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, true);
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            Some("login-a".to_string())
-        );
-    }
-
-    #[test]
-    fn an_approval_without_remember_grants_nothing() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, false);
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn a_grant_does_not_cross_to_another_origin() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, true);
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://other.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn a_grant_does_not_cover_a_login_it_was_not_given_for() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, true);
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-b"])
-            ),
-            None
-        );
-    }
-
-    /// Locking the vault advances the session epoch, so a grant cannot survive it.
-    #[test]
-    fn a_grant_dies_when_the_session_epoch_moves() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, true);
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                8,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-        // The stale grant is pruned rather than left waiting for the epoch to come back.
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn cancelling_pending_approvals_clears_every_grant() {
-        let state = BrowserFillState::default();
-        approve(&state, "req-1", 7, true);
-        state.cancel_pending();
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn a_grant_does_not_transfer_to_another_peer() {
-        let state = BrowserFillState::default();
-        let granted_peer = live_peer();
-        approve_for(&state, "req-1", 7, granted_peer);
-        let other_peer = PeerIdentity {
-            pid: 0,
-            start_time: 0,
-        };
-
-        assert_eq!(
-            state.granted_login(
-                &other_peer,
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-        assert_eq!(
-            state.granted_login(
-                &granted_peer,
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            Some("login-a".to_string())
-        );
-    }
-
-    #[test]
-    fn a_grant_for_a_peer_that_is_gone_is_cleared() {
-        let state = BrowserFillState::default();
-        let gone_peer = PeerIdentity {
-            pid: u32::MAX,
-            start_time: 1,
-        };
-        approve_for(&state, "req-1", 7, gone_peer);
-
-        assert_eq!(
-            state.granted_login(
-                &gone_peer,
-                &origin("https://example.test"),
-                7,
-                &ids(&["login-a"])
-            ),
-            None
-        );
-        assert!(state.inner.lock().expect("inner").grants.is_empty());
     }
 
     #[test]
@@ -1367,7 +1155,6 @@ mod grant_tests {
             .decide(
                 &approval_id,
                 ApprovalDecision::Selected("card-a".to_string()),
-                false,
             )
             .expect("approve card");
         assert!(
@@ -1379,7 +1166,6 @@ mod grant_tests {
                 "card-request-1",
                 origin("https://checkout.example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Card {
                     candidate_ids: ids(&["card-a"]),
                 },
@@ -1397,7 +1183,6 @@ mod grant_tests {
             state.decide(
                 &approval_id,
                 ApprovalDecision::Selected("card-b".to_string()),
-                false,
             ),
             Err("selectionNotOffered")
         );
@@ -1418,7 +1203,6 @@ mod grant_tests {
                 "req-2",
                 origin("https://example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Save {
                     kind: SaveKind::New,
                     title: "Fictional".to_string(),
@@ -1434,7 +1218,6 @@ mod grant_tests {
                 "req-1",
                 origin("https://example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Card {
                     candidate_ids: ids(&["card-a"]),
                 },
@@ -1449,14 +1232,12 @@ mod grant_tests {
         let (approval_id, _receiver) = begin_fill(&state, "req-1", 7);
 
         assert_eq!(
-            state.decide("not-the-approval", ApprovalDecision::Denied, false),
+            state.decide("not-the-approval", ApprovalDecision::Denied),
             Err("approvalExpired")
         );
-        assert!(state
-            .decide(&approval_id, ApprovalDecision::Denied, false)
-            .is_ok());
+        assert!(state.decide(&approval_id, ApprovalDecision::Denied).is_ok());
         assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            state.decide(&approval_id, ApprovalDecision::Denied),
             Err("approvalExpired")
         );
     }
@@ -1472,7 +1253,7 @@ mod grant_tests {
         }
 
         assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            state.decide(&approval_id, ApprovalDecision::Denied),
             Err("approvalExpired")
         );
         assert!(state.save_payload_if_bound(&approval_id).is_none());
@@ -1509,7 +1290,6 @@ mod grant_tests {
                 "save-1",
                 origin("https://example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Save {
                     kind: SaveKind::Update,
                     title: "Fictional".to_string(),
@@ -1526,7 +1306,7 @@ mod grant_tests {
         assert!(state.save_payload_if_bound("not-the-approval").is_none());
 
         state
-            .decide(&approval_id, ApprovalDecision::Saved, false)
+            .decide(&approval_id, ApprovalDecision::Saved)
             .expect("decide");
         assert!(state.save_payload_if_bound(&approval_id).is_none());
     }
@@ -1552,31 +1332,9 @@ mod grant_tests {
         assert!(state.pending_save_request().is_none());
 
         state
-            .decide(&approval_id, ApprovalDecision::Denied, false)
+            .decide(&approval_id, ApprovalDecision::Denied)
             .expect("decide");
         assert!(state.pending_fill_request().is_none());
-    }
-
-    #[test]
-    fn a_remembered_grant_is_only_recorded_for_a_fill_selection() {
-        let state = BrowserFillState::default();
-        let (approval_id, _receiver) = begin_card(&state, "card-request-3");
-        state
-            .decide(
-                &approval_id,
-                ApprovalDecision::Selected("card-a".to_string()),
-                true,
-            )
-            .expect("decide");
-        assert_eq!(
-            state.granted_login(
-                &live_peer(),
-                &origin("https://checkout.example.test"),
-                7,
-                &ids(&["card-a"])
-            ),
-            None
-        );
     }
 }
 
@@ -1884,10 +1642,6 @@ mod totp_flow_tests {
         values.iter().map(|value| value.to_string()).collect()
     }
 
-    fn live_peer() -> PeerIdentity {
-        crate::browser_pipe::current_process_identity()
-    }
-
     fn totp_entry(id: &str, url: &str, seed: Option<&str>) -> VaultEntry {
         VaultEntry {
             id: id.to_string(),
@@ -1923,7 +1677,6 @@ mod totp_flow_tests {
                 request_id,
                 origin("https://example.test"),
                 epoch,
-                live_peer(),
                 ApprovalRequest::Totp {
                     candidate_ids: ids(&["login-a"]),
                 },
@@ -2006,7 +1759,6 @@ mod totp_flow_tests {
             state.decide(
                 &approval_id,
                 ApprovalDecision::Selected("login-short".to_string()),
-                false,
             ),
             Err("selectionNotOffered")
         );
@@ -2038,7 +1790,6 @@ mod totp_flow_tests {
             .decide(
                 &approval_id,
                 ApprovalDecision::Selected("login-a".to_string()),
-                false,
             )
             .expect("decide");
         assert!(
@@ -2046,7 +1797,7 @@ mod totp_flow_tests {
         );
         assert!(state.pending_totp_request().is_none());
         assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            state.decide(&approval_id, ApprovalDecision::Denied),
             Err("approvalExpired")
         );
         assert!(matches!(
@@ -2054,7 +1805,6 @@ mod totp_flow_tests {
                 "totp-1",
                 origin("https://example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Totp {
                     candidate_ids: ids(&["login-a"]),
                 },
@@ -2073,7 +1823,6 @@ mod totp_flow_tests {
                 "totp-2",
                 origin("https://example.test"),
                 7,
-                live_peer(),
                 ApprovalRequest::Totp {
                     candidate_ids: ids(&["login-a"]),
                 },
@@ -2093,7 +1842,7 @@ mod totp_flow_tests {
         }
 
         assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied, false),
+            state.decide(&approval_id, ApprovalDecision::Denied),
             Err("approvalExpired")
         );
         assert!(state.pending_totp_request().is_none());
