@@ -47,7 +47,6 @@ export const requiredAppImageSteps = [
   'app.launch',
   'app.stop',
   'browser.registration_refused',
-  'package.uninstall',
 ]
 
 export const evidenceFilenameByFormat = {
@@ -170,9 +169,22 @@ const registrationEnvironment = (environment) => [`HOME=${environment.HOME}`, `X
 
 function elfMachine(bytes) {
   if (bytes.length < 20 || bytes[0] !== 0x7f || bytes.toString('latin1', 1, 4) !== 'ELF') {
-    throw new Error('The AppImage payload does not carry an ELF application binary.')
+    return null
   }
   return bytes[5] === 1 ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18)
+}
+
+async function registrationRefused(environment, appIdentifier) {
+  const manifestCleared = await registrationRemoved(environment)
+  const diagnostics = await readFile(path.join(environment.XDG_DATA_HOME, appIdentifier, 'logs', 'sesame-diagnostics.jsonl'), 'utf8').catch(() => '')
+  const refusalRecorded = diagnostics.includes('"code":"registration_unsupported"')
+  return {
+    ok: manifestCleared && refusalRecorded,
+    value: { manifestCleared, refusalRecorded },
+    error: manifestCleared
+      ? (refusalRecorded ? undefined : 'The AppImage did not record a refused browser registration.')
+      : 'The AppImage registered a persistent native-host manifest.',
+  }
 }
 
 async function launchAndStop(binary, { launchSeconds, logPath, environment, extraEnv = {} }) {
@@ -352,17 +364,19 @@ async function runRpmGate(context) {
 }
 
 async function runAppImageGate(context) {
-  const { staging, environment, platform, architecture, version, expectedElfMachine, packagePath, packageBytes, packageSha256, steps, startedAt } = context
+  const { staging, environment, appIdentifier, platform, architecture, version, expectedElfMachine, expectedAppImageArchitecture, packagePath, packageBytes, packageSha256, steps, startedAt } = context
   const filename = path.basename(packagePath)
-  if (!filename.includes(`_${version}_`)) throw new Error(`The AppImage name ${filename} does not carry version ${version}.`)
   await command(packagePath, ['--appimage-extract'], { cwd: staging })
   const appDir = path.join(staging, 'squashfs-root')
   const binary = path.join(appDir, 'usr/bin/sesame')
   const host = path.join(appDir, 'usr/bin/sesame-browser-host')
-  const binaryBytes = await readFile(binary)
-  if (elfMachine(binaryBytes) !== expectedElfMachine) throw new Error(`The AppImage payload architecture does not match ${architecture}.`)
-  record(steps, 'package.metadata', true, { filename, version, architecture })
-  record(steps, 'package.install', true, { installKind: 'appimage-extract', binary })
+  const binaryBytes = await readFile(binary).catch(() => null)
+  if (!binaryBytes) throw new Error('The AppImage extraction did not produce usr/bin/sesame.')
+  const expectedFilename = `Sesame_${version}_${expectedAppImageArchitecture}.AppImage`
+  const metadataOk = filename === expectedFilename && elfMachine(binaryBytes) === expectedElfMachine
+  record(steps, 'package.metadata', metadataOk, { filename, version, architecture }, metadataOk ? undefined : `The AppImage identity is not ${expectedFilename} on ${architecture}.`)
+  const installOk = await executableFile(path.join(appDir, 'AppRun')) && await executableFile(binary)
+  record(steps, 'package.install', installOk, { installKind: 'appimage-extract', binary }, installOk ? undefined : 'The AppImage extraction did not produce an executable AppRun and application binary.')
 
   const desktopPath = path.join(appDir, 'usr/share/applications/Sesame.desktop')
   const desktopEntry = await readFile(desktopPath, 'utf8').catch(() => '')
@@ -375,11 +389,8 @@ async function runAppImageGate(context) {
   const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The AppImage exited before the launch window closed.')
   record(steps, 'app.stop', true)
-  const refused = await registrationRemoved(environment)
-  record(steps, 'browser.registration_refused', refused, undefined, refused ? undefined : 'The AppImage registered a persistent native-host manifest.')
-
-  await rm(staging, { recursive: true, force: true })
-  record(steps, 'package.uninstall', (await stat(staging).catch(() => null)) === null)
+  const refused = await registrationRefused(environment, appIdentifier)
+  record(steps, 'browser.registration_refused', refused.ok, refused.value, refused.error)
 
   return buildRecord({
     schema: APPIMAGE_RUN_SCHEMA,
@@ -461,6 +472,8 @@ async function main() {
   if (platform !== 'linux') throw new Error('The shipped-package gate only runs on Linux.')
   const architecture = architectureName()
   const version = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version
+  const appIdentifier = JSON.parse(await readFile(path.join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8')).identifier
+  if (typeof appIdentifier !== 'string' || appIdentifier.length === 0) throw new Error('The Tauri configuration has no application identifier.')
   const startedAt = new Date().toISOString()
 
   const workRoot = await mkdtemp(path.join(tmpdir(), 'sesame-shipped-package-'))
@@ -482,6 +495,8 @@ async function main() {
     expectedArchitecture: architecture === 'x86_64' ? 'amd64' : 'arm64',
     expectedRpmArchitecture: architecture,
     expectedElfMachine: elMachines[architecture],
+    expectedAppImageArchitecture: architecture === 'x86_64' ? 'amd64' : 'aarch64',
+    appIdentifier,
     packagePath,
     packageBytes,
     packageSha256,

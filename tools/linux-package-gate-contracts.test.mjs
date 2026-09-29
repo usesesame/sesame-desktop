@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
 import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
-import { pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
+import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { chromeHostManifestMatches, pinnedChromeOrigin } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
+
+const bundlerFetchedToolNames = [
+  'AppRun-x86_64',
+  'linuxdeploy-x86_64.AppImage',
+  'linuxdeploy-plugin-gtk.sh',
+  'linuxdeploy-plugin-gstreamer.sh',
+  'linuxdeploy-plugin-appimage.AppImage',
+]
 
 function shippedRecord(overrides = {}) {
   return {
@@ -218,6 +227,7 @@ test('the AppImage shipped record requires an extracted payload and no registrat
   assert.throws(() => validateLinuxAppImageShippedEvidence(missing), /did not pass browser\.registration_refused/)
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ schema: RPM_RUN_SCHEMA })), /wrong schema/)
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ binarySha256: 'nope' })), /package and binary digests/)
+  assert.ok(!requiredAppImageSteps.includes('package.uninstall'), 'the AppImage gate must not require an uninstall step that only deletes its own staging directory')
 })
 
 test('the shipped evidence filenames and format inference stay stable', () => {
@@ -256,12 +266,12 @@ test('the release lane gates every shipped format before freezing evidence', asy
   assert.ok(workflow.indexOf('linux-shipped-package-gate.mjs') < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the gates must run before the evidence freeze')
 })
 
-test('every repository-managed AppImage bundling tool is pinned by version and hash', async () => {
+test('every tool the Tauri bundler can fetch is pinned by version and hash', async () => {
   const pins = pinnedBundleTools.x86_64
-  assert.equal(pins.length, 3)
+  assert.deepEqual(pins.map((pin) => pin.name).sort(), [...bundlerFetchedToolNames].sort(), 'the pin table does not cover exactly the tools the bundler fetches')
   for (const pin of pins) {
     assert.match(pin.name, /^[A-Za-z0-9._-]+$/)
-    assert.match(pin.url, /^https:\/\/github\.com\//)
+    assert.match(pin.url, /^https:\/\/(github\.com|raw\.githubusercontent\.com)\//)
     assert.match(pin.sha256, /^[0-9a-f]{64}$/)
   }
   const apprun = pins.find((pin) => pin.name === 'AppRun-x86_64')
@@ -271,8 +281,36 @@ test('every repository-managed AppImage bundling tool is pinned by version and h
   assert.equal(linuxdeploy.url, 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage')
   const plugin = pins.find((pin) => pin.name === 'linuxdeploy-plugin-appimage.AppImage')
   assert.equal(plugin.url, 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage')
+  const gtk = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
+  assert.match(gtk.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gtk\/[0-9a-f]{40}\/linuxdeploy-plugin-gtk\.sh$/, 'the gtk plugin is not pinned to an immutable commit')
+  const gstreamer = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gstreamer.sh')
+  assert.match(gstreamer.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gstreamer\/[0-9a-f]{40}\/linuxdeploy-plugin-gstreamer\.sh$/, 'the gstreamer plugin is not pinned to an immutable commit')
   const lock = JSON.parse(await readFile(path.join(repository, 'package-lock.json'), 'utf8'))
   assert.equal(lock.packages['node_modules/@tauri-apps/cli'].version, verifiedCliVersion, 'the pinned Linux bundling tools target a different Tauri CLI; re-verify every bundler tool name and hash')
+})
+
+test('a download that does not match its pinned hash is refused before it is written', async () => {
+  const tool = pinnedBundleTools.x86_64.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
+  const toolsDir = await mkdtemp(path.join(tmpdir(), 'sesame-bundle-tools-'))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('fictional tampered tool', { status: 200 })
+  try {
+    await assert.rejects(installPinnedTool(tool, toolsDir), /does not match its pinned SHA-256/)
+    assert.equal(await readFile(path.join(toolsDir, tool.name)).catch(() => null), null, 'the rejected tool was written')
+    assert.equal(await readFile(path.join(toolsDir, `${tool.name}.download`)).catch(() => null), null, 'the rejected tool was staged for rename')
+  } finally {
+    globalThis.fetch = originalFetch
+    await rm(toolsDir, { recursive: true, force: true })
+  }
+})
+
+test('Linux CI exercises the shipped rpm and AppImage gates before tagging', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const job = workflow.slice(workflow.indexOf('desktop-linux:'))
+  for (const format of ['rpm', 'appimage']) {
+    assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
+  }
+  assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
 })
 
 test('the bundling tools are verified before the bundler can download its own', async () => {

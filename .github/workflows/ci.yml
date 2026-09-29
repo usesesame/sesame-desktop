@@ -189,6 +189,20 @@ jobs:
           npm run tauri -- build --bundles deb,rpm,appimage
           --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
 
+      - name: Prove the shipped rpm installs, launches, and unregisters
+        run: |
+          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format rpm \
+            --package "$(ls src-tauri/target/release/bundle/rpm/*.rpm)" \
+            --out linux-rpm-shipped-evidence
+
+      - name: Prove the shipped AppImage launches and refuses registration
+        run: |
+          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format appimage \
+            --package "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" \
+            --out linux-appimage-shipped-evidence
+
       # The shipped binary has no test bridge, so the package that installs
       # here is the test-featured build. It exercises the real deb layout,
       # dpkg install, launch, vault operations, restart, and removal.
