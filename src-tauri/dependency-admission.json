@@ -2,6 +2,78 @@
   "schemaVersion": 1,
   "packages": [
     {
+      "name": "@eslint/js",
+      "version": "10.0",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@sveltejs/vite-plugin-svelte",
+      "version": "7.3",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@tauri-apps/api",
+      "version": "2.11",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@tauri-apps/cli",
+      "version": "2.11",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@tauri-apps/plugin-clipboard-manager",
+      "version": "2.3",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@tauri-apps/plugin-dialog",
+      "version": "2.7",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@testing-library/svelte",
+      "version": "5.4",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@testing-library/user-event",
+      "version": "14.6",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@tsconfig/svelte",
+      "version": "5.0",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@types/node",
+      "version": "26.6",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@typescript/native",
+      "version": "7.0",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "@vitest/coverage-v8",
+      "version": "5.0",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
       "name": "arboard",
       "version": "3",
       "reason": "In use before this gate was adopted."
@@ -28,12 +100,36 @@
     },
     {
       "name": "csv",
-      "version": "1.3",
+      "version": "1.4",
       "reason": "In use before this gate was adopted."
     },
     {
       "name": "ed25519-dalek",
       "version": "3",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "eslint",
+      "version": "10.10",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "eslint-plugin-svelte",
+      "version": "3.23",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "glib",
+      "version": "0.18.5",
+      "source": "path",
+      "reason": "Vendored under src-tauri/vendor/glib."
+    },
+    {
+      "name": "globals",
+      "version": "17.12",
+      "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
@@ -45,6 +141,12 @@
       "name": "idna",
       "version": "1",
       "reason": "Decodes punycode host labels for the FILL-03 lookalike comparison; psl reads only ASCII and does not decode. Already in the lock through url. Owner approved 2026-09-27."
+    },
+    {
+      "name": "jsdom",
+      "version": "30.1",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
     },
     {
       "name": "libc",
@@ -97,7 +199,30 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "svelte",
+      "version": "5.57",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "svelte-check",
+      "version": "4.7",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "svelte-eslint-parser",
+      "version": "1.8",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
       "name": "tauri",
+      "version": "2",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tauri-build",
       "version": "2",
       "reason": "In use before this gate was adopted."
     },
@@ -147,6 +272,18 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "typescript",
+      "version": "6.0",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "typescript-eslint",
+      "version": "8.70",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
       "name": "unicode-security",
       "version": "0.1",
       "reason": "UTS #39 confusable skeletons and mixed-script detection for the FILL-03 lookalike check. Owner approved 2026-09-27."
@@ -154,6 +291,18 @@
     {
       "name": "url",
       "version": "2.5",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "vite",
+      "version": "8.3",
+      "source": "npm",
+      "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "vitest",
+      "version": "5.0",
+      "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
@@ -173,7 +322,7 @@
     },
     {
       "name": "zeroize",
-      "version": "1.8",
+      "version": "1.9",
       "reason": "In use before this gate was adopted."
     }
   ]
