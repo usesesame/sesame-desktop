@@ -183,37 +183,26 @@ pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
         ])
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     for entry in &payload.entries {
-        let title = safe_csv_cell(&entry.title);
-        let url = safe_csv_cell(&entry.url);
-        let username = safe_csv_cell(&entry.username);
-        let email = safe_csv_cell(&entry.email);
-        let password = safe_csv_cell(&entry.password);
         let folder_name = crate::snapshot::folder_name_for(payload, entry);
-        let folder = safe_csv_cell(&folder_name);
-        let totp = safe_csv_cell(entry.totp.as_deref().unwrap_or_default());
         let joined_backup_codes = entry.backup_codes.join("\n");
-        let backup_codes = safe_csv_cell(&joined_backup_codes);
-        let recovery_email = safe_csv_cell(entry.recovery_email.as_deref().unwrap_or_default());
-        let recovery_phone = safe_csv_cell(entry.recovery_phone.as_deref().unwrap_or_default());
-        let notes = safe_csv_cell(entry.notes.as_deref().unwrap_or_default());
         writer
             .write_record([
-                title.as_ref(),
-                url.as_ref(),
-                username.as_ref(),
-                email.as_ref(),
-                password.as_ref(),
-                folder.as_ref(),
-                totp.as_ref(),
-                backup_codes.as_ref(),
-                recovery_email.as_ref(),
-                recovery_phone.as_ref(),
+                entry.title.as_str(),
+                entry.url.as_str(),
+                entry.username.as_str(),
+                entry.email.as_str(),
+                entry.password.as_str(),
+                folder_name.as_str(),
+                entry.totp.as_deref().unwrap_or_default(),
+                joined_backup_codes.as_str(),
+                entry.recovery_email.as_deref().unwrap_or_default(),
+                entry.recovery_phone.as_deref().unwrap_or_default(),
                 if entry.recovery_not_applicable {
                     "true"
                 } else {
                     "false"
                 },
-                notes.as_ref(),
+                entry.notes.as_deref().unwrap_or_default(),
             ])
             .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     }
@@ -239,46 +228,24 @@ pub fn identities_csv_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
         ])
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     for identity in &payload.identities {
-        let label = safe_csv_cell(&identity.label);
-        let full_name = safe_csv_cell(&identity.full_name);
-        let email = safe_csv_cell(&identity.email);
-        let phone = safe_csv_cell(&identity.phone);
-        let address_line1 = safe_csv_cell(&identity.address_line1);
-        let address_line2 = safe_csv_cell(&identity.address_line2);
-        let city = safe_csv_cell(&identity.city);
-        let region = safe_csv_cell(&identity.region);
-        let postal_code = safe_csv_cell(&identity.postal_code);
-        let country = safe_csv_cell(&identity.country);
         writer
             .write_record([
-                label.as_ref(),
-                full_name.as_ref(),
-                email.as_ref(),
-                phone.as_ref(),
-                address_line1.as_ref(),
-                address_line2.as_ref(),
-                city.as_ref(),
-                region.as_ref(),
-                postal_code.as_ref(),
-                country.as_ref(),
+                identity.label.as_str(),
+                identity.full_name.as_str(),
+                identity.email.as_str(),
+                identity.phone.as_str(),
+                identity.address_line1.as_str(),
+                identity.address_line2.as_str(),
+                identity.city.as_str(),
+                identity.region.as_str(),
+                identity.postal_code.as_str(),
+                identity.country.as_str(),
             ])
             .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     }
     writer
         .into_inner()
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())
-}
-
-fn safe_csv_cell(value: &str) -> std::borrow::Cow<'_, str> {
-    if value
-        .chars()
-        .next()
-        .is_some_and(|character| matches!(character, '=' | '+' | '-' | '@' | '\t' | '\r' | '\n'))
-    {
-        std::borrow::Cow::Owned(format!("'{value}"))
-    } else {
-        std::borrow::Cow::Borrowed(value)
-    }
 }
 
 /// Pre-change encrypted copy; the change can be undone by restoring it.
