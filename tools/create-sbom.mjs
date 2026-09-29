@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(import.meta.dirname, '..')
 const destination = process.env.SESAME_SBOM_OUTPUT_DIR
@@ -24,13 +25,14 @@ const npmHash = (integrity) => {
 const npmComponents = Object.entries(JSON.parse(npmLock).packages ?? {})
   .filter(([name]) => name.includes('node_modules/'))
   .map(([name, entry]) => {
-    const packageName = name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
+    const packageName =
+      entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
     const component = {
       type: 'library',
       name: packageName,
       version: entry.version,
       purl: `pkg:npm/${packageName}@${entry.version}`,
-      scope: entry.dev ? 'excluded' : 'required',
+      scope: entry.dev ? 'optional' : 'required',
     }
     const hash = npmHash(entry.integrity)
     if (hash) component.hashes = [hash]
@@ -52,7 +54,7 @@ const cargoComponents = cargoLock
     return component
   })
 
-const vendorTreeDigest = async (directory) => {
+export const vendorTreeDigest = async (directory, base = root) => {
   const files = []
   const walk = async (current) => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
@@ -62,59 +64,67 @@ const vendorTreeDigest = async (directory) => {
     }
   }
   await walk(directory)
-  files.sort()
+  const relativeFiles = files
+    .map((file) => path.relative(base, file).split(path.sep).join('/'))
+    .sort()
   const hash = createHash('sha256')
-  for (const file of files) {
-    hash.update(path.relative(root, file))
+  for (const relative of relativeFiles) {
+    hash.update(relative)
     hash.update('\0')
-    hash.update(await readFile(file))
+    hash.update(await readFile(path.join(base, relative)))
     hash.update('\0')
   }
   return hash.digest('hex')
 }
 
-const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
-for (const component of cargoComponents) {
-  if (component.name === 'glib' && component.properties) {
-    component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
+const main = async () => {
+  const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
+  for (const component of cargoComponents) {
+    if (component.name === 'glib' && component.properties) {
+      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
+    }
   }
+
+  await mkdir(destination, { recursive: true })
+  const components = [
+    ...npmComponents,
+    ...cargoComponents,
+    ...(goSum
+      ? [
+          ...new Set(
+            [...goSum.matchAll(/^([^\s]+) v([^\s]+)/gm)].map(([, name, version]) => `${name}@${version}`),
+          ),
+        ].map((value) => {
+          const [name, version] = value.split('@')
+          return { type: 'library', name, version, purl: `pkg:golang/${name}@${version}` }
+        })
+      : []),
+  ]
+  const bom = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.5',
+    serialNumber: `urn:uuid:${digest(`${npmLock}${cargoLock}${goSum}`).slice(0, 32)}`,
+    version: 1,
+    metadata: { component: { type: 'application', name: manifest.name, version: manifest.version } },
+    components,
+  }
+  const provenance = {
+    version: 1,
+    source: {
+      commit: process.env.GITHUB_SHA ?? 'local-uncommitted',
+      npmLockSha256: digest(npmLock),
+      cargoLockSha256: digest(cargoLock),
+      vendorTreeSha256: vendorTree,
+      ...(goSum ? { goSumSha256: digest(goSum) } : {}),
+    },
+    sbomSha256: digest(JSON.stringify(bom)),
+    protectedValuesIncluded: false,
+  }
+  await writeFile(path.join(destination, `sesame-${manifest.version}.cdx.json`), `${JSON.stringify(bom, null, 2)}\n`)
+  await writeFile(path.join(destination, `sesame-${manifest.version}.provenance.json`), `${JSON.stringify(provenance, null, 2)}\n`)
+  console.log(`Wrote ${components.length} locked components to release-evidence/`)
 }
 
-await mkdir(destination, { recursive: true })
-const components = [
-  ...npmComponents,
-  ...cargoComponents,
-  ...(goSum
-    ? [
-        ...new Set(
-          [...goSum.matchAll(/^([^\s]+) v([^\s]+)/gm)].map(([, name, version]) => `${name}@${version}`),
-        ),
-      ].map((value) => {
-        const [name, version] = value.split('@')
-        return { type: 'library', name, version, purl: `pkg:golang/${name}@${version}` }
-      })
-    : []),
-]
-const bom = {
-  bomFormat: 'CycloneDX',
-  specVersion: '1.5',
-  serialNumber: `urn:uuid:${digest(`${npmLock}${cargoLock}${goSum}`).slice(0, 32)}`,
-  version: 1,
-  metadata: { component: { type: 'application', name: manifest.name, version: manifest.version } },
-  components,
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main()
 }
-const provenance = {
-  version: 1,
-  source: {
-    commit: process.env.GITHUB_SHA ?? 'local-uncommitted',
-    npmLockSha256: digest(npmLock),
-    cargoLockSha256: digest(cargoLock),
-    vendorTreeSha256: vendorTree,
-    ...(goSum ? { goSumSha256: digest(goSum) } : {}),
-  },
-  sbomSha256: digest(JSON.stringify(bom)),
-  protectedValuesIncluded: false,
-}
-await writeFile(path.join(destination, `sesame-${manifest.version}.cdx.json`), `${JSON.stringify(bom, null, 2)}\n`)
-await writeFile(path.join(destination, `sesame-${manifest.version}.provenance.json`), `${JSON.stringify(provenance, null, 2)}\n`)
-console.log(`Wrote ${components.length} locked components to release-evidence/`)
