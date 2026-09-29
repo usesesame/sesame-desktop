@@ -290,21 +290,75 @@ pub fn snapshot_vault_revision(vault: &Path, label: &str) -> VaultResult<Option<
         .parent()
         .ok_or("Sesame could not find the vault folder.")?
         .join("backups");
-    fs::create_dir_all(&backup_dir)
+    create_private_dir(&backup_dir)
         .map_err(|_| "Sesame could not prepare a revision before this change.".to_string())?;
     let name = format!(
         "sesame-before-{label}-{}-{}.sesame",
         unix_timestamp(),
         random_id()
     );
-    fs::copy(vault, backup_dir.join(&name))
+    copy_private_file(vault, &backup_dir.join(&name))
         .map_err(|_| "Sesame could not create a revision before this change.".to_string())?;
     Ok(Some(name))
+}
+
+pub fn prune_vault_backups(vault: &Path) -> VaultResult<usize> {
+    let backup_dir = vault
+        .parent()
+        .ok_or("Sesame could not find the vault folder.")?
+        .join("backups");
+    let entries = match fs::read_dir(&backup_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(_) => return Err("Sesame could not read the local backup folder.".to_string()),
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry =
+            entry.map_err(|_| "Sesame could not read the local backup folder.".to_string())?;
+        let file_type = entry
+            .file_type()
+            .map_err(|_| "Sesame could not read the local backup folder.".to_string())?;
+        if file_type.is_dir() {
+            fs::remove_dir_all(entry.path())
+                .map_err(|_| "Sesame could not remove the local backup copies.".to_string())?;
+        } else {
+            fs::remove_file(entry.path())
+                .map_err(|_| "Sesame could not remove the local backup copies.".to_string())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 pub struct PreparedRestore {
     file: VaultFile,
     key: Zeroizing<[u8; 32]>,
+    vault_id: Option<String>,
+    revision: u64,
+}
+
+impl PreparedRestore {
+    pub fn vault_id(&self) -> Option<&str> {
+        self.vault_id.as_deref()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+pub fn restore_revision_delta(
+    prepared: &PreparedRestore,
+    current_vault_id: Option<&str>,
+    current_revision: u64,
+) -> VaultResult<(u64, u64)> {
+    if prepared.vault_id.as_deref() != current_vault_id {
+        return Err(
+            "That backup belongs to a different vault. Sesame did not replace this vault.".into(),
+        );
+    }
+    Ok((prepared.revision, current_revision))
 }
 
 pub struct RestoreInstall {
@@ -387,6 +441,8 @@ pub fn prepare_backup_for_restore(
     Ok(PreparedRestore {
         file,
         key: Zeroizing::new(*opened.key),
+        vault_id: opened.payload.vault_id.clone(),
+        revision: opened.payload.revision,
     })
 }
 
@@ -1062,5 +1118,114 @@ mod restore_fault_tests {
                 .vault_id,
             restarted.payload.vault_id
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PASSWORD: &str = "fictional master password 01";
+    const SOURCE: &[u8] = include_bytes!("../tests/fixtures/compatibility/v0.1.0.sesame");
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("sesame-{name}-{}", random_id()));
+            fs::create_dir(&path).expect("test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn pruning_removes_local_backup_files_and_reports_the_count() {
+        let directory = TestDirectory::new("prune-backups");
+        let vault = directory.0.join("vault.sesame");
+        let backups = directory.0.join("backups");
+        fs::create_dir(&backups).expect("backup folder");
+        assert_eq!(prune_vault_backups(&vault).expect("empty folder"), 0);
+
+        fs::write(
+            backups.join("sesame-backup-fictional.sesame"),
+            b"fictional copy",
+        )
+        .expect("backup copy");
+        fs::write(
+            backups.join("sesame-before-import-fictional.sesame"),
+            b"fictional copy",
+        )
+        .expect("revision copy");
+        assert_eq!(prune_vault_backups(&vault).expect("pruned"), 2);
+        assert_eq!(fs::read_dir(&backups).expect("backup folder").count(), 0);
+        assert_eq!(prune_vault_backups(&vault).expect("pruned again"), 0);
+    }
+
+    #[test]
+    fn restore_refuses_a_backup_from_a_different_vault() {
+        let directory = TestDirectory::new("restore-different-vault");
+        let source = directory.0.join("fictional-source.sesame");
+        let destination = directory.0.join("fictional-active.sesame");
+        fs::write(&source, SOURCE).expect("source");
+        let prepared =
+            prepare_backup_for_restore(&source, &destination, PASSWORD).expect("prepared restore");
+
+        let error = restore_revision_delta(&prepared, Some("fictional-other-vault"), 4)
+            .err()
+            .expect("refused");
+        assert!(error.contains("belongs to a different vault"));
+    }
+
+    #[test]
+    fn restore_returns_the_revision_delta_for_the_same_vault() {
+        let directory = TestDirectory::new("restore-delta");
+        let source = directory.0.join("fictional-source.sesame");
+        let destination = directory.0.join("fictional-active.sesame");
+        fs::write(&source, SOURCE).expect("source");
+        let opened =
+            VaultLoader::load(SOURCE, Credential::MasterPassword(PASSWORD)).expect("opened source");
+        let prepared =
+            prepare_backup_for_restore(&source, &destination, PASSWORD).expect("prepared restore");
+
+        assert_eq!(prepared.vault_id(), opened.payload.vault_id.as_deref());
+        assert_eq!(prepared.revision(), opened.payload.revision);
+        let (restored, replaced) =
+            restore_revision_delta(&prepared, prepared.vault_id(), 9).expect("same vault");
+        assert_eq!(restored, opened.payload.revision);
+        assert_eq!(replaced, 9);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshots_use_the_private_directory_and_file_helpers() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::new("snapshot-permissions");
+        let vault = directory.0.join("vault.sesame");
+        fs::write(&vault, b"fictional vault bytes").expect("vault");
+        fs::set_permissions(&vault, fs::Permissions::from_mode(0o644)).expect("loose mode");
+
+        let name = snapshot_vault_revision(&vault, "import")
+            .expect("snapshot")
+            .expect("snapshot name");
+        let backup_dir = directory.0.join("backups");
+        let directory_mode = fs::metadata(&backup_dir)
+            .expect("backup folder")
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = fs::metadata(backup_dir.join(&name))
+            .expect("snapshot file")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(directory_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
     }
 }

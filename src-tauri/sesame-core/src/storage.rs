@@ -314,6 +314,7 @@ pub fn rotate_master_password_for_session(
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
+    let _ = crate::backup::prune_vault_backups(&session.path);
     Ok(recovery_kit_for_display)
 }
 
@@ -1083,6 +1084,54 @@ mod tests {
         assert!(open_vault_with_password(&file, new_password).is_ok());
         assert!(open_vault_with_recovery_kit(&file, &recovery_kit).is_ok());
         assert!(!path.with_extension("sesame.prev").exists());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_removes_backups_that_open_with_the_old_password() {
+        let directory = test_path("record-rotation-backups");
+        let path = directory.join("vault.sesame");
+        let old_password = "fictional old password";
+        let new_password = "fictional new password";
+        let mut session = unlocked_at(path.clone(), old_password);
+        persist_session(&mut session).expect("initial persisted session");
+
+        let old_copy = fs::read(&path).expect("vault bytes");
+        let old_file: VaultFile = serde_json::from_slice(&old_copy).expect("vault file");
+        assert!(open_vault_with_password(&old_file, old_password).is_ok());
+
+        let backup_dir = directory.join("backups");
+        fs::create_dir_all(&backup_dir).expect("backup folder");
+        fs::write(backup_dir.join("sesame-backup-fictional.sesame"), &old_copy)
+            .expect("backup copy");
+        fs::write(
+            backup_dir.join("sesame-before-import-fictional.sesame"),
+            &old_copy,
+        )
+        .expect("revision copy");
+
+        rotate_master_password_for_session(&mut session, old_password, new_password)
+            .expect("rotated password");
+
+        assert_eq!(fs::read_dir(&backup_dir).expect("backup folder").count(), 0);
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_succeeds_without_a_backup_folder() {
+        let directory = test_path("record-rotation-no-backups");
+        let path = directory.join("vault.sesame");
+        let mut session = unlocked_at(path.clone(), "fictional old password");
+        persist_session(&mut session).expect("initial persisted session");
+        assert!(!directory.join("backups").exists());
+
+        rotate_master_password_for_session(
+            &mut session,
+            "fictional old password",
+            "fictional new password",
+        )
+        .expect("rotated password");
+
         fs::remove_dir_all(directory).expect("removed test directory");
     }
 }

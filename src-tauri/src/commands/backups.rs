@@ -8,7 +8,8 @@ use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
     apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, inspect_backup_file,
-    managed_vault_paths, prepare_backup_for_restore, stage_managed_vault_files, verify_backup_file,
+    managed_vault_paths, prepare_backup_for_restore, restore_revision_delta,
+    stage_managed_vault_files, verify_backup_file,
 };
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health;
@@ -305,15 +306,44 @@ pub fn restore_backup(
     app: AppHandle,
     request: RestoreBackupRequest,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<RestoreBackupResult> {
     let source = PathBuf::from(request.source);
     let destination = vault_path(&app)?;
     let mut secret = request.secret;
 
+    let active = destination.exists();
+    let current = {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+        let session = session.as_ref();
+        if active && session.is_none() {
+            return Err("Unlock your vault before restoring a backup.".into());
+        }
+        session.map(|vault| {
+            let snapshot = vault.snapshot();
+            (snapshot.vault_id, snapshot.revision)
+        })
+    };
+    if current.is_some() {
+        require_release_presence(&state, &presence)?;
+    }
+
     // Authenticate before invalidating anything: a failure must not lock the user out.
     let prepared = prepare_backup_for_restore(&source, &destination, &secret);
     secret.zeroize();
     let prepared = prepared?;
+
+    let (restored_revision, replaced_revision) = match current {
+        Some((vault_id, revision)) => {
+            let (restored, replaced) =
+                restore_revision_delta(&prepared, vault_id.as_deref(), revision)?;
+            (restored, Some(replaced))
+        }
+        None => (prepared.revision(), None),
+    };
 
     let installed =
         state.apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
@@ -328,6 +358,8 @@ pub fn restore_backup(
         safety_backup_name: installed.safety_backup_name,
         pin_unlock_available: installed.pin_unlock_available,
         hello_unlock_available: installed.hello_unlock_available,
+        restored_revision,
+        replaced_revision,
     })
 }
 
