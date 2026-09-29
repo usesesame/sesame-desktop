@@ -56,15 +56,17 @@ pub(crate) fn parse_card_fields(value: &str) -> Option<Vec<String>> {
     Some(fields)
 }
 
-pub fn supported_protocol_version(version: u8) -> bool {
-    matches!(
-        version,
-        PROTOCOL_VERSION
-            | CARD_PROTOCOL_VERSION
-            | FILL_MATCH_PROTOCOL_VERSION
-            | TOTP_PROTOCOL_VERSION
-            | LOOKALIKE_PROTOCOL_VERSION
-    )
+/// Only the current contract version of a message type is accepted. Older
+/// versions have no fallback path, so a stale extension is refused instead of
+/// being served a narrower contract than it expects.
+pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
+    match message_type {
+        "fill" => version == LOOKALIKE_PROTOCOL_VERSION,
+        "totp" => version == TOTP_PROTOCOL_VERSION,
+        "card" => version == CARD_PROTOCOL_VERSION,
+        "save" | "identity" | "capabilities" | "activate" => version == PROTOCOL_VERSION,
+        _ => false,
+    }
 }
 
 pub fn fill_carries_match_kind(version: u8) -> bool {
@@ -74,7 +76,7 @@ pub fn fill_carries_match_kind(version: u8) -> bool {
     )
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BrowserRequest {
     pub version: u8,
@@ -107,14 +109,8 @@ impl Drop for BrowserRequest {
 
 impl BrowserRequest {
     pub fn validate(&self) -> bool {
-        if !supported_protocol_version(self.version) || !valid_identifier(&self.request_id) {
-            return false;
-        }
-        if (self.version == PROTOCOL_VERSION && self.message_type == "card")
-            || (self.version == CARD_PROTOCOL_VERSION && self.message_type != "card")
-            || (self.version == FILL_MATCH_PROTOCOL_VERSION && self.message_type != "fill")
-            || (self.version == TOTP_PROTOCOL_VERSION && self.message_type != "totp")
-            || (self.version == LOOKALIKE_PROTOCOL_VERSION && self.message_type != "fill")
+        if !valid_identifier(&self.request_id)
+            || !supported_protocol_version(&self.message_type, self.version)
         {
             return false;
         }
@@ -340,15 +336,15 @@ pub struct BrowserResponse {
 }
 
 impl BrowserResponse {
-    pub fn capabilities(request_id: &str, desktop_available: bool, locked: bool) -> Self {
+    pub fn capabilities(request_id: &str, desktop_available: bool) -> Self {
         Self {
             version: PROTOCOL_VERSION,
             message_type: "capabilities".into(),
             request_id: request_id.into(),
             installed: Some(true),
             desktop_available: Some(desktop_available),
-            locked: Some(locked),
-            fill_available: Some(!locked),
+            locked: None,
+            fill_available: None,
             opened: None,
             username: None,
             password: None,
@@ -756,13 +752,11 @@ impl BrowserResponse {
             ("capabilities", "capabilities") => {
                 self.installed == Some(true)
                     && self.desktop_available.is_some()
-                    && self.locked.is_some()
-                    && self.fill_available.is_some()
+                    && self.locked.is_none()
+                    && self.fill_available.is_none()
                     && no_credential
                     && self.reason.is_none()
                     && self.message.is_none()
-                    && self.fill_available == self.locked.map(|locked| !locked)
-                    && (self.desktop_available == Some(true) || self.locked == Some(true))
                     && no_activation
                     && no_saved
                     && no_identity
@@ -1045,25 +1039,69 @@ mod tests {
     }
 
     #[test]
-    fn fill_match_requests_are_fill_only() {
-        assert!(fill_request(FILL_MATCH_PROTOCOL_VERSION).validate());
+    fn a_request_is_accepted_only_on_its_current_protocol_version() {
+        assert!(fill_request(LOOKALIKE_PROTOCOL_VERSION).validate());
+        assert!(!fill_request(FILL_MATCH_PROTOCOL_VERSION).validate());
+        assert!(!fill_request(PROTOCOL_VERSION).validate());
+        assert!(!fill_request(LOOKALIKE_PROTOCOL_VERSION + 1).validate());
 
-        let mut capability = fill_request(FILL_MATCH_PROTOCOL_VERSION);
-        capability.message_type = "capabilities".to_string();
-        capability.origin = None;
-        assert!(!capability.validate());
+        assert!(request(CARD_PROTOCOL_VERSION, "card").validate());
+        assert!(!request(PROTOCOL_VERSION, "card").validate());
 
-        let mut card = fill_request(FILL_MATCH_PROTOCOL_VERSION);
-        card.message_type = "card".to_string();
-        card.fields = Some("number".to_string());
-        assert!(!card.validate());
+        let capability = BrowserRequest {
+            version: PROTOCOL_VERSION,
+            message_type: "capabilities".to_string(),
+            request_id: "request-1".to_string(),
+            origin: None,
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        };
+        assert!(capability.validate());
+        let mut legacy_capability = capability.clone();
+        legacy_capability.version = CARD_PROTOCOL_VERSION;
+        assert!(!legacy_capability.validate());
 
-        let future = fill_request(LOOKALIKE_PROTOCOL_VERSION + 1);
-        assert!(!future.validate());
+        let mut activation = capability.clone();
+        activation.message_type = "activate".to_string();
+        assert!(activation.validate());
+
+        let mut identity = capability.clone();
+        identity.message_type = "identity".to_string();
+        identity.origin = Some("https://example.test".to_string());
+        identity.fields = Some("email".to_string());
+        assert!(identity.validate());
+
+        let mut save = capability.clone();
+        save.message_type = "save".to_string();
+        save.origin = Some("https://example.test".to_string());
+        save.kind = Some("new".to_string());
+        save.password = Some("fictional-example-value".to_string());
+        assert!(save.validate());
+
+        assert!(totp_request(TOTP_PROTOCOL_VERSION).validate());
+        assert!(!totp_request(LOOKALIKE_PROTOCOL_VERSION).validate());
     }
 
     #[test]
-    fn fill_match_responses_carry_the_rule_only_on_protocol_v3() {
+    fn fill_match_requests_are_fill_only() {
+        let mut v5_capability = fill_request(LOOKALIKE_PROTOCOL_VERSION);
+        v5_capability.message_type = "capabilities".to_string();
+        v5_capability.origin = None;
+        assert!(!v5_capability.validate());
+
+        let mut v5_card = fill_request(LOOKALIKE_PROTOCOL_VERSION);
+        v5_card.message_type = "card".to_string();
+        v5_card.fields = Some("number".to_string());
+        assert!(!v5_card.validate());
+
+        assert!(!fill_request(FILL_MATCH_PROTOCOL_VERSION).validate());
+    }
+
+    #[test]
+    fn fill_match_responses_carry_the_rule_only_on_versions_that_define_it() {
         let request = fill_request(FILL_MATCH_PROTOCOL_VERSION);
         let exact = BrowserResponse::fill_with_match_kind(
             &request,
@@ -1106,7 +1144,6 @@ mod tests {
     #[test]
     fn fill_match_responses_do_not_cross_protocol_versions() {
         let v1_request = fill_request(PROTOCOL_VERSION);
-        assert!(v1_request.validate());
         let v1_response = BrowserResponse::fill_for(
             &v1_request,
             "person@example.test".to_string(),
@@ -1249,7 +1286,7 @@ mod tests {
         for version in [PROTOCOL_VERSION, FILL_MATCH_PROTOCOL_VERSION] {
             let mut older = fill_request(version);
             older.message_type = "fill".to_string();
-            assert!(older.validate());
+            assert!(!older.validate());
             assert!(!BrowserResponse::unavailable(&older, "lookalike").validate_for(&older));
             assert!(
                 !BrowserResponse::lookalike_unavailable(&older, "apple.com".to_string())

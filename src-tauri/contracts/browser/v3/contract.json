@@ -3,11 +3,12 @@
   "name": "Sesame browser native messaging protocol",
   "tag": "browser-protocol-v3",
   "protocolVersion": 3,
+  "supersededByProtocolVersion": 5,
   "compatibility": {
-    "minimumHostProtocolVersion": 3,
-    "currentHostProtocolVersion": 3,
-    "minimumExtensionProtocolVersion": 3,
-    "currentExtensionProtocolVersion": 3
+    "minimumHostProtocolVersion": 5,
+    "currentHostProtocolVersion": 5,
+    "minimumExtensionProtocolVersion": 5,
+    "currentExtensionProtocolVersion": 5
   },
   "limits": {
     "nativeMessageBytes": 16384,

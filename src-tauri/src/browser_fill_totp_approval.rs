@@ -20,7 +20,7 @@ fn totp_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         };
         let Some(session) = session.as_ref() else {
             diagnostics::record_browser_host_registration(app, "totp_locked");
-            return BrowserResponse::totp_unavailable(&request.request_id, "locked");
+            return BrowserResponse::totp_unavailable(&request.request_id, "noMatch");
         };
         let payload = match session.open_payload() {
             Ok(payload) => payload,
@@ -50,6 +50,7 @@ fn totp_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         &request.request_id,
         origin.clone(),
         epoch,
+        peer.identity(),
         ApprovalRequest::Totp { candidate_ids },
     ) {
         Ok(value) => value,

@@ -14,8 +14,8 @@
       "message": { "version": 1, "type": "activate", "requestId": "activate-1" }
     },
     {
-      "name": "fill request defaults to both fields",
-      "valid": true,
+      "name": "fill on protocol one is refused",
+      "valid": false,
       "message": { "version": 1, "type": "fill", "requestId": "fill-1", "origin": "https://example.test" }
     },
     {
@@ -32,6 +32,16 @@
       "name": "future protocol request",
       "valid": false,
       "message": { "version": 2, "type": "capabilities", "requestId": "future-1" }
+    },
+    {
+      "name": "card on protocol one is refused",
+      "valid": false,
+      "message": { "version": 1, "type": "card", "requestId": "card-1", "origin": "https://checkout.example.test", "fields": "number" }
+    },
+    {
+      "name": "totp on protocol one is refused",
+      "valid": false,
+      "message": { "version": 1, "type": "totp", "requestId": "totp-1", "origin": "https://example.test" }
     },
     {
       "name": "request id contains punctuation",
@@ -64,8 +74,8 @@
       "name": "available desktop capabilities",
       "hostValid": true,
       "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-1" },
-      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true },
-      "extensionResult": { "ok": true, "protocolVersion": 1, "capabilities": { "desktopAvailable": true, "locked": false, "fillAvailable": true } }
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-1", "installed": true, "desktopAvailable": true },
+      "extensionResult": { "ok": true, "protocolVersion": 1, "capabilities": { "desktopAvailable": true } }
     },
     {
       "name": "desktop activation succeeds",
@@ -155,14 +165,14 @@
       "name": "future response protocol",
       "hostValid": false,
       "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-future-1" },
-      "message": { "version": 2, "type": "capabilities", "requestId": "capabilities-future-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true },
+      "message": { "version": 2, "type": "capabilities", "requestId": "capabilities-future-1", "installed": true, "desktopAvailable": true },
       "extensionResult": { "ok": false, "code": "protocol-mismatch" }
     },
     {
       "name": "capabilities response rejects an extra property",
       "hostValid": false,
       "request": { "version": 1, "type": "capabilities", "requestId": "capabilities-extra-1" },
-      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-extra-1", "installed": true, "desktopAvailable": true, "locked": false, "fillAvailable": true, "username": "must-not-cross" },
+      "message": { "version": 1, "type": "capabilities", "requestId": "capabilities-extra-1", "installed": true, "desktopAvailable": true, "username": "must-not-cross" },
       "extensionResult": { "ok": false, "code": "unsafe-response" }
     }
   ]

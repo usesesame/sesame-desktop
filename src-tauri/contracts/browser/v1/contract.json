@@ -20,15 +20,12 @@
   "requestTypes": [
     "capabilities",
     "activate",
-    "fill",
     "identity",
     "save"
   ],
   "responseTypes": [
     "capabilities",
     "activated",
-    "fill",
-    "fill-unavailable",
     "identity",
     "identity-unavailable",
     "saved",
@@ -65,7 +62,7 @@
   ],
   "bindings": {
     "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
-    "origin": "Fill, identity, and save requests carry one normalized page origin. The extension and desktop recheck it before release or write.",
+    "origin": "Identity and save requests carry one normalized page origin. The extension and desktop recheck it before release or write.",
     "tabIdentity": "Not transmitted to the native host. The extension binds the operation to the active tab and window and rechecks both before a page write.",
     "documentToken": "Not transmitted to the native host. The extension creates a single-document token during prepare and requires it again during fill or clear.",
     "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."

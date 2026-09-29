@@ -5,10 +5,6 @@
   "oneOf": [
     { "$ref": "#/$defs/capabilities" },
     { "$ref": "#/$defs/activated" },
-    { "$ref": "#/$defs/fillBoth" },
-    { "$ref": "#/$defs/fillUsername" },
-    { "$ref": "#/$defs/fillPassword" },
-    { "$ref": "#/$defs/fillUnavailable" },
     { "$ref": "#/$defs/identity" },
     { "$ref": "#/$defs/identityUnavailable" },
     { "$ref": "#/$defs/saved" },
@@ -62,29 +58,14 @@
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "type", "requestId", "installed", "desktopAvailable", "locked", "fillAvailable"],
+      "required": ["version", "type", "requestId", "installed", "desktopAvailable"],
       "properties": {
         "version": { "const": 1 },
         "type": { "const": "capabilities" },
         "requestId": { "$ref": "#/$defs/requestId" },
         "installed": { "const": true },
-        "desktopAvailable": { "type": "boolean" },
-        "locked": { "type": "boolean" },
-        "fillAvailable": { "type": "boolean" }
-      },
-      "allOf": [
-        {
-          "if": { "properties": { "locked": { "const": true } }, "required": ["locked"] },
-          "then": { "properties": { "fillAvailable": { "const": false } } },
-          "else": { "properties": { "fillAvailable": { "const": true } } }
-        },
-        {
-          "anyOf": [
-            { "properties": { "desktopAvailable": { "const": true } }, "required": ["desktopAvailable"] },
-            { "properties": { "locked": { "const": true } }, "required": ["locked"] }
-          ]
-        }
-      ]
+        "desktopAvailable": { "type": "boolean" }
+      }
     },
     "activated": {
       "type": "object",

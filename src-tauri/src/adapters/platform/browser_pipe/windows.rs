@@ -12,7 +12,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, GetLastError, LocalFree, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING,
-        ERROR_PIPE_CONNECTED, ERROR_TIMEOUT, GENERIC_READ, GENERIC_WRITE, HANDLE,
+        ERROR_PIPE_CONNECTED, ERROR_TIMEOUT, FILETIME, GENERIC_READ, GENERIC_WRITE, HANDLE,
         INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
     },
     Security::{
@@ -34,14 +34,15 @@ use windows_sys::Win32::{
         },
         RemoteDesktop::ProcessIdToSessionId,
         Threading::{
-            CreateEventW, GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
-            QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+            CreateEventW, GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess,
+            OpenProcessToken, QueryFullProcessImageNameW, WaitForSingleObject,
+            PROCESS_QUERY_LIMITED_INFORMATION,
         },
         IO::{CancelIoEx, GetOverlappedResult, GetOverlappedResultEx, OVERLAPPED},
     },
 };
 
-use super::MAX_PIPE_MESSAGE_BYTES;
+use super::{PeerIdentity, MAX_PIPE_MESSAGE_BYTES};
 use zeroize::Zeroizing;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1_500);
@@ -99,6 +100,7 @@ struct UserIdentity {
 pub struct PipePeer {
     pipe: HANDLE,
     process: OwnedHandle,
+    identity: PeerIdentity,
 }
 
 impl PipePeer {
@@ -118,6 +120,36 @@ impl PipePeer {
                 ptr::null_mut(),
             ) != 0
         }
+    }
+
+    pub fn identity(&self) -> PeerIdentity {
+        self.identity
+    }
+}
+
+impl PeerIdentity {
+    pub fn is_alive(&self) -> bool {
+        let Ok(process) = OwnedHandle::new(unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                self.pid,
+            )
+        }) else {
+            return false;
+        };
+        if unsafe { WaitForSingleObject(process.raw(), 0) } != WAIT_TIMEOUT {
+            return false;
+        }
+        process_creation_time(process.raw()) == Ok(self.start_time)
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn current_process_identity() -> PeerIdentity {
+    PeerIdentity {
+        pid: unsafe { GetCurrentProcessId() },
+        start_time: process_creation_time(unsafe { GetCurrentProcess() }).unwrap_or(0),
     }
 }
 
@@ -219,7 +251,38 @@ fn verified_peer(pipe: HANDLE, expected_client: &Path) -> io::Result<PipePeer> {
         ));
     }
     let process = verified_process(process_id, expected_client)?;
-    Ok(PipePeer { pipe, process })
+    let start_time = process_creation_time(process.raw())?;
+    Ok(PipePeer {
+        pipe,
+        process,
+        identity: PeerIdentity {
+            pid: process_id,
+            start_time,
+        },
+    })
+}
+
+fn process_creation_time(process: HANDLE) -> io::Result<u64> {
+    let mut creation = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exit = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut kernel = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut user = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    if unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
 }
 
 fn verified_server(pipe: HANDLE, expected_server: &Path) -> io::Result<OwnedHandle> {

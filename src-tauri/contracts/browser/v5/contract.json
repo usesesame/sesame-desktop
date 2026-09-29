@@ -9,6 +9,15 @@
     "minimumExtensionProtocolVersion": 5,
     "currentExtensionProtocolVersion": 5
   },
+  "messageVersions": {
+    "capabilities": 1,
+    "activate": 1,
+    "identity": 1,
+    "save": 1,
+    "card": 2,
+    "totp": 4,
+    "fill": 5
+  },
   "limits": {
     "nativeMessageBytes": 16384,
     "requestIdBytes": 64,

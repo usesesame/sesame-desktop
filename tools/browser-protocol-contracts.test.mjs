@@ -30,6 +30,116 @@ test('the published contract matches the implementation that serves it', () => {
   assert.match(rust, /pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;/)
 })
 
+test('only the current contract version of each message type is accepted', () => {
+  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const v5 = json(join(lookalikeCanonical, 'contract.json'))
+  const matrix = {
+    capabilities: 1,
+    activate: 1,
+    identity: 1,
+    save: 1,
+    card: 2,
+    totp: 4,
+    fill: 5,
+  }
+
+  assert.deepEqual(v5.messageVersions, matrix)
+  assert.match(rust, /"fill" => version == LOOKALIKE_PROTOCOL_VERSION/)
+  assert.match(rust, /"totp" => version == TOTP_PROTOCOL_VERSION/)
+  assert.match(rust, /"card" => version == CARD_PROTOCOL_VERSION/)
+  assert.match(
+    rust,
+    /"save" \| "identity" \| "capabilities" \| "activate" => version == PROTOCOL_VERSION/,
+  )
+  assert.match(rust, /supported_protocol_version\(&self\.message_type, self\.version\)/)
+
+  const directories = { 1: 'v1', 2: 'v2', 4: 'v4', 5: 'v5' }
+  for (const [messageType, version] of Object.entries(matrix)) {
+    if (messageType === 'fill') continue
+    const contract = json(join(root, 'src-tauri', 'contracts', 'browser', directories[version], 'contract.json'))
+    assert.ok(
+      contract.requestTypes.includes(messageType),
+      `${messageType} is not declared on protocol ${version}`,
+    )
+  }
+  assert.deepEqual(json(join(canonical, 'contract.json')).requestTypes, [
+    'capabilities',
+    'activate',
+    'identity',
+    'save',
+  ])
+  assert.equal(
+    json(join(cardCanonical, 'contract.json')).compatibility.currentHostProtocolVersion,
+    2,
+  )
+  assert.equal(
+    json(join(totpCanonical, 'contract.json')).compatibility.currentHostProtocolVersion,
+    4,
+  )
+  for (const directory of ['v1', 'v2', 'v3', 'v4', 'v5']) {
+    const vectors = json(join(root, 'src-tauri', 'contracts', 'browser', directory, 'vectors.json'))
+    for (const entry of vectors.requestCases) {
+      if (entry.valid) {
+        assert.equal(
+          entry.message.version,
+          matrix[entry.message.type],
+          `${directory} accepted ${entry.name} on the wrong version`,
+        )
+      }
+    }
+  }
+})
+
+test('capabilities answer desktop availability only', () => {
+  const schema = json(join(canonical, 'response.schema.json'))
+  const capabilities = schema.$defs.capabilities
+  assert.deepEqual(capabilities.required, [
+    'version',
+    'type',
+    'requestId',
+    'installed',
+    'desktopAvailable',
+  ])
+  assert.deepEqual(Object.keys(capabilities.properties), capabilities.required)
+  assert.equal(capabilities.additionalProperties, false)
+
+  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  assert.match(rust, /pub fn capabilities\(request_id: &str, desktop_available: bool\)/)
+  assert.match(
+    rust,
+    /self\.installed == Some\(true\)\s*&& self\.desktop_available\.is_some\(\)\s*&& self\.locked\.is_none\(\)\s*&& self\.fill_available\.is_none\(\)/,
+  )
+
+  const fill = readFileSync(join(root, 'src-tauri', 'src', 'browser_fill.rs'), 'utf8')
+  assert.doesNotMatch(fill, /capabilities\s*\([^)]*locked/)
+
+  const preApprovalSlices = [
+    ['browser_fill.rs', fill, 'fn fill_response'],
+    ['browser_fill.rs', fill, 'fn save_response'],
+    ['browser_fill.rs', fill, 'fn card_response'],
+    [
+      'browser_fill_identity_approval.rs',
+      readFileSync(join(root, 'src-tauri', 'src', 'browser_fill_identity_approval.rs'), 'utf8'),
+      'fn identity_response',
+    ],
+    [
+      'browser_fill_totp_approval.rs',
+      readFileSync(join(root, 'src-tauri', 'src', 'browser_fill_totp_approval.rs'), 'utf8'),
+      'fn totp_response',
+    ],
+  ]
+  for (const [file, source, functionName] of preApprovalSlices) {
+    const start = source.indexOf(functionName)
+    const end = source.indexOf('fill_state.begin(', start)
+    assert.ok(start >= 0 && end > start, `${file} does not declare ${functionName}`)
+    assert.doesNotMatch(
+      source.slice(start, end),
+      /"locked"|"multipleMatches"/,
+      `${functionName} answers before approval with a distinguishable reason`,
+    )
+  }
+})
+
 test('the host implementation names no consumer of its protocol', () => {
   const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
   assert.doesNotMatch(rust, /extensions[\\/]sesame|sesame-browser-extension/)
@@ -106,8 +216,9 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
   assert.equal(contract.protocolVersion, 3)
   assert.deepEqual(contract.requestTypes, ['fill'])
   assert.deepEqual(contract.matchKinds, ['exact', 'wwwAlias'])
-  assert.equal(contract.compatibility.minimumHostProtocolVersion, 3)
-  assert.equal(contract.compatibility.currentHostProtocolVersion, 3)
+  assert.equal(contract.supersededByProtocolVersion, 5)
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 5)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 5)
   assert.equal(requestSchema.properties.version.const, 3)
   assert.equal(requestSchema.properties.type.const, 'fill')
   assert.deepEqual(responseSchema.$defs.matchKind.enum, contract.matchKinds)
