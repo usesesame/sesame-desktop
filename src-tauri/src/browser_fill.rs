@@ -645,9 +645,7 @@ fn fill_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         fill_state.revoke(&approval_id);
         return BrowserResponse::unavailable(request, "approvalUnavailable");
     }
-    // Publish before focus change: Chromium closes the popup when Sesame comes forward.
     bring_to_foreground(app);
-    // The webview also polls the durable request so a listener race cannot hide the prompt.
     let _ = app.emit("browser-fill-request", event);
 
     let decision = match wait_for_decision(
