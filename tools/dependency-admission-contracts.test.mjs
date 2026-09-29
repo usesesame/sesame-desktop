@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { checkAdmission, checkWorkspace, matchesVersion } from './dependency-admission.mjs'
+import { checkAdmission, checkWorkspace, matchesVersion, parseCargoLock } from './dependency-admission.mjs'
 
 const cratesIo = 'registry+https://github.com/rust-lang/crates.io-index'
 const workspaceId = 'path+file:///fixture/sesame#0.3.0'
@@ -41,10 +41,16 @@ function cargoFixture({ packages = [], direct = [] }) {
   }
 }
 
-function npmFixture({ direct = {}, packages = [] }) {
-  const lockPackages = { '': { name: 'sesame', version: '0.3.0', dependencies: direct } }
+function npmFixture({ direct = {}, optional = {}, peer = {}, overrides = {}, packages = [] }) {
+  const root = { name: 'sesame', version: '0.3.0', dependencies: direct }
+  if (Object.keys(optional).length > 0) root.optionalDependencies = optional
+  if (Object.keys(peer).length > 0) root.peerDependencies = peer
+  if (Object.keys(overrides).length > 0) root.overrides = overrides
+  const lockPackages = { '': root }
   for (const pkg of packages) {
-    lockPackages[`node_modules/${pkg.name}`] = {
+    const key = pkg.key ?? pkg.name
+    lockPackages[`node_modules/${key}`] = {
+      ...(key === pkg.name ? {} : { name: pkg.name }),
       version: pkg.version,
       ...(pkg.resolved === null ? {} : { resolved: pkg.resolved ?? `https://registry.npmjs.org/${pkg.name}/-/${pkg.name}-${pkg.version}.tgz` }),
       ...(pkg.integrity === null ? {} : { integrity: pkg.integrity ?? 'sha512-fixture' }),
@@ -91,6 +97,48 @@ test('a registry package without a checksum fails', () => {
   })
   const result = check(fixture, admissionOf([{ name: 'argon2', version: '0.6' }]))
   assert.ok(result.missingChecksums.some((line) => line.includes('argon2')))
+})
+
+test('a cargo checksum that is not 64 lowercase hex characters fails', () => {
+  const fixture = cargoFixture({
+    packages: [
+      { name: 'argon2', version: '0.6.0', source: cratesIo, checksum: 'a'.repeat(63) },
+      { name: 'base64', version: '0.23.0', source: cratesIo, checksum: 'A'.repeat(64) },
+      { name: 'serde', version: '1.0.0', source: cratesIo, checksum: checksum('c') },
+    ],
+    direct: [],
+  })
+  const result = check(fixture, admissionOf([]))
+  assert.ok(result.missingChecksums.some((line) => line.includes('argon2')))
+  assert.ok(result.missingChecksums.some((line) => line.includes('base64')))
+  assert.ok(!result.missingChecksums.some((line) => line.includes('serde')))
+})
+
+test('a patch entry after the last package does not overwrite it', () => {
+  const lock = [
+    'version = 4',
+    '',
+    '[[package]]',
+    'name = "sketchy-crate"',
+    'version = "1.2.3"',
+    'source = "git+https://example.invalid/sketchy-crate#0123456789abcdef0123456789abcdef01234567"',
+    '',
+    '[[patch.unused]]',
+    'name = "unused-patch"',
+    'version = "9.9.9"',
+    'source = "registry+https://github.com/rust-lang/crates.io-index"',
+    `checksum = "${checksum('a')}"`,
+    '',
+  ].join('\n')
+  assert.deepEqual(parseCargoLock(lock).map((pkg) => pkg.name), ['sketchy-crate'])
+  const result = checkAdmission({
+    cargoLock: lock,
+    npmLock: npmFixture({}),
+    metadata: { workspace_members: [], packages: [], resolve: { nodes: [] } },
+    admission: admissionOf([]),
+  })
+  assert.ok(result.foreignSources.some((line) => line.includes('sketchy-crate')))
+  assert.ok(!result.foreignSources.some((line) => line.includes('unused-patch')))
 })
 
 test('a locked version outside the admitted line fails', () => {
@@ -141,6 +189,107 @@ test('npm packages need registry.npmjs.org and an integrity hash', () => {
   )
   assert.ok(result.foreignSources.some((line) => line.includes('renderer-kit')))
   assert.ok(result.missingIntegrity.some((line) => line.includes('builder-tool')))
+})
+
+test('npm integrity must carry a sha512 hash', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { 'renderer-kit': '^3.0.0' },
+    packages: [{ name: 'renderer-kit', version: '3.1.0', integrity: 'sha1-fixture' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'renderer-kit', version: '3.1', source: 'npm' }]), npmLock)
+  assert.ok(result.missingIntegrity.some((line) => line.includes('renderer-kit')))
+})
+
+test('a registry URL has to bind to the package it installs', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { svelte: '^5.0.0' },
+    packages: [{ name: 'svelte', version: '5.1.0', resolved: 'https://registry.npmjs.org/evil/-/evil-5.1.0.tgz' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'svelte', version: '5.1', source: 'npm' }]), npmLock)
+  assert.ok(result.foreignSources.some((line) => line.includes('svelte')))
+})
+
+test('an npm alias cannot ride an admitted name', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { svelte: 'npm:evil@1' },
+    packages: [{ key: 'svelte', name: 'evil', version: '5.1.0' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'svelte', version: '5.1', source: 'npm' }]), npmLock)
+  assert.ok(result.unadmitted.some((line) => line.includes('evil')))
+})
+
+test('a declared alias is admitted under the real package name', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { renderer: 'npm:renderer-kit@^3.0.0' },
+    packages: [{ key: 'renderer', name: 'renderer-kit', version: '3.1.0' }],
+  })
+  const realName = check(fixture, admissionOf([{ name: 'renderer-kit', version: '3.1', source: 'npm' }]), npmLock)
+  assert.deepEqual(realName.unadmitted, [])
+  assert.deepEqual(realName.foreignSources, [])
+  assert.deepEqual(realName.stale, [])
+  const aliasName = check(fixture, admissionOf([{ name: 'renderer', version: '3.1', source: 'npm' }]), npmLock)
+  assert.ok(aliasName.unadmitted.some((line) => line.includes('renderer-kit')))
+  assert.ok(aliasName.stale.some((line) => line.includes('renderer')))
+})
+
+test('a lock entry that renames a package without a declared alias fails', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { svelte: '^5.0.0' },
+    packages: [{ key: 'svelte', name: 'evil', version: '5.1.0' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'evil', version: '5.1', source: 'npm' }]), npmLock)
+  assert.ok(result.foreignSources.some((line) => line.includes('svelte') && line.includes('evil')))
+})
+
+test('a declared alias the lock does not honor fails', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { svelte: 'npm:evil@1' },
+    packages: [{ name: 'svelte', version: '5.1.0' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'evil', version: '5.1', source: 'npm' }]), npmLock)
+  assert.ok(result.foreignSources.some((line) => line.includes('svelte') && line.includes('evil')))
+})
+
+test('optional and peer dependencies count as direct npm dependencies', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    optional: { 'optional-tool': '^1.0.0' },
+    peer: { 'peer-tool': '^2.0.0' },
+    packages: [
+      { name: 'optional-tool', version: '1.2.0' },
+      { name: 'peer-tool', version: '2.1.0' },
+    ],
+  })
+  const missing = check(fixture, admissionOf([]), npmLock)
+  assert.ok(missing.unadmitted.some((line) => line.includes('optional-tool')))
+  assert.ok(missing.unadmitted.some((line) => line.includes('peer-tool')))
+  const admitted = check(
+    fixture,
+    admissionOf([
+      { name: 'optional-tool', version: '1', source: 'npm' },
+      { name: 'peer-tool', version: '2', source: 'npm' },
+    ]),
+    npmLock,
+  )
+  assert.deepEqual(admitted.unadmitted, [])
+  assert.deepEqual(admitted.stale, [])
+})
+
+test('npm overrides are refused instead of ignored', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { 'renderer-kit': '^3.0.0' },
+    overrides: { 'renderer-kit': '3.1.0' },
+    packages: [{ name: 'renderer-kit', version: '3.1.0' }],
+  })
+  const result = check(fixture, admissionOf([{ name: 'renderer-kit', version: '3.1', source: 'npm' }]), npmLock)
+  assert.ok(result.unadmitted.some((line) => line.includes('overrides')))
 })
 
 test('a source-less package needs an admitted path entry', () => {

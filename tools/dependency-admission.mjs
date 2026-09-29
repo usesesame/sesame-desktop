@@ -15,14 +15,19 @@ const cratesIoSources = new Set([
 ])
 const admissionSources = new Set(['crates.io', 'npm', 'path'])
 const admittedVersion = /^\d+(\.\d+){0,2}$/
+const cargoChecksum = /^[0-9a-f]{64}$/
+
+function hasSha512Integrity(value) {
+  return typeof value === 'string' && value.split(/\s+/).some((hash) => hash.startsWith('sha512-'))
+}
 
 export function parseCargoLock(text) {
   const packages = []
   let current = null
   for (const line of text.split('\n')) {
-    if (line.trim() === '[[package]]') {
-      current = {}
-      packages.push(current)
+    if (line.startsWith('[')) {
+      current = line.trim() === '[[package]]' ? {} : null
+      if (current) packages.push(current)
       continue
     }
     if (!current) continue
@@ -35,6 +40,13 @@ export function parseCargoLock(text) {
 function packageNameFromKey(key) {
   const marker = key.lastIndexOf('node_modules/')
   return marker === -1 ? key : key.slice(marker + 'node_modules/'.length)
+}
+
+function aliasTarget(spec) {
+  if (typeof spec !== 'string' || !spec.startsWith('npm:')) return null
+  const target = spec.slice('npm:'.length)
+  const marker = target.lastIndexOf('@')
+  return marker <= 0 ? target : target.slice(0, marker)
 }
 
 export function parsePackageLock(text) {
@@ -53,19 +65,34 @@ export function parsePackageLock(text) {
   const packages = []
   for (const [key, entry] of Object.entries(lock.packages)) {
     if (key === '') continue
+    const keyName = packageNameFromKey(key)
+    const lockedName = typeof entry?.name === 'string' && entry.name ? entry.name : null
     packages.push({
-      name: packageNameFromKey(key),
+      name: lockedName ?? keyName,
       version: typeof entry?.version === 'string' ? entry.version : null,
       resolved: typeof entry?.resolved === 'string' ? entry.resolved : null,
       integrity: typeof entry?.integrity === 'string' ? entry.integrity : null,
     })
   }
-  const direct = []
-  for (const name of Object.keys({ ...root.dependencies, ...root.devDependencies })) {
-    const entry = lock.packages[`node_modules/${name}`]
-    direct.push({ name, version: typeof entry?.version === 'string' ? entry.version : null })
+  const declared = {
+    ...root.dependencies,
+    ...root.devDependencies,
+    ...root.optionalDependencies,
+    ...root.peerDependencies,
   }
-  return { packages, direct }
+  const direct = []
+  for (const [name, spec] of Object.entries(declared)) {
+    const entry = lock.packages[`node_modules/${name}`]
+    const lockedName = typeof entry?.name === 'string' && entry.name ? entry.name : null
+    direct.push({
+      name,
+      spec: typeof spec === 'string' ? spec : null,
+      realName: lockedName ?? name,
+      version: typeof entry?.version === 'string' ? entry.version : null,
+    })
+  }
+  const overrides = typeof root.overrides === 'object' && root.overrides !== null ? Object.keys(root.overrides) : []
+  return { packages, direct, overrides }
 }
 
 export function directDependenciesFromMetadata(metadata) {
@@ -168,7 +195,9 @@ export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
       foreignSources.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} comes from ${pkg.source}`)
       continue
     }
-    if (!pkg.checksum) missingChecksums.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} has no checksum`)
+    if (!cargoChecksum.test(pkg.checksum ?? '')) {
+      missingChecksums.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} does not carry a sha256 checksum`)
+    }
   }
 
   for (const dep of directCargo) {
@@ -187,13 +216,32 @@ export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
       foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to ${pkg.resolved ?? 'no registry URL'}`)
       continue
     }
-    if (!pkg.integrity) missingIntegrity.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} has no integrity hash`)
+    if (!url.pathname.includes(`/${pkg.name}/-/`)) {
+      foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to a tarball for another package: ${pkg.resolved}`)
+      continue
+    }
+    if (!hasSha512Integrity(pkg.integrity)) {
+      missingIntegrity.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} does not carry a sha512 integrity hash`)
+    }
+  }
+
+  for (const name of npm.overrides) {
+    unadmitted.push(`package.json: overrides.${name} is not admitted by this gate; remove the override`)
   }
 
   for (const dep of npm.direct) {
-    const entry = admitted.get('npm').get(dep.name)
+    const declaredTarget = aliasTarget(dep.spec)
+    if (declaredTarget !== null && declaredTarget !== dep.realName) {
+      foreignSources.push(`package.json: ${dep.name} is declared as ${dep.spec} but ${npmLockFile} installs ${dep.realName}`)
+      continue
+    }
+    if (declaredTarget === null && dep.realName !== dep.name) {
+      foreignSources.push(`${npmLockFile}: ${dep.name} installs ${dep.realName} without an npm: alias declaration in package.json`)
+      continue
+    }
+    const entry = admitted.get('npm').get(dep.realName)
     if (!entry) {
-      unadmitted.push(`package.json: ${dep.name} is not recorded in ${admissionFile}`)
+      unadmitted.push(`package.json: ${dep.name} resolves to ${dep.realName}, which is not recorded in ${admissionFile}`)
       continue
     }
     if (!dep.version) {
@@ -201,13 +249,13 @@ export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
       continue
     }
     if (!matchesVersion(dep.version, entry.version)) {
-      mismatched.push(`${dep.name} is admitted at ${entry.version} but ${npmLockFile} resolves ${dep.version}`)
+      mismatched.push(`${dep.name} resolves to ${dep.realName} ${dep.version}, which does not match the admitted version ${entry.version}`)
     }
   }
 
   for (const entry of entries) {
     let used = false
-    if (entry.source === 'npm') used = npm.direct.some((dep) => dep.name === entry.name)
+    if (entry.source === 'npm') used = npm.direct.some((dep) => dep.realName === entry.name)
     else if (entry.source === 'path') used = cargoPackages.some((pkg) => !pkg.source && pkg.name === entry.name)
     else used = directCargo.some((dep) => dep.name === entry.name && dep.source && cratesIoSources.has(dep.source))
     if (!used) stale.push(`${entry.name} is admitted for ${entry.source} but nothing in the lockfiles uses it`)

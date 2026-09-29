@@ -62,8 +62,8 @@
       "reason": "In use before this gate was adopted."
     },
     {
-      "name": "@typescript/native",
-      "version": "7.0",
+      "name": "@typescript/typescript6",
+      "version": "6.0",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -273,7 +273,7 @@
     },
     {
       "name": "typescript",
-      "version": "6.0",
+      "version": "7.0",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
