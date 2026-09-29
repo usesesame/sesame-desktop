@@ -30,7 +30,20 @@ pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
+    fs::rename(source, destination)
+        .map_err(|_| "Sesame could not complete the local vault save.".to_string())?;
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| "Sesame could not sync the local vault folder.".to_string())
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
     fs::rename(source, destination)
         .map_err(|_| "Sesame could not complete the local vault save.".to_string())
