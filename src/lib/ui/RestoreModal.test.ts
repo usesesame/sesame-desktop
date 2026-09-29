@@ -20,6 +20,7 @@ function renderRestore(compatibility: BackupCompatibility, overrides: Record<str
     restoreSelection: { source: '/tmp/fictional-backup.sesame', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true },
     onClose: vi.fn(),
     onConfirm: vi.fn(),
+    onConfirmPresence: vi.fn(),
     ...overrides,
   })
 }
@@ -70,4 +71,19 @@ test('a failed open announces the backend message and keeps the form open', asyn
   expect(alert.textContent).toBe('That master password or recovery kit does not open this backup.')
   expect(alert.textContent).not.toMatch(/broken|damaged|corrupt/i)
   expect(screen.getByRole('button', { name: 'Restore backup' })).toBeTruthy()
+})
+
+test('a presence requirement asks for the current master password before replacing the vault', async () => {
+  renderRestore('current', {
+    presenceRequired: true,
+    presencePassword: 'fictional master password 01',
+    restoreSecret: 'fictional backup password',
+    restoreConfirmed: true,
+  })
+  await Promise.resolve()
+  const presence = screen.getByLabelText('Your current master password') as HTMLInputElement
+  expect(presence.value).toBe('fictional master password 01')
+  expect(screen.getByText('Sesame confirms it is replacing the vault you have open.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Confirm and restore' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Restore backup' })).toBeNull()
 })
