@@ -29,6 +29,29 @@ const jobBlock = (body, job) => {
   return next ? rest.slice(0, afterFirst + next.index) : rest
 }
 
+const runScriptBlocks = (body) => {
+  const lines = body.split('\n')
+  const scripts = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(\s*)run:\s*(.*)$/)
+    if (!match) continue
+    const [, indentation, value] = match
+    if (!/^[>|][+-]?\s*$/.test(value)) {
+      scripts.push(value)
+      continue
+    }
+    const content = []
+    while (index + 1 < lines.length) {
+      const line = lines[index + 1]
+      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indentation.length) break
+      content.push(line)
+      index += 1
+    }
+    scripts.push(content.join('\n'))
+  }
+  return scripts
+}
+
 test('every workflow declares permissions and pins every third-party action', () => {
   assert.ok(workflows.length >= 4, `expected this repository's workflows, found ${workflows.length}`)
 
@@ -89,6 +112,32 @@ test('the Windows release build resolves the public keys without a signing key o
   const sign = jobBlock(body, 'sign-and-attest')
   assert.match(sign, /^\s+id-token:\s*write\s*$/m, 'the signing job needs an OIDC token for keyless Sigstore')
   assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the signing job must run behind its protected environment')
+})
+
+test('release build outputs reach the signing jobs as data, never as script text', () => {
+  const body = read('.github', 'workflows', 'release-early-access.yml')
+  for (const script of runScriptBlocks(body)) {
+    assert.doesNotMatch(script, /needs\.build\.outputs/, 'a build job output is pasted into a run script')
+    assert.doesNotMatch(script, /steps\.installer\.outputs\.path/, 'the installer path is pasted into a run script')
+  }
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+EXPECTED_INSTALLER:\s*\$\{\{\s*needs\.build\.outputs\.installer\s*\}\}\s*$/m, 'the expected installer name must arrive as environment data')
+  assert.match(sign, /^\s+EXPECTED_SHA256:\s*\$\{\{\s*needs\.build\.outputs\.installer-sha256\s*\}\}\s*$/m, 'the expected installer digest must arrive as environment data')
+  assert.match(sign, /^\s+INSTALLER_PATH:\s*\$\{\{\s*steps\.installer\.outputs\.path\s*\}\}\s*$/m, 'the signing step must read its path from the environment')
+  assert.doesNotMatch(sign, /build-output/, 'the signing job must not reach into the build job output directory')
+  assert.doesNotMatch(sign, /verify-updater-artifact/, 'the signing job must not run a verifier compiled by the build job')
+  assert.doesNotMatch(sign, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate signing key must stay out of the updater signing job')
+  const receipt = jobBlock(body, 'candidate-receipt')
+  assert.match(receipt, /^\s+needs:\s*verify-fresh\s*$/m, 'the candidate receipt must run after independent verification')
+  assert.match(receipt, /^\s+environment:\s*release-build\s*$/m, 'the candidate receipt runs behind the protected release environment')
+  assert.match(receipt, /^\s+permissions:\s*\n\s+contents:\s*read\s*$/m, 'the candidate receipt only reads repository contents')
+  assert.doesNotMatch(receipt, /id-token/, 'the candidate receipt must not mint an OIDC token')
+  assert.match(receipt, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate receipt holds the candidate signing key')
+  assert.match(receipt, /cargo build[^\n]*verify-updater-artifact/, 'the candidate receipt compiles the verifier from the tagged source')
+  assert.match(receipt, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*candidate-receipt\s*$/m, 'the candidate receipt uploads the candidate files from their own directory')
+  const publish = jobBlock(body, 'publish-candidate')
+  assert.match(publish, /needs:[^\n]*candidate-receipt/, 'publish waits for the candidate receipt')
+  assert.match(publish, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*release-handoff\s*$/m, 'publish merges the candidate files into the handoff directory')
 })
 
 test('every job a workflow depends on exists in that workflow', () => {

@@ -201,6 +201,7 @@ jobs:
 
       # option_env! turns any missing value into a build with updates silently
       # switched off, which is how 0.1.0 shipped unable to update itself. Fail
+      # the release instead of discovering it from a user's screenshot.
       - name: Require a complete signed-update configuration
         shell: pwsh
         env:
@@ -236,15 +237,11 @@ jobs:
           "name=$($installers[0].Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Build the updater verifier for the signing job
-        run: cargo build --manifest-path src-tauri/Cargo.toml --bin verify-updater-artifact
-
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sesame-build-${{ github.ref_name }}
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/debug/verify-updater-artifact.exe
             release-evidence/*.cdx.json
             vault-compatibility-merged.json
           if-no-files-found: error
@@ -273,17 +270,22 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sesame-build-${{ github.ref_name }}
-          path: build-output
+          path: release-input
 
       - name: Re-hash the downloaded installer
         id: installer
         shell: pwsh
+        env:
+          EXPECTED_INSTALLER: ${{ needs.build.outputs.installer }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.installer-sha256 }}
         run: |
-          $installers = @(Get-ChildItem -Path build-output -Recurse -Filter '*-setup.exe' -File)
+          if ($env:EXPECTED_INSTALLER -cnotmatch '^[A-Za-z0-9._-]+-setup\.exe$') { throw "The build job recorded an installer name that is not a plain NSIS installer filename." }
+          if ($env:EXPECTED_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw "The build job recorded a malformed installer SHA-256." }
+          $installers = @(Get-ChildItem -Path release-input -Recurse -Filter '*-setup.exe' -File)
           if ($installers.Count -ne 1) { throw "The build artifact contains $($installers.Count) NSIS installers, expected one." }
-          if ($installers[0].Name -ne '${{ needs.build.outputs.installer }}') { throw "The downloaded installer is not the installer the build job recorded." }
+          if ($installers[0].Name -ne $env:EXPECTED_INSTALLER) { throw "The downloaded installer is not the installer the build job recorded." }
           $sha256 = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha256 -ne '${{ needs.build.outputs.installer-sha256 }}') { throw "The downloaded installer does not match the SHA-256 the build job recorded." }
+          if ($sha256 -ne $env:EXPECTED_SHA256) { throw "The downloaded installer does not match the SHA-256 the build job recorded." }
           "path=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install the release tools without running package scripts
@@ -292,34 +294,38 @@ jobs:
       - name: Sign the installer with the pinned updater key
         shell: pwsh
         env:
+          INSTALLER_PATH: ${{ steps.installer.outputs.path }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri signer sign "${{ steps.installer.outputs.path }}"
+        run: |
+          if ((Split-Path -Leaf $env:INSTALLER_PATH) -notmatch '^[A-Za-z0-9._-]+-setup\.exe$') { throw "The installer path is not a plain NSIS installer filename." }
+          if (-not (Test-Path -LiteralPath $env:INSTALLER_PATH -PathType Leaf)) { throw "The re-hashed installer is missing." }
+          npx tauri signer sign $env:INSTALLER_PATH
 
-      - name: Verify the updater signature against the pinned public key
+      - name: Re-hash the signed installer before attestation
         shell: pwsh
         env:
-          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          INSTALLER_PATH: ${{ steps.installer.outputs.path }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.installer-sha256 }}
         run: |
-          $installer = '${{ steps.installer.outputs.path }}'
-          $sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha256 -ne '${{ needs.build.outputs.installer-sha256 }}') { throw "The installer changed after the build job hashed it." }
-          $verifier = Join-Path $env:GITHUB_WORKSPACE 'build-output/src-tauri/target/debug/verify-updater-artifact.exe'
-          & $verifier $installer "$installer.sig"
+          if ($env:EXPECTED_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw "The build job recorded a malformed installer SHA-256." }
+          if (-not (Test-Path -LiteralPath $env:INSTALLER_PATH -PathType Leaf)) { throw "The installer is missing after signing." }
+          $sha256 = (Get-FileHash -LiteralPath $env:INSTALLER_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha256 -ne $env:EXPECTED_SHA256) { throw "The installer changed after the build job hashed it." }
 
       - id: evidence
         name: Freeze the installer, updater signature, manifest, and SBOM
         shell: pwsh
         env:
-          SESAME_VAULT_COMPATIBILITY_FILE: build-output/vault-compatibility-merged.json
+          SESAME_VAULT_COMPATIBILITY_FILE: release-input/vault-compatibility-merged.json
         run: |
           $discovery = Join-Path $env:RUNNER_TEMP 'sesame-release-packages.json'
-          node tools/release-set-cli.mjs discover windows build-output/src-tauri/target/release/bundle $env:SESAME_RELEASE_ARCHITECTURE $discovery
+          node tools/release-set-cli.mjs discover windows release-input/src-tauri/target/release/bundle $env:SESAME_RELEASE_ARCHITECTURE $discovery
           $packageSet = Get-Content -Raw -LiteralPath $discovery | ConvertFrom-Json
           $installer = $packageSet.packages[0].path
           $signature = $packageSet.packages[0].updaterSignaturePath
           $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
-          $sbom = "build-output/release-evidence/sesame-$version.cdx.json"
+          $sbom = "release-input/release-evidence/sesame-$version.cdx.json"
           $manifest = (node tools/prepare-release-evidence.mjs $installer $signature $sbom release-handoff).Trim()
           Copy-Item -LiteralPath tools/verify-sesame-release.ps1 -Destination release-handoff/verify-sesame-release.ps1
           "manifest=$manifest" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -343,31 +349,6 @@ jobs:
           $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
           $artifact = "release-handoff/$($record.artifact.filename)"
           node tools/create-sigstore-evidence.mjs $artifact "release-handoff/$manifest" "$artifact.sigstore.json" "release-handoff/$manifest.sigstore.json" release-handoff/sigstore-evidence.json
-
-      - name: Create the signed candidate receipt
-        env:
-          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
-          SESAME_UPDATER_VERIFY_BIN: ${{ github.workspace }}/build-output/src-tauri/target/debug/verify-updater-artifact.exe
-          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
-          SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
-          SESAME_RELEASE_CANDIDATE_SIGNING_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_SIGNING_KEY }}
-        shell: pwsh
-        run: |
-          $manifest = '${{ steps.evidence.outputs.manifest }}'
-          $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
-          $artifact = "release-handoff/$($record.artifact.filename)"
-          $signature = "release-handoff/$($record.updaterSignature.filename)"
-          $env:SESAME_RELEASE_ARTIFACT_OBJECT_KEY = "windows/$($record.version)/$($record.artifact.filename)"
-          # The candidate signs this URL, so it has to be set before the
-          # candidate is built rather than only for the update manifest.
-          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
-          node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
-          $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
-          node tools/release-set-cli.mjs verify $candidate
-          Copy-Item -LiteralPath $candidate -Destination release-handoff/
-          $env:SESAME_UPDATE_RECEIPT_V3_FILE = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).update-receipt.json"
-          if (-not (Test-Path -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE)) { throw "The v3 update receipt was not produced: $($env:SESAME_UPDATE_RECEIPT_V3_FILE)." }
-          node tools/create-static-update-manifest.mjs $candidate release-handoff/latest.json
 
       - name: Prepare and audit the public-only evidence set
         shell: pwsh
@@ -420,8 +401,71 @@ jobs:
       - name: Re-audit the exact public evidence payload
         run: node tools/audit-public-release-evidence.mjs public-release-evidence
 
+  candidate-receipt:
+    needs: verify-fresh
+    runs-on: windows-latest
+    environment: release-build
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sesame-release-${{ github.ref_name }}
+
+      - name: Stage the browser host sidecar
+        run: npm run desktop:host:stage
+
+      - name: Build the updater verifier from this tag's source
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin verify-updater-artifact
+
+      - name: Create the signed candidate receipt
+        shell: pwsh
+        env:
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_UPDATER_VERIFY_BIN: ${{ github.workspace }}/src-tauri/target/debug/verify-updater-artifact.exe
+          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
+          SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+          SESAME_RELEASE_CANDIDATE_SIGNING_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_SIGNING_KEY }}
+          RELEASE_MANIFEST: ${{ needs.sign-and-attest.outputs.manifest }}
+        run: |
+          $manifest = $env:RELEASE_MANIFEST
+          $record = Get-Content -Raw -LiteralPath "release-handoff/$manifest" | ConvertFrom-Json
+          $artifact = "release-handoff/$($record.artifact.filename)"
+          $signature = "release-handoff/$($record.updaterSignature.filename)"
+          $env:SESAME_RELEASE_ARTIFACT_OBJECT_KEY = "windows/$($record.version)/$($record.artifact.filename)"
+          # The candidate signs this URL, so it has to be set before the
+          # candidate is built rather than only for the update manifest.
+          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
+          node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
+          $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
+          node tools/release-set-cli.mjs verify $candidate
+          New-Item -ItemType Directory -Force -Path candidate-receipt | Out-Null
+          Copy-Item -LiteralPath $candidate -Destination candidate-receipt/
+          $env:SESAME_UPDATE_RECEIPT_V3_FILE = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).update-receipt.json"
+          if (-not (Test-Path -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE)) { throw "The v3 update receipt was not produced: $($env:SESAME_UPDATE_RECEIPT_V3_FILE)." }
+          Copy-Item -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE -Destination candidate-receipt/
+          node tools/create-static-update-manifest.mjs $candidate candidate-receipt/latest.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sesame-candidate-${{ github.ref_name }}
+          path: candidate-receipt
+          if-no-files-found: error
+          retention-days: 14
+
   publish-candidate:
-    needs: [sign-and-attest, verify-fresh]
+    needs: [sign-and-attest, verify-fresh, candidate-receipt]
     runs-on: ubuntu-latest
     environment: release-publish
     permissions:
@@ -440,6 +484,11 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sesame-release-${{ github.ref_name }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sesame-candidate-${{ github.ref_name }}
+          path: release-handoff
 
       # The static update manifest and the candidate receipt both point at
       # https://github.com/<repo>/releases/download/<tag>/<installer>, so the
