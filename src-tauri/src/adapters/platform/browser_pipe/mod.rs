@@ -8,8 +8,6 @@ use zeroize::Zeroizing;
 
 pub const MAX_PIPE_MESSAGE_BYTES: usize = 16 * 1024;
 
-/// One host process: stable across its connections, and a reused process id
-/// is a different identity because the start time is part of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeerIdentity {
     pub(crate) pid: u32,

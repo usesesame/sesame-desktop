@@ -1184,7 +1184,6 @@ mod grant_tests {
             .expect("decide");
     }
 
-    /// Approve once with remember for a caller-chosen peer identity.
     fn approve_for(state: &BrowserFillState, request_id: &str, epoch: u64, peer: PeerIdentity) {
         let (approval_id, _, _receiver) = state
             .begin(

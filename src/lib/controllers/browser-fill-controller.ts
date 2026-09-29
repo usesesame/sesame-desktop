@@ -78,7 +78,7 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
         feedback.showNotice(
           'Login approved',
           remember
-            ? `Filled one login for ${request.hostname}. This login fills there without asking for the next 15 minutes.`
+            ? `Filled one login for ${request.hostname}. This login fills there without asking while the browser connection stays open, for up to 15 minutes.`
             : `Filled one login for ${request.hostname}.`,
         )
       }
