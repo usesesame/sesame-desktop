@@ -161,13 +161,12 @@ impl VaultRecordStore {
             "metadata",
             &self.header,
         )?);
-        let mut payload = OpenedPayload(VaultPayload {
-            vault_name: header.vault_name.clone(),
-            folders: header.folders.clone(),
-            vault_id: header.vault_id.clone(),
-            revision: header.revision,
-            ..VaultPayload::default()
-        });
+        let mut opened = VaultPayload::default();
+        opened.vault_name = header.vault_name.clone();
+        opened.folders = header.folders.clone();
+        opened.vault_id = header.vault_id.clone();
+        opened.revision = header.revision;
+        let mut payload = OpenedPayload(opened);
         let mut active_ids = HashSet::new();
         for record in &self.active {
             if !active_ids.insert(record.id.as_str()) {
@@ -388,26 +387,25 @@ mod tests {
     use crate::types::VaultEntry;
 
     fn payload() -> VaultPayload {
-        VaultPayload {
-            vault_name: "Fictional vault".to_string(),
-            entries: vec![
-                VaultEntry {
-                    id: "login-a".to_string(),
-                    title: "Northwind".to_string(),
-                    password: "fictional-alpha-secret".to_string(),
-                    ..VaultEntry::default()
-                },
-                VaultEntry {
-                    id: "login-b".to_string(),
-                    title: "Contoso".to_string(),
-                    password: "fictional-beta-secret".to_string(),
-                    ..VaultEntry::default()
-                },
-            ],
-            vault_id: Some("vault-fictional".to_string()),
-            revision: 7,
-            ..VaultPayload::default()
-        }
+        let mut payload = VaultPayload::default();
+        payload.vault_name = "Fictional vault".to_string();
+        payload.entries = vec![
+            VaultEntry {
+                id: "login-a".to_string(),
+                title: "Northwind".to_string(),
+                password: "fictional-alpha-secret".to_string(),
+                ..VaultEntry::default()
+            },
+            VaultEntry {
+                id: "login-b".to_string(),
+                title: "Contoso".to_string(),
+                password: "fictional-beta-secret".to_string(),
+                ..VaultEntry::default()
+            },
+        ];
+        payload.vault_id = Some("vault-fictional".to_string());
+        payload.revision = 7;
+        payload
     }
 
     #[test]

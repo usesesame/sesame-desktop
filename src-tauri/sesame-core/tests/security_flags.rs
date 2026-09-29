@@ -12,10 +12,9 @@ fn login(url: &str, username: &str, password: &str) -> VaultEntry {
 }
 
 fn payload(entries: Vec<VaultEntry>) -> VaultPayload {
-    VaultPayload {
-        entries,
-        ..VaultPayload::default()
-    }
+    let mut payload = VaultPayload::default();
+    payload.entries = entries;
+    payload
 }
 
 #[test]

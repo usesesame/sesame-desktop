@@ -2,10 +2,8 @@ use sesame_core::backup::csv_export_bytes;
 use sesame_core::types::{VaultEntry, VaultPayload};
 
 fn export_with(entry: VaultEntry) -> String {
-    let payload = VaultPayload {
-        entries: vec![entry],
-        ..VaultPayload::default()
-    };
+    let mut payload = VaultPayload::default();
+    payload.entries = vec![entry];
     String::from_utf8(csv_export_bytes(&payload).expect("export")).expect("utf8")
 }
 

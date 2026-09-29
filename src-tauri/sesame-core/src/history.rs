@@ -239,12 +239,11 @@ mod change_tests {
         use crate::types::{Attachment, DocumentMetadata};
 
         fn document(attachments: Vec<Attachment>) -> TaggedItem {
-            TaggedItem::Document(DocumentMetadata {
-                id: "doc".to_string(),
-                title: "Passport".to_string(),
-                attachments,
-                ..DocumentMetadata::default()
-            })
+            let mut document = DocumentMetadata::default();
+            document.id = "doc".to_string();
+            document.title = "Passport".to_string();
+            document.attachments = attachments;
+            TaggedItem::Document(document)
         }
 
         let attachment = Attachment {
