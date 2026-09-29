@@ -74,11 +74,15 @@ test('a workflow that writes says so at the job that writes', () => {
   }
 })
 
-test('the Windows release build cannot reach a signing key or the OIDC identity', () => {
+test('the Windows release build resolves the public keys without a signing key or OIDC identity', () => {
   const body = read('.github', 'workflows', 'release-early-access.yml')
   const build = jobBlock(body, 'build')
+  assert.match(
+    build,
+    /^\s+environment:\s*release-build\s*$/m,
+    'the release build takes the candidate public key from release-build and must carry no private key',
+  )
   assert.doesNotMatch(build, /id-token/, 'the release build must not be able to mint an OIDC token')
-  assert.doesNotMatch(build, /^\s+environment:/m, 'the release build must not run behind the signing environment')
   for (const secret of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'SESAME_RELEASE_CANDIDATE_SIGNING_KEY']) {
     assert.doesNotMatch(build, new RegExp(secret), `${secret} must not be available to the release build`)
   }

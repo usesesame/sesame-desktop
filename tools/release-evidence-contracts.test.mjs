@@ -140,3 +140,41 @@ test('public evidence uses an explicit safe allowlist and rejects added secret m
     await rm(publicRoot, { recursive: true, force: true })
   }
 })
+
+test('the candidate tool refuses to sign without a successful updater verifier run', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sesame-candidate-tool-'))
+  try {
+    const artifact = path.join(root, 'Sesame_1.2.3_x64-setup.exe')
+    const signature = `${artifact}.sig`
+    const sigstore = path.join(root, 'sigstore-evidence.json')
+    await writeFile(artifact, 'fictional installer bytes')
+    await writeFile(signature, 'A'.repeat(64))
+    await writeFile(sigstore, '{}')
+    const environment = {
+      ...process.env,
+      SESAME_RELEASE_ARCHITECTURE: 'x86_64',
+      SESAME_RELEASE_ARTIFACT_OBJECT_KEY: 'windows/1.2.3/Sesame_1.2.3_x64-setup.exe',
+      SESAME_UPDATER_SIGNING_KEY_ID: 'updater-1',
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: 'candidate-1',
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY: Buffer.alloc(32, 7).toString('base64url'),
+      SESAME_UPDATER_PUBLIC_KEY: 'fictional-updater-public-key',
+      SESAME_SUPPORTED_WINDOWS: 'Windows 10,Windows 11',
+      SESAME_RELEASE_NOTES_URL: 'https://usesesame.app/releases/1.2.3',
+      SESAME_PUBLIC_UPDATE_ARTIFACT_URL: 'https://github.com/usesesame/sesame-desktop/releases/download/v1.2.3/Sesame_1.2.3_x64-setup.exe',
+    }
+    const args = ['tools/create-updater-artifacts.mjs', artifact, signature, sigstore]
+    delete environment.SESAME_UPDATER_VERIFY_BIN
+    await assert.rejects(
+      run(process.execPath, args, { env: environment }),
+      /SESAME_UPDATER_VERIFY_BIN/,
+      'the tool must refuse to sign when the verifier executable is unset',
+    )
+    await assert.rejects(
+      run(process.execPath, args, { env: { ...environment, SESAME_UPDATER_VERIFY_BIN: process.execPath } }),
+      (error) => error.code === 1 && /Command failed/.test(String(error.stderr)),
+      'the tool must refuse to sign when the verifier exits non-zero',
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

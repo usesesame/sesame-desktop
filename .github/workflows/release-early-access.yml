@@ -30,9 +30,6 @@ env:
   SESAME_UPDATER_SIGNING_KEY_ID: ${{ vars.SESAME_UPDATER_SIGNING_KEY_ID }}
 
 jobs:
-  # Nothing is built until the tag is proven to point at main and to carry the
-  # version the package declares, so a tag pushed from a side branch cannot
-  # release a binary that never went through main.
   gate:
     runs-on: ubuntu-latest
     permissions:
@@ -138,13 +135,10 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # The complete cargo and npm release build runs here with no private signing
-  # key and no OIDC token in the job, so a compromised build script, proc macro
-  # or npm package cannot read the updater key, mint the release identity, or
-  # sign a swapped installer.
   build:
     needs: [vault-compatibility]
     runs-on: windows-latest
+    environment: release-build
     permissions:
       contents: read
     env:
@@ -207,8 +201,6 @@ jobs:
 
       # option_env! turns any missing value into a build with updates silently
       # switched off, which is how 0.1.0 shipped unable to update itself. Fail
-      # the release instead of discovering it from a user's screenshot. These
-      # are the public halves; the private keys belong to the signing job.
       - name: Require a complete signed-update configuration
         shell: pwsh
         env:
@@ -223,9 +215,6 @@ jobs:
             }
           }
 
-      # createUpdaterArtifacts stays off: the minisign signature is produced in
-      # the signing job from the frozen bytes this step uploads, so no signing
-      # key is ever present while this build runs.
       - name: Build the immutable unsigned Windows installer
         shell: pwsh
         env:
@@ -247,20 +236,20 @@ jobs:
           "name=$($installers[0].Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Build the updater verifier for the signing job
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin verify-updater-artifact
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sesame-build-${{ github.ref_name }}
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/debug/verify-updater-artifact.exe
             release-evidence/*.cdx.json
             vault-compatibility-merged.json
           if-no-files-found: error
           retention-days: 14
 
-  # Signing and attestation run after the build. The minisign key exists only
-  # in the step that signs and the candidate signing key only in the receipt
-  # step; the installer digest is re-checked before and after the signing step
-  # so a key never covers bytes other than the ones the build job recorded.
   sign-and-attest:
     needs: build
     runs-on: windows-latest
@@ -280,13 +269,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: src-tauri
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Download the built installer and evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -304,15 +286,8 @@ jobs:
           if ($sha256 -ne '${{ needs.build.outputs.installer-sha256 }}') { throw "The downloaded installer does not match the SHA-256 the build job recorded." }
           "path=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      # This job runs no build: npm ci skips package lifecycle scripts and no
-      # cargo target is compiled in a step that can read a signing key.
       - name: Install the release tools without running package scripts
         run: npm ci --ignore-scripts
-
-      # tauri-build validates the declared sidecar in any cargo build, and this
-      # is the command that produces it.
-      - name: Stage the browser host sidecar
-        run: npm run desktop:host:stage
 
       - name: Sign the installer with the pinned updater key
         shell: pwsh
@@ -329,7 +304,8 @@ jobs:
           $installer = '${{ steps.installer.outputs.path }}'
           $sha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($sha256 -ne '${{ needs.build.outputs.installer-sha256 }}') { throw "The installer changed after the build job hashed it." }
-          cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin verify-updater-artifact -- $installer "$installer.sig"
+          $verifier = Join-Path $env:GITHUB_WORKSPACE 'build-output/src-tauri/target/debug/verify-updater-artifact.exe'
+          & $verifier $installer "$installer.sig"
 
       - id: evidence
         name: Freeze the installer, updater signature, manifest, and SBOM
@@ -371,6 +347,7 @@ jobs:
       - name: Create the signed candidate receipt
         env:
           SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_UPDATER_VERIFY_BIN: ${{ github.workspace }}/build-output/src-tauri/target/debug/verify-updater-artifact.exe
           SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
           SESAME_RELEASE_CANDIDATE_SIGNING_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_SIGNING_KEY }}

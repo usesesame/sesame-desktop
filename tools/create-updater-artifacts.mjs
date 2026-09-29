@@ -1,5 +1,7 @@
 import { createHash, createPrivateKey, sign } from 'node:crypto'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,6 +20,7 @@ const updaterPublicKey = process.env.SESAME_UPDATER_PUBLIC_KEY
 const supportedWindows = process.env.SESAME_SUPPORTED_WINDOWS
 const releaseNotesURL = process.env.SESAME_RELEASE_NOTES_URL
 const publicArtifactURL = process.env.SESAME_PUBLIC_UPDATE_ARTIFACT_URL
+const verifyBin = process.env.SESAME_UPDATER_VERIFY_BIN?.trim()
 const channel = process.env.SESAME_RELEASE_CHANNEL ?? 'beta'
 const architecture = process.env.SESAME_RELEASE_ARCHITECTURE
 const validHTTPSURL = (value) => {
@@ -41,8 +44,12 @@ if (!candidateSigningKeyID || !candidateSigningKey || !updaterPublicKey || !supp
 if (architecture !== 'x86_64' && architecture !== 'aarch64') {
   throw new Error('SESAME_RELEASE_ARCHITECTURE must be x86_64 or aarch64 and must describe the built artifact, not the CI runner.')
 }
+if (!verifyBin) {
+  throw new Error('SESAME_UPDATER_VERIFY_BIN must point at the verify-updater-artifact executable built from this commit.')
+}
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const run = promisify(execFile)
 const packageJSON = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8'))
 const [artifact, signature, sigstore, authenticode] = await Promise.all([
   readFile(artifactPath),
@@ -52,6 +59,11 @@ const [artifact, signature, sigstore, authenticode] = await Promise.all([
 ])
 const updaterSignature = signature.trim()
 if (updaterSignature.length < 64) throw new Error('The Tauri updater signature is missing or malformed.')
+const verifierEnvironment = {
+  SESAME_UPDATER_PUBLIC_KEY: updaterPublicKey,
+  ...(process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+}
+await run(path.resolve(verifyBin), [artifactPath, signaturePath], { env: verifierEnvironment })
 if (authenticode !== null && (typeof authenticode !== 'object' || Array.isArray(authenticode))) {
   throw new Error('Authenticode evidence must be a JSON object produced by the signing job.')
 }
