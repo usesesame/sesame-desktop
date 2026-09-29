@@ -114,7 +114,7 @@ describe('copying a login password', () => {
     await controller.copySelectedField('password')
 
     expect(vaultApi.copyToClipboard).toHaveBeenCalledWith('fictional-alpha-secret')
-    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '', revealedFor: '' })
+    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '' })
   })
 
   it('copies after the master password check and keeps the password hidden', async () => {
@@ -143,7 +143,8 @@ describe('copying a login password', () => {
     await controller.confirmPasswordPresence()
 
     expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
-    expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-secret', revealedFor: 'login-a' })
+    expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2)
+    expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-secret' })
   })
 
   it('copies the password of a login that is not selected from the context menu', async () => {
@@ -194,6 +195,72 @@ describe('copying a login password', () => {
 
     expect(vaultApi.grantPresence).not.toHaveBeenCalled()
     expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+  })
+})
+
+describe('revealing a login password', () => {
+  it('asks the vault for the secret again when the same password is shown a second time', async () => {
+    let reveals = 0
+    vaultApi.revealLoginSecret.mockImplementation(async () => {
+      reveals += 1
+      return reveals === 1 ? 'fictional-alpha-secret' : 'fictional-alpha-rotated'
+    })
+    const { controller } = harness()
+
+    await controller.togglePasswordReveal()
+    expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-secret' })
+
+    await controller.togglePasswordReveal()
+    expect(controller.state.value().passwordVisible).toBe(false)
+
+    await controller.togglePasswordReveal()
+
+    expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2)
+    expect(vaultApi.revealLoginSecret).toHaveBeenLastCalledWith('login-a')
+    expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-rotated' })
+  })
+
+  it('asks for the master password again when the presence window has closed', async () => {
+    let presenceOpen = true
+    vaultApi.revealLoginSecret.mockImplementation(async () => {
+      if (!presenceOpen) throw new Error('presenceRequired')
+      return 'fictional-alpha-secret'
+    })
+    const { controller } = harness()
+
+    await controller.togglePasswordReveal()
+    await controller.togglePasswordReveal()
+    presenceOpen = false
+
+    await controller.togglePasswordReveal()
+
+    expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2)
+    expect(controller.state.value()).toMatchObject({
+      passwordVisible: false,
+      passwordPresenceRequired: true,
+      passwordPresenceFor: 'login-a',
+      passwordPresenceIntent: 'reveal',
+    })
+  })
+
+  it('drops the shown password when another login is selected', async () => {
+    const { controller } = harness('login-a')
+    await controller.togglePasswordReveal()
+    expect(controller.state.value().revealedPassword).toBe('fictional-alpha-secret')
+
+    await controller.selectEntry('login-b')
+
+    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '' })
+  })
+
+  it('drops the shown password when the vault locks', async () => {
+    const { controller } = harness()
+    await controller.togglePasswordReveal()
+    expect(controller.state.value().revealedPassword).toBe('fictional-alpha-secret')
+
+    controller.clearSecrets()
+
+    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '', passwordPresenceRequired: false })
   })
 })
 

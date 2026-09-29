@@ -56,7 +56,6 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   const state = controllerStore({
     passwordVisible: false,
     revealedPassword: '',
-    revealedFor: '',
     passwordPresenceRequired: false,
     passwordPresenceFor: '',
     passwordPresenceIntent: 'reveal' as PasswordIntent,
@@ -113,9 +112,6 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   const loginIds = derived(vault, ($vault) => new Set(($vault.snapshot?.entries ?? []).map((entry) => entry.id)))
 
   async function readPassword(id: string, intent: PasswordIntent): Promise<string> {
-    if (state.value().revealedFor === id && state.value().revealedPassword) {
-      return state.value().revealedPassword
-    }
     const generation = revealGeneration
     try {
       const secret = await revealLoginSecret(id)
@@ -136,7 +132,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   async function ensureRevealed(id: string): Promise<string> {
     const secret = await readPassword(id, 'reveal')
     if (!secret || selection.value().activeItemId !== id) return ''
-    state.patch({ revealedPassword: secret, revealedFor: id })
+    state.patch({ revealedPassword: secret })
     return secret
   }
 
@@ -166,7 +162,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       vault.patch({ loginCard: card })
       selection.patch({ recentItemIds: rememberRecent(selection.value().recentItemIds, id) })
       clearPasswordHideTimer()
-      state.patch({ passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '' })
+      state.patch({ passwordVisible: false, revealedPassword: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '' })
       totp.start(card, id, (refresh) => {
         const current = vault.value().loginCard
         if (requestToken !== selectionRequestToken || selection.value().activeItemId !== id || !current) return
@@ -687,7 +683,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       // A countdown in flight must not fire after the lock it was racing against.
       stopAutoTypeCountdown()
       state.set({
-        passwordVisible: false, revealedPassword: '', revealedFor: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
+        passwordVisible: false, revealedPassword: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
         savingLogin: false, editorTitle: 'Add a login',
         editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,

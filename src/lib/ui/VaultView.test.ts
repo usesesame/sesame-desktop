@@ -1,9 +1,42 @@
 /* @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { createFeedbackController } from '../controllers/feedback-controller'
+import { createLoginController } from '../controllers/login-controller'
+import { createModalController } from '../controllers/modal-controller'
 import { APP_STORES, createAppStores } from '../stores/app-stores'
+import type { LoginCard, VaultSnapshot } from '../types'
 import type { VaultItem } from '../vault-items'
 import VaultView from './VaultView.svelte'
+
+const vaultApi = vi.hoisted(() => ({
+  addItemsTag: vi.fn(),
+  autoType: vi.fn(),
+  bulkAssignFolder: vi.fn(),
+  checkPasswordBreach: vi.fn(),
+  clearWebsiteIconCache: vi.fn(),
+  copyToClipboard: vi.fn(),
+  createFolder: vi.fn(),
+  deleteFolder: vi.fn(),
+  getLoginCard: vi.fn(),
+  getPlatformCapabilities: vi.fn(),
+  getWebsiteIcon: vi.fn(),
+  grantPresence: vi.fn(),
+  openWebsite: vi.fn(),
+  recordDiagnostic: vi.fn(),
+  recordItemUse: vi.fn(),
+  refreshTotp: vi.fn(),
+  renameFolder: vi.fn(),
+  revealLoginSecret: vi.fn(),
+  saveLogin: vi.fn(),
+  setItemFavourite: vi.fn(),
+}))
+
+vi.mock('../vault', () => ({
+  previewMode: false,
+  PRESENCE_REQUIRED: 'presenceRequired',
+  ...vaultApi,
+}))
 
 afterEach(() => {
   cleanup()
@@ -11,6 +44,7 @@ afterEach(() => {
 })
 
 beforeEach(() => {
+  vi.clearAllMocks()
   window.matchMedia = ((query: string) => ({
     matches: false,
     media: query,
@@ -95,6 +129,46 @@ function renderVault(overrides: Record<string, unknown> = {}) {
     context: new Map([[APP_STORES, stores]]),
   } as never)
   return { rendered, stores, props }
+}
+
+function renderReveal() {
+  const stores = createAppStores()
+  const loginCard = { id: 'login-a', title: 'Northwind', username: 'alpha@example.test', email: '', hasPassword: true, favourite: false } as LoginCard
+  stores.vault.patch({
+    status: { exists: true, unlocked: true, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 1 },
+    snapshot: {
+      vaultName: 'Fictional vault',
+      revision: 1,
+      folders: [],
+      entries: [{ id: 'login-a', title: 'Northwind', site: '', initials: 'N', folder: '', favourite: false, updatedAt: 1, tags: [], issueKinds: [], passwordScore: 0, passwordIssues: [] }],
+      items: [],
+      trash: [],
+      history: [],
+      security: { good: 0, needsAttention: 0 },
+    } as unknown as VaultSnapshot,
+    loginCard,
+  })
+  stores.selection.patch({ activeItemId: 'login-a', activeItemKind: 'login' })
+  const feedback = createFeedbackController()
+  const controller = createLoginController({
+    stores,
+    feedback,
+    modal: createModalController({ stores, feedback }),
+    refreshDiagnostics: async () => {},
+    requestDelete: () => {},
+    requestBulkDelete: () => {},
+  })
+  const rendered = render(VaultView, {
+    props: vaultProps({
+      passwordVisible: false,
+      revealedPassword: '',
+      onRevealPassword: () => controller.togglePasswordReveal(),
+      onConfirmPasswordPresence: () => void controller.confirmPasswordPresence(),
+      onCancelPasswordPresence: () => controller.cancelPasswordPresence(),
+    }),
+    context: new Map([[APP_STORES, stores]]),
+  } as never)
+  return { rendered, controller }
 }
 
 function rowButtons(container: HTMLElement): HTMLButtonElement[] {
@@ -225,4 +299,29 @@ test('a row that needs attention exposes a named status marker with its label', 
   expect(marker).toBeTruthy()
   expect(rendered.container.querySelector('.entry-warning-label')?.textContent).toBe('Needs attention')
   expect(rendered.container.querySelectorAll('.entry-warning')).toHaveLength(1)
+})
+
+test('the show control asks the vault again after the password is hidden', async () => {
+  let reveals = 0
+  vaultApi.revealLoginSecret.mockImplementation(async () => {
+    reveals += 1
+    return reveals === 1 ? 'fictional-alpha-secret' : 'fictional-alpha-rotated'
+  })
+  const { rendered, controller } = renderReveal()
+  await Promise.resolve()
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  await vi.waitFor(() => expect(controller.state.value().passwordVisible).toBe(true))
+  await rendered.rerender({ passwordVisible: true, revealedPassword: controller.state.value().revealedPassword })
+  expect(screen.getByText('fictional-alpha-secret')).toBeTruthy()
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+  await vi.waitFor(() => expect(controller.state.value().passwordVisible).toBe(false))
+  await rendered.rerender({ passwordVisible: false, revealedPassword: controller.state.value().revealedPassword })
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  await vi.waitFor(() => expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2))
+  await vi.waitFor(() => expect(controller.state.value().revealedPassword).toBe('fictional-alpha-rotated'))
+  await rendered.rerender({ passwordVisible: true, revealedPassword: controller.state.value().revealedPassword })
+  expect(screen.getByText('fictional-alpha-rotated')).toBeTruthy()
 })
