@@ -95,6 +95,9 @@ jobs:
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
+      - name: Verify the vendored glib tree
+        run: node tools/verify-glib-vendor.mjs
+
       - name: Build the immutable Linux packages
         run: >-
           npx tauri build --bundles deb,rpm,appimage
