@@ -225,6 +225,7 @@ pub fn delete_local_vault(
     state.cache_hello_unlock(false);
     let staged = stage_managed_vault_files(&vault, parent);
     drop(session);
+    let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(&app);
     // Never recreate a PIN throttle file after the vault and its PIN wrapper are gone.
     discard_pin_throttle_state(&app, &state);
     let staged = staged?;

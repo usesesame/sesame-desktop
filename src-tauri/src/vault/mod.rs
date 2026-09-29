@@ -78,6 +78,7 @@ pub use sesame_core::{
 pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResult<()> {
     use tauri::{Emitter, Manager};
     state.lock_for_lifecycle()?;
+    let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(app);
     if let Some(presence) = app.try_state::<crate::release::ReleasePresence>() {
         presence.revoke();
     }

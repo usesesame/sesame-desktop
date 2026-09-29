@@ -1470,7 +1470,7 @@ export async function copyToClipboard(value: string): Promise<void> {
   }
   // The copy runs in Rust so the value crosses once and carries the secret hint
   // that keeps clipboard managers from filing it in their history.
-  const epoch = await invoke<number>('copy_secret', { value })
+  const epoch = await invoke<number>('copy_secret', { value, clearAfterMs: clipboardClearMs })
   window.setTimeout(() => {
     void invoke('clear_clipboard_if_unchanged', { epoch }).catch(() => {})
   }, clipboardClearMs)
