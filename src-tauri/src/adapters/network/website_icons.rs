@@ -585,6 +585,7 @@ fn icon_client(host: &str, pinned: &[SocketAddr]) -> VaultResult<Client> {
         .timeout(Duration::from_secs(8))
         .user_agent("Sesame website icon cache/1")
         .resolve_to_addrs(host, pinned)
+        .no_proxy()
         .build()
         .map_err(|_| "Sesame could not prepare the website icon request.".to_string())
 }
@@ -775,7 +776,7 @@ fn is_public_ip(ip: IpAddr) -> bool {
 }
 
 fn is_public_ipv4(ip: Ipv4Addr) -> bool {
-    let [a, b, _, _] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     !(ip.is_private()
         || ip.is_loopback()
         || ip.is_link_local()
@@ -784,9 +785,14 @@ fn is_public_ipv4(ip: Ipv4Addr) -> bool {
         || ip.is_unspecified()
         || ip.is_multicast()
         || a == 0
+        || (a == 192 && b == 0 && c == 0)
         || (a == 100 && (64..=127).contains(&b))
         || (a == 198 && (18..=19).contains(&b))
         || a >= 240)
+}
+
+fn ipv4_from_segments(high: u16, low: u16) -> Ipv4Addr {
+    Ipv4Addr::from((u32::from(high) << 16) | u32::from(low))
 }
 
 fn is_public_ipv6(ip: Ipv6Addr) -> bool {
@@ -794,11 +800,27 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
     if let Some(mapped) = ip.to_ipv4_mapped() {
         return is_public_ipv4(mapped);
     }
+    if segments[0] == 0x0064 && segments[1] == 0xff9b {
+        let is_nat64 = segments[2] == 0x0001
+            || (segments[2] == 0 && segments[3..6].iter().all(|segment| *segment == 0));
+        return is_nat64 && is_public_ipv4(ipv4_from_segments(segments[6], segments[7]));
+    }
+    if segments[0] == 0x2002 {
+        return is_public_ipv4(ipv4_from_segments(segments[1], segments[2]));
+    }
+    if segments[0] == 0x2001 && segments[1] == 0 {
+        return false;
+    }
+    if segments[..6].iter().all(|segment| *segment == 0) {
+        return is_public_ipv4(ipv4_from_segments(segments[6], segments[7]));
+    }
     !(ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
         || (segments[0] & 0xfe00) == 0xfc00
         || (segments[0] & 0xffc0) == 0xfe80
+        || (segments[0] & 0xffc0) == 0xfec0
+        || (segments[0] == 0x0100 && segments[1..4].iter().all(|segment| *segment == 0))
         || (segments[0] == 0x2001 && segments[1] == 0x0db8))
 }
 
@@ -970,14 +992,27 @@ mod tests {
             "192.168.1.1",
             "169.254.1.1",
             "100.64.0.1",
+            "192.0.0.1",
             "::1",
             "fd00::1",
             "fe80::1",
+            "fec0::1",
             "::ffff:10.0.0.1",
+            "::a00:1",
+            "64:ff9b::a00:1",
+            "64:ff9b::c0a8:101",
+            "64:ff9b:1::c0a8:101",
+            "64:ff9b:2::1",
+            "2002:c0a8:101::1",
+            "2001::1",
+            "100::1",
         ] {
             assert!(!is_public_ip(address.parse().unwrap()), "{address}");
         }
         assert!(is_public_ip("93.184.216.34".parse().unwrap()));
+        assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b::101:101".parse().unwrap()));
+        assert!(is_public_ip("2002:5db8:d822::1".parse().unwrap()));
     }
 
     #[test]
