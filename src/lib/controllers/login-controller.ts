@@ -673,6 +673,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       selectionRequestToken += 1
       totp.stop()
       vault.patch({ loginCard: null })
+      state.patch({ passwordVisible: false, revealedPassword: '' })
     },
     clearSecrets() {
       selectionRequestToken += 1
