@@ -35,9 +35,6 @@ fn fictional_hello_wrap() -> HelloWrap {
 
 #[test]
 fn setting_then_removing_a_pin_leaves_no_previous_copy() {
-    if protect_for_device(b"fictional device protection probe").is_err() {
-        return;
-    }
     let directory = test_directory("pin");
     let path = directory.join("vault.sesame");
     let previous = path.with_extension("sesame.prev");
@@ -47,7 +44,25 @@ fn setting_then_removing_a_pin_leaves_no_previous_copy() {
     persist_session(&mut session).expect("create a previous copy");
     assert!(previous.exists());
 
-    set_pin_for_session(&mut session, PIN).expect("set pin");
+    let device_protection = protect_for_device(b"fictional device protection probe");
+    let set_result = set_pin_for_session(&mut session, PIN);
+    if device_protection.is_err() {
+        assert!(
+            set_result.is_err(),
+            "a vault without device protection accepted a PIN"
+        );
+        assert!(session.pin_wrap.is_none());
+        assert!(
+            VaultLoader::read(&path)
+                .expect("read vault")
+                .pin_wrap
+                .is_none(),
+            "the saved vault gained a PIN wrap without device protection"
+        );
+        fs::remove_dir_all(&directory).expect("cleanup");
+        return;
+    }
+    set_result.expect("set pin");
 
     assert!(session.pin_wrap.is_some());
     assert!(
