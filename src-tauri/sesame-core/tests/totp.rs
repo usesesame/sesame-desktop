@@ -72,11 +72,9 @@ fn surrounding_whitespace_does_not_stop_a_secret_being_read() {
 
 #[test]
 fn the_login_card_derives_a_code_but_never_carries_the_seed() {
-    let entry = VaultEntry {
-        title: "Example".into(),
-        totp: Some(RFC_KEY.to_string()),
-        ..VaultEntry::default()
-    };
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.totp = Some(RFC_KEY.to_string());
     let card = login_card_for(&[], &entry);
     let wire = serde_json::to_string(&card).expect("the card serializes");
     assert!(card.has_totp, "a configured seed was not reported");
@@ -86,10 +84,8 @@ fn the_login_card_derives_a_code_but_never_carries_the_seed() {
         "the raw seed crossed the interface boundary: {wire}"
     );
 
-    let bare = VaultEntry {
-        title: "Example".into(),
-        ..VaultEntry::default()
-    };
+    let mut bare = VaultEntry::default();
+    bare.title = "Example".into();
     assert!(!login_card_for(&[], &bare).has_totp);
 }
 

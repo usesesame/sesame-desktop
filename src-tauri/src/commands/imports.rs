@@ -28,19 +28,19 @@ fn insert_imported_items(
         materialize_entry_folder(payload, entry)?;
     }
     for entry in entries {
-        payload.insert_active_item(TaggedItem::Login(entry))?;
+        payload.insert_active_item(&mut TaggedItem::Login(entry))?;
     }
     for note in secure_notes {
-        payload.insert_active_item(TaggedItem::SecureNote(note))?;
+        payload.insert_active_item(&mut TaggedItem::SecureNote(note))?;
     }
     for card in cards {
-        payload.insert_active_item(TaggedItem::Card(card))?;
+        payload.insert_active_item(&mut TaggedItem::Card(card))?;
     }
     for identity in identities {
-        payload.insert_active_item(TaggedItem::Identity(identity))?;
+        payload.insert_active_item(&mut TaggedItem::Identity(identity))?;
     }
     for key in ssh_keys {
-        payload.insert_active_item(TaggedItem::SshKey(key))?;
+        payload.insert_active_item(&mut TaggedItem::SshKey(key))?;
     }
     Ok(())
 }

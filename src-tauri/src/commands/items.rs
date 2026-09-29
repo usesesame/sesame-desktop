@@ -392,14 +392,13 @@ mod tests {
     const LATENCY_RUNS: usize = 5;
 
     fn login() -> TaggedItem {
-        TaggedItem::Login(VaultEntry {
-            id: "fictional-login".to_string(),
-            title: "Northwind".to_string(),
-            username: "casey".to_string(),
-            password: "fictional-secret-canary".to_string(),
-            folder_id: Some("fictional-folder".to_string()),
-            ..VaultEntry::default()
-        })
+        let mut entry = VaultEntry::default();
+        entry.id = "fictional-login".to_string();
+        entry.title = "Northwind".to_string();
+        entry.username = "casey".to_string();
+        entry.password = "fictional-secret-canary".to_string();
+        entry.folder_id = Some("fictional-folder".to_string());
+        TaggedItem::Login(entry)
     }
 
     #[test]
@@ -427,14 +426,13 @@ mod tests {
         tags: &[&str],
         notes: Option<&str>,
     ) -> TaggedItem {
-        TaggedItem::Login(VaultEntry {
-            id: id.to_string(),
-            title: title.to_string(),
-            username: username.to_string(),
-            tags: tags.iter().map(|tag| tag.to_string()).collect(),
-            notes: notes.map(str::to_string),
-            ..VaultEntry::default()
-        })
+        let mut entry = VaultEntry::default();
+        entry.id = id.to_string();
+        entry.title = title.to_string();
+        entry.username = username.to_string();
+        entry.tags = tags.iter().map(|tag| tag.to_string()).collect();
+        entry.notes = notes.map(str::to_string);
+        TaggedItem::Login(entry)
     }
 
     fn match_score(item: &TaggedItem, query: &str) -> i64 {
@@ -523,47 +521,54 @@ mod tests {
         };
 
         vec![
-            TaggedItem::Login(VaultEntry {
-                id: "login".to_string(),
-                title: "Northwind".to_string(),
-                username: "casey".to_string(),
-                password: "fictional-login-canary".to_string(),
-                ..VaultEntry::default()
+            TaggedItem::Login({
+                let mut entry = VaultEntry::default();
+                entry.id = "login".to_string();
+                entry.title = "Northwind".to_string();
+                entry.username = "casey".to_string();
+                entry.password = "fictional-login-canary".to_string();
+                entry
             }),
-            TaggedItem::Identity(Identity {
-                id: "identity".to_string(),
-                full_name: "Casey North".to_string(),
-                ..Identity::default()
+            TaggedItem::Identity({
+                let mut identity = Identity::default();
+                identity.id = "identity".to_string();
+                identity.full_name = "Casey North".to_string();
+                identity
             }),
-            TaggedItem::SecureNote(SecureNote {
-                id: "note".to_string(),
-                content: "fictional note body".to_string(),
-                ..SecureNote::default()
+            TaggedItem::SecureNote({
+                let mut note = SecureNote::default();
+                note.id = "note".to_string();
+                note.content = "fictional note body".to_string();
+                note
             }),
-            TaggedItem::Card(Card {
-                id: "card".to_string(),
-                number: "fictional-card-number-canary".to_string(),
-                security_code: "fictional-card-code-canary".to_string(),
-                ..Card::default()
+            TaggedItem::Card({
+                let mut card = Card::default();
+                card.id = "card".to_string();
+                card.number = "fictional-card-number-canary".to_string();
+                card.security_code = "fictional-card-code-canary".to_string();
+                card
             }),
-            TaggedItem::WifiNetwork(WifiNetwork {
-                id: "wifi".to_string(),
-                ssid: "Fictional Cafe".to_string(),
-                password: "fictional-wifi-canary".to_string(),
-                ..WifiNetwork::default()
+            TaggedItem::WifiNetwork({
+                let mut network = WifiNetwork::default();
+                network.id = "wifi".to_string();
+                network.ssid = "Fictional Cafe".to_string();
+                network.password = "fictional-wifi-canary".to_string();
+                network
             }),
-            TaggedItem::SshKey(SshKey {
-                id: "ssh".to_string(),
-                key_type: "ed25519".to_string(),
-                private_key: "fictional-ssh-canary".to_string(),
-                passphrase: "fictional-ssh-passphrase-canary".to_string(),
-                ..SshKey::default()
+            TaggedItem::SshKey({
+                let mut key = SshKey::default();
+                key.id = "ssh".to_string();
+                key.key_type = "ed25519".to_string();
+                key.private_key = "fictional-ssh-canary".to_string();
+                key.passphrase = "fictional-ssh-passphrase-canary".to_string();
+                key
             }),
-            TaggedItem::SoftwareLicense(SoftwareLicense {
-                id: "license".to_string(),
-                product_name: "Fictional Editor".to_string(),
-                license_key: "fictional-licence-canary".to_string(),
-                ..SoftwareLicense::default()
+            TaggedItem::SoftwareLicense({
+                let mut license = SoftwareLicense::default();
+                license.id = "license".to_string();
+                license.product_name = "Fictional Editor".to_string();
+                license.license_key = "fictional-licence-canary".to_string();
+                license
             }),
             TaggedItem::Document({
                 let mut document = DocumentMetadata::default();
@@ -571,14 +576,15 @@ mod tests {
                 document.document_number = "fictional-document-canary".to_string();
                 document
             }),
-            TaggedItem::CustomRecord(CustomRecord {
-                id: "record".to_string(),
-                fields: vec![crate::vault::CustomFieldEntry {
+            TaggedItem::CustomRecord({
+                let mut record = CustomRecord::default();
+                record.id = "record".to_string();
+                record.fields = vec![crate::vault::CustomFieldEntry {
                     label: "Fictional field".to_string(),
                     value: "fictional-field-canary".to_string(),
                     kind: "text".to_string(),
-                }],
-                ..CustomRecord::default()
+                }];
+                record
             }),
         ]
     }
@@ -661,23 +667,20 @@ mod tests {
     fn search_index_orders_matches_and_skips_secrets() {
         let (mut opened, _) =
             create_vault("fictional master password", "Fictional vault").expect("created vault");
-        opened.payload.entries.push(VaultEntry {
-            id: "login-b".to_string(),
-            title: "Portal northwind".to_string(),
-            ..VaultEntry::default()
-        });
-        opened.payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            title: "Northwind portal".to_string(),
-            username: "casey".to_string(),
-            ..VaultEntry::default()
-        });
-        opened.payload.entries.push(VaultEntry {
-            id: "login-c".to_string(),
-            title: "Elsewhere".to_string(),
-            password: "fictional-secret-canary".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut first = VaultEntry::default();
+        first.id = "login-b".to_string();
+        first.title = "Portal northwind".to_string();
+        opened.payload.entries.push(first);
+        let mut second = VaultEntry::default();
+        second.id = "login-a".to_string();
+        second.title = "Northwind portal".to_string();
+        second.username = "casey".to_string();
+        opened.payload.entries.push(second);
+        let mut third = VaultEntry::default();
+        third.id = "login-c".to_string();
+        third.title = "Elsewhere".to_string();
+        third.password = "fictional-secret-canary".to_string();
+        opened.payload.entries.push(third);
         let path = std::env::temp_dir().join(format!("sesame-search-{}", random_id()));
         let session = UnlockedVault::from_opened(path, &opened).expect("unlocked vault");
 
@@ -692,17 +695,16 @@ mod tests {
         let (mut opened, _) =
             create_vault("fictional master password", "Fictional vault").expect("created vault");
         for index in 0..count {
-            opened.payload.entries.push(VaultEntry {
-                id: format!("fictional-login-{index:05}"),
-                title: format!("Northwind account {index:05}"),
-                username: format!("casey.{index:05}"),
-                email: format!("casey.{index:05}@northwind.example"),
-                url: format!("https://portal.example/{index:05}"),
-                notes: Some(format!("Fictional note {index:05}")),
-                password: format!("fictional-secret-{index:05}"),
-                updated_at: 41,
-                ..VaultEntry::default()
-            });
+            let mut entry = VaultEntry::default();
+            entry.id = format!("fictional-login-{index:05}");
+            entry.title = format!("Northwind account {index:05}");
+            entry.username = format!("casey.{index:05}");
+            entry.email = format!("casey.{index:05}@northwind.example");
+            entry.url = format!("https://portal.example/{index:05}");
+            entry.notes = Some(format!("Fictional note {index:05}"));
+            entry.password = format!("fictional-secret-{index:05}");
+            entry.updated_at = 41;
+            opened.payload.entries.push(entry);
         }
         let path = std::env::temp_dir().join(format!("sesame-search-{}", random_id()));
         UnlockedVault::from_opened(path, &opened).expect("unlocked vault")

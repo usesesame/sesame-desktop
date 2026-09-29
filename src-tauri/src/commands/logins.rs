@@ -539,15 +539,14 @@ mod keep_password_tests {
 
     fn stored_login() -> VaultPayload {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            title: "Northwind".to_string(),
-            password: "fictional-stored-secret".to_string(),
-            updated_at: 41,
-            password_updated_at: 42,
-            revision: 7,
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.title = "Northwind".to_string();
+        entry.password = "fictional-stored-secret".to_string();
+        entry.updated_at = 41;
+        entry.password_updated_at = 42;
+        entry.revision = 7;
+        payload.entries.push(entry);
         payload
     }
 
@@ -605,11 +604,9 @@ mod keep_password_tests {
     #[test]
     fn an_edit_for_a_missing_login_leaves_the_payload_untouched() {
         let payload = stored_login();
-        let updated = VaultEntry {
-            id: "login-missing".to_string(),
-            password: "fictional-new-secret".to_string(),
-            ..VaultEntry::default()
-        };
+        let mut updated = VaultEntry::default();
+        updated.id = "login-missing".to_string();
+        updated.password = "fictional-new-secret".to_string();
 
         assert!(payload_with_saved_login(&payload, updated, None, 9001).is_err());
         assert_eq!(payload.entries[0].password, "fictional-stored-secret");

@@ -177,15 +177,14 @@ mod lookalike_tests {
     }
 
     fn entry(id: &str, url: &str, password: &str) -> VaultEntry {
-        VaultEntry {
-            id: id.to_string(),
-            title: format!("Entry {id}"),
-            username: "casey".to_string(),
-            email: "casey@example.test".to_string(),
-            password: password.to_string(),
-            url: url.to_string(),
-            ..VaultEntry::default()
-        }
+        let mut entry = VaultEntry::default();
+        entry.id = id.to_string();
+        entry.title = format!("Entry {id}");
+        entry.username = "casey".to_string();
+        entry.email = "casey@example.test".to_string();
+        entry.password = password.to_string();
+        entry.url = url.to_string();
+        entry
     }
 
     fn fill_request(origin: &str) -> BrowserRequest {

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use sesame_core::snapshot::password_counts;
-use sesame_core::types::{Attachment, DocumentMetadata, VaultEntry, VaultPayload};
+use sesame_core::types::{Attachment, DocumentMetadata, TaggedItem, VaultEntry, VaultPayload};
 
 struct ZeroedBeforeFree;
 
@@ -56,18 +56,42 @@ fn drop_and_require_zeroed<T>(value: T, pointer: *const u8, length: usize) {
     );
 }
 
+fn login(password: &str) -> VaultEntry {
+    let mut entry = VaultEntry::default();
+    entry.id = "login-a".to_string();
+    entry.password = password.to_string();
+    entry
+}
+
 #[test]
 fn a_dropped_payload_zeroes_the_login_password() {
     let mut payload = VaultPayload::default();
-    payload.entries.push(VaultEntry {
-        id: "login-a".to_string(),
-        password: "fictional-vault-password".to_string(),
-        ..VaultEntry::default()
-    });
+    payload.entries.push(login("fictional-vault-password"));
     let pointer = payload.entries[0].password.as_ptr();
     let length = payload.entries[0].password.len();
 
     drop_and_require_zeroed(payload, pointer, length);
+}
+
+#[test]
+fn a_dropped_tagged_item_zeroes_the_login_password() {
+    let item = TaggedItem::Login(login("fictional-tagged-password"));
+    let TaggedItem::Login(entry) = &item else {
+        panic!("expected a login item");
+    };
+    let pointer = entry.password.as_ptr();
+    let length = entry.password.len();
+
+    drop_and_require_zeroed(item, pointer, length);
+}
+
+#[test]
+fn a_dropped_vault_entry_zeroes_the_login_password() {
+    let entry = login("fictional-entry-password");
+    let pointer = entry.password.as_ptr();
+    let length = entry.password.len();
+
+    drop_and_require_zeroed(entry, pointer, length);
 }
 
 #[test]
@@ -91,11 +115,7 @@ fn a_dropped_document_zeroes_attachment_bytes() {
 #[test]
 fn dropped_password_counts_zero_their_keys() {
     let mut payload = VaultPayload::default();
-    payload.entries = vec![VaultEntry {
-        id: "login-a".to_string(),
-        password: "fictional-shared-password".to_string(),
-        ..VaultEntry::default()
-    }];
+    payload.entries = vec![login("fictional-shared-password")];
     let counts = password_counts(&payload);
     let key = counts.keys().next().expect("one counted password");
     let pointer = key.as_ptr();

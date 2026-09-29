@@ -10,10 +10,9 @@ fn export_with(entry: VaultEntry) -> String {
 #[test]
 fn a_field_that_a_spreadsheet_would_run_as_a_formula_is_neutralised() {
     for dangerous in ["=cmd|'/c calc'!A1", "+1+1", "-1+1", "@SUM(A1)"] {
-        let csv = export_with(VaultEntry {
-            title: dangerous.to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.title = dangerous.to_string();
+        let csv = export_with(entry);
         let cell = csv.lines().nth(1).expect("a data row");
         assert!(
             !cell.contains(&format!(",{dangerous}")) || cell.contains(&format!("'{dangerous}")),
@@ -25,11 +24,10 @@ fn a_field_that_a_spreadsheet_would_run_as_a_formula_is_neutralised() {
 
 #[test]
 fn the_guard_covers_the_password_column_too_not_only_the_name() {
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        password: "=1+1".into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.password = "=1+1".into();
+    let csv = export_with(entry);
     assert!(
         csv.contains("'=1+1"),
         "password was exported unguarded:\n{csv}"
@@ -38,21 +36,19 @@ fn the_guard_covers_the_password_column_too_not_only_the_name() {
 
 #[test]
 fn an_ordinary_value_is_exported_unchanged() {
-    let csv = export_with(VaultEntry {
-        title: "Example".into(),
-        username: "person@example.test".into(),
-        password: "ordinary-secret".into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.username = "person@example.test".into();
+    entry.password = "ordinary-secret".into();
+    let csv = export_with(entry);
     assert!(csv.contains("ordinary-secret"), "{csv}");
     assert!(!csv.contains("'ordinary-secret"), "{csv}");
 }
 
 #[test]
 fn a_leading_control_character_is_neutralised_as_well() {
-    let csv = export_with(VaultEntry {
-        title: "\tExample".into(),
-        ..VaultEntry::default()
-    });
+    let mut entry = VaultEntry::default();
+    entry.title = "\tExample".into();
+    let csv = export_with(entry);
     assert!(csv.contains('\''), "tab-led value was not prefixed:\n{csv}");
 }
