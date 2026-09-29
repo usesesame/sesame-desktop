@@ -175,8 +175,8 @@ test('the release workflow gates publication on installed-app compatibility evid
   assert.match(workflow, /vault-compatibility-gate\.mjs merge/, 'the compatibility job does not merge platform evidence')
   assert.match(workflow, /SESAME_VAULT_COMPATIBILITY_FILE/, 'release evidence does not take the compatibility evidence')
   const publish = workflow.slice(workflow.indexOf('publish-candidate:'))
-  assert.match(publish, /needs: \[build-and-attest, verify-fresh\]/, 'publication does not wait for the evidence jobs')
-  const build = workflow.slice(workflow.indexOf('build-and-attest:'), workflow.indexOf('verify-fresh:'))
+  assert.match(publish, /needs: \[sign-and-attest, verify-fresh\]/, 'publication does not wait for the evidence jobs')
+  const build = workflow.slice(workflow.indexOf('\n  build:\n'), workflow.indexOf('\n  sign-and-attest:\n'))
   assert.match(build, /needs: \[vault-compatibility\]/, 'the release build does not wait for installed-app compatibility')
 })
 

@@ -1,7 +1,5 @@
 import { createHash, createPrivateKey, sign } from 'node:crypto'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -44,8 +42,6 @@ if (architecture !== 'x86_64' && architecture !== 'aarch64') {
   throw new Error('SESAME_RELEASE_ARCHITECTURE must be x86_64 or aarch64 and must describe the built artifact, not the CI runner.')
 }
 
-const run = promisify(execFile)
-
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packageJSON = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8'))
 const [artifact, signature, sigstore, authenticode] = await Promise.all([
@@ -77,12 +73,6 @@ if (
   throw new Error('Sigstore evidence must be a verified, transparency-logged record for the exact artifact.')
 }
 const distributionClass = authenticodeVerified ? 'production' : 'early_access'
-
-// Minisign-verify the exact artifact before the CI key signs a receipt, so a receipt can never turn a merely present .sig file into trusted evidence.
-await run('cargo', ['run', '--quiet', '--manifest-path', 'src-tauri/Cargo.toml', '--bin', 'verify-updater-artifact', '--', artifactPath, signaturePath], {
-  cwd: workspace,
-  env: { ...process.env, SESAME_UPDATER_PUBLIC_KEY: updaterPublicKey },
-})
 
 if (!validHTTPSURL(publicArtifactURL)) {
   throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')

@@ -58,20 +58,33 @@ test('a workflow that writes says so at the job that writes', () => {
     )
   }
   for (const [workflow, signingJob] of [
-    ['release-early-access.yml', 'build-and-attest'],
+    ['release-early-access.yml', 'sign-and-attest'],
     ['release-linux-early-access.yml', 'build-and-test'],
   ]) {
     const body = read('.github', 'workflows', workflow)
     const job = jobBlock(body, signingJob)
     assert.match(job, /^\s+id-token:\s*write\s*$/m, `${workflow} signs keylessly in ${signingJob} and needs an OIDC token there`)
     assert.match(job, /^\s+environment:\s*release-build\s*$/m, `${workflow} should build ${signingJob} behind its protected environment`)
-    const publishBlock = jobBlock(body, signingJob === 'build-and-attest' ? 'publish-candidate' : 'publish')
+    const publishBlock = jobBlock(body, signingJob === 'sign-and-attest' ? 'publish-candidate' : 'publish')
     assert.match(
       publishBlock,
       /^\s+environment:\s*release-publish\s*$/m,
       `${workflow} should publish behind its protected environment`,
     )
   }
+})
+
+test('the Windows release build cannot reach a signing key or the OIDC identity', () => {
+  const body = read('.github', 'workflows', 'release-early-access.yml')
+  const build = jobBlock(body, 'build')
+  assert.doesNotMatch(build, /id-token/, 'the release build must not be able to mint an OIDC token')
+  assert.doesNotMatch(build, /^\s+environment:/m, 'the release build must not run behind the signing environment')
+  for (const secret of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'SESAME_RELEASE_CANDIDATE_SIGNING_KEY']) {
+    assert.doesNotMatch(build, new RegExp(secret), `${secret} must not be available to the release build`)
+  }
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+id-token:\s*write\s*$/m, 'the signing job needs an OIDC token for keyless Sigstore')
+  assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the signing job must run behind its protected environment')
 })
 
 test('every job a workflow depends on exists in that workflow', () => {
