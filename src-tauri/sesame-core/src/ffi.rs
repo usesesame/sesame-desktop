@@ -8,6 +8,8 @@ use crate::api::OpenedVault;
 
 pub const MAX_FFI_INPUT_BYTES: usize = crate::MAX_VAULT_FILE_BYTES as usize;
 
+pub const MAX_FFI_SECRET_BYTES: usize = 4096;
+
 pub const MAX_FFI_OPEN_HANDLES: usize = 32;
 
 #[repr(i32)]
@@ -31,6 +33,13 @@ fn next_handle_id() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+fn handle_table_is_full() -> bool {
+    let table = handles()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    table.len() >= MAX_FFI_OPEN_HANDLES
 }
 
 fn register(opened: OpenedVault) -> Result<u64, ErrorCode> {
@@ -104,12 +113,18 @@ pub unsafe extern "C" fn sesame_core_open_vault(
         let Some(file_bytes) = read_slice(file_bytes, file_len) else {
             return ErrorCode::InvalidArgument;
         };
+        if secret_len > MAX_FFI_SECRET_BYTES {
+            return ErrorCode::InvalidArgument;
+        }
         let Some(secret_bytes) = read_slice(secret, secret_len) else {
             return ErrorCode::InvalidArgument;
         };
         let Ok(secret_str) = std::str::from_utf8(secret_bytes) else {
             return ErrorCode::InvalidArgument;
         };
+        if handle_table_is_full() {
+            return ErrorCode::HandleLimitReached;
+        }
         match crate::api::open_vault_bytes(file_bytes, secret_str) {
             Ok(opened) => match register(opened) {
                 Ok(handle) => {
@@ -269,6 +284,7 @@ mod tests {
 
     #[test]
     fn zero_length_inputs_are_accepted_and_reach_the_vault_loader() {
+        let _guard = handle_test_lock();
         let secret = b"fictional master password";
         let mut handle = 0_u64;
 
@@ -295,6 +311,94 @@ mod tests {
         };
         assert_eq!(result, ErrorCode::OperationFailed as i32);
         assert_eq!(handle, 0);
+    }
+
+    #[test]
+    fn a_secret_over_the_small_cap_is_refused_before_loading() {
+        let _guard = handle_test_lock();
+        let mut handle = 0_u64;
+
+        let oversized = vec![b'a'; MAX_FFI_SECRET_BYTES + 1];
+        assert_eq!(
+            unsafe {
+                sesame_core_open_vault(
+                    std::ptr::null(),
+                    0,
+                    oversized.as_ptr(),
+                    oversized.len(),
+                    &mut handle,
+                )
+            },
+            ErrorCode::InvalidArgument as i32
+        );
+
+        let at_cap = vec![b'a'; MAX_FFI_SECRET_BYTES];
+        let normal = b"fictional master password";
+        for secret in [&at_cap[..], &normal[..]] {
+            assert_eq!(
+                unsafe {
+                    sesame_core_open_vault(
+                        std::ptr::null(),
+                        0,
+                        secret.as_ptr(),
+                        secret.len(),
+                        &mut handle,
+                    )
+                },
+                ErrorCode::OperationFailed as i32
+            );
+        }
+        assert_eq!(handle, 0);
+    }
+
+    #[test]
+    fn a_full_handle_table_refuses_an_open_before_the_kdf_runs() {
+        let _guard = handle_test_lock();
+        let (opened, _) =
+            crate::api::create_vault("fictional full table password", "Fictional vault").unwrap();
+        let file = serde_json::to_vec(&opened.file).unwrap();
+        assert!(crate::api::open_vault_bytes(&file, "fictional full table password").is_ok());
+
+        let mut registered = Vec::new();
+        loop {
+            match register(fictional_opened_vault()) {
+                Ok(handle) => registered.push(handle),
+                Err(code) => {
+                    assert_eq!(code, ErrorCode::HandleLimitReached);
+                    break;
+                }
+            }
+        }
+        assert_eq!(registered.len(), MAX_FFI_OPEN_HANDLES);
+
+        let mut handle = 0_u64;
+        for secret in [
+            &b"fictional full table password"[..],
+            &b"fictional secret that does not open this vault"[..],
+        ] {
+            let result = unsafe {
+                sesame_core_open_vault(
+                    file.as_ptr(),
+                    file.len(),
+                    secret.as_ptr(),
+                    secret.len(),
+                    &mut handle,
+                )
+            };
+            assert_eq!(result, ErrorCode::HandleLimitReached as i32);
+        }
+        assert_eq!(handle, 0);
+        assert_eq!(
+            handles()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .len(),
+            MAX_FFI_OPEN_HANDLES
+        );
+
+        for handle in registered {
+            assert_eq!(sesame_core_close_vault(handle), ErrorCode::Ok as i32);
+        }
     }
 
     #[test]

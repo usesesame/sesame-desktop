@@ -443,3 +443,22 @@ test('every allowlisted diagnostic code has an explicit severity classification'
   const missing = [...allowed].filter((code) => !classified.has(code)).sort()
   assert.deepEqual(missing, [], `allowlisted codes with no explicit severity default to info and are pruned after a day:\n  ${missing.join('\n  ')}`)
 })
+
+test('the C ABI exports only the intended sesame_core symbols', () => {
+  const rust = filesMatching(/\.rs$/, join(root, 'src-tauri')).map((path) => readFileSync(path, 'utf8'))
+  const attributes = rust.flatMap((text) => text.match(/#\[no_mangle\]/g) ?? [])
+  assert.equal(attributes.length, 4, 'an unexpected #[no_mangle] export was added to src-tauri')
+
+  const exported = rust
+    .flatMap((text) => [
+      ...text.matchAll(/#\[no_mangle\]\s*(?:pub\s+)?(?:unsafe\s+)?extern\s+"C"\s+fn\s+([A-Za-z0-9_]+)/g),
+    ].map((match) => match[1]))
+    .sort()
+
+  assert.deepEqual(exported, [
+    'sesame_core_api_version',
+    'sesame_core_close_vault',
+    'sesame_core_entry_count',
+    'sesame_core_open_vault',
+  ])
+})
