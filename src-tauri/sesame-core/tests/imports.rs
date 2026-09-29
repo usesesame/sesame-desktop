@@ -216,6 +216,64 @@ fn control_and_bidi_characters_are_stripped_from_display_text() {
 }
 
 #[test]
+fn a_bitwarden_secure_note_keeps_its_line_breaks() {
+    let export = r#"{
+      "items": [
+        { "type": 2, "name": "Recovery", "notes": "line one\nline two" }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    assert_eq!(parsed.secure_notes.len(), 1);
+    assert_eq!(parsed.secure_notes[0].content, "line one\nline two");
+}
+
+#[test]
+fn a_login_note_keeps_its_line_breaks() {
+    let export = r#"{
+      "items": [
+        { "type": 1, "name": "Example", "notes": "first line\nsecond line",
+          "login": { "username": "person", "password": "secret", "uris": [{ "uri": "https://example.test" }] } }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    assert_eq!(
+        parsed.entries[0].notes.as_deref(),
+        Some("first line\nsecond line")
+    );
+}
+
+#[test]
+fn a_bitwarden_identity_address_keeps_its_line_breaks() {
+    let export = r#"{
+      "items": [
+        { "type": 4, "name": "Home", "identity": { "address1": "12 Example Street\nFlat 3" } }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    assert_eq!(parsed.identities.len(), 1);
+    assert_eq!(
+        parsed.identities[0].address_line1,
+        "12 Example Street\nFlat 3"
+    );
+}
+
+#[test]
+fn tabs_survive_in_a_note_and_line_separators_do_not() {
+    let csv = "name,url,username,password,note\nExample,https://example.test,person,secret,\"col\tumn\u{2028}end\u{2029}\u{FEFF}\"\n";
+    let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
+    assert_eq!(parsed.entries[0].notes.as_deref(), Some("col\tumnend"));
+}
+
+#[test]
+fn bidi_and_zero_width_characters_are_stripped_from_single_line_fields() {
+    let username = "per\u{200E}so\u{200F}n\u{061C}\u{200B}\u{200C}\u{200D}\u{FEFF}\u{2028}\u{2029}";
+    let csv =
+        format!("name,url,username,password\nExample,https://example.test,{username},secret\n");
+    let parsed = parse_import_entries(&csv, "chrome-csv").expect("Chrome import");
+    assert_eq!(parsed.entries[0].username, "person");
+}
+
+#[test]
 fn an_unknown_source_is_refused_rather_than_guessed_at() {
     assert!(parse_import_entries("name,url,username,password\n", "not-a-real-manager").is_err());
 }

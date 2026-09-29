@@ -42,14 +42,27 @@ fn clean_import_field(field: &str, value: String) -> VaultResult<String> {
     Ok(value)
 }
 
+fn clean_import_multiline_field(field: &str, value: String) -> VaultResult<String> {
+    let mut value = bounded_import_field(field, value)?;
+    value.retain(|character| is_import_line_break(character) || !is_import_control(character));
+    Ok(value)
+}
+
 fn is_import_control(character: char) -> bool {
     matches!(
         character,
         '\u{0000}'..='\u{001F}'
             | '\u{0080}'..='\u{009F}'
-            | '\u{202A}'..='\u{202E}'
+            | '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
             | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
     )
+}
+
+fn is_import_line_break(character: char) -> bool {
+    matches!(character, '\n' | '\r' | '\t')
 }
 
 /// The plaintext export never crosses the IPC boundary; Rust reads the file the user picked.
@@ -368,7 +381,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
                 .record(FieldDisposition::IntentionallyOmitted);
         }
         let item_name = clean_import_field("login name", item.name)?;
-        let item_notes = clean_import_field("notes", item.notes)?;
+        let item_notes = clean_import_multiline_field("notes", item.notes)?;
         if item_name.is_empty() && login.username.is_empty() && login.password.is_empty() {
             continue;
         }
@@ -453,7 +466,7 @@ fn bitwarden_json_card(
     card.exp_year = bounded_import_field("expiry year", card.exp_year)?;
     card.code = bounded_import_field("security code", card.code)?;
     card.brand = clean_import_field("card brand", card.brand)?;
-    let notes = clean_import_field("notes", item.notes)?;
+    let notes = clean_import_multiline_field("notes", item.notes)?;
     if !notes.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
@@ -524,7 +537,7 @@ fn bitwarden_json_ssh_key(
         .next()
         .unwrap_or_default()
         .to_string();
-    let notes = clean_import_field("notes", item.notes)?;
+    let notes = clean_import_multiline_field("notes", item.notes)?;
     if !notes.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
@@ -570,7 +583,7 @@ fn bitwarden_json_secure_note(
     for _ in 0..item.attachments.len() {
         fidelity.record(FieldDisposition::IntentionallyOmitted);
     }
-    let content = clean_import_field("notes", item.notes)?;
+    let content = clean_import_multiline_field("notes", item.notes)?;
     if !content.is_empty() {
         fidelity.record(FieldDisposition::Imported);
     }
@@ -614,9 +627,6 @@ fn bitwarden_json_identity(
         ("first name", &mut identity.first_name),
         ("middle name", &mut identity.middle_name),
         ("last name", &mut identity.last_name),
-        ("address", &mut identity.address1),
-        ("address", &mut identity.address2),
-        ("address", &mut identity.address3),
         ("city", &mut identity.city),
         ("region", &mut identity.state),
         ("postal code", &mut identity.postal_code),
@@ -630,6 +640,13 @@ fn bitwarden_json_identity(
         ("licence number", &mut identity.license_number),
     ] {
         *value = clean_import_field(label, std::mem::take(value))?;
+    }
+    for value in [
+        &mut identity.address1,
+        &mut identity.address2,
+        &mut identity.address3,
+    ] {
+        *value = clean_import_multiline_field("address", std::mem::take(value))?;
     }
     let identity_name = clean_import_field("identity name", item.name)?;
     let mut legacy_fields = Vec::new();
@@ -1638,7 +1655,7 @@ pub fn imported_entry(
         .map(|value| clean_import_field("recovery phone", value))
         .transpose()?;
     let notes = notes
-        .map(|value| clean_import_field("notes", value))
+        .map(|value| clean_import_multiline_field("notes", value))
         .transpose()?;
     let trimmed_url = url.trim();
     let normalised_url = normalise_url(&url);
