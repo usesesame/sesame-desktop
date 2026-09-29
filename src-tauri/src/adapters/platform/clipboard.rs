@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -9,14 +8,38 @@ use zeroize::Zeroize;
 use crate::vault::VaultResult;
 
 const MAX_CLIPBOARD_COMPARE_BYTES: usize = 1024 * 1024;
+const MAX_CLIPBOARD_CLEAR_MS: u64 = 5 * 60 * 1_000;
+const CLEAR_ATTEMPTS: usize = 3;
+const CLEAR_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 /// Digest of the last copied secret; the webview never gains general clipboard-read permission.
 #[derive(Default)]
 pub struct ClipboardGuard {
-    digest: Mutex<Option<[u8; 32]>>,
-    epoch: AtomicU64,
+    state: Mutex<ClipboardState>,
     #[cfg(any(windows, target_os = "linux"))]
     clipboard: Mutex<Option<arboard::Clipboard>>,
+}
+
+#[derive(Default)]
+struct ClipboardState {
+    digest: Option<[u8; 32]>,
+    epoch: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClipboardAccess {
+    Ready,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Busy,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    Unsupported,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ClearOutcome {
+    Cleared,
+    Skipped,
+    Busy,
 }
 
 fn digest(value: &str) -> [u8; 32] {
@@ -25,24 +48,17 @@ fn digest(value: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn armed_digest(state: &ClipboardGuard) -> Option<[u8; 32]> {
-    *state
-        .digest
+fn lock_state(state: &ClipboardGuard) -> MutexGuard<'_, ClipboardState> {
+    state
+        .state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn set_armed_digest(state: &ClipboardGuard, value: Option<[u8; 32]>) {
-    *state
-        .digest
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
 }
 
 trait ClipboardBackend {
     fn read(&self, state: &ClipboardGuard) -> Option<String>;
     fn write(&self, state: &ClipboardGuard, value: &str) -> VaultResult<()>;
-    fn within_limit(&self) -> bool;
+    fn access(&self) -> ClipboardAccess;
 }
 
 struct SystemClipboard;
@@ -56,8 +72,8 @@ impl ClipboardBackend for SystemClipboard {
         write_secret_text(state, value)
     }
 
-    fn within_limit(&self) -> bool {
-        clipboard_text_within_limit(MAX_CLIPBOARD_COMPARE_BYTES)
+    fn access(&self) -> ClipboardAccess {
+        clipboard_access(MAX_CLIPBOARD_COMPARE_BYTES)
     }
 }
 
@@ -133,43 +149,55 @@ fn clear_armed_text<B: ClipboardBackend>(
     state: &ClipboardGuard,
     epoch: Option<u64>,
     backend: &B,
-) -> VaultResult<bool> {
+) -> VaultResult<ClearOutcome> {
+    let mut armed = lock_state(state);
     if let Some(epoch) = epoch {
-        if state.epoch.load(Ordering::Acquire) != epoch {
-            return Ok(false);
+        if armed.epoch != epoch {
+            return Ok(ClearOutcome::Skipped);
         }
     }
-    let expected = match armed_digest(state) {
-        Some(expected) => expected,
-        None => return Ok(false),
+    let Some(expected) = armed.digest else {
+        return Ok(ClearOutcome::Skipped);
     };
-    if !backend.within_limit() {
-        return Ok(false);
+    match backend.access() {
+        ClipboardAccess::Busy => return Ok(ClearOutcome::Busy),
+        ClipboardAccess::Unsupported => return Ok(ClearOutcome::Skipped),
+        ClipboardAccess::Ready => {}
     }
     let mut current = backend.read(state).unwrap_or_default();
     if current.len() > MAX_CLIPBOARD_COMPARE_BYTES {
         current.zeroize();
-        return Ok(false);
+        return Ok(ClearOutcome::Skipped);
     }
     let unchanged = digest(&current) == expected;
     current.zeroize();
     if !unchanged {
-        return Ok(false);
-    }
-    if let Some(epoch) = epoch {
-        if state.epoch.load(Ordering::Acquire) != epoch {
-            return Ok(false);
-        }
+        return Ok(ClearOutcome::Skipped);
     }
     backend.write(state, "")?;
-    let mut armed = state
-        .digest
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *armed == Some(expected) {
-        *armed = None;
+    armed.digest = None;
+    Ok(ClearOutcome::Cleared)
+}
+
+fn clear_armed_with_retry<B: ClipboardBackend>(
+    state: &ClipboardGuard,
+    epoch: Option<u64>,
+    backend: &B,
+    attempts: usize,
+    retry_delay: Duration,
+) -> VaultResult<bool> {
+    for attempt in 1..=attempts {
+        match clear_armed_text(state, epoch, backend)? {
+            ClearOutcome::Cleared => return Ok(true),
+            ClearOutcome::Skipped => return Ok(false),
+            ClearOutcome::Busy => {
+                if attempt < attempts {
+                    std::thread::sleep(retry_delay);
+                }
+            }
+        }
     }
-    Ok(true)
+    Ok(false)
 }
 
 fn clear_armed_clipboard_from(app: &AppHandle, epoch: Option<u64>) -> VaultResult<()> {
@@ -177,12 +205,35 @@ fn clear_armed_clipboard_from(app: &AppHandle, epoch: Option<u64>) -> VaultResul
         Some(guard) => guard,
         None => return Ok(()),
     };
-    clear_armed_text(&guard, epoch, &SystemClipboard)?;
+    clear_armed_with_retry(
+        &guard,
+        epoch,
+        &SystemClipboard,
+        CLEAR_ATTEMPTS,
+        CLEAR_RETRY_DELAY,
+    )?;
     Ok(())
 }
 
 pub fn clear_armed_clipboard(app: &AppHandle) -> VaultResult<()> {
     clear_armed_clipboard_from(app, None)
+}
+
+fn arm_secret<B: ClipboardBackend>(
+    state: &ClipboardGuard,
+    backend: &B,
+    value: &str,
+) -> VaultResult<u64> {
+    let computed = digest(value);
+    let mut armed = lock_state(state);
+    backend.write(state, value)?;
+    armed.epoch = armed.epoch.wrapping_add(1);
+    armed.digest = Some(computed);
+    Ok(armed.epoch)
+}
+
+fn bounded_clear_after_ms(clear_after_ms: u64) -> u64 {
+    clear_after_ms.min(MAX_CLIPBOARD_CLEAR_MS)
 }
 
 /// Copies a vault secret and arms the clear in one step, so the value crosses
@@ -194,13 +245,11 @@ pub fn copy_secret(
     mut value: String,
     clear_after_ms: Option<u64>,
 ) -> VaultResult<u64> {
-    let written = write_secret_text(&state, &value);
-    let computed = digest(&value);
+    let written = arm_secret(&state, &SystemClipboard, &value);
     value.zeroize();
-    written?;
-    set_armed_digest(&state, Some(computed));
-    let epoch = state.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+    let epoch = written?;
     if let Some(clear_after_ms) = clear_after_ms {
+        let clear_after_ms = bounded_clear_after_ms(clear_after_ms);
         let _ = std::thread::Builder::new().spawn(move || {
             std::thread::sleep(Duration::from_millis(clear_after_ms));
             let _ = clear_armed_clipboard_from(&app, Some(epoch));
@@ -215,12 +264,18 @@ pub fn clear_clipboard_if_unchanged(
     state: State<'_, ClipboardGuard>,
     epoch: u64,
 ) -> VaultResult<()> {
-    clear_armed_text(&state, Some(epoch), &SystemClipboard)?;
+    clear_armed_with_retry(
+        &state,
+        Some(epoch),
+        &SystemClipboard,
+        CLEAR_ATTEMPTS,
+        CLEAR_RETRY_DELAY,
+    )?;
     Ok(())
 }
 
 #[cfg(windows)]
-fn clipboard_text_within_limit(max_bytes: usize) -> bool {
+fn clipboard_access(max_bytes: usize) -> ClipboardAccess {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     };
@@ -229,10 +284,10 @@ fn clipboard_text_within_limit(max_bytes: usize) -> bool {
 
     unsafe {
         if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
-            return true;
+            return ClipboardAccess::Ready;
         }
         if OpenClipboard(std::ptr::null_mut()) == 0 {
-            return false;
+            return ClipboardAccess::Busy;
         }
         let handle = GetClipboardData(CF_UNICODETEXT);
         let size = if handle.is_null() {
@@ -241,22 +296,32 @@ fn clipboard_text_within_limit(max_bytes: usize) -> bool {
             GlobalSize(handle as _)
         };
         let _ = CloseClipboard();
-        size > 0 && size <= max_bytes
+        if size > 0 && size <= max_bytes {
+            ClipboardAccess::Ready
+        } else {
+            ClipboardAccess::Unsupported
+        }
     }
 }
 
 #[cfg(not(windows))]
-fn clipboard_text_within_limit(_max_bytes: usize) -> bool {
-    true
+fn clipboard_access(_max_bytes: usize) -> ClipboardAccess {
+    ClipboardAccess::Ready
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn armed_digest(state: &ClipboardGuard) -> Option<[u8; 32]> {
+        lock_state(state).digest
+    }
 
     struct FakeClipboard {
         text: Mutex<Option<String>>,
         writable: bool,
+        busy_reads: AtomicUsize,
     }
 
     impl FakeClipboard {
@@ -264,6 +329,7 @@ mod tests {
             FakeClipboard {
                 text: Mutex::new(Some(value.to_string())),
                 writable: true,
+                busy_reads: AtomicUsize::new(0),
             }
         }
 
@@ -271,6 +337,15 @@ mod tests {
             FakeClipboard {
                 text: Mutex::new(Some(value.to_string())),
                 writable: false,
+                busy_reads: AtomicUsize::new(0),
+            }
+        }
+
+        fn busy_for(value: &str, reads: usize) -> FakeClipboard {
+            FakeClipboard {
+                text: Mutex::new(Some(value.to_string())),
+                writable: true,
+                busy_reads: AtomicUsize::new(reads),
             }
         }
 
@@ -279,6 +354,10 @@ mod tests {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone()
+        }
+
+        fn busy_reads(&self) -> usize {
+            self.busy_reads.load(Ordering::Acquire)
         }
     }
 
@@ -298,15 +377,23 @@ mod tests {
             Ok(())
         }
 
-        fn within_limit(&self) -> bool {
-            true
+        fn access(&self) -> ClipboardAccess {
+            if self.busy_reads() == 0 {
+                ClipboardAccess::Ready
+            } else {
+                self.busy_reads.fetch_sub(1, Ordering::AcqRel);
+                ClipboardAccess::Busy
+            }
         }
     }
 
     fn armed(value: &str, epoch: u64) -> ClipboardGuard {
         let guard = ClipboardGuard::default();
-        set_armed_digest(&guard, Some(digest(value)));
-        guard.epoch.store(epoch, Ordering::Release);
+        {
+            let mut state = lock_state(&guard);
+            state.digest = Some(digest(value));
+            state.epoch = epoch;
+        }
         guard
     }
 
@@ -315,7 +402,10 @@ mod tests {
         let guard = armed("fictional-armed-secret", 4);
         let clipboard = FakeClipboard::holding("fictional-armed-secret");
 
-        assert!(clear_armed_text(&guard, None, &clipboard).unwrap());
+        assert_eq!(
+            clear_armed_text(&guard, None, &clipboard).unwrap(),
+            ClearOutcome::Cleared
+        );
 
         assert_eq!(clipboard.text().as_deref(), Some(""));
         assert_eq!(armed_digest(&guard), None);
@@ -326,7 +416,10 @@ mod tests {
         let guard = armed("fictional-armed-secret", 4);
         let clipboard = FakeClipboard::holding("fictional-user-notes");
 
-        assert!(!clear_armed_text(&guard, None, &clipboard).unwrap());
+        assert_eq!(
+            clear_armed_text(&guard, None, &clipboard).unwrap(),
+            ClearOutcome::Skipped
+        );
 
         assert_eq!(clipboard.text().as_deref(), Some("fictional-user-notes"));
         assert!(armed_digest(&guard).is_some());
@@ -337,7 +430,10 @@ mod tests {
         let guard = armed("fictional-newer-secret", 7);
         let clipboard = FakeClipboard::holding("fictional-newer-secret");
 
-        assert!(!clear_armed_text(&guard, Some(6), &clipboard).unwrap());
+        assert_eq!(
+            clear_armed_text(&guard, Some(6), &clipboard).unwrap(),
+            ClearOutcome::Skipped
+        );
 
         assert_eq!(clipboard.text().as_deref(), Some("fictional-newer-secret"));
         assert!(armed_digest(&guard).is_some());
@@ -348,7 +444,10 @@ mod tests {
         let guard = armed("fictional-timed-secret", 7);
         let clipboard = FakeClipboard::holding("fictional-timed-secret");
 
-        assert!(clear_armed_text(&guard, Some(7), &clipboard).unwrap());
+        assert_eq!(
+            clear_armed_text(&guard, Some(7), &clipboard).unwrap(),
+            ClearOutcome::Cleared
+        );
 
         assert_eq!(clipboard.text().as_deref(), Some(""));
         assert_eq!(armed_digest(&guard), None);
@@ -359,7 +458,10 @@ mod tests {
         let guard = armed("fictional-timed-secret", 7);
         let clipboard = FakeClipboard::holding("fictional-replacement");
 
-        assert!(!clear_armed_text(&guard, Some(7), &clipboard).unwrap());
+        assert_eq!(
+            clear_armed_text(&guard, Some(7), &clipboard).unwrap(),
+            ClearOutcome::Skipped
+        );
 
         assert_eq!(clipboard.text().as_deref(), Some("fictional-replacement"));
         assert!(armed_digest(&guard).is_some());
@@ -374,5 +476,63 @@ mod tests {
 
         assert_eq!(clipboard.text().as_deref(), Some("fictional-armed-secret"));
         assert!(armed_digest(&guard).is_some());
+    }
+
+    #[test]
+    fn copying_twice_clears_only_the_newer_secret() {
+        let guard = ClipboardGuard::default();
+        let clipboard = FakeClipboard::holding("");
+        let first = arm_secret(&guard, &clipboard, "fictional-first-secret").unwrap();
+        let second = arm_secret(&guard, &clipboard, "fictional-second-secret").unwrap();
+        assert_ne!(first, second);
+
+        assert_eq!(
+            clear_armed_text(&guard, Some(first), &clipboard).unwrap(),
+            ClearOutcome::Skipped
+        );
+        assert_eq!(clipboard.text().as_deref(), Some("fictional-second-secret"));
+
+        assert_eq!(
+            clear_armed_text(&guard, Some(second), &clipboard).unwrap(),
+            ClearOutcome::Cleared
+        );
+        assert_eq!(clipboard.text().as_deref(), Some(""));
+        assert_eq!(armed_digest(&guard), None);
+    }
+
+    #[test]
+    fn the_lock_path_retries_a_busy_clipboard() {
+        let guard = armed("fictional-armed-secret", 4);
+        let clipboard = FakeClipboard::busy_for("fictional-armed-secret", 2);
+
+        assert!(
+            clear_armed_with_retry(&guard, None, &clipboard, CLEAR_ATTEMPTS, Duration::ZERO)
+                .unwrap()
+        );
+
+        assert_eq!(clipboard.busy_reads(), 0);
+        assert_eq!(clipboard.text().as_deref(), Some(""));
+        assert_eq!(armed_digest(&guard), None);
+    }
+
+    #[test]
+    fn the_lock_path_stops_retrying_a_still_busy_clipboard() {
+        let guard = armed("fictional-armed-secret", 4);
+        let clipboard = FakeClipboard::busy_for("fictional-armed-secret", 10);
+
+        assert!(
+            !clear_armed_with_retry(&guard, None, &clipboard, CLEAR_ATTEMPTS, Duration::ZERO)
+                .unwrap()
+        );
+
+        assert_eq!(clipboard.busy_reads(), 10 - CLEAR_ATTEMPTS);
+        assert_eq!(clipboard.text().as_deref(), Some("fictional-armed-secret"));
+        assert!(armed_digest(&guard).is_some());
+    }
+
+    #[test]
+    fn the_clear_delay_is_bounded() {
+        assert_eq!(bounded_clear_after_ms(1_000), 1_000);
+        assert_eq!(bounded_clear_after_ms(u64::MAX), MAX_CLIPBOARD_CLEAR_MS);
     }
 }
