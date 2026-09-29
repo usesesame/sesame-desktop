@@ -19,7 +19,7 @@ pub use linux::{device_protection_available, protect_for_device, unprotect_for_d
 mod fs;
 pub use fs::{
     copy_private_file, create_private_dir, open_private_file, replace_file, same_file_identity,
-    securely_delete,
+    securely_delete, ReplaceFailure,
 };
 
 #[cfg(not(any(windows, target_os = "linux")))]
