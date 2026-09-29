@@ -318,6 +318,7 @@ pub fn restore_backup(
 
     let installed =
         state.apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
+    let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(&app);
     state.cache_pin_unlock(installed.pin_unlock_available);
     state.cache_hello_unlock(installed.hello_unlock_available);
     if installed.pin_unlock_available {
