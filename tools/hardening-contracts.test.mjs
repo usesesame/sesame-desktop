@@ -194,6 +194,17 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   assert.doesNotMatch(quickCommands.split('#[cfg(test)]')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
 })
 
+test('no capability grants a webview an updater permission', () => {
+  const offenders = filesMatching(/\.json$/, join(root, 'src-tauri', 'capabilities')).flatMap((path) => {
+    const capability = JSON.parse(readFileSync(path, 'utf8'))
+    return (capability.permissions ?? [])
+      .map((permission) => (typeof permission === 'string' ? permission : permission.identifier))
+      .filter((identifier) => typeof identifier === 'string' && identifier.startsWith('updater:'))
+      .map((identifier) => `${relative(root, path).replaceAll('\\', '/')} grants ${identifier}`)
+  })
+  assert.deepEqual(offenders, [], `updater permissions would hand the webview the updater plugin surface:\n  ${offenders.join('\n  ')}`)
+})
+
 test('desktop OS and reusable HTTP adapters stay in their named Rust boundaries', () => {
   const rustFiles = filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))
   const platformOffenders = rustFiles
