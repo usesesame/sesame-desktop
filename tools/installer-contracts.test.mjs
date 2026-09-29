@@ -56,6 +56,30 @@ test('the installer owns its own template and never offers to delete app data', 
   assert.match(code, /Section EarlyChecks[\s\S]*SetErrorLevel 3\s*Quit[\s\S]*SectionEnd/)
 })
 
+test('the installer pins the install directory instead of offering a choice', () => {
+  const installer = read('src-tauri', 'nsis', 'installer.nsi')
+  const code = installer
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+
+  assert.doesNotMatch(code, /MUI_PAGE_DIRECTORY/)
+  assert.doesNotMatch(code, /RestorePreviousInstallLocation/)
+  assert.doesNotMatch(code, /\$\{GetOptions\}\s+\$CMDLINE\s+"\/D/i)
+  assert.doesNotMatch(code, /(?:ReadRegStr|ReadINIStr)\s+\$INSTDIR/)
+
+  const onInit = code.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)
+  assert.ok(onInit, 'the installer has no .onInit function, so this contract read nothing')
+  assert.doesNotMatch(onInit[1], /\$INSTDIR\s*(?:==|!=)/)
+  assert.match(
+    onInit[1],
+    /!if "\$\{INSTALLMODE\}" == "perMachine"\s*\n\s*StrCpy \$INSTDIR "\$PROGRAMFILES64\\\$\{PRODUCTNAME\}"/,
+  )
+
+  const assignments = [...code.matchAll(/StrCpy\s+\$INSTDIR\s+("[^"]*"|\S+)/g)].map((match) => match[1])
+  assert.deepEqual(assignments, ['"$PROGRAMFILES64\\${PRODUCTNAME}"', '"$LOCALAPPDATA\\${PRODUCTNAME}"'])
+})
+
 test('Windows executables use a safe DLL search order and install per-machine', () => {
   const cargo = read('src-tauri', 'Cargo.toml')
   const desktop = read('src-tauri', 'src', 'lib.rs')

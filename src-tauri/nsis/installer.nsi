@@ -159,7 +159,6 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_KEY "${UNINSTKEY}"
   !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_VALUENAME "CurrentUser"
   !define MULTIUSER_INSTALLMODEPAGE_SHOWUSERNAME
-  !define MULTIUSER_INSTALLMODE_FUNCTION RestorePreviousInstallLocation
   !define MULTIUSER_EXECUTIONLEVEL Highest
   !include MultiUser.nsh
 !endif
@@ -441,10 +440,6 @@ Function PageLeaveReinstall
   reinst_done:
 FunctionEnd
 
-; 5. Choose install directory page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_DIRECTORY
-
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
 !if "${STARTMENUFOLDER}" != ""
@@ -558,26 +553,11 @@ Function .onInit
 
   !insertmacro SetContext
 
-  ${If} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
-    ; Set default install location
-    !if "${INSTALLMODE}" == "perMachine"
-      ${If} ${RunningX64}
-        !if "${ARCH}" == "x64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else if "${ARCH}" == "arm64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else
-          StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-        !endif
-      ${Else}
-        StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-      ${EndIf}
-    !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
-    !endif
-
-    Call RestorePreviousInstallLocation
-  ${EndIf}
+  !if "${INSTALLMODE}" == "perMachine"
+    StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+  !else if "${INSTALLMODE}" == "currentUser"
+    StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+  !endif
 
 
   !if "${INSTALLMODE}" == "both"
@@ -966,12 +946,6 @@ Section Uninstall
     SetAutoClose true
   ${EndIf}
 SectionEnd
-
-Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
-FunctionEnd
 
 Function Skip
   Abort
