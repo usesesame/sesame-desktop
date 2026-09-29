@@ -153,7 +153,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       try {
         const hadVault = vault.value().status.exists
         const upgraded = current.restoreSelection.compatibility === 'upgrade'
-        const restored = await restoreBackup(current.restoreSelection.source, current.restoreSecret)
+        const restored = await restoreBackup(current.restoreSelection.token, current.restoreSecret)
         const action = upgraded ? 'Older backup upgraded and restored.' : 'Backup restored.'
         const message = restored.safetyBackupName
           ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.`
@@ -197,7 +197,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       if (!current.drillSelection || !current.drillSecret.trim() || current.drillWorking) return
       state.patch({ drillWorking: true, drillError: '' })
       try {
-        state.patch({ drillVerification: await verifyBackup(current.drillSelection.source, current.drillSecret) })
+        state.patch({ drillVerification: await verifyBackup(current.drillSelection.token, current.drillSecret) })
         await refreshHealth()
       } catch (error) {
         state.patch({ drillVerification: null, drillError: error instanceof Error ? error.message : 'That backup could not be verified.' })
@@ -211,7 +211,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       state.patch({ drillRestoring: true, drillError: '' })
       try {
         const upgraded = current.drillVerification.compatibility === 'upgrade'
-        const restored = await restoreBackup(current.drillSelection.source, current.drillSecret)
+        const restored = await restoreBackup(current.drillSelection.token, current.drillSecret)
         const action = upgraded
           ? 'Recovery drill complete. The older backup was upgraded and restored.'
           : 'Recovery drill complete. The verified backup was restored.'

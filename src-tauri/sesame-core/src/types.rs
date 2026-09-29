@@ -54,7 +54,10 @@ pub struct RecoveryKitRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreBackupRequest {
-    pub source: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
     pub secret: String,
 }
 

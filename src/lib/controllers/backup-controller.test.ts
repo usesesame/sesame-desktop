@@ -25,7 +25,7 @@ vi.mock('../vault', () => ({
 const STATUS = { exists: true, unlocked: false, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 }
 
 function selection(compatibility: 'current' | 'upgrade') {
-  return { source: '/tmp/fictional-backup.sesame', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true }
+  return { token: 'fictional-backup-token', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true }
 }
 
 function harness() {

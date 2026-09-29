@@ -4,6 +4,7 @@ use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::lifecycle::{discard_pin_throttle_state, establish_pin_throttle_state};
+use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
 use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
@@ -43,8 +44,10 @@ pub fn create_backup(state: State<'_, VaultState>) -> VaultResult<String> {
 #[tauri::command]
 pub fn export_backup(
     app: AppHandle,
-    destination: String,
+    token: Option<String>,
+    destination: Option<String>,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
     require_release_presence(&state, &presence)?;
@@ -55,7 +58,13 @@ pub fn export_backup(
     let session = session
         .as_ref()
         .ok_or("Unlock your vault before exporting a backup.")?;
-    let destination = PathBuf::from(destination);
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::BackupExport,
+        true,
+    )?;
     if destination
         .extension()
         .and_then(|extension| extension.to_str())
@@ -88,8 +97,10 @@ pub fn export_backup(
 /// Returns every file actually written, so the interface can say what it produced.
 #[tauri::command]
 pub fn export_vault_csv(
-    destination: String,
+    token: Option<String>,
+    destination: Option<String>,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<Vec<String>> {
     require_release_presence(&state, &presence)?;
@@ -100,7 +111,13 @@ pub fn export_vault_csv(
     let session = session
         .as_ref()
         .ok_or("Unlock your vault before exporting it.")?;
-    let destination = PathBuf::from(destination);
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::CsvExport,
+        true,
+    )?;
     if destination
         .extension()
         .and_then(|extension| extension.to_str())
@@ -159,9 +176,11 @@ fn identities_export_path(logins_destination: &std::path::Path) -> Option<PathBu
 /// `kit` is the plaintext already on screen; only an unlocked mid-onboarding session is required.
 #[tauri::command]
 pub fn export_recovery_kit(
-    destination: String,
+    token: Option<String>,
+    destination: Option<String>,
     kit: String,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
     require_release_presence(&state, &presence)?;
@@ -175,7 +194,13 @@ pub fn export_recovery_kit(
     if kit.trim().is_empty() {
         return Err("There is no recovery kit to save.".into());
     }
-    let destination = PathBuf::from(destination);
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::RecoveryKitExport,
+        true,
+    )?;
     if destination
         .extension()
         .and_then(|extension| extension.to_str())
@@ -242,8 +267,10 @@ pub fn delete_local_vault(
 #[tauri::command]
 pub fn inspect_backup(
     app: AppHandle,
-    source: String,
+    token: Option<String>,
+    source: Option<String>,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<BackupInspection> {
     // Session required: a locked renderer must not use this as a file-format oracle.
     let unlocked = state
@@ -254,7 +281,13 @@ pub fn inspect_backup(
     if !unlocked && vault_path(&app)?.exists() {
         return Err("Unlock your vault before inspecting a backup.".into());
     }
-    let source = PathBuf::from(source);
+    let source = resolve_path(
+        &selection,
+        token.as_deref(),
+        source.as_deref(),
+        FilePurpose::BackupRead,
+        false,
+    )?;
     inspect_backup_file(&source)
 }
 
@@ -263,6 +296,7 @@ pub fn verify_backup(
     app: AppHandle,
     request: RestoreBackupRequest,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<BackupVerification> {
     let unlocked = state
         .session
@@ -272,7 +306,13 @@ pub fn verify_backup(
     if !unlocked {
         return Err("Unlock your vault before verifying a backup.".into());
     }
-    let source = PathBuf::from(request.source);
+    let source = resolve_path(
+        &selection,
+        request.token.as_deref(),
+        request.source.as_deref(),
+        FilePurpose::BackupRead,
+        false,
+    )?;
     let mut secret = request.secret;
     let result = verify_backup_file(&source, &secret);
     secret.zeroize();
@@ -305,15 +345,26 @@ pub fn restore_backup(
     app: AppHandle,
     request: RestoreBackupRequest,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<RestoreBackupResult> {
-    let source = PathBuf::from(request.source);
     let destination = vault_path(&app)?;
+    let source = resolve_path(
+        &selection,
+        request.token.as_deref(),
+        request.source.as_deref(),
+        FilePurpose::BackupRead,
+        false,
+    )?;
     let mut secret = request.secret;
 
     // Authenticate before invalidating anything: a failure must not lock the user out.
     let prepared = prepare_backup_for_restore(&source, &destination, &secret);
     secret.zeroize();
     let prepared = prepared?;
+
+    if let Some(token) = request.token.as_deref().filter(|token| !token.is_empty()) {
+        selection.take(token, FilePurpose::BackupRead)?;
+    }
 
     let installed =
         state.apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;

@@ -17,7 +17,7 @@ beforeEach(() => {
 
 function selection(compatibility: BackupCompatibility) {
   return {
-    source: '/tmp/fictional-backup.sesame',
+    token: 'fictional-backup-token',
     fileName: 'fictional-backup.sesame',
     formatVersion: compatibility === 'current' ? 10 : 8,
     compatibility,

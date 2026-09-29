@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::browser_fill::SaveKind;
+use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
 use crate::vault::imports::entry_from_input;
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;
@@ -18,7 +19,19 @@ pub fn get_diagnostic_status(app: AppHandle) -> VaultResult<diagnostics::Diagnos
 }
 
 #[tauri::command]
-pub fn export_diagnostics(app: AppHandle, destination: String) -> VaultResult<String> {
+pub fn export_diagnostics(
+    app: AppHandle,
+    token: Option<String>,
+    destination: Option<String>,
+    selection: State<'_, FileSelectionState>,
+) -> VaultResult<String> {
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::DiagnosticsExport,
+        true,
+    )?;
     diagnostics::export(&app, &destination)
 }
 
