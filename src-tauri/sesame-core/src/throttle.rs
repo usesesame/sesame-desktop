@@ -6,7 +6,6 @@ pub const PIN_FAILURES_BEFORE_LOCKOUT: u32 = 5;
 const PIN_BASE_COOLDOWN: Duration = Duration::from_secs(15);
 const PIN_MAX_COOLDOWN: Duration = Duration::from_secs(300);
 
-/// App-level cooldown; a same-user process can rewrite the device-protected file.
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedPinThrottle {
