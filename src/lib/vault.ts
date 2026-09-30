@@ -706,12 +706,17 @@ export async function searchQuickAccessItems(query: string): Promise<QuickAccess
   return invoke<QuickAccessItem[]>('search_quick_access_items', { query })
 }
 
-export async function getQuickAccessField(id: string, field: string, confirmed = false): Promise<QuickAccessValue> {
+export async function getQuickAccessField(id: string, field: string): Promise<QuickAccessValue> {
   if (previewMode) {
     const card = previewCards[id]
     return { value: (field === 'totp' ? card?.totpCode : card?.hasPassword ? 'preview-only-not-a-real-password' : '') ?? '' }
   }
-  return invoke<QuickAccessValue>('get_quick_access_field', { id, field, confirmed })
+  return invoke<QuickAccessValue>('get_quick_access_field', { id, field })
+}
+
+export async function confirmQuickAccessField(id: string, field: string): Promise<void> {
+  if (previewMode) return
+  await invoke('confirm_quick_access_field', { id, field })
 }
 
 export async function openQuickAccessItem(id: string): Promise<void> {

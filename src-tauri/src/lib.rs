@@ -51,6 +51,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_quick_access_status,
             commands::search_quick_access_items,
             commands::get_quick_access_field,
+            commands::confirm_quick_access_field,
             commands::open_quick_access_item,
             commands::get_login_card,
             commands::search_items,
@@ -277,6 +278,7 @@ pub fn run() {
         )
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
+        .manage(commands::QuickAccessConfirmations::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())

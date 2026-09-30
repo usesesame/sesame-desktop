@@ -161,6 +161,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
       'get_quick_access_status',
       'search_quick_access_items',
       'get_quick_access_field',
+      'confirm_quick_access_field',
       'open_quick_access_item',
       'copy_secret',
       'clear_clipboard_if_unchanged',
@@ -293,14 +294,39 @@ test('only the quick-access permission hands out get_quick_access_field', () => 
   )
 })
 
+test('only the quick-access permission hands out confirm_quick_access_field', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+
+  const holders = []
+  for (const manifest of Object.values(manifests)) {
+    for (const definition of Object.values(manifest.permissions ?? {})) {
+      if (definition.commands.allow.includes('confirm_quick_access_field')) holders.push(definition.identifier)
+    }
+  }
+  assert.deepEqual(
+    holders.sort(),
+    ['quick-access'],
+    `confirm_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
+  )
+  assert.ok(
+    capabilityCommands(manifests, capabilities, 'quick-access-capability').has('confirm_quick_access_field'),
+    'the quick-access window capability lost confirm_quick_access_field',
+  )
+  assert.ok(
+    !capabilityCommands(manifests, capabilities, 'main-capability').has('confirm_quick_access_field'),
+    'the main window capability gained confirm_quick_access_field',
+  )
+})
+
 test('caller-supplied boolean gates on the command surface stay pinned', () => {
   const gates = filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))
     .flatMap((path) => callerSuppliedBooleanGates(readFileSync(path, 'utf8')))
     .sort()
   assert.deepEqual(
     gates,
-    ['get_quick_access_field:confirmed'],
-    'the reviewed caller-supplied boolean gate changed; a new confirmation flag is a new authorization question and must not be added silently',
+    [],
+    'a command gained a caller-supplied boolean authorization gate; confirmation state must live in backend state',
   )
 })
 
