@@ -243,6 +243,9 @@ jobs:
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
 
+      - name: Build the desktop frontend for shipped-package evidence
+        run: npm run desktop:build
+
       - name: Generate locked SBOM and provenance
         run: npm run supply-chain:sbom
 

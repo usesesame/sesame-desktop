@@ -8,9 +8,11 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { vendorTreeDigest } from './create-sbom.mjs'
+import { packageNameFromModuleId } from './shipped-packages.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const shippedFixture = ['@tauri-apps/api', '@tauri-apps/plugin-dialog', 'svelte']
 
 function readNpmLock() {
   return JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'))
@@ -20,12 +22,18 @@ function lockName(location, entry) {
   return entry.name ?? location.slice(location.lastIndexOf('node_modules/') + 'node_modules/'.length)
 }
 
-function generate() {
+function generate(shipped = shippedFixture) {
   const output = mkdtempSync(join(tmpdir(), 'sesame-sbom-'))
   try {
+    const shippedFile = join(output, 'shipped-npm-packages.json')
+    writeFileSync(shippedFile, `${JSON.stringify([...shipped].sort(), null, 2)}\n`)
     execFileSync(process.execPath, [join(root, 'tools', 'create-sbom.mjs')], {
       cwd: root,
-      env: { ...process.env, SESAME_SBOM_OUTPUT_DIR: output },
+      env: {
+        ...process.env,
+        SESAME_SBOM_OUTPUT_DIR: output,
+        SESAME_SHIPPED_PACKAGES: shippedFile,
+      },
     })
     return {
       bom: JSON.parse(readFileSync(join(output, `sesame-${version}.cdx.json`), 'utf8')),
@@ -52,11 +60,15 @@ test('the bill of materials records a hash and an accurate scope for every npm p
   const scopes = new Map()
   for (const [location, entry] of Object.entries(readNpmLock().packages ?? {})) {
     if (!location.includes('node_modules/')) continue
-    scopes.set(`${lockName(location, entry)}@${entry.version}`, entry.dev ? 'optional' : 'required')
+    const name = lockName(location, entry)
+    scopes.set(
+      `${name}@${entry.version}`,
+      entry.dev && !shippedFixture.includes(name) ? 'excluded' : 'required',
+    )
   }
   const npm = bom.components.filter((component) => component.purl.startsWith('pkg:npm/'))
   assert.ok(npm.length > 100, 'the npm packages are missing')
-  assert.ok(npm.some((component) => component.scope === 'optional'), 'no build-time npm package is marked optional')
+  assert.ok(npm.some((component) => component.scope === 'excluded'), 'no build-only npm package is marked excluded')
   assert.ok(npm.some((component) => component.scope === 'required'), 'no shipped npm package is marked required')
   for (const component of npm) {
     assert.ok(component.hashes?.length === 1, `${component.name} has no integrity hash`)
@@ -66,6 +78,20 @@ test('the bill of materials records a hash and an accurate scope for every npm p
       `${component.name} has the wrong scope for its lock entry`,
     )
   }
+  for (const component of npm) {
+    if (shippedFixture.includes(component.name)) {
+      assert.equal(
+        component.scope,
+        'required',
+        `${component.name} builds into the shipped bundle and must be required`,
+      )
+    }
+  }
+  const scopeOf = (name) => npm.find((component) => component.name === name)?.scope
+  assert.equal(scopeOf('svelte'), 'required', 'svelte compiles into the shipped frontend')
+  assert.equal(scopeOf('@tauri-apps/api'), 'required', 'scoped runtime dependencies stay required')
+  assert.equal(scopeOf('vite'), 'excluded', 'vite modules are virtual in the bundle and it stays build-only')
+  assert.equal(scopeOf('vitest'), 'excluded', 'vitest is build-only and must be excluded')
 })
 
 test('aliased npm packages are recorded under the real package name', () => {
@@ -116,5 +142,45 @@ test('the vendored tree digest hashes forward-slash relative paths in a nested t
     assert.equal(await vendorTreeDigest(tree, tree), expected.digest('hex'))
   } finally {
     rmSync(tree, { recursive: true, force: true })
+  }
+})
+
+test('module ids map to npm package names, including scoped packages', () => {
+  assert.equal(packageNameFromModuleId('/repo/node_modules/svelte/src/index-client.js'), 'svelte')
+  assert.equal(
+    packageNameFromModuleId('/repo/node_modules/@sveltejs/vite-plugin-svelte/src/index.js'),
+    '@sveltejs/vite-plugin-svelte',
+  )
+  assert.equal(packageNameFromModuleId('C:\\repo\\node_modules\\@scope\\pkg\\index.js'), '@scope/pkg')
+  assert.equal(
+    packageNameFromModuleId('/repo/node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope/pkg/index.js'),
+    '@scope/pkg',
+  )
+  assert.equal(packageNameFromModuleId('\0vite/modulepreload-polyfill.js'), null)
+  assert.equal(packageNameFromModuleId('/repo/src/main.ts'), null)
+})
+
+test('the bill of materials refuses to classify npm packages without a shipped manifest', () => {
+  const output = mkdtempSync(join(tmpdir(), 'sesame-sbom-missing-'))
+  try {
+    assert.throws(
+      () =>
+        execFileSync(process.execPath, [join(root, 'tools', 'create-sbom.mjs')], {
+          cwd: root,
+          env: {
+            ...process.env,
+            SESAME_SBOM_OUTPUT_DIR: output,
+            SESAME_SHIPPED_PACKAGES: join(output, 'missing.json'),
+          },
+          stdio: 'pipe',
+        }),
+      (error) => {
+        assert.equal(error.status, 1)
+        assert.match(String(error.stderr), /npm run desktop:build/)
+        return true
+      },
+    )
+  } finally {
+    rmSync(output, { recursive: true, force: true })
   }
 })

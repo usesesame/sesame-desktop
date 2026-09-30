@@ -3,6 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { readShippedPackages } from './shipped-packages.mjs'
+
 const root = path.resolve(import.meta.dirname, '..')
 const destination = process.env.SESAME_SBOM_OUTPUT_DIR
   ? path.resolve(process.env.SESAME_SBOM_OUTPUT_DIR)
@@ -22,22 +24,27 @@ const npmHash = (integrity) => {
   return match ? { alg: 'SHA-512', content: Buffer.from(match[1], 'base64').toString('hex') } : null
 }
 
-const npmComponents = Object.entries(JSON.parse(npmLock).packages ?? {})
-  .filter(([name]) => name.includes('node_modules/'))
-  .map(([name, entry]) => {
-    const packageName =
-      entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
-    const component = {
-      type: 'library',
-      name: packageName,
-      version: entry.version,
-      purl: `pkg:npm/${packageName}@${entry.version}`,
-      scope: entry.dev ? 'optional' : 'required',
-    }
-    const hash = npmHash(entry.integrity)
-    if (hash) component.hashes = [hash]
-    return component
-  })
+const shippedPackagesFile = process.env.SESAME_SHIPPED_PACKAGES
+  ? path.resolve(process.env.SESAME_SHIPPED_PACKAGES)
+  : path.join(root, 'dist', 'shipped-npm-packages.json')
+
+const npmComponents = (shippedPackages) =>
+  Object.entries(JSON.parse(npmLock).packages ?? {})
+    .filter(([name]) => name.includes('node_modules/'))
+    .map(([name, entry]) => {
+      const packageName =
+        entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
+      const component = {
+        type: 'library',
+        name: packageName,
+        version: entry.version,
+        purl: `pkg:npm/${packageName}@${entry.version}`,
+        scope: entry.dev && !shippedPackages.has(packageName) ? 'excluded' : 'required',
+      }
+      const hash = npmHash(entry.integrity)
+      if (hash) component.hashes = [hash]
+      return component
+    })
 
 const cargoComponents = cargoLock
   .split('[[package]]')
@@ -78,6 +85,7 @@ export const vendorTreeDigest = async (directory, base = root) => {
 }
 
 const main = async () => {
+  const shippedPackages = await readShippedPackages(shippedPackagesFile)
   const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
   for (const component of cargoComponents) {
     if (component.name === 'glib' && component.properties) {
@@ -87,7 +95,7 @@ const main = async () => {
 
   await mkdir(destination, { recursive: true })
   const components = [
-    ...npmComponents,
+    ...npmComponents(shippedPackages),
     ...cargoComponents,
     ...(goSum
       ? [
