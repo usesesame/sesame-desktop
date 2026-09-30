@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -29,7 +29,7 @@ try {
     throw new Error(`The glib crate digest changed: expected ${crateSHA256}, got ${actual}`)
   }
   const upstream = join(work, 'glib-0.18.5')
-  execFileSync('tar', ['-xzf', cratePath, '-C', work])
+  execFileSync('tar', ['-xzf', basename(cratePath), '-C', work], { cwd: work })
   if (!existsSync(upstream)) throw new Error('The glib crate did not contain glib-0.18.5')
   execFileSync('patch', ['-p1', '-d', upstream, '-i', patchPath], { stdio: 'pipe' })
   try {

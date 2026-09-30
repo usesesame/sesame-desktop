@@ -176,6 +176,9 @@ jobs:
       - name: Run the complete release gate
         run: npm run release:check
 
+      - name: Verify the vendored glib tree
+        run: node tools/verify-glib-vendor.mjs
+
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
