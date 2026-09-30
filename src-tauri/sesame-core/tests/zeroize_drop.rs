@@ -10,6 +10,9 @@ struct ZeroedBeforeFree;
 static TRACKED_POINTER: AtomicUsize = AtomicUsize::new(0);
 static TRACKED_LENGTH: AtomicUsize = AtomicUsize::new(0);
 static SAW_ZEROED_DEALLOC: AtomicBool = AtomicBool::new(false);
+static WATCHED_PLAINTEXT_POINTER: AtomicUsize = AtomicUsize::new(0);
+static WATCHED_PLAINTEXT_LENGTH: AtomicUsize = AtomicUsize::new(0);
+static SAW_UNWIPED_PLAINTEXT_DEALLOC: AtomicBool = AtomicBool::new(false);
 
 unsafe impl GlobalAlloc for ZeroedBeforeFree {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -23,6 +26,19 @@ unsafe impl GlobalAlloc for ZeroedBeforeFree {
                 let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
                 if bytes.iter().all(|byte| *byte == 0) {
                     SAW_ZEROED_DEALLOC.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+        let plaintext_pointer = WATCHED_PLAINTEXT_POINTER.load(Ordering::SeqCst);
+        if plaintext_pointer != 0 {
+            let plaintext_length = WATCHED_PLAINTEXT_LENGTH.load(Ordering::SeqCst);
+            if plaintext_length != 0 && plaintext_length <= layout.size() {
+                let plaintext = unsafe {
+                    std::slice::from_raw_parts(plaintext_pointer as *const u8, plaintext_length)
+                };
+                let bytes = unsafe { std::slice::from_raw_parts(pointer, plaintext_length) };
+                if bytes == plaintext {
+                    SAW_UNWIPED_PLAINTEXT_DEALLOC.store(true, Ordering::SeqCst);
                 }
             }
         }
@@ -54,6 +70,22 @@ fn drop_and_require_zeroed<T>(value: T, pointer: *const u8, length: usize) {
         zeroed,
         "plaintext reached the allocator before it was zeroed"
     );
+}
+
+fn require_no_unwiped_plaintext<T>(plaintext: &'static [u8], action: impl FnOnce() -> T) -> T {
+    let _gate = tracking_gate();
+    WATCHED_PLAINTEXT_POINTER.store(plaintext.as_ptr() as usize, Ordering::SeqCst);
+    WATCHED_PLAINTEXT_LENGTH.store(plaintext.len(), Ordering::SeqCst);
+    SAW_UNWIPED_PLAINTEXT_DEALLOC.store(false, Ordering::SeqCst);
+    let value = action();
+    let unwiped = SAW_UNWIPED_PLAINTEXT_DEALLOC.load(Ordering::SeqCst);
+    WATCHED_PLAINTEXT_POINTER.store(0, Ordering::SeqCst);
+    WATCHED_PLAINTEXT_LENGTH.store(0, Ordering::SeqCst);
+    assert!(
+        !unwiped,
+        "a plaintext copy reached the allocator before it was zeroed"
+    );
+    value
 }
 
 #[test]
@@ -88,15 +120,27 @@ fn a_dropped_document_zeroes_attachment_bytes() {
     drop_and_require_zeroed(document, pointer, length);
 }
 
+const SHARED_PASSWORD: &str = "fictional-shared-password";
+
 #[test]
 fn dropped_password_counts_zero_their_keys() {
     let mut payload = VaultPayload::default();
-    payload.entries = vec![VaultEntry {
-        id: "login-a".to_string(),
-        password: "fictional-shared-password".to_string(),
-        ..VaultEntry::default()
-    }];
-    let counts = password_counts(&payload);
+    payload.entries = vec![
+        VaultEntry {
+            id: "login-a".to_string(),
+            password: SHARED_PASSWORD.to_string(),
+            ..VaultEntry::default()
+        },
+        VaultEntry {
+            id: "login-b".to_string(),
+            password: SHARED_PASSWORD.to_string(),
+            ..VaultEntry::default()
+        },
+    ];
+    let counts =
+        require_no_unwiped_plaintext(SHARED_PASSWORD.as_bytes(), || password_counts(&payload));
+    assert_eq!(counts.len(), 1, "duplicate passwords share one count entry");
+    assert_eq!(counts.get(SHARED_PASSWORD).copied(), Some(2));
     let key = counts.keys().next().expect("one counted password");
     let pointer = key.as_ptr();
     let length = key.len();
