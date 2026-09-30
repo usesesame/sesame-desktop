@@ -144,7 +144,12 @@ test('release build outputs reach the signing jobs as data, never as script text
   assert.match(receipt, /^\s+permissions:\s*\n\s+contents:\s*read\s*$/m, 'the candidate receipt only reads repository contents')
   assert.doesNotMatch(receipt, /id-token/, 'the candidate receipt must not mint an OIDC token')
   assert.match(receipt, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate receipt holds the candidate signing key')
-  assert.match(receipt, /cargo build[^\n]*verify-updater-artifact/, 'the candidate receipt compiles the verifier from the tagged source')
+  assert.doesNotMatch(receipt, /cargo|desktop:host:stage|rust-toolchain/, 'the candidate receipt must not compile or stage build tools')
+  assert.match(receipt, /needs\.verify-fresh\.outputs\.verifier-sha256/, 'the receipt must compare the downloaded verifier against the independent job digest')
+  assert.match(receipt, /Get-FileHash[^\n]*\$verifier/, 'the receipt must re-hash the downloaded verifier')
+  const verify = jobBlock(body, 'verify-fresh')
+  assert.match(verify, /name: sesame-updater-verifier-/, 'independent verification must publish its verifier')
+  assert.doesNotMatch(verify, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY/, 'the verifier build must not have private signing keys')
   assert.match(receipt, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*candidate-receipt\s*$/m, 'the candidate receipt uploads the candidate files from their own directory')
   const publish = jobBlock(body, 'publish-candidate')
   assert.match(publish, /needs:[^\n]*candidate-receipt/, 'publish waits for the candidate receipt')
@@ -197,4 +202,18 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
   assert.match(body, /Report a vulnerability/, 'the policy does not name the private reporting route')
   assert.match(body, /## Scope/, 'the policy has no scope, so a reporter cannot tell what counts')
   assert.match(body, /vault/i, 'the policy is not scoped to this product')
+})
+
+
+test('private signing jobs cannot compile application code or stage sidecars', () => {
+  for (const workflow of workflows) {
+    const body = read(workflow)
+    for (const [, name] of body.matchAll(/^ {2}([a-z0-9_-]+):$/gm)) {
+      const job = jobBlock(body, name)
+      if (!/secrets\.(?:SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY)\s*\}\}/.test(job)) continue
+      for (const script of runScriptBlocks(job)) {
+        assert.doesNotMatch(script, /cargo\s+(?:build|test|run|install)|desktop:host:stage|tauri\s+build|desktop:ci|release:check/, `${workflow} ${name} compiles code beside a signing key`)
+      }
+    }
+  }
 })
