@@ -106,7 +106,7 @@ test('the desktop repository owns a closed standalone command surface', () => {
 test('the npm intake policy is pinned and the runner must read it', () => {
   const policy = read('.npmrc')
   for (const line of ['ignore-scripts=true', 'allow-git=none', 'audit-level=high', 'min-release-age=7']) {
-    assert.ok(policy.split('\n').includes(line), `.npmrc no longer pins ${line}`)
+    assert.ok(policy.split(/\r?\n/).includes(line), `.npmrc no longer pins ${line}`)
   }
 
   const workflow = read('.github', 'workflows', 'ci.yml')
