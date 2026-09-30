@@ -83,7 +83,7 @@ function fictionalRun({ matrix, matrixDigest, platform, fixtureId, overrides = {
     startedAt: '2026-09-13T00:00:00.000Z',
     finishedAt: '2026-09-13T00:10:00.000Z',
     phases: {
-      restore: { passed: 14, failed: 0, steps: ['create_vault', 'restore_backup.different_vault', 'active_vault.unchanged_after_refusal', 'delete_local_vault', 'restore_backup.fresh', 'unlock.password', 'backup.restored', 'verify.restored_backup', 'restore_backup.same_vault', 'safety_backup.same_vault'].map((name) => ({ name, ok: true })) },
+      restore: { passed: 14, failed: 0, steps: ['create_vault', 'restore_backup.locked', 'active_vault.unchanged_after_locked_refusal', 'restore_backup.without_presence', 'active_vault.unchanged_after_presence_refusal', 'restore_backup.different_vault', 'active_vault.unchanged_after_refusal', 'delete_local_vault', 'restore_backup.fresh', 'unlock.password', 'backup.restored', 'verify.restored_backup', 'restore_backup.same_vault', 'safety_backup.same_vault'].map((name) => ({ name, ok: true })) },
       restart: { passed: 6, failed: 0, steps: ['restart.unlock.password', 'restart.unlock.recovery_kit'].map((name) => ({ name, ok: true })) },
     },
     ...overrides,
@@ -166,6 +166,19 @@ test('a skipped, failed, or digest-mismatched installed run cannot merge', async
   const partialPhase = structuredClone(runs)
   partialPhase[0].phases.restore.steps = partialPhase[0].phases.restore.steps.filter((step) => step.name !== 'restore_backup.same_vault')
   assert.throws(() => mergeInstalledEvidence({ runs: partialPhase, matrix, policy, matrixDigest }), /did not pass restore_backup\.same_vault/)
+})
+
+test('a restore run missing a refusal step cannot merge', async () => {
+  const { matrix, policy, matrixDigest } = await assertRepositoryCompatibility(repository)
+  const runs = ['linux', 'windows'].flatMap((platform) => matrix.publishedVersions.map((entry) => fictionalRun({ matrix, matrixDigest, platform, fixtureId: entry.fixtureId })))
+  for (const omitted of ['restore_backup.locked', 'active_vault.unchanged_after_locked_refusal', 'restore_backup.without_presence', 'active_vault.unchanged_after_presence_refusal']) {
+    const partial = structuredClone(runs)
+    partial[0].phases.restore.steps = partial[0].phases.restore.steps.filter((step) => step.name !== omitted)
+    assert.throws(
+      () => mergeInstalledEvidence({ runs: partial, matrix, policy, matrixDigest }),
+      new RegExp(`did not pass ${omitted.replace(/\./g, '\\.')}`),
+    )
+  }
 })
 
 test('the release workflow gates publication on installed-app compatibility evidence', async () => {

@@ -16,6 +16,10 @@ export const SUPPORTED_PLATFORMS = ['linux', 'windows']
 const sha256Pattern = /^[0-9a-f]{64}$/
 const requiredRestoreSteps = [
   'create_vault',
+  'restore_backup.locked',
+  'active_vault.unchanged_after_locked_refusal',
+  'restore_backup.without_presence',
+  'active_vault.unchanged_after_presence_refusal',
   'restore_backup.different_vault',
   'active_vault.unchanged_after_refusal',
   'delete_local_vault',
