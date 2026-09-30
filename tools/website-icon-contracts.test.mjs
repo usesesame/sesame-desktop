@@ -31,6 +31,7 @@ test('desktop icon fetches require the persisted website icon opt-in', () => {
   assert.match(icons, /require_website_icons_enabled\(&desktop_settings::settings_path/)
   assert.match(settings, /app_local_data_dir\(\)/)
   assert.match(settings, /atomic_replace/)
+  assert.match(settings, /if enabled \{\s*(?:crate::commands::)?require_release_presence\(state, presence\)\?;/)
   assert.match(controller, /const stored = await getWebsiteIconsEnabled\(\)/)
   assert.match(controller, /await setWebsiteIconsEnabled\(enabled\)/)
 })

@@ -801,9 +801,13 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
         return is_public_ipv4(mapped);
     }
     if segments[0] == 0x0064 && segments[1] == 0xff9b {
-        let is_nat64 = segments[2] == 0x0001
-            || (segments[2] == 0 && segments[3..6].iter().all(|segment| *segment == 0));
-        return is_nat64 && is_public_ipv4(ipv4_from_segments(segments[6], segments[7]));
+        if segments[2] == 0 && segments[3..6].iter().all(|segment| *segment == 0) {
+            return is_public_ipv4(ipv4_from_segments(segments[6], segments[7]));
+        }
+        if segments[2] == 0x0001 && segments[5..8].iter().all(|segment| *segment == 0) {
+            return is_public_ipv4(ipv4_from_segments(segments[3], segments[4]));
+        }
+        return false;
     }
     if segments[0] == 0x2002 {
         return is_public_ipv4(ipv4_from_segments(segments[1], segments[2]));
@@ -827,6 +831,8 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::release::ReleasePresence;
+    use crate::vault::VaultState;
 
     fn page(url: &str) -> url::Url {
         url::Url::parse(url).unwrap()
@@ -1002,6 +1008,7 @@ mod tests {
             "64:ff9b::a00:1",
             "64:ff9b::c0a8:101",
             "64:ff9b:1::c0a8:101",
+            "64:ff9b:1:c0a8:101::",
             "64:ff9b:2::1",
             "2002:c0a8:101::1",
             "2001::1",
@@ -1012,7 +1019,18 @@ mod tests {
         assert!(is_public_ip("93.184.216.34".parse().unwrap()));
         assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
         assert!(is_public_ip("64:ff9b::101:101".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b::808:808".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b:1:808:808::".parse().unwrap()));
         assert!(is_public_ip("2002:5db8:d822::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_nat64_48_prefix_judges_the_embedded_ipv4_in_the_right_segments() {
+        assert!(!is_public_ip("64:ff9b:1:c0a8:101::".parse().unwrap()));
+        assert!(!is_public_ip("64:ff9b:1:a00:1::".parse().unwrap()));
+        assert!(is_public_ip("64:ff9b:1:808:808::".parse().unwrap()));
+        assert!(!is_public_ip("64:ff9b:1::c0a8:101".parse().unwrap()));
+        assert!(!is_public_ip("64:ff9b:1:808:808:1::".parse().unwrap()));
     }
 
     #[test]
@@ -1065,6 +1083,31 @@ mod tests {
             },
         )
         .expect("disable setting");
+        assert!(desktop_settings::require_website_icons_enabled(&settings).is_err());
+        let _ = fs::remove_dir_all(settings.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn the_icon_opt_in_requires_presence_only_to_enable() {
+        let settings = test_dir("opt-in-presence").join("desktop-settings.json");
+        let state = VaultState::default();
+        let presence = ReleasePresence::default();
+        assert!(
+            desktop_settings::set_website_icons_enabled_at(&settings, true, &state, &presence)
+                .is_err()
+        );
+        assert!(desktop_settings::require_website_icons_enabled(&settings).is_err());
+        desktop_settings::write_settings_at(
+            &settings,
+            &desktop_settings::DesktopSettings {
+                website_icons_enabled: true,
+            },
+        )
+        .expect("enable setting");
+        assert!(desktop_settings::set_website_icons_enabled_at(
+            &settings, false, &state, &presence
+        )
+        .is_ok());
         assert!(desktop_settings::require_website_icons_enabled(&settings).is_err());
         let _ = fs::remove_dir_all(settings.parent().expect("settings parent"));
     }

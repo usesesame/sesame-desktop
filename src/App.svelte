@@ -729,6 +729,12 @@
         onUpdateQuickAccessShortcut={settingsController.updateQuickAccessShortcut}
         onSetTheme={settingsController.setTheme}
         onSetSiteIconsEnabled={settingsController.setSiteIconsEnabled}
+        siteIconsWorking={$settingsState.siteIconsWorking}
+        siteIconsPresenceRequired={$settingsState.siteIconsPresenceRequired}
+        bind:siteIconsPresencePassword={$settingsState.siteIconsPresencePassword}
+        errorMessage={$feedbackState.errorMessage}
+        onConfirmSiteIconsPresence={settingsController.confirmSiteIconsPresence}
+        onCancelSiteIconsPresence={settingsController.cancelSiteIconsPresence}
         websiteIconCacheWorking={$settingsState.websiteIconCacheWorking}
         websiteIconCacheEntryCount={$settingsState.websiteIconCache.entryCount}
         websiteIconCacheIconCount={$settingsState.websiteIconCache.iconCount}
