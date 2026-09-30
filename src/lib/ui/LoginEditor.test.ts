@@ -93,3 +93,33 @@ test('showing a saved password asks the vault again and hiding clears the field'
   expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2)
   expect(vaultApi.revealLoginSecret).toHaveBeenLastCalledWith('login-a')
 })
+
+test('showing and hiding a typed replacement preserves the value that will be saved', async () => {
+  renderEditor()
+  const password = passwordInput()
+  await fireEvent.input(password, { target: { value: 'fictional-replacement' } })
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  expect(password.value).toBe('fictional-replacement')
+  expect(password.type).toBe('text')
+  expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+  expect(password.value).toBe('')
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  expect(password.value).toBe('fictional-replacement')
+  expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
+})
+
+test('showing a generated replacement preserves the generated draft', async () => {
+  renderEditor()
+  await fireEvent.click(screen.getByRole('button', { name: 'Generate a password' }))
+  const generated = passwordInput().value
+  expect(generated.length).toBeGreaterThan(0)
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  expect(passwordInput().value).toBe(generated)
+  await fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
+  expect(passwordInput().value).toBe('')
+  await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+  expect(passwordInput().value).toBe(generated)
+  expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
+})

@@ -100,7 +100,7 @@
       passwordVisible = false
       return
     }
-    if (!loginDraft.id) {
+    if (!loginDraft.id || loginDraft.password !== '') {
       passwordDisplay = loginDraft.password
       passwordVisible = true
       return
