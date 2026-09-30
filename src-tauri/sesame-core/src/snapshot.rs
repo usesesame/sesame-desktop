@@ -498,10 +498,14 @@ impl Drop for PasswordCounts {
 }
 
 pub fn password_counts(payload: &VaultPayload) -> PasswordCounts {
-    let mut passwords = HashMap::new();
+    let mut passwords: HashMap<String, usize> = HashMap::new();
     for entry in &payload.entries {
         if !entry.password.is_empty() {
-            *passwords.entry(entry.password.clone()).or_insert(0) += 1;
+            if let Some(count) = passwords.get_mut(entry.password.as_str()) {
+                *count += 1;
+            } else {
+                passwords.insert(entry.password.clone(), 1);
+            }
         }
     }
     PasswordCounts(passwords)
