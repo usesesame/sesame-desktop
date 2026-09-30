@@ -157,6 +157,16 @@ function registryUrl(resolved) {
   }
 }
 
+function registryTarballMatches(name, version, url) {
+  const prefix = `/${name}/-/`
+  if (!url.pathname.startsWith(prefix)) return false
+  const file = url.pathname.slice(prefix.length)
+  if (file.includes('/')) return false
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  if (typeof version === 'string' && version) return file === `${base}-${version}.tgz`
+  return file.startsWith(`${base}-`) && file.endsWith('.tgz')
+}
+
 export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
   const entries = validateAdmission(admission)
   const cargoPackages = parseCargoLock(cargoLock)
@@ -216,7 +226,7 @@ export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
       foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to ${pkg.resolved ?? 'no registry URL'}`)
       continue
     }
-    if (!url.pathname.includes(`/${pkg.name}/-/`)) {
+    if (!registryTarballMatches(pkg.name, pkg.version, url)) {
       foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to a tarball for another package: ${pkg.resolved}`)
       continue
     }

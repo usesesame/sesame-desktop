@@ -211,6 +211,51 @@ test('a registry URL has to bind to the package it installs', () => {
   assert.ok(result.foreignSources.some((line) => line.includes('svelte')))
 })
 
+test('a tarball under another scope cannot borrow the package name', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    packages: [{ name: 'svelte', version: '5.1.0', resolved: 'https://registry.npmjs.org/@evil/svelte/-/svelte-5.1.0.tgz' }],
+  })
+  const result = check(fixture, admissionOf([]), npmLock)
+  assert.ok(
+    result.foreignSources.some((line) => line.includes('svelte') && line.includes('tarball for another package')),
+  )
+})
+
+test('a tarball filename for another package fails', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    packages: [{ name: 'svelte', version: '5.1.0', resolved: 'https://registry.npmjs.org/svelte/-/evil-5.1.0.tgz' }],
+  })
+  const result = check(fixture, admissionOf([]), npmLock)
+  assert.ok(
+    result.foreignSources.some((line) => line.includes('svelte') && line.includes('tarball for another package')),
+  )
+})
+
+test('a legitimate scoped package passes the registry check', () => {
+  const fixture = cargoFixture({})
+  const npmLock = npmFixture({
+    direct: { '@scope/renderer-kit': '^3.0.0' },
+    packages: [
+      {
+        name: '@scope/renderer-kit',
+        version: '3.1.0',
+        resolved: 'https://registry.npmjs.org/@scope/renderer-kit/-/renderer-kit-3.1.0.tgz',
+      },
+    ],
+  })
+  const result = check(
+    fixture,
+    admissionOf([{ name: '@scope/renderer-kit', version: '3.1', source: 'npm' }]),
+    npmLock,
+  )
+  assert.deepEqual(result.foreignSources, [])
+  assert.deepEqual(result.missingIntegrity, [])
+  assert.deepEqual(result.unadmitted, [])
+  assert.deepEqual(result.stale, [])
+})
+
 test('an npm alias cannot ride an admitted name', () => {
   const fixture = cargoFixture({})
   const npmLock = npmFixture({
