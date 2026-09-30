@@ -495,6 +495,29 @@ mod tests {
     }
 
     #[test]
+    fn dropped_vault_header_zeroizes_the_vault_name() {
+        fn require_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+
+        let mut header = VaultHeader {
+            vault_name: "fictional-vault-name".to_string(),
+            folders: vec![Folder {
+                id: "folder-a".to_string(),
+                name: "fictional-folder-name".to_string(),
+            }],
+            vault_id: Some("fictional-vault-id".to_string()),
+            revision: 7,
+        };
+        let pointer = header.vault_name.as_ptr();
+        let length = header.vault_name.len();
+
+        require_zeroize_on_drop::<VaultHeader>();
+        header.zeroize();
+
+        let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+        assert!(bytes.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
     fn malformed_record_is_rejected() {
         let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
         store.active[0].blob.ciphertext = "not-base64".to_string();
