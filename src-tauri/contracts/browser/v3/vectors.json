@@ -4,13 +4,13 @@
   "fictionalDataOnly": true,
   "requestCases": [
     {
-      "name": "fill on protocol three is refused",
-      "valid": false,
+      "name": "fill match request defaults to both fields",
+      "valid": true,
       "message": { "version": 3, "type": "fill", "requestId": "fill-3-1", "origin": "https://example.test" }
     },
     {
-      "name": "fill field selection on protocol three is refused",
-      "valid": false,
+      "name": "fill match request names only the password field",
+      "valid": true,
       "message": { "version": 3, "type": "fill", "requestId": "fill-3-2", "origin": "https://www.example.test", "fields": "password" }
     },
     {

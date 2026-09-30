@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v6/response.schema.json",
+  "title": "Sesame browser capabilities response v6",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/capabilities"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "$defs": {
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "installed",
+        "desktopAvailable"
+      ],
+      "properties": {
+        "version": {
+          "const": 6
+        },
+        "type": {
+          "const": "capabilities"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "installed": {
+          "const": true
+        },
+        "desktopAvailable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "message"
+      ],
+      "properties": {
+        "version": {
+          "const": 6
+        },
+        "type": {
+          "const": "error"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "message": {
+          "enum": [
+            "Unsupported protocol version.",
+            "Invalid browser request.",
+            "Unsupported browser request.",
+            "Browser response unavailable."
+          ]
+        }
+      }
+    },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    }
+  }
+}

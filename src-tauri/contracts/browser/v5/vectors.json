@@ -64,7 +64,7 @@
       "extensionResult": { "ok": false, "code": "no-match" }
     },
     {
-      "name": "a legacy locked reply still decodes",
+      "name": "locked vault is a safe negative result",
       "hostValid": true,
       "request": { "version": 5, "type": "fill", "requestId": "fill-5-6", "origin": "https://example.test" },
       "message": { "version": 5, "type": "fill-unavailable", "requestId": "fill-5-6", "reason": "locked" },

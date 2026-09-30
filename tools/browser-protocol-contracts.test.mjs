@@ -10,6 +10,7 @@ const canonical = join(root, 'src-tauri', 'contracts', 'browser', 'v1')
 const cardCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v2')
 const fillMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v3')
 const totpCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v4')
+const capabilitiesCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v6')
 const lookalikeCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v5')
 
 function json(path) {
@@ -32,9 +33,9 @@ test('the published contract matches the implementation that serves it', () => {
 
 test('only the current contract version of each message type is accepted', () => {
   const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
-  const v5 = json(join(lookalikeCanonical, 'contract.json'))
+  const v6 = json(join(capabilitiesCanonical, 'contract.json'))
   const matrix = {
-    capabilities: 1,
+    capabilities: 6,
     activate: 1,
     identity: 1,
     save: 1,
@@ -43,17 +44,17 @@ test('only the current contract version of each message type is accepted', () =>
     fill: 5,
   }
 
-  assert.deepEqual(v5.messageVersions, matrix)
+  assert.deepEqual(v6.messageVersions, matrix)
   assert.match(rust, /"fill" => version == LOOKALIKE_PROTOCOL_VERSION/)
   assert.match(rust, /"totp" => version == TOTP_PROTOCOL_VERSION/)
   assert.match(rust, /"card" => version == CARD_PROTOCOL_VERSION/)
   assert.match(
     rust,
-    /"save" \| "identity" \| "capabilities" \| "activate" => version == PROTOCOL_VERSION/,
+    /"save" \| "identity" \| "activate" => version == PROTOCOL_VERSION/,
   )
   assert.match(rust, /supported_protocol_version\(&self\.message_type, self\.version\)/)
 
-  const directories = { 1: 'v1', 2: 'v2', 4: 'v4', 5: 'v5' }
+  const directories = { 1: 'v1', 2: 'v2', 4: 'v4', 5: 'v5', 6: 'v6' }
   for (const [messageType, version] of Object.entries(matrix)) {
     if (messageType === 'fill') continue
     const contract = json(join(root, 'src-tauri', 'contracts', 'browser', directories[version], 'contract.json'))
@@ -65,6 +66,7 @@ test('only the current contract version of each message type is accepted', () =>
   assert.deepEqual(json(join(canonical, 'contract.json')).requestTypes, [
     'capabilities',
     'activate',
+    'fill',
     'identity',
     'save',
   ])
@@ -76,22 +78,19 @@ test('only the current contract version of each message type is accepted', () =>
     json(join(totpCanonical, 'contract.json')).compatibility.currentHostProtocolVersion,
     4,
   )
-  for (const directory of ['v1', 'v2', 'v3', 'v4', 'v5']) {
-    const vectors = json(join(root, 'src-tauri', 'contracts', 'browser', directory, 'vectors.json'))
-    for (const entry of vectors.requestCases) {
-      if (entry.valid) {
-        assert.equal(
-          entry.message.version,
-          matrix[entry.message.type],
-          `${directory} accepted ${entry.name} on the wrong version`,
-        )
-      }
-    }
+  assert.match(rust, /"capabilities" => version == CAPABILITIES_PROTOCOL_VERSION/)
+  assert.match(rust, /pub const CAPABILITIES_PROTOCOL_VERSION: u8 = 6;/)
+  const vectors = json(join(capabilitiesCanonical, 'vectors.json'))
+  assert.equal(vectors.protocolVersion, 6)
+  assert.ok(vectors.requestCases.some((entry) => !entry.valid && entry.message.version === 1))
+  for (const entry of vectors.requestCases.filter((entry) => entry.valid)) {
+    assert.equal(entry.message.type, 'capabilities')
+    assert.equal(entry.message.version, matrix.capabilities)
   }
 })
 
-test('capabilities answer desktop availability only', () => {
-  const schema = json(join(canonical, 'response.schema.json'))
+test('capabilities answer desktop availability only on a new tagged contract', () => {
+  const schema = json(join(capabilitiesCanonical, 'response.schema.json'))
   const capabilities = schema.$defs.capabilities
   assert.deepEqual(capabilities.required, [
     'version',
@@ -216,9 +215,8 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
   assert.equal(contract.protocolVersion, 3)
   assert.deepEqual(contract.requestTypes, ['fill'])
   assert.deepEqual(contract.matchKinds, ['exact', 'wwwAlias'])
-  assert.equal(contract.supersededByProtocolVersion, 5)
-  assert.equal(contract.compatibility.minimumHostProtocolVersion, 5)
-  assert.equal(contract.compatibility.currentHostProtocolVersion, 5)
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 3)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 3)
   assert.equal(requestSchema.properties.version.const, 3)
   assert.equal(requestSchema.properties.type.const, 'fill')
   assert.deepEqual(responseSchema.$defs.matchKind.enum, contract.matchKinds)

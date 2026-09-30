@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 pub const PROTOCOL_VERSION: u8 = 1;
+pub const CAPABILITIES_PROTOCOL_VERSION: u8 = 6;
 pub const CARD_PROTOCOL_VERSION: u8 = 2;
 pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
 pub const TOTP_PROTOCOL_VERSION: u8 = 4;
@@ -61,7 +62,8 @@ pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
         "fill" => version == LOOKALIKE_PROTOCOL_VERSION,
         "totp" => version == TOTP_PROTOCOL_VERSION,
         "card" => version == CARD_PROTOCOL_VERSION,
-        "save" | "identity" | "capabilities" | "activate" => version == PROTOCOL_VERSION,
+        "capabilities" => version == CAPABILITIES_PROTOCOL_VERSION,
+        "save" | "identity" | "activate" => version == PROTOCOL_VERSION,
         _ => false,
     }
 }
@@ -335,7 +337,7 @@ pub struct BrowserResponse {
 impl BrowserResponse {
     pub fn capabilities(request_id: &str, desktop_available: bool) -> Self {
         Self {
-            version: PROTOCOL_VERSION,
+            version: CAPABILITIES_PROTOCOL_VERSION,
             message_type: "capabilities".into(),
             request_id: request_id.into(),
             installed: Some(true),
@@ -1046,7 +1048,7 @@ mod tests {
         assert!(!request(PROTOCOL_VERSION, "card").validate());
 
         let capability = BrowserRequest {
-            version: PROTOCOL_VERSION,
+            version: CAPABILITIES_PROTOCOL_VERSION,
             message_type: "capabilities".to_string(),
             request_id: "request-1".to_string(),
             origin: None,
@@ -1058,21 +1060,24 @@ mod tests {
         };
         assert!(capability.validate());
         let mut legacy_capability = capability.clone();
-        legacy_capability.version = CARD_PROTOCOL_VERSION;
+        legacy_capability.version = PROTOCOL_VERSION;
         assert!(!legacy_capability.validate());
 
         let mut activation = capability.clone();
         activation.message_type = "activate".to_string();
+        activation.version = PROTOCOL_VERSION;
         assert!(activation.validate());
 
         let mut identity = capability.clone();
         identity.message_type = "identity".to_string();
+        identity.version = PROTOCOL_VERSION;
         identity.origin = Some("https://example.test".to_string());
         identity.fields = Some("email".to_string());
         assert!(identity.validate());
 
         let mut save = capability.clone();
         save.message_type = "save".to_string();
+        save.version = PROTOCOL_VERSION;
         save.origin = Some("https://example.test".to_string());
         save.kind = Some("new".to_string());
         save.password = Some("fictional-example-value".to_string());

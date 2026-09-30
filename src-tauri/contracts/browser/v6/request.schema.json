@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v6/request.schema.json",
+  "title": "Sesame browser capabilities request v6",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/capabilities"
+    }
+  ],
+  "$defs": {
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId"
+      ],
+      "properties": {
+        "version": {
+          "const": 6
+        },
+        "type": {
+          "const": "capabilities"
+        },
+        "requestId": {
+          "$ref": "#/$defs/baseProperties/requestId"
+        }
+      }
+    },
+    "baseProperties": {
+      "version": {
+        "const": 6
+      },
+      "requestId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{1,64}$"
+      }
+    }
+  }
+}
