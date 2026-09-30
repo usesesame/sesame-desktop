@@ -52,6 +52,19 @@ unsafe impl GlobalAlloc for ZeroedBeforeFree {
                 }
             }
         }
+        let plaintext_pointer = WATCHED_PLAINTEXT_POINTER.load(Ordering::SeqCst);
+        if plaintext_pointer != 0 {
+            let plaintext_length = WATCHED_PLAINTEXT_LENGTH.load(Ordering::SeqCst);
+            if plaintext_length != 0 && plaintext_length <= layout.size() {
+                let plaintext = unsafe {
+                    std::slice::from_raw_parts(plaintext_pointer as *const u8, plaintext_length)
+                };
+                let bytes = unsafe { std::slice::from_raw_parts(pointer, plaintext_length) };
+                if bytes == plaintext {
+                    SAW_UNWIPED_PLAINTEXT_DEALLOC.store(true, Ordering::SeqCst);
+                }
+            }
+        }
         unsafe { System.dealloc(pointer, layout) }
     }
 }
