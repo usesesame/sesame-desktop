@@ -183,16 +183,19 @@ pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
         ])
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     for entry in &payload.entries {
+        let title = safe_csv_cell(&entry.title);
+        let url = safe_csv_cell(&entry.url);
         let folder_name = crate::snapshot::folder_name_for(payload, entry);
+        let folder = safe_csv_cell(&folder_name);
         let joined_backup_codes = entry.backup_codes.join("\n");
         writer
             .write_record([
-                entry.title.as_str(),
-                entry.url.as_str(),
+                title.as_ref(),
+                url.as_ref(),
                 entry.username.as_str(),
                 entry.email.as_str(),
                 entry.password.as_str(),
-                folder_name.as_str(),
+                folder.as_ref(),
                 entry.totp.as_deref().unwrap_or_default(),
                 joined_backup_codes.as_str(),
                 entry.recovery_email.as_deref().unwrap_or_default(),
@@ -246,6 +249,18 @@ pub fn identities_csv_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
     writer
         .into_inner()
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())
+}
+
+fn safe_csv_cell(value: &str) -> std::borrow::Cow<'_, str> {
+    if value
+        .chars()
+        .next()
+        .is_some_and(|character| matches!(character, '=' | '+' | '-' | '@' | '\t' | '\r' | '\n'))
+    {
+        std::borrow::Cow::Owned(format!("'{value}"))
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
 }
 
 /// Pre-change encrypted copy; the change can be undone by restoring it.

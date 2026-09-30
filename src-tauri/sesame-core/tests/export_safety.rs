@@ -1,5 +1,5 @@
 use sesame_core::backup::{csv_export_bytes, identities_csv_bytes};
-use sesame_core::types::{Identity, VaultEntry, VaultPayload};
+use sesame_core::types::{Folder, Identity, VaultEntry, VaultPayload};
 use sesame_core::util::split_backup_codes;
 
 fn export_with(entry: VaultEntry) -> String {
@@ -39,6 +39,22 @@ fn reimport(csv: &str) -> VaultEntry {
     entry
 }
 
+fn cell(csv: &str, name: &str) -> String {
+    let mut reader = csv::Reader::from_reader(csv.as_bytes());
+    let headers = reader.headers().expect("headers").clone();
+    let record = reader
+        .records()
+        .next()
+        .expect("a data row")
+        .expect("a record");
+    headers
+        .iter()
+        .position(|header| header == name)
+        .and_then(|index| record.get(index))
+        .unwrap_or_default()
+        .to_string()
+}
+
 #[test]
 fn a_password_that_looks_like_a_formula_survives_export_and_reimport() {
     let password = "=cmd|'/c calc'!A1";
@@ -70,14 +86,45 @@ fn a_totp_seed_and_a_backup_code_survive_export_and_reimport() {
 }
 
 #[test]
-fn a_leading_control_character_survives_export_and_reimport() {
+fn a_title_with_a_leading_control_character_is_neutralised() {
     let title = "\tExample".to_string();
     let mut entry = VaultEntry::default();
     entry.title = title.clone();
     let csv = export_with(entry);
 
-    assert!(csv.contains(&title), "the title was rewritten:\n{csv}");
-    assert_eq!(reimport(&csv).title, title);
+    let reimported = reimport(&csv);
+    assert_eq!(
+        reimported.title,
+        format!("'{title}"),
+        "the exported title carries the guard and the reader keeps the apostrophe, so the neutralised cell does not reimport byte-for-byte:\n{csv}"
+    );
+}
+
+#[test]
+fn a_formula_title_url_and_folder_are_neutralised_while_secrets_stay_raw() {
+    let formula = "=cmd|'/c calc'!A1";
+    let mut entry = VaultEntry::default();
+    entry.title = formula.into();
+    entry.url = formula.into();
+    entry.folder_id = Some("folder-1".into());
+    entry.password = formula.into();
+    entry.totp = Some(formula.into());
+    entry.backup_codes = vec![formula.into()];
+    let mut payload = VaultPayload::default();
+    payload.folders = vec![Folder {
+        id: "folder-1".into(),
+        name: formula.into(),
+    }];
+    payload.entries = vec![entry];
+    let csv = String::from_utf8(csv_export_bytes(&payload).expect("export")).expect("utf8");
+
+    let reimported = reimport(&csv);
+    assert_eq!(reimported.title, format!("'{formula}"), "{csv}");
+    assert_eq!(reimported.url, format!("'{formula}"), "{csv}");
+    assert_eq!(cell(&csv, "folder"), format!("'{formula}"), "{csv}");
+    assert_eq!(reimported.password, formula, "{csv}");
+    assert_eq!(reimported.totp.as_deref(), Some(formula), "{csv}");
+    assert_eq!(reimported.backup_codes, vec![formula.to_string()], "{csv}");
 }
 
 #[test]
@@ -99,11 +146,19 @@ fn an_identity_that_looks_like_a_formula_is_exported_unchanged() {
 fn an_ordinary_value_is_exported_unchanged() {
     let mut entry = VaultEntry::default();
     entry.title = "Example".into();
+    entry.url = "https://example.test".into();
     entry.username = "person@example.test".into();
     entry.password = "ordinary-secret".into();
     let csv = export_with(entry);
+    for value in ["Example", "https://example.test", "person@example.test"] {
+        assert!(csv.contains(value), "{csv}");
+    }
     assert!(csv.contains("ordinary-secret"), "{csv}");
     assert!(!csv.contains("'ordinary-secret"), "{csv}");
+    let reimported = reimport(&csv);
+    assert_eq!(reimported.title, "Example");
+    assert_eq!(reimported.url, "https://example.test");
+    assert_eq!(reimported.password, "ordinary-secret");
 }
 
 #[cfg(unix)]
