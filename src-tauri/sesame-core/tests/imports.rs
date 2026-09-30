@@ -270,7 +270,82 @@ fn bidi_and_zero_width_characters_are_stripped_from_single_line_fields() {
     let csv =
         format!("name,url,username,password\nExample,https://example.test,{username},secret\n");
     let parsed = parse_import_entries(&csv, "chrome-csv").expect("Chrome import");
-    assert_eq!(parsed.entries[0].username, "person");
+    assert_eq!(parsed.entries[0].username, "person\u{200C}\u{200D}");
+}
+
+#[test]
+fn a_persian_style_display_name_keeps_its_zero_width_non_joiner() {
+    let csv = "name,url,username,password\n\"کتاب\u{200C}ها\",https://example.test,person,secret\n";
+    let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
+    assert_eq!(parsed.entries[0].title, "کتاب\u{200C}ها");
+}
+
+#[test]
+fn a_single_line_display_field_keeps_its_zero_width_joiner() {
+    let csv =
+        "name,url,username,password\nExample,https://example.test,\"fam\u{200D}ily\",secret\n";
+    let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
+    assert_eq!(parsed.entries[0].username, "fam\u{200D}ily");
+}
+
+#[test]
+fn a_note_keeps_a_zero_width_joiner_emoji_sequence() {
+    let csv = "name,url,username,password,note\nExample,https://example.test,person,secret,\"\u{1F469}\u{200D}\u{1F4BB} codes\"\n";
+    let parsed = parse_import_entries(csv, "chrome-csv").expect("Chrome import");
+    assert_eq!(
+        parsed.entries[0].notes.as_deref(),
+        Some("\u{1F469}\u{200D}\u{1F4BB} codes")
+    );
+}
+
+#[test]
+fn secrets_keep_their_zero_width_characters_byte_for_byte() {
+    let export = r#"{
+      "items": [
+        {
+          "type": 1,
+          "name": "Example",
+          "login": {
+            "username": "person",
+            "password": "before\u0007\u200C\u200D\u202Eafter",
+            "totp": "ABCDEF\t\u200C\u200D",
+            "uris": [{ "uri": "https://example.test" }]
+          },
+          "fields": [
+            { "name": "Recovery note", "value": "note\u200C\u200D\u0007secret", "type": 1 }
+          ]
+        },
+        {
+          "type": 5,
+          "name": "Deploy key",
+          "sshKey": {
+            "privateKey": "-----BEGIN KEY-----\n\u200C\u200D\trow\n-----END KEY-----",
+            "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\u200D comment"
+          }
+        }
+      ]
+    }"#;
+    let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden import");
+    let login = &parsed.entries[0];
+    assert_eq!(
+        login.password,
+        "before\u{0007}\u{200C}\u{200D}\u{202E}after"
+    );
+    assert_eq!(login.totp.as_deref(), Some("ABCDEF\t\u{200C}\u{200D}"));
+    assert_eq!(
+        login.legacy_fields[0].value,
+        "note\u{200C}\u{200D}\u{0007}secret"
+    );
+    assert!(login.legacy_fields[0].secret);
+    let key = &parsed.ssh_keys[0];
+    assert_eq!(
+        key.private_key,
+        "-----BEGIN KEY-----\n\u{200C}\u{200D}\trow\n-----END KEY-----"
+    );
+    assert_eq!(
+        key.public_key,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\u{200D} comment"
+    );
 }
 
 #[test]
