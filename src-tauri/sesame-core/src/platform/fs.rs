@@ -6,27 +6,12 @@ use crate::VaultResult;
 
 #[derive(Debug)]
 pub struct ReplaceFailure {
-    replaced: bool,
     message: &'static str,
 }
 
 impl ReplaceFailure {
-    pub(crate) fn unchanged(message: &'static str) -> Self {
-        Self {
-            replaced: false,
-            message,
-        }
-    }
-
-    pub(crate) fn not_durable(message: &'static str) -> Self {
-        Self {
-            replaced: true,
-            message,
-        }
-    }
-
-    pub fn replaced(&self) -> bool {
-        self.replaced
+    pub(crate) fn new(message: &'static str) -> Self {
+        Self { message }
     }
 }
 
@@ -40,14 +25,6 @@ impl From<ReplaceFailure> for String {
     fn from(failure: ReplaceFailure) -> Self {
         failure.message.to_string()
     }
-}
-
-#[cfg(unix)]
-fn directory_sync_error_is_tolerated(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
-    )
 }
 
 #[cfg(windows)]
@@ -71,7 +48,7 @@ pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFail
         )
     };
     if result == 0 {
-        return Err(ReplaceFailure::unchanged(
+        return Err(ReplaceFailure::new(
             "Sesame could not complete the local vault save.",
         ));
     }
@@ -80,26 +57,20 @@ pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFail
 
 #[cfg(unix)]
 pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFailure> {
-    fs::rename(source, destination).map_err(|_| {
-        ReplaceFailure::unchanged("Sesame could not complete the local vault save.")
-    })?;
+    fs::rename(source, destination)
+        .map_err(|_| ReplaceFailure::new("Sesame could not complete the local vault save."))?;
     let parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    match fs::File::open(parent).and_then(|directory| directory.sync_all()) {
-        Ok(()) => Ok(()),
-        Err(error) if directory_sync_error_is_tolerated(&error) => Ok(()),
-        Err(_) => Err(ReplaceFailure::not_durable(
-            "Sesame could not sync the local vault folder.",
-        )),
-    }
+    let _ = fs::File::open(parent).and_then(|directory| directory.sync_all());
+    Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
 pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFailure> {
     fs::rename(source, destination)
-        .map_err(|_| ReplaceFailure::unchanged("Sesame could not complete the local vault save."))
+        .map_err(|_| ReplaceFailure::new("Sesame could not complete the local vault save."))
 }
 
 #[cfg(unix)]
@@ -335,22 +306,4 @@ fn overwrite_open_file(file: &mut fs::File, len: u64) -> VaultResult<()> {
             .map_err(|_| "Sesame could not sync an overwrite pass to disk.".to_string())?;
     }
     Ok(())
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::directory_sync_error_is_tolerated;
-
-    #[test]
-    fn unsupported_directory_sync_errors_are_tolerated() {
-        assert!(directory_sync_error_is_tolerated(&std::io::Error::from(
-            std::io::ErrorKind::InvalidInput
-        )));
-        assert!(directory_sync_error_is_tolerated(&std::io::Error::from(
-            std::io::ErrorKind::Unsupported
-        )));
-        assert!(!directory_sync_error_is_tolerated(&std::io::Error::from(
-            std::io::ErrorKind::PermissionDenied
-        )));
-    }
 }

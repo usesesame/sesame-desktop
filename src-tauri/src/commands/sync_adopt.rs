@@ -204,15 +204,13 @@ pub(super) fn adopt(
     if let Err(error) =
         crate::vault::storage::commit_payload_change_without_previous(vault, payload)
     {
-        if !error.replaced_not_durable() {
-            vault.kdf = previous.0;
-            vault.key_wrap = previous.1;
-            vault.recovery_kdf = previous.2;
-            vault.recovery_wrap = previous.3;
-            vault.pin_wrap = previous.4;
-            vault.hello_wrap = previous.5;
-            vault.replace_vault_key(previous.6);
-        }
+        vault.kdf = previous.0;
+        vault.key_wrap = previous.1;
+        vault.recovery_kdf = previous.2;
+        vault.recovery_wrap = previous.3;
+        vault.pin_wrap = previous.4;
+        vault.hello_wrap = previous.5;
+        vault.replace_vault_key(previous.6);
         return Err(error.into());
     }
     if let Some(old) = previous.5 {

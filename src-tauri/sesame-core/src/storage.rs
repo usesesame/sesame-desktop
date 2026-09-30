@@ -11,7 +11,7 @@ use crate::crypto::{
 };
 use crate::platform::{
     copy_private_file, create_private_dir, open_private_file, protect_for_device, replace_file,
-    unprotect_for_device, ReplaceFailure,
+    unprotect_for_device,
 };
 use crate::snapshot::duplicate_key;
 use crate::{
@@ -74,57 +74,7 @@ pub fn clear_pin_throttle_state_at(path: &Path) -> VaultResult<()> {
     }
 }
 
-#[derive(Debug)]
-pub enum SaveFailure {
-    Unchanged(String),
-    ReplacedNotDurable(String),
-}
-
-impl SaveFailure {
-    pub fn replaced_not_durable(&self) -> bool {
-        matches!(self, Self::ReplacedNotDurable(_))
-    }
-
-    fn message(&self) -> &str {
-        match self {
-            Self::Unchanged(message) | Self::ReplacedNotDurable(message) => message,
-        }
-    }
-}
-
-impl std::fmt::Display for SaveFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.message())
-    }
-}
-
-impl From<String> for SaveFailure {
-    fn from(message: String) -> Self {
-        Self::Unchanged(message)
-    }
-}
-
-impl From<&str> for SaveFailure {
-    fn from(message: &str) -> Self {
-        Self::Unchanged(message.to_string())
-    }
-}
-
-impl From<SaveFailure> for String {
-    fn from(failure: SaveFailure) -> Self {
-        failure.message().to_string()
-    }
-}
-
-impl From<ReplaceFailure> for SaveFailure {
-    fn from(failure: ReplaceFailure) -> Self {
-        if failure.replaced() {
-            Self::ReplacedNotDurable(failure.to_string())
-        } else {
-            Self::Unchanged(failure.to_string())
-        }
-    }
-}
+pub type SaveFailure = String;
 
 pub fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), SaveFailure> {
     write_vault_file_inner(path, file, true)
@@ -143,7 +93,7 @@ fn write_vault_file_inner(
     let bytes = serde_json::to_vec(file)
         .map_err(|_| "Sesame could not save the local vault.".to_string())?;
     if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
-        return Err(SaveFailure::Unchanged(VAULT_SIZE_LIMIT_MESSAGE.to_string()));
+        return Err(VAULT_SIZE_LIMIT_MESSAGE.to_string());
     }
     let parent = path
         .parent()
@@ -159,9 +109,7 @@ fn write_vault_file_inner(
     drop(tmp);
 
     let outcome: Result<(), SaveFailure> = if written.is_err() {
-        Err(SaveFailure::Unchanged(
-            "Sesame could not write the local vault.".to_string(),
-        ))
+        Err("Sesame could not write the local vault.".to_string())
     } else {
         (|| {
             if retain_previous && path.exists() {
@@ -274,10 +222,8 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
     let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
     let payload = session.open_payload()?;
     if let Err(error) = persist_payload(session, payload.clone(), false) {
-        if !error.replaced_not_durable() {
-            session.recovery_kdf = previous_kdf;
-            session.recovery_wrap = previous_wrap;
-        }
+        session.recovery_kdf = previous_kdf;
+        session.recovery_wrap = previous_wrap;
         return Err(error.into());
     }
     Ok(recovery_kit_for_display)
@@ -311,9 +257,7 @@ pub fn complete_recovery_setup_for_session(
 
     session.setup_complete = true;
     if let Err(error) = persist_session(session) {
-        if !error.replaced_not_durable() {
-            session.setup_complete = false;
-        }
+        session.setup_complete = false;
         return Err(error.into());
     }
     Ok(())
@@ -364,15 +308,13 @@ pub fn rotate_master_password_for_session(
     let previous_hello_wrap = session.hello_wrap.take();
 
     if let Err(error) = persist_session_without_previous(session) {
-        if !error.replaced_not_durable() {
-            session.replace_vault_key(previous_key);
-            session.kdf = previous_kdf;
-            session.key_wrap = previous_key_wrap;
-            session.recovery_kdf = previous_recovery_kdf;
-            session.recovery_wrap = previous_recovery_wrap;
-            session.pin_wrap = previous_pin_wrap;
-            session.hello_wrap = previous_hello_wrap;
-        }
+        session.replace_vault_key(previous_key);
+        session.kdf = previous_kdf;
+        session.key_wrap = previous_key_wrap;
+        session.recovery_kdf = previous_recovery_kdf;
+        session.recovery_wrap = previous_recovery_wrap;
+        session.pin_wrap = previous_pin_wrap;
+        session.hello_wrap = previous_hello_wrap;
         return Err(error.into());
     }
     if let Some(old) = previous_hello_wrap {
@@ -400,9 +342,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
         key_wrap,
     });
     if let Err(error) = persist_session(session) {
-        if !error.replaced_not_durable() {
-            session.pin_wrap = previous;
-        }
+        session.pin_wrap = previous;
         return Err(error.into());
     }
     Ok(())
@@ -411,9 +351,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.pin_wrap.take();
     if let Err(error) = persist_session(session) {
-        if !error.replaced_not_durable() {
-            session.pin_wrap = previous;
-        }
+        session.pin_wrap = previous;
         return Err(error.into());
     }
     Ok(())
@@ -423,9 +361,7 @@ pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
 pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> VaultResult<()> {
     let previous = session.hello_wrap.replace(wrap);
     if let Err(error) = persist_session(session) {
-        if !error.replaced_not_durable() {
-            session.hello_wrap = previous;
-        }
+        session.hello_wrap = previous;
         return Err(error.into());
     }
     if let Some(old) = previous {
@@ -438,9 +374,7 @@ pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> Va
 pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.hello_wrap.take();
     if let Err(error) = persist_session(session) {
-        if !error.replaced_not_durable() {
-            session.hello_wrap = previous;
-        }
+        session.hello_wrap = previous;
         return Err(error.into());
     }
     if let Some(old) = previous {
@@ -1087,17 +1021,6 @@ mod tests {
         assert_eq!(current.vault_name, "Fictional vault");
         assert_eq!(current.revision, 1);
         fs::remove_dir_all(directory).expect("removed test directory");
-    }
-
-    #[test]
-    fn a_replaced_but_unsynced_write_is_reported_as_replaced() {
-        let replaced = SaveFailure::from(ReplaceFailure::not_durable("fictional sync failure"));
-        assert!(replaced.replaced_not_durable());
-        assert_eq!(replaced.to_string(), "fictional sync failure");
-
-        let unchanged = SaveFailure::from(ReplaceFailure::unchanged("fictional rename failure"));
-        assert!(!unchanged.replaced_not_durable());
-        assert_eq!(unchanged.to_string(), "fictional rename failure");
     }
 
     #[test]
