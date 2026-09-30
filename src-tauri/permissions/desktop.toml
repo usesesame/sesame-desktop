@@ -237,4 +237,4 @@ commands.allow = [
 [[permission]]
 identifier = "desktop-e2e"
 description = "Compile-time-gated desktop test bridge for the main window."
-commands.allow = ["desktop_e2e_config"]
+commands.allow = ["desktop_e2e_config", "wdio_issue_file_choice"]

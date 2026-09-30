@@ -27,6 +27,10 @@ function parseArguments(argv) {
   return options
 }
 
+function refused(result, message) {
+  return { ok: result.ok === false, value: result.value, error: result.ok === false ? undefined : message }
+}
+
 async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   const steps = []
   const password = manifestEntry.secrets.masterPassword
@@ -41,7 +45,20 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   }
 
   const beforeDigest = sha256(await readFile(fixture))
-  const restored = recordStep(steps, 'restore_backup', await bridge.call('restore_backup', { request: { source: fixture, secret: password } }))
+  const issued = recordStep(steps, 'restore_backup.token_issued', await bridge.call('wdio_issue_file_choice', { path: fixture }))
+  const token = issued.value?.token
+  const restored = recordStep(steps, 'restore_backup', await bridge.call('restore_backup', { request: { token, secret: password } }))
+  recordStep(steps, 'restore_backup.replay_refused', refused(
+    await bridge.call('restore_backup', { request: { token, secret: password } }),
+    'The spent restore token was accepted again.',
+  ))
+  const retryIssued = recordStep(steps, 'restore_backup.retry_token_issued', await bridge.call('wdio_issue_file_choice', { path: fixture }))
+  const retryToken = retryIssued.value?.token
+  recordStep(steps, 'restore_backup.wrong_password_refused', refused(
+    await bridge.call('restore_backup', { request: { token: retryToken, secret: 'fictional wrong master password' } }),
+    'A wrong master password restored the vault.',
+  ))
+  recordStep(steps, 'restore_backup.after_failure', await bridge.call('restore_backup', { request: { token: retryToken, secret: password } }))
   const safetyName = restored.value?.safetyBackupName
   recordStep(steps, 'safety_backup.exists', {
     ok: Boolean(safetyName) && (await stat(path.join(root, 'backups', safetyName ?? '')).catch(() => null))?.isFile() === true,

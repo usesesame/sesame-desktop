@@ -348,38 +348,60 @@ pub fn restore_backup(
     selection: State<'_, FileSelectionState>,
 ) -> VaultResult<RestoreBackupResult> {
     let destination = vault_path(&app)?;
-    let source = resolve_path(
-        &selection,
-        request.token.as_deref(),
-        request.source.as_deref(),
-        FilePurpose::BackupRead,
-        false,
-    )?;
+    let claim = request
+        .token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+        .map(|token| selection.claim(token, FilePurpose::BackupRead))
+        .transpose()?;
+    let source = match claim.as_ref() {
+        Some(claim) => claim.path().to_path_buf(),
+        None => resolve_path(
+            &selection,
+            None,
+            request.source.as_deref(),
+            FilePurpose::BackupRead,
+            false,
+        )?,
+    };
     let mut secret = request.secret;
 
-    // Authenticate before invalidating anything: a failure must not lock the user out.
-    let prepared = prepare_backup_for_restore(&source, &destination, &secret);
-    secret.zeroize();
-    let prepared = prepared?;
+    let restored = (|| -> VaultResult<RestoreBackupResult> {
+        // Authenticate before invalidating anything: a failure must not lock the user out.
+        let prepared = prepare_backup_for_restore(&source, &destination, &secret);
+        secret.zeroize();
+        let prepared = prepared?;
 
-    if let Some(token) = request.token.as_deref().filter(|token| !token.is_empty()) {
-        selection.take(token, FilePurpose::BackupRead)?;
-    }
+        let installed = state
+            .apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
+        state.cache_pin_unlock(installed.pin_unlock_available);
+        state.cache_hello_unlock(installed.hello_unlock_available);
+        if installed.pin_unlock_available {
+            let _ = establish_pin_throttle_state(&app, &state);
+        } else {
+            discard_pin_throttle_state(&app, &state);
+        }
+        Ok(RestoreBackupResult {
+            safety_backup_name: installed.safety_backup_name,
+            pin_unlock_available: installed.pin_unlock_available,
+            hello_unlock_available: installed.hello_unlock_available,
+        })
+    })();
 
-    let installed =
-        state.apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
-    state.cache_pin_unlock(installed.pin_unlock_available);
-    state.cache_hello_unlock(installed.hello_unlock_available);
-    if installed.pin_unlock_available {
-        let _ = establish_pin_throttle_state(&app, &state);
-    } else {
-        discard_pin_throttle_state(&app, &state);
+    match restored {
+        Ok(restored) => {
+            if let Some(claim) = claim {
+                selection.consume(claim);
+            }
+            Ok(restored)
+        }
+        Err(error) => {
+            if let Some(claim) = claim {
+                selection.release(claim);
+            }
+            Err(error)
+        }
     }
-    Ok(RestoreBackupResult {
-        safety_backup_name: installed.safety_backup_name,
-        pin_unlock_available: installed.pin_unlock_available,
-        hello_unlock_available: installed.hello_unlock_available,
-    })
 }
 
 #[tauri::command]

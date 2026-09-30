@@ -205,6 +205,7 @@ macro_rules! sesame_wdio_handler {
     () => {
         sesame_invoke_handler![
             desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
             commands::sync::sync_status,
             commands::sync::sync_enroll_device,
             commands::sync::sync_this_device_fingerprint,
@@ -231,7 +232,10 @@ macro_rules! sesame_wdio_handler {
 #[cfg(all(feature = "wdio", not(feature = "sync-preview")))]
 macro_rules! sesame_wdio_handler {
     () => {
-        sesame_invoke_handler![desktop_e2e::desktop_e2e_config]
+        sesame_invoke_handler![
+            desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
+        ]
     };
 }
 

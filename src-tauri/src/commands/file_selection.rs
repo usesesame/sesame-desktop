@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,18 @@ struct PendingChoice {
     purpose: FilePurpose,
     path: PathBuf,
     expires_at: Instant,
+    claimed: bool,
+}
+
+pub(crate) struct FileClaim {
+    token: String,
+    path: PathBuf,
+}
+
+impl FileClaim {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl FileSelectionState {
@@ -54,16 +66,52 @@ impl FileSelectionState {
             .lock()
             .map_err(|_| CHOICE_LOCK_ERROR.to_string())?;
         let now = Instant::now();
-        choices.retain(|_, choice| choice.expires_at > now);
+        choices.retain(|_, choice| choice.claimed || choice.expires_at > now);
         choices.insert(
             token.clone(),
             PendingChoice {
                 purpose,
                 path,
                 expires_at: now + FILE_CHOICE_TTL,
+                claimed: false,
             },
         );
         Ok(token)
+    }
+
+    pub(crate) fn claim(&self, token: &str, purpose: FilePurpose) -> VaultResult<FileClaim> {
+        let mut choices = self
+            .choices
+            .lock()
+            .map_err(|_| CHOICE_LOCK_ERROR.to_string())?;
+        let now = Instant::now();
+        choices.retain(|_, choice| choice.claimed || choice.expires_at > now);
+        let choice = choices
+            .get_mut(token)
+            .ok_or_else(|| STALE_CHOICE.to_string())?;
+        if choice.purpose != purpose || choice.claimed || choice.expires_at <= now {
+            return Err(STALE_CHOICE.into());
+        }
+        choice.claimed = true;
+        Ok(FileClaim {
+            token: token.to_string(),
+            path: choice.path.clone(),
+        })
+    }
+
+    pub(crate) fn release(&self, claim: FileClaim) {
+        if let Ok(mut choices) = self.choices.lock() {
+            if let Some(choice) = choices.get_mut(&claim.token) {
+                choice.claimed = false;
+                choice.expires_at = Instant::now() + FILE_CHOICE_TTL;
+            }
+        }
+    }
+
+    pub(crate) fn consume(&self, claim: FileClaim) {
+        if let Ok(mut choices) = self.choices.lock() {
+            choices.remove(&claim.token);
+        }
     }
 
     pub(crate) fn take(&self, token: &str, purpose: FilePurpose) -> VaultResult<PathBuf> {
@@ -71,11 +119,11 @@ impl FileSelectionState {
             .choices
             .lock()
             .map_err(|_| CHOICE_LOCK_ERROR.to_string())?;
-        {
-            let choice = choices.get(token).ok_or_else(|| STALE_CHOICE.to_string())?;
-            if choice.purpose != purpose || choice.expires_at <= Instant::now() {
-                return Err(STALE_CHOICE.into());
-            }
+        let now = Instant::now();
+        choices.retain(|_, choice| choice.claimed || choice.expires_at > now);
+        let choice = choices.get(token).ok_or_else(|| STALE_CHOICE.to_string())?;
+        if choice.purpose != purpose || choice.claimed || choice.expires_at <= now {
+            return Err(STALE_CHOICE.into());
         }
         choices
             .remove(token)
@@ -89,9 +137,9 @@ impl FileSelectionState {
             .lock()
             .map_err(|_| CHOICE_LOCK_ERROR.to_string())?;
         let now = Instant::now();
-        choices.retain(|_, choice| choice.expires_at > now);
+        choices.retain(|_, choice| choice.claimed || choice.expires_at > now);
         let choice = choices.get(token).ok_or_else(|| STALE_CHOICE.to_string())?;
-        if choice.purpose != purpose {
+        if choice.purpose != purpose || choice.claimed {
             return Err(STALE_CHOICE.into());
         }
         Ok(choice.path.clone())
@@ -259,6 +307,16 @@ pub async fn choose_backup_for_restore(
     )
 }
 
+#[cfg(feature = "wdio")]
+#[tauri::command]
+pub fn wdio_issue_file_choice(
+    path: String,
+    state: State<'_, FileSelectionState>,
+) -> VaultResult<ChosenFile> {
+    chosen_file(&state, FilePurpose::BackupRead, Some(PathBuf::from(path)))?
+        .ok_or_else(|| STALE_CHOICE.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +386,112 @@ mod tests {
             ),
             Err(STALE_CHOICE.to_string())
         );
+    }
+
+    #[test]
+    fn an_expired_token_is_refused_before_it_is_claimed() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        state
+            .choices
+            .lock()
+            .expect("choice lock")
+            .get_mut(&token)
+            .expect("pending choice")
+            .expires_at = Instant::now() - Duration::from_secs(1);
+        assert_eq!(
+            state.claim(&token, FilePurpose::BackupRead).err(),
+            Some(STALE_CHOICE.to_string())
+        );
+    }
+
+    #[test]
+    fn a_failed_restore_releases_the_token_for_a_retry() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        let claim = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("first claim");
+        state
+            .choices
+            .lock()
+            .expect("choice lock")
+            .get_mut(&token)
+            .expect("pending choice")
+            .expires_at = Instant::now() - Duration::from_secs(1);
+        state.release(claim);
+        let retry = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("retry claim");
+        assert_eq!(retry.path(), Path::new("fictional-backup.sesame"));
+    }
+
+    #[test]
+    fn a_claimed_token_is_not_available_to_another_caller() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        let _claim = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("first claim");
+        assert_eq!(
+            state.claim(&token, FilePurpose::BackupRead).err(),
+            Some(STALE_CHOICE.to_string())
+        );
+        assert_eq!(
+            resolve_path(&state, Some(&token), None, FilePurpose::BackupRead, true),
+            Err(STALE_CHOICE.to_string())
+        );
+        assert_eq!(
+            resolve_path(&state, Some(&token), None, FilePurpose::BackupRead, false),
+            Err(STALE_CHOICE.to_string())
+        );
+    }
+
+    #[test]
+    fn an_in_flight_claim_outlasts_the_choice_expiry() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        let claim = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("first claim");
+        state
+            .choices
+            .lock()
+            .expect("choice lock")
+            .get_mut(&token)
+            .expect("pending choice")
+            .expires_at = Instant::now() - Duration::from_secs(1);
+        state.consume(claim);
+        assert_eq!(
+            state.claim(&token, FilePurpose::BackupRead).err(),
+            Some(STALE_CHOICE.to_string())
+        );
+    }
+
+    #[test]
+    fn a_successful_restore_spends_the_token() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        let claim = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("first claim");
+        state.consume(claim);
+        assert_eq!(
+            state.claim(&token, FilePurpose::BackupRead).err(),
+            Some(STALE_CHOICE.to_string())
+        );
+        assert_eq!(
+            resolve_path(&state, Some(&token), None, FilePurpose::BackupRead, false),
+            Err(STALE_CHOICE.to_string())
+        );
+    }
+
+    #[test]
+    fn a_file_claim_is_bound_to_its_purpose() {
+        let (state, token) = state_with(FilePurpose::BackupRead, "fictional-backup.sesame");
+        assert_eq!(
+            state.claim(&token, FilePurpose::BackupExport).err(),
+            Some(STALE_CHOICE.to_string())
+        );
+        let claim = state
+            .claim(&token, FilePurpose::BackupRead)
+            .expect("right purpose");
+        state.release(claim);
     }
 
     #[test]
