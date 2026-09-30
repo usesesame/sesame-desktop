@@ -402,7 +402,7 @@ jobs:
         run: node tools/audit-public-release-evidence.mjs public-release-evidence
 
   candidate-receipt:
-    needs: verify-fresh
+    needs: [sign-and-attest, verify-fresh]
     runs-on: windows-latest
     environment: release-build
     permissions:

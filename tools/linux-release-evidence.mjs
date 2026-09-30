@@ -96,6 +96,25 @@ export function assertCandidateArtifactsBindAssets(candidate, assets, { reposito
   }
 }
 
+export async function validateLinuxHandoffPackageBytes(directory, manifestFilename) {
+  const root = path.resolve(directory)
+  assertSafeReleaseFilename(manifestFilename, 'Linux manifest filename')
+  const manifest = validateLinuxReleaseManifest(JSON.parse(await readFile(path.join(root, manifestFilename), 'utf8')))
+  for (const artifact of manifest.artifacts) {
+    const record = await describeFile(path.join(root, artifact.filename))
+    if (record.sha256 !== artifact.sha256 || record.bytes !== artifact.bytes) {
+      throw new Error(`The Linux ${artifact.format} package does not match the frozen release manifest.`)
+    }
+  }
+  for (const [label, file] of Object.entries({ sbom: manifest.sbom, shipped: manifest.linuxLifecycle.shipped, vault: manifest.linuxLifecycle.vault })) {
+    const record = await describeFile(path.join(root, file.filename))
+    if (record.sha256 !== file.sha256 || record.bytes !== file.bytes) {
+      throw new Error(`The Linux ${label} record does not match the frozen release manifest.`)
+    }
+  }
+  return manifest
+}
+
 export async function validateLinuxEvidenceDirectory(directory, manifestFilename) {
   const root = path.resolve(directory)
   assertSafeReleaseFilename(manifestFilename, 'Linux manifest filename')

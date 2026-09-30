@@ -80,15 +80,15 @@ test('a workflow that writes says so at the job that writes', () => {
       `${workflow} should default to exactly contents: read at the top and widen per job`,
     )
   }
-  for (const [workflow, signingJob] of [
-    ['release-early-access.yml', 'sign-and-attest'],
-    ['release-linux-early-access.yml', 'build-and-test'],
+  for (const [workflow, signingJob, publishJob] of [
+    ['release-early-access.yml', 'sign-and-attest', 'publish-candidate'],
+    ['release-linux-early-access.yml', 'sign-and-attest', 'publish'],
   ]) {
     const body = read('.github', 'workflows', workflow)
     const job = jobBlock(body, signingJob)
     assert.match(job, /^\s+id-token:\s*write\s*$/m, `${workflow} signs keylessly in ${signingJob} and needs an OIDC token there`)
     assert.match(job, /^\s+environment:\s*release-build\s*$/m, `${workflow} should build ${signingJob} behind its protected environment`)
-    const publishBlock = jobBlock(body, signingJob === 'sign-and-attest' ? 'publish-candidate' : 'publish')
+    const publishBlock = jobBlock(body, publishJob)
     assert.match(
       publishBlock,
       /^\s+environment:\s*release-publish\s*$/m,
@@ -114,6 +114,17 @@ test('the Windows release build resolves the public keys without a signing key o
   assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the signing job must run behind its protected environment')
 })
 
+test('the Linux release build resolves the capability key without a signing key or OIDC identity', () => {
+  const body = read('.github', 'workflows', 'release-linux-early-access.yml')
+  const build = jobBlock(body, 'build-and-test')
+  assert.doesNotMatch(build, /^\s+environment:\s*release-build\s*$/m, 'the Linux release build must not run behind the signing environment')
+  assert.doesNotMatch(build, /id-token/, 'the Linux release build must not be able to mint an OIDC token')
+  assert.doesNotMatch(build, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate signing key must not be available to the Linux release build')
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+id-token:\s*write\s*$/m, 'the Linux signing job needs an OIDC token for keyless Sigstore')
+  assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the Linux signing job must run behind its protected environment')
+})
+
 test('release build outputs reach the signing jobs as data, never as script text', () => {
   const body = read('.github', 'workflows', 'release-early-access.yml')
   for (const script of runScriptBlocks(body)) {
@@ -128,7 +139,7 @@ test('release build outputs reach the signing jobs as data, never as script text
   assert.doesNotMatch(sign, /verify-updater-artifact/, 'the signing job must not run a verifier compiled by the build job')
   assert.doesNotMatch(sign, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate signing key must stay out of the updater signing job')
   const receipt = jobBlock(body, 'candidate-receipt')
-  assert.match(receipt, /^\s+needs:\s*verify-fresh\s*$/m, 'the candidate receipt must run after independent verification')
+  assert.match(receipt, /^\s+needs:\s*\[sign-and-attest, verify-fresh\]\s*$/m, 'the candidate receipt must run after independent verification and must be able to read the manifest from the signing job')
   assert.match(receipt, /^\s+environment:\s*release-build\s*$/m, 'the candidate receipt runs behind the protected release environment')
   assert.match(receipt, /^\s+permissions:\s*\n\s+contents:\s*read\s*$/m, 'the candidate receipt only reads repository contents')
   assert.doesNotMatch(receipt, /id-token/, 'the candidate receipt must not mint an OIDC token')
