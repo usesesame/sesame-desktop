@@ -317,7 +317,9 @@ test('the show control asks the vault again after the password is hidden', async
 
   await fireEvent.click(screen.getByRole('button', { name: 'Hide password' }))
   await vi.waitFor(() => expect(controller.state.value().passwordVisible).toBe(false))
+  expect(controller.state.value().revealedPassword).toBe('')
   await rendered.rerender({ passwordVisible: false, revealedPassword: controller.state.value().revealedPassword })
+  expect(screen.queryByText('fictional-alpha-secret')).toBeNull()
 
   await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
   await vi.waitFor(() => expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2))

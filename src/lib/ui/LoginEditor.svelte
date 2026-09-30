@@ -95,11 +95,17 @@
   let presenceError = ''
 
   async function togglePasswordVisibility() {
-    if (passwordDisplay) {
-      passwordVisible = !passwordVisible
+    if (passwordVisible) {
+      passwordDisplay = ''
+      passwordVisible = false
       return
     }
-    if (!loginDraft.id || passwordRevealWorking) return
+    if (!loginDraft.id) {
+      passwordDisplay = loginDraft.password
+      passwordVisible = true
+      return
+    }
+    if (passwordRevealWorking) return
     passwordRevealWorking = true
     revealError = ''
     try {
@@ -191,7 +197,7 @@
     <label>Password
       <span class="password-field">
         <input name="login-password" value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
-        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={(!passwordDisplay && !loginDraft.id) || passwordRevealWorking} on:click={togglePasswordVisibility}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
+        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={(!passwordDisplay && !loginDraft.password && !loginDraft.id) || passwordRevealWorking} on:click={togglePasswordVisibility}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
         <button type="button" class="icon-button" aria-label="Generate a password" title="Generate a password" on:click={generatePassword}><Icon name="refresh" size={15} /></button>
         <button type="button" class="icon-button" aria-label="Password options" title="Password options" aria-expanded={generatorOpen} on:click={() => (generatorOpen = !generatorOpen)}><Icon name="settings" size={15} /></button>
       </span>

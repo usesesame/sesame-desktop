@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LoginCard, VaultSnapshot } from '../types'
 import { createAppStores } from '../stores/app-stores'
 import { createFeedbackController } from './feedback-controller'
@@ -107,6 +107,10 @@ beforeEach(() => {
   vaultApi.copyToClipboard.mockResolvedValue(undefined)
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('copying a login password', () => {
   it('copies without revealing or caching the password', async () => {
     const { controller } = harness()
@@ -211,13 +215,25 @@ describe('revealing a login password', () => {
     expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-secret' })
 
     await controller.togglePasswordReveal()
-    expect(controller.state.value().passwordVisible).toBe(false)
+    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '' })
 
     await controller.togglePasswordReveal()
 
     expect(vaultApi.revealLoginSecret).toHaveBeenCalledTimes(2)
     expect(vaultApi.revealLoginSecret).toHaveBeenLastCalledWith('login-a')
     expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-rotated' })
+  })
+
+  it('clears the shown password when the reveal times out', async () => {
+    vi.useFakeTimers()
+    const { controller } = harness()
+
+    await controller.togglePasswordReveal()
+    expect(controller.state.value()).toMatchObject({ passwordVisible: true, revealedPassword: 'fictional-alpha-secret' })
+
+    vi.advanceTimersByTime(30_000)
+
+    expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '' })
   })
 
   it('asks for the master password again when the presence window has closed', async () => {

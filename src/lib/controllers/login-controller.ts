@@ -97,7 +97,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     clearPasswordHideTimer()
     passwordHideTimer = setTimeout(() => {
       passwordHideTimer = null
-      state.patch({ passwordVisible: false })
+      state.patch({ passwordVisible: false, revealedPassword: '' })
     }, PASSWORD_REVEAL_TIMEOUT_MS)
   }
 
@@ -375,7 +375,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       if (!card?.hasPassword) return
       if (state.value().passwordVisible) {
         clearPasswordHideTimer()
-        state.patch({ passwordVisible: false })
+        state.patch({ passwordVisible: false, revealedPassword: '' })
         return
       }
       const secret = await ensureRevealed(card.id)
