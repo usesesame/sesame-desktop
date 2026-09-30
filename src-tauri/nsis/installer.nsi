@@ -410,10 +410,48 @@ Function PageLeaveReinstall
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-      ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
-      ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
-      StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
-      ExecWait '$R1' $0
+
+      StrCpy $R2 0
+      StrLen $R0 "$PROGRAMFILES64"
+      IntOp $R0 $R0 + 1
+      StrCpy $R3 $4 $R0
+      ${If} $R3 == "$PROGRAMFILES64\"
+        StrCpy $R2 1
+      ${EndIf}
+      StrLen $R0 "$PROGRAMFILES"
+      IntOp $R0 $R0 + 1
+      StrCpy $R3 $4 $R0
+      ${If} $R3 == "$PROGRAMFILES\"
+        StrCpy $R2 1
+      ${EndIf}
+
+      ${If} $R2 = 1
+        ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
+        ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
+        StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
+        ClearErrors
+        ExecWait '$R1' $0
+
+        ${If} $0 = 0
+        ${AndIfNot} ${Errors}
+        ${AndIf} $4 != $INSTDIR
+          Delete "$4\uninstall.exe"
+          RMDir "$4"
+          ClearErrors
+        ${EndIf}
+      ${Else}
+        StrCpy $0 0
+        ClearErrors
+        ${If} $4 != ""
+        ${AndIf} $4 != $INSTDIR
+          ${If} ${FileExists} "$4\${MAINBINARYNAME}.exe"
+            RMDir /r "$4"
+          ${Else}
+            Delete "$4\uninstall.exe"
+          ${EndIf}
+        ${EndIf}
+        ClearErrors
+      ${EndIf}
     ${EndIf}
 
     BringToFront

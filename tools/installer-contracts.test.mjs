@@ -46,7 +46,12 @@ test('the installer owns its own template and never offers to delete app data', 
   assert.doesNotMatch(code, /__NSD_CheckBox/)
   assert.doesNotMatch(code, /BM_GETCHECK/)
 
-  assert.doesNotMatch(code, /rmdir\s+\/r(?![a-z])/i)
+  const recursiveRemovals = [...code.matchAll(/rmdir\s+\/r(?![a-z])\s+("[^"]*"|\S+)/gi)].map((match) => match[1])
+  assert.deepEqual(
+    recursiveRemovals,
+    ['"$4"'],
+    'the only recursive directory removal must be the recorded old install directory',
+  )
 
   assert.doesNotMatch(code, /\$APPDATA\\\$\{BUNDLEID\}/)
   assert.doesNotMatch(code, /\$LOCALAPPDATA\\\$\{BUNDLEID\}/)
@@ -78,6 +83,54 @@ test('the installer pins the install directory instead of offering a choice', ()
 
   const assignments = [...code.matchAll(/StrCpy\s+\$INSTDIR\s+("[^"]*"|\S+)/g)].map((match) => match[1])
   assert.deepEqual(assignments, ['"$PROGRAMFILES64\\${PRODUCTNAME}"', '"$LOCALAPPDATA\\${PRODUCTNAME}"'])
+})
+
+test('the installer only runs a pre-existing uninstaller from an administrator-owned location', () => {
+  const installer = read('src-tauri', 'nsis', 'installer.nsi')
+  const code = installer
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+
+  const reinstall = code.match(/reinst_uninstall:([\s\S]*?)reinst_done:/)
+  assert.ok(reinstall, 'reinst_uninstall was not found, so this contract read nothing')
+  const block = reinstall[1]
+
+  assert.match(
+    block,
+    /ReadRegStr \$4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/,
+    'the reinstall flow no longer reads the recorded old install directory',
+  )
+
+  const prefixCheck = (name) =>
+    String.raw`StrLen \$R0 "\$${name}"\s*\n\s*IntOp \$R0 \$R0 \+ 1\s*\n\s*StrCpy \$R3 \$4 \$R0\s*\n\s*\$\{If\} \$R3 == "\$${name}\\"`
+  const root64 = block.search(new RegExp(prefixCheck('PROGRAMFILES64')))
+  const root32 = block.search(new RegExp(prefixCheck('PROGRAMFILES')))
+  assert.ok(root64 >= 0, 'the trust check no longer matches $PROGRAMFILES64 with its trailing backslash')
+  assert.ok(root32 >= 0, 'the trust check no longer matches $PROGRAMFILES with its trailing backslash')
+
+  const gate = block.search(/\$\{If\} \$R2 = 1/)
+  assert.ok(gate >= 0, 'the recorded uninstaller launch is not gated on a trust result')
+  assert.ok(root64 < gate && root32 < gate, 'the launch is gated before both trust roots are checked')
+
+  const branches = block.match(/\$\{If\} \$R2 = 1\s*\n([\s\S]*?)\n {6}\$\{Else\}\s*\n([\s\S]*?)\n {6}\$\{EndIf\}/)
+  assert.ok(branches, 'the trust result has no trusted and untrusted branches')
+  const [, trusted, untrusted] = branches
+
+  assert.match(trusted, /ExecWait '\$R1' \$0/, 'the trusted branch no longer runs the recorded uninstaller')
+  assert.doesNotMatch(untrusted, /Exec|RunAsUser/i, 'the untrusted branch must not execute the recorded uninstaller')
+
+  assert.match(
+    trusted,
+    /\$\{If\} \$0 = 0[\s\S]*?\$\{AndIf\} \$4 != \$INSTDIR[\s\S]*?Delete "\$4\\uninstall\.exe"[\s\S]*?RMDir "\$4"/,
+    'the trusted branch no longer removes the leftover old uninstaller',
+  )
+
+  assert.match(
+    untrusted,
+    /\$\{If\} \$4 != ""\s*\n\s*\$\{AndIf\} \$4 != \$INSTDIR\s*\n\s*\$\{If\} \$\{FileExists\} "\$4\\\$\{MAINBINARYNAME\}\.exe"\s*\n\s*RMDir \/r "\$4"\s*\n\s*\$\{Else\}\s*\n\s*Delete "\$4\\uninstall\.exe"/,
+    'the untrusted cleanup is not bound to the old executable existing and to paths other than $INSTDIR',
+  )
 })
 
 test('Windows executables use a safe DLL search order and install per-machine', () => {
