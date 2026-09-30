@@ -313,15 +313,20 @@ fn clipboard_access(_max_bytes: usize) -> ClipboardAccess {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
 
     fn armed_digest(state: &ClipboardGuard) -> Option<[u8; 32]> {
         lock_state(state).digest
     }
 
+    type ReadHook = Box<dyn Fn() + Send + Sync>;
+
     struct FakeClipboard {
         text: Mutex<Option<String>>,
         writable: bool,
         busy_reads: AtomicUsize,
+        on_read: Mutex<Option<ReadHook>>,
+        read_wait: Mutex<Option<mpsc::Receiver<()>>>,
     }
 
     impl FakeClipboard {
@@ -330,6 +335,8 @@ mod tests {
                 text: Mutex::new(Some(value.to_string())),
                 writable: true,
                 busy_reads: AtomicUsize::new(0),
+                on_read: Mutex::new(None),
+                read_wait: Mutex::new(None),
             }
         }
 
@@ -338,6 +345,8 @@ mod tests {
                 text: Mutex::new(Some(value.to_string())),
                 writable: false,
                 busy_reads: AtomicUsize::new(0),
+                on_read: Mutex::new(None),
+                read_wait: Mutex::new(None),
             }
         }
 
@@ -346,6 +355,8 @@ mod tests {
                 text: Mutex::new(Some(value.to_string())),
                 writable: true,
                 busy_reads: AtomicUsize::new(reads),
+                on_read: Mutex::new(None),
+                read_wait: Mutex::new(None),
             }
         }
 
@@ -363,7 +374,24 @@ mod tests {
 
     impl ClipboardBackend for FakeClipboard {
         fn read(&self, _state: &ClipboardGuard) -> Option<String> {
-            self.text()
+            let snapshot = self.text();
+            let hook = self
+                .on_read
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(hook) = hook {
+                hook();
+            }
+            let wait = self
+                .read_wait
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(wait) = wait {
+                let _ = wait.recv_timeout(Duration::from_secs(1));
+            }
+            snapshot
         }
 
         fn write(&self, _state: &ClipboardGuard, value: &str) -> VaultResult<()> {
@@ -494,6 +522,76 @@ mod tests {
 
         assert_eq!(
             clear_armed_text(&guard, Some(second), &clipboard).unwrap(),
+            ClearOutcome::Cleared
+        );
+        assert_eq!(clipboard.text().as_deref(), Some(""));
+        assert_eq!(armed_digest(&guard), None);
+    }
+
+    #[test]
+    fn a_concurrent_arm_survives_an_in_flight_clear() {
+        let guard = Arc::new(armed("fictional-older-secret", 4));
+        let clipboard = Arc::new(FakeClipboard::holding("fictional-older-secret"));
+        let newer_epoch = Arc::new(Mutex::new(None));
+        let arm_handle = Arc::new(Mutex::new(None));
+        let (arm_done_tx, arm_done_rx) = mpsc::channel();
+
+        {
+            let hook_clipboard = Arc::clone(&clipboard);
+            let hook_guard = Arc::clone(&guard);
+            let hook_epoch = Arc::clone(&newer_epoch);
+            let hook_handle = Arc::clone(&arm_handle);
+            *clipboard
+                .on_read
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(move || {
+                let arm_guard = Arc::clone(&hook_guard);
+                let arm_clipboard = Arc::clone(&hook_clipboard);
+                let arm_epoch = Arc::clone(&hook_epoch);
+                let sender = arm_done_tx.clone();
+                let handle = std::thread::spawn(move || {
+                    let epoch =
+                        arm_secret(&arm_guard, &*arm_clipboard, "fictional-newer-secret").unwrap();
+                    *arm_epoch
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(epoch);
+                    let _ = sender.send(());
+                });
+                *hook_handle
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
+            }));
+        }
+        *clipboard
+            .read_wait
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(arm_done_rx);
+
+        let clear_guard = Arc::clone(&guard);
+        let clear_clipboard = Arc::clone(&clipboard);
+        let clear_handle = std::thread::spawn(move || {
+            clear_armed_text(&clear_guard, Some(4), &*clear_clipboard).unwrap()
+        });
+
+        assert_eq!(clear_handle.join().unwrap(), ClearOutcome::Cleared);
+        arm_handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
+
+        let newer = newer_epoch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap();
+        assert_eq!(clipboard.text().as_deref(), Some("fictional-newer-secret"));
+        assert_eq!(armed_digest(&guard), Some(digest("fictional-newer-secret")));
+        assert_eq!(lock_state(&guard).epoch, newer);
+
+        assert_eq!(
+            clear_armed_text(&guard, Some(newer), &*clipboard).unwrap(),
             ClearOutcome::Cleared
         );
         assert_eq!(clipboard.text().as_deref(), Some(""));
