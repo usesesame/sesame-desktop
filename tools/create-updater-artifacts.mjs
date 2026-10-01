@@ -5,143 +5,172 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3 } from './release-set.mjs'
-
-const [artifactPath, signaturePath, sigstorePath, authenticodePath] = process.argv.slice(2)
-if (!artifactPath || !signaturePath || !sigstorePath) {
-  throw new Error('Usage: node tools/create-updater-artifacts.mjs <artifact> <tauri-signature> <sigstore-evidence.json> [authenticode-evidence.json]')
-}
-
-const artifactObjectKey = process.env.SESAME_RELEASE_ARTIFACT_OBJECT_KEY
-const signingKeyID = process.env.SESAME_UPDATER_SIGNING_KEY_ID
-const candidateSigningKeyID = process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID
-const candidateSigningKey = process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY
-const updaterPublicKey = process.env.SESAME_UPDATER_PUBLIC_KEY
-const supportedWindows = process.env.SESAME_SUPPORTED_WINDOWS
-const releaseNotesURL = process.env.SESAME_RELEASE_NOTES_URL
-const publicArtifactURL = process.env.SESAME_PUBLIC_UPDATE_ARTIFACT_URL
-const verifyBin = process.env.SESAME_UPDATER_VERIFY_BIN?.trim()
-const channel = process.env.SESAME_RELEASE_CHANNEL ?? 'beta'
-const architecture = process.env.SESAME_RELEASE_ARCHITECTURE
-const validHTTPSURL = (value) => {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname !== '' && url.username === '' && url.password === '' && url.hash === ''
-  } catch {
-    return false
-  }
-}
-const validObjectKey = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$/.test(value) && !value.includes('//') && !value.split('/').some((part) => part === '.' || part === '..')
-if (!validObjectKey(artifactObjectKey)) {
-  throw new Error('SESAME_RELEASE_ARTIFACT_OBJECT_KEY must be an opaque private-storage object key, not a URL.')
-}
-if (!signingKeyID || signingKeyID.length > 120) {
-  throw new Error('SESAME_UPDATER_SIGNING_KEY_ID is required.')
-}
-if (!candidateSigningKeyID || !candidateSigningKey || !updaterPublicKey || !supportedWindows || !validHTTPSURL(releaseNotesURL)) {
-  throw new Error('The updater public key, candidate signing key and ID, supported Windows versions, and an HTTPS release-notes URL are required.')
-}
-if (architecture !== 'x86_64' && architecture !== 'aarch64') {
-  throw new Error('SESAME_RELEASE_ARCHITECTURE must be x86_64 or aarch64 and must describe the built artifact, not the CI runner.')
-}
-if (!verifyBin) {
-  throw new Error('SESAME_UPDATER_VERIFY_BIN must point at the verify-updater-artifact executable built from this commit.')
-}
+import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const run = promisify(execFile)
-const packageJSON = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8'))
-const [artifact, signature, sigstore, authenticode] = await Promise.all([
-  readFile(artifactPath),
-  readFile(signaturePath, 'utf8'),
-  readFile(sigstorePath, 'utf8').then(JSON.parse),
-  authenticodePath ? readFile(authenticodePath, 'utf8').then(JSON.parse) : Promise.resolve(null),
-])
-const updaterSignature = signature.trim()
-if (updaterSignature.length < 64) throw new Error('The Tauri updater signature is missing or malformed.')
-const verifierEnvironment = {
-  SESAME_UPDATER_PUBLIC_KEY: updaterPublicKey,
-  ...(process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-}
-await run(path.resolve(verifyBin), [artifactPath, signaturePath], { env: verifierEnvironment })
-if (authenticode !== null && (typeof authenticode !== 'object' || Array.isArray(authenticode))) {
-  throw new Error('Authenticode evidence must be a JSON object produced by the signing job.')
-}
 
-const authenticodeVerified = authenticode?.verified === true
-const authenticodeSubject = typeof authenticode?.subject === 'string' ? authenticode.subject : ''
-const authenticodeThumbprint = typeof authenticode?.thumbprint === 'string' ? authenticode.thumbprint : ''
-if (authenticodeVerified && (!authenticodeSubject || !authenticodeThumbprint)) {
-  throw new Error('Verified Authenticode evidence must include both subject and thumbprint.')
-}
-const artifactSHA256 = createHash('sha256').update(artifact).digest('hex')
-if (
-  sigstore === null || typeof sigstore !== 'object' || Array.isArray(sigstore) ||
-  sigstore.schemaVersion !== 1 || sigstore.verified !== true || sigstore.transparencyLogVerified !== true ||
-  sigstore.artifactSha256 !== artifactSHA256 || typeof sigstore.issuer !== 'string' || !sigstore.issuer ||
-  typeof sigstore.certificateIdentity !== 'string' || !sigstore.certificateIdentity ||
-  typeof sigstore.artifactBundleSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sigstore.artifactBundleSha256)
-) {
-  throw new Error('Sigstore evidence must be a verified, transparency-logged record for the exact artifact.')
-}
-const distributionClass = authenticodeVerified ? 'production' : 'early_access'
+async function prepareCandidate(arguments_) {
+  const [artifactPath, signaturePath, sigstorePath, authenticodePath] = arguments_
+  if (!artifactPath || !signaturePath || !sigstorePath) {
+    throw new Error('Usage: node tools/create-updater-artifacts.mjs <artifact> <tauri-signature> <sigstore-evidence.json> [authenticode-evidence.json]')
+  }
 
-if (!validHTTPSURL(publicArtifactURL)) {
-  throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')
-}
-const candidate = prepareReleaseSet({
-  version: packageJSON.version,
-  channel,
-  platform: 'windows',
-  architecture,
-  supportedWindows,
-  releaseNotesUrl: releaseNotesURL,
-  artifacts: [{
-    format: 'nsis',
+  const artifactObjectKey = process.env.SESAME_RELEASE_ARTIFACT_OBJECT_KEY
+  const signingKeyID = process.env.SESAME_UPDATER_SIGNING_KEY_ID
+  const updaterPublicKey = process.env.SESAME_UPDATER_PUBLIC_KEY
+  const supportedWindows = process.env.SESAME_SUPPORTED_WINDOWS
+  const releaseNotesURL = process.env.SESAME_RELEASE_NOTES_URL
+  const publicArtifactURL = process.env.SESAME_PUBLIC_UPDATE_ARTIFACT_URL
+  const verifyBin = process.env.SESAME_UPDATER_VERIFY_BIN?.trim()
+  const channel = process.env.SESAME_RELEASE_CHANNEL ?? 'beta'
+  const architecture = process.env.SESAME_RELEASE_ARCHITECTURE
+  const validHTTPSURL = (value) => {
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' && url.hostname !== '' && url.username === '' && url.password === '' && url.hash === ''
+    } catch {
+      return false
+    }
+  }
+  const validObjectKey = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$/.test(value) && !value.includes('//') && !value.split('/').some((part) => part === '.' || part === '..')
+  if (!validObjectKey(artifactObjectKey)) {
+    throw new Error('SESAME_RELEASE_ARTIFACT_OBJECT_KEY must be an opaque private-storage object key, not a URL.')
+  }
+  if (!signingKeyID || signingKeyID.length > 120) {
+    throw new Error('SESAME_UPDATER_SIGNING_KEY_ID is required.')
+  }
+  if (!updaterPublicKey || !supportedWindows || !validHTTPSURL(releaseNotesURL)) {
+    throw new Error('The updater public key, supported Windows versions, and an HTTPS release-notes URL are required.')
+  }
+  if (architecture !== 'x86_64' && architecture !== 'aarch64') {
+    throw new Error('SESAME_RELEASE_ARCHITECTURE must be x86_64 or aarch64 and must describe the built artifact, not the CI runner.')
+  }
+  if (!verifyBin) {
+    throw new Error('SESAME_UPDATER_VERIFY_BIN must point at the verify-updater-artifact executable built from this commit.')
+  }
+
+  const run = promisify(execFile)
+  const packageJSON = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8'))
+  const [artifact, signature, sigstore, authenticode] = await Promise.all([
+    readFile(artifactPath),
+    readFile(signaturePath, 'utf8'),
+    readFile(sigstorePath, 'utf8').then(JSON.parse),
+    authenticodePath ? readFile(authenticodePath, 'utf8').then(JSON.parse) : Promise.resolve(null),
+  ])
+  const updaterSignature = signature.trim()
+  if (updaterSignature.length < 64) throw new Error('The Tauri updater signature is missing or malformed.')
+  const verifierEnvironment = {
+    SESAME_UPDATER_PUBLIC_KEY: updaterPublicKey,
+    ...(process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+  }
+  await run(path.resolve(verifyBin), [artifactPath, signaturePath], { env: verifierEnvironment })
+  if (authenticode !== null && (typeof authenticode !== 'object' || Array.isArray(authenticode))) {
+    throw new Error('Authenticode evidence must be a JSON object produced by the signing job.')
+  }
+
+  const authenticodeVerified = authenticode?.verified === true
+  const authenticodeSubject = typeof authenticode?.subject === 'string' ? authenticode.subject : ''
+  const authenticodeThumbprint = typeof authenticode?.thumbprint === 'string' ? authenticode.thumbprint : ''
+  if (authenticodeVerified && (!authenticodeSubject || !authenticodeThumbprint)) {
+    throw new Error('Verified Authenticode evidence must include both subject and thumbprint.')
+  }
+  const artifactSHA256 = createHash('sha256').update(artifact).digest('hex')
+  if (
+    sigstore === null || typeof sigstore !== 'object' || Array.isArray(sigstore) ||
+    sigstore.schemaVersion !== 1 || sigstore.verified !== true || sigstore.transparencyLogVerified !== true ||
+    sigstore.artifactSha256 !== artifactSHA256 || typeof sigstore.issuer !== 'string' || !sigstore.issuer ||
+    typeof sigstore.certificateIdentity !== 'string' || !sigstore.certificateIdentity ||
+    typeof sigstore.artifactBundleSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sigstore.artifactBundleSha256)
+  ) {
+    throw new Error('Sigstore evidence must be a verified, transparency-logged record for the exact artifact.')
+  }
+  const distributionClass = authenticodeVerified ? 'production' : 'early_access'
+
+  if (!validHTTPSURL(publicArtifactURL)) {
+    throw new Error('SESAME_PUBLIC_UPDATE_ARTIFACT_URL must be the HTTPS URL the installer is downloaded from.')
+  }
+  const candidate = prepareReleaseSet({
+    version: packageJSON.version,
+    channel,
+    platform: 'windows',
     architecture,
-    url: publicArtifactURL,
-    objectKey: artifactObjectKey,
-    sha256: artifactSHA256,
-    bytes: artifact.length,
-    updaterCapable: true,
-    updaterSignature,
-    updaterSigningKeyId: signingKeyID,
-    distributionClass,
-    sigstoreEvidence: sigstore,
-    sigstoreVerified: true,
-    sigstoreIssuer: sigstore.issuer,
-    sigstoreIdentity: sigstore.certificateIdentity,
-    sigstoreBundleSha256: sigstore.artifactBundleSha256,
-    // Explicit false so no release path mistakes Sigstore or an updater signature for Windows publisher signing.
-    authenticodeVerified,
-    ...(authenticode === null ? {} : {
-      authenticodeEvidence: authenticode,
-      authenticodeSubject,
-      authenticodeThumbprint,
-    }),
-  }],
-})
-const signingPayload = releaseSetSigningPayload(candidate)
-const candidateSeed = Buffer.from(candidateSigningKey, 'base64url')
-if (candidateSeed.length !== 32) throw new Error('SESAME_RELEASE_CANDIDATE_SIGNING_KEY must be a base64url 32-byte Ed25519 seed.')
-const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), candidateSeed])
-candidate.candidateSigningKeyId = candidateSigningKeyID
-candidate.candidateSignature = sign(null, Buffer.from(signingPayload), createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).toString('base64url')
-const outputDirectory = path.join(workspace, 'release-artifacts')
-await mkdir(outputDirectory, { recursive: true })
-const outputPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.candidate.json`)
-await writeFile(outputPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf8')
-console.log(`Created verified-candidate input: ${outputPath}`)
-
-// Released clients before 0.2.3 verify the static update manifest against the
-// v3 receipt layout rather than the release-set payload the server ingests.
-// Both receipts bind the same artifact and are signed by the same key.
-const signingKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
-const updateReceipt = {
-  payload: updateReceiptV3(candidate),
-  signingKeyId: candidate.candidateSigningKeyId,
-  signature: sign(null, Buffer.from(updateReceiptV3(candidate)), signingKey).toString('base64url'),
+    supportedWindows,
+    releaseNotesUrl: releaseNotesURL,
+    artifacts: [{
+      format: 'nsis',
+      architecture,
+      url: publicArtifactURL,
+      objectKey: artifactObjectKey,
+      sha256: artifactSHA256,
+      bytes: artifact.length,
+      updaterCapable: true,
+      updaterSignature,
+      updaterSigningKeyId: signingKeyID,
+      distributionClass,
+      sigstoreEvidence: sigstore,
+      sigstoreVerified: true,
+      sigstoreIssuer: sigstore.issuer,
+      sigstoreIdentity: sigstore.certificateIdentity,
+      sigstoreBundleSha256: sigstore.artifactBundleSha256,
+      // Explicit false so no release path mistakes Sigstore or an updater signature for Windows publisher signing.
+      authenticodeVerified,
+      ...(authenticode === null ? {} : {
+        authenticodeEvidence: authenticode,
+        authenticodeSubject,
+        authenticodeThumbprint,
+      }),
+    }],
+  })
+  return candidate
 }
-const receiptPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.update-receipt.json`)
-await writeFile(receiptPath, `${JSON.stringify(updateReceipt, null, 2)}\n`, 'utf8')
-console.log(`Created legacy-format update receipt: ${receiptPath}`)
+
+async function signCandidate(candidate, outputDirectory) {
+  verifyReleaseSet(candidate)
+  const candidateSigningKeyID = process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID
+  const candidateSigningKey = process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY
+  if (!candidateSigningKeyID || !candidateSigningKey) throw new Error('The candidate signing key and ID are required.')
+  const signingPayload = releaseSetSigningPayload(candidate)
+  const candidateSeed = Buffer.from(candidateSigningKey, 'base64url')
+  if (candidateSeed.length !== 32) throw new Error('SESAME_RELEASE_CANDIDATE_SIGNING_KEY must be a base64url 32-byte Ed25519 seed.')
+  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), candidateSeed])
+  candidate.candidateSigningKeyId = candidateSigningKeyID
+  candidate.candidateSignature = sign(null, Buffer.from(signingPayload), createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).toString('base64url')
+  await mkdir(outputDirectory, { recursive: true })
+  const outputPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.candidate.json`)
+  await writeFile(outputPath, `${JSON.stringify(candidate, null, 2)}\n`, 'utf8')
+  console.log(`Created verified-candidate input: ${outputPath}`)
+
+  // Released clients before 0.2.3 verify the static update manifest against the
+  // v3 receipt layout rather than the release-set payload the server ingests.
+  // Both receipts bind the same artifact and are signed by the same key.
+  const signingKey = createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })
+  const updateReceipt = {
+    payload: updateReceiptV3(candidate),
+    signingKeyId: candidate.candidateSigningKeyId,
+    signature: sign(null, Buffer.from(updateReceiptV3(candidate)), signingKey).toString('base64url'),
+  }
+  const receiptPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.update-receipt.json`)
+  await writeFile(receiptPath, `${JSON.stringify(updateReceipt, null, 2)}\n`, 'utf8')
+  console.log(`Created legacy-format update receipt: ${receiptPath}`)
+}
+
+const arguments_ = process.argv.slice(2)
+const mode = arguments_[0]
+if (mode === '--sign') {
+  const [input, output = path.join(workspace, 'release-artifacts')] = arguments_.slice(1)
+  if (!input) throw new Error('A verified candidate input file is required.')
+  const expected = process.env.SESAME_VERIFIED_CANDIDATE_SHA256
+  if (!expected || !/^[0-9a-f]{64}$/.test(expected)) throw new Error('SESAME_VERIFIED_CANDIDATE_SHA256 is required.')
+  const bytes = await readFile(input)
+  const actual = createHash('sha256').update(bytes).digest('hex')
+  if (actual !== expected) throw new Error('The candidate input changed during handoff.')
+  await signCandidate(JSON.parse(bytes.toString('utf8')), path.resolve(output))
+} else if (mode === '--prepare') {
+  if (process.env.SESAME_RELEASE_CANDIDATE_SIGNING_KEY) throw new Error('Candidate preparation must not receive a signing key.')
+  const candidate = await prepareCandidate(arguments_.slice(1))
+  const directory = path.join(workspace, 'candidate-input')
+  await mkdir(directory, { recursive: true })
+  await writeFile(path.join(directory, 'unsigned-candidate.json'), `${JSON.stringify(candidate, null, 2)}\n`, 'utf8')
+} else {
+  await signCandidate(await prepareCandidate(arguments_), path.join(workspace, 'release-artifacts'))
+}

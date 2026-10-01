@@ -369,7 +369,7 @@ jobs:
     needs: sign-and-attest
     runs-on: windows-latest
     outputs:
-      verifier-sha256: ${{ steps.verifier.outputs.sha256 }}
+      candidate-sha256: ${{ steps.candidate.outputs.sha256 }}
     permissions:
       contents: read
     steps:
@@ -403,19 +403,28 @@ jobs:
       - name: Re-audit the exact public evidence payload
         run: node tools/audit-public-release-evidence.mjs public-release-evidence
 
-      - id: verifier
-        name: Hash the independently built updater verifier
+      - id: candidate
+        name: Prepare the verified candidate without signing authority
         shell: pwsh
+        env:
+          SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
+          SESAME_UPDATER_VERIFY_BIN: ${{ github.workspace }}/src-tauri/target/debug/verify-updater-artifact.exe
+          RELEASE_MANIFEST: ${{ needs.sign-and-attest.outputs.manifest }}
         run: |
-          $verifier = 'src-tauri/target/debug/verify-updater-artifact.exe'
-          if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) { throw "The independently built verifier is missing." }
-          $sha256 = (Get-FileHash -LiteralPath $verifier -Algorithm SHA256).Hash.ToLowerInvariant()
+          $record = Get-Content -Raw -LiteralPath "release-handoff/$env:RELEASE_MANIFEST" | ConvertFrom-Json
+          $artifact = "release-handoff/$($record.artifact.filename)"
+          $signature = "release-handoff/$($record.updaterSignature.filename)"
+          $env:SESAME_RELEASE_ARTIFACT_OBJECT_KEY = "windows/$($record.version)/$($record.artifact.filename)"
+          $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
+          node tools/create-updater-artifacts.mjs --prepare $artifact $signature release-handoff/sigstore-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "Candidate preparation failed." }
+          $sha256 = (Get-FileHash -LiteralPath candidate-input/unsigned-candidate.json -Algorithm SHA256).Hash.ToLowerInvariant()
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: sesame-updater-verifier-${{ github.ref_name }}
-          path: src-tauri/target/debug/verify-updater-artifact.exe
+          name: sesame-candidate-input-${{ github.ref_name }}
+          path: candidate-input/unsigned-candidate.json
           if-no-files-found: error
           retention-days: 14
 
@@ -441,25 +450,14 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: sesame-updater-verifier-${{ github.ref_name }}
-          path: verified-tools
-
-      - name: Check the independently built updater verifier
-        shell: pwsh
-        env:
-          EXPECTED_VERIFIER_SHA256: ${{ needs.verify-fresh.outputs.verifier-sha256 }}
-        run: |
-          if ($env:EXPECTED_VERIFIER_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw "The verifier digest is malformed." }
-          $verifier = 'verified-tools/verify-updater-artifact.exe'
-          if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) { throw "The independently built verifier is missing." }
-          $sha256 = (Get-FileHash -LiteralPath $verifier -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha256 -ne $env:EXPECTED_VERIFIER_SHA256) { throw "The updater verifier changed during handoff." }
+          name: sesame-candidate-input-${{ github.ref_name }}
+          path: candidate-input
 
       - name: Create the signed candidate receipt
         shell: pwsh
         env:
           SESAME_UPDATER_PUBLIC_KEY: ${{ secrets.SESAME_UPDATER_PUBLIC_KEY }}
-          SESAME_UPDATER_VERIFY_BIN: ${{ github.workspace }}/verified-tools/verify-updater-artifact.exe
+          SESAME_VERIFIED_CANDIDATE_SHA256: ${{ needs.verify-fresh.outputs.candidate-sha256 }}
           SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
           SESAME_RELEASE_CANDIDATE_SIGNING_KEY: ${{ secrets.SESAME_RELEASE_CANDIDATE_SIGNING_KEY }}
@@ -473,7 +471,8 @@ jobs:
           # The candidate signs this URL, so it has to be set before the
           # candidate is built rather than only for the update manifest.
           $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
-          node tools/create-updater-artifacts.mjs $artifact $signature release-handoff/sigstore-evidence.json
+          node tools/create-updater-artifacts.mjs --sign candidate-input/unsigned-candidate.json
+          if ($LASTEXITCODE -ne 0) { throw "Candidate signing failed." }
           $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
           node tools/release-set-cli.mjs verify $candidate
           New-Item -ItemType Directory -Force -Path candidate-receipt | Out-Null
