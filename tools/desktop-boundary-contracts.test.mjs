@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -32,6 +32,12 @@ test('the boundary carries every tool the standalone gate executes', () => {
   }
 
   const referenced = new Set()
+  for (const config of ['vite.config.ts', 'vitest.config.ts']) {
+    for (const match of read(config).matchAll(/from\s+['"](\.\.?\/[^'"]+\.mjs)['"]/g)) {
+      const imported = relative(root, resolve(root, match[1])).replaceAll('\\', '/')
+      assert.ok(inBoundary(imported), `${config} imports ${imported} outside the standalone boundary`)
+    }
+  }
   for (const name of closure) {
     for (const match of (pkg.scripts[name] ?? '').matchAll(/(tools\/[A-Za-z0-9._/-]+\.mjs)/g)) referenced.add(match[1])
   }

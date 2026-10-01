@@ -88,6 +88,7 @@
     "tools/build-browser-host.mjs",
     "tools/check-linux-prerequisites.mjs",
     "tools/stage-browser-host.mjs",
+    "tools/shipped-packages.mjs",
     "tools/generate-types.mjs",
     "tools/refresh-two-factor-sites.mjs",
     ".cargo/config.toml"
