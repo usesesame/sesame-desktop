@@ -78,10 +78,10 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   })
 
   recordStep(steps, 'grant_presence.active', await bridge.call('grant_presence', { secret: createdPassword }))
-  const refused = await bridge.call('restore_backup', { request: { token, secret: password } })
-  const refusalMessage = String(refused.error ?? '')
+  const foreignRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
+  const refusalMessage = String(foreignRefusal.error ?? '')
   recordStep(steps, 'restore_backup.different_vault', {
-    ok: refused.ok === false && refusalMessage.includes('belongs to a different vault'),
+    ok: foreignRefusal.ok === false && refusalMessage.includes('belongs to a different vault'),
     error: refusalMessage || 'the restore did not report a different-vault refusal',
     value: { refused: true },
   })
@@ -132,7 +132,8 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
     })
 
     recordStep(steps, 'grant_presence.restored', await bridge.call('grant_presence', { secret: password }))
-    const sameVault = recordStep(steps, 'restore_backup.same_vault', await bridge.call('restore_backup', { request: { source: backupPath, secret: password } }))
+    const sameVaultIssued = recordStep(steps, 'restore_backup.same_vault_token_issued', await bridge.call('wdio_issue_file_choice', { path: backupPath }))
+    const sameVault = recordStep(steps, 'restore_backup.same_vault', await bridge.call('restore_backup', { request: { token: sameVaultIssued.value?.token, secret: password } }))
     const safetyName = sameVault.value?.safetyBackupName
     recordStep(steps, 'safety_backup.same_vault', {
       ok: Boolean(safetyName) && (await stat(path.join(root, 'backups', safetyName ?? '')).catch(() => null))?.isFile() === true,
