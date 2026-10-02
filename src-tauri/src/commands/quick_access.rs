@@ -2,6 +2,10 @@
 //! Search results carry titles and non-secret detail only; a stored value
 //! crosses back solely for the field the person just chose.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
@@ -13,6 +17,7 @@ use crate::vault::{Identity, TaggedItem, VaultResult, VaultState};
 
 const QUICK_ACCESS_WINDOW: &str = "quick-access";
 const QUICK_ACCESS_RESULT_LIMIT: usize = 8;
+const QUICK_ACCESS_CONFIRMATION_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
@@ -60,6 +65,39 @@ fn require_quick_access(window: &WebviewWindow) -> VaultResult<()> {
         Ok(())
     } else {
         Err("That command is available only from quick access.".into())
+    }
+}
+
+#[derive(Default)]
+pub struct QuickAccessConfirmations(Mutex<HashMap<String, Instant>>);
+
+impl QuickAccessConfirmations {
+    fn key(window: &str, id: &str, field: &str) -> String {
+        format!("{window}\u{1f}{id}\u{1f}{field}")
+    }
+
+    fn lock(&self) -> VaultResult<MutexGuard<'_, HashMap<String, Instant>>> {
+        self.0
+            .lock()
+            .map_err(|_| "Sesame could not read this confirmation.".to_string())
+    }
+
+    pub fn record(&self, window: &str, id: &str, field: &str) -> VaultResult<()> {
+        self.prune()?;
+        self.lock()?
+            .insert(Self::key(window, id, field), Instant::now());
+        Ok(())
+    }
+
+    pub fn consume(&self, window: &str, id: &str, field: &str) -> VaultResult<bool> {
+        self.prune()?;
+        Ok(self.lock()?.remove(&Self::key(window, id, field)).is_some())
+    }
+
+    pub fn prune(&self) -> VaultResult<()> {
+        self.lock()?
+            .retain(|_, confirmed_at| confirmed_at.elapsed() < QUICK_ACCESS_CONFIRMATION_TTL);
+        Ok(())
     }
 }
 
@@ -118,9 +156,9 @@ pub fn search_quick_access_items(
 pub fn get_quick_access_field(
     window: WebviewWindow,
     state: State<'_, VaultState>,
+    confirmations: State<'_, QuickAccessConfirmations>,
     id: String,
     field: String,
-    confirmed: bool,
 ) -> VaultResult<QuickAccessValue> {
     require_quick_access(&window)?;
     let session = state
@@ -135,12 +173,39 @@ pub fn get_quick_access_field(
         .into_iter()
         .find(|action| action.field == field.trim())
         .ok_or("Quick access cannot copy that field for this item.")?;
-    if action.guarded && !confirmed {
+    if action.guarded && !confirmations.consume(window.label(), item.id(), action.field)? {
         return Err("Confirm this copy in quick access first.".into());
     }
     let value = quick_access_value(&item, action.field)
         .ok_or("Nothing is saved in that field for this item.")?;
     Ok(QuickAccessValue { value })
+}
+
+#[tauri::command]
+pub fn confirm_quick_access_field(
+    window: WebviewWindow,
+    state: State<'_, VaultState>,
+    confirmations: State<'_, QuickAccessConfirmations>,
+    id: String,
+    field: String,
+) -> VaultResult<()> {
+    require_quick_access(&window)?;
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session
+        .as_ref()
+        .ok_or("Unlock your vault in Sesame first.")?;
+    let item = session.open_item(id.trim())?;
+    let action = quick_access_actions(&item)
+        .into_iter()
+        .find(|action| action.field == field.trim())
+        .ok_or("Quick access cannot copy that field for this item.")?;
+    if !action.guarded {
+        return Err("That quick-access field does not need a confirmation.".into());
+    }
+    confirmations.record(window.label(), item.id(), action.field)
 }
 
 /// A note, document, or custom record opens in Sesame rather than exposing its
@@ -374,5 +439,68 @@ mod tests {
     fn quick_access_search_does_not_match_secret_values() {
         assert!(quick_access_matches(&login(), "casey"));
         assert!(!quick_access_matches(&login(), "secret-canary"));
+    }
+
+    #[test]
+    fn a_quick_access_confirmation_is_consumed_once() {
+        let confirmations = QuickAccessConfirmations::default();
+        confirmations
+            .record("quick-access", "fictional-id", "privateKey")
+            .expect("recorded confirmation");
+
+        assert!(confirmations
+            .consume("quick-access", "fictional-id", "privateKey")
+            .expect("first consume"));
+        assert!(!confirmations
+            .consume("quick-access", "fictional-id", "privateKey")
+            .expect("second consume"));
+    }
+
+    #[test]
+    fn mismatched_and_expired_quick_access_confirmations_are_refused() {
+        let confirmations = QuickAccessConfirmations::default();
+        confirmations
+            .record("quick-access", "fictional-id", "privateKey")
+            .expect("recorded confirmation");
+
+        assert!(!confirmations
+            .consume("quick-access", "fictional-other-id", "privateKey")
+            .expect("mismatched id"));
+        assert!(!confirmations
+            .consume("quick-access", "fictional-id", "publicKey")
+            .expect("mismatched field"));
+        assert!(!confirmations
+            .consume("other-window", "fictional-id", "privateKey")
+            .expect("mismatched window"));
+
+        confirmations.lock().expect("confirmation lock").insert(
+            QuickAccessConfirmations::key("quick-access", "fictional-id", "privateKey"),
+            Instant::now() - QUICK_ACCESS_CONFIRMATION_TTL - Duration::from_secs(1),
+        );
+        assert!(!confirmations
+            .consume("quick-access", "fictional-id", "privateKey")
+            .expect("expired confirmation"));
+    }
+
+    #[test]
+    fn pruning_quick_access_confirmations_drops_only_expired_entries() {
+        let confirmations = QuickAccessConfirmations::default();
+        confirmations
+            .record("quick-access", "fictional-id", "privateKey")
+            .expect("recorded confirmation");
+        confirmations.lock().expect("confirmation lock").insert(
+            QuickAccessConfirmations::key("quick-access", "fictional-stale-id", "privateKey"),
+            Instant::now() - QUICK_ACCESS_CONFIRMATION_TTL - Duration::from_secs(1),
+        );
+
+        confirmations.prune().expect("pruned confirmations");
+
+        let remaining = confirmations.lock().expect("confirmation lock");
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining.contains_key(&QuickAccessConfirmations::key(
+            "quick-access",
+            "fictional-id",
+            "privateKey"
+        )));
     }
 }

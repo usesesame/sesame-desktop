@@ -173,7 +173,7 @@ test('static updater manifest refuses an update receipt that does not describe t
     const candidatePath = join(directory, 'candidate.json')
     const receiptPath = join(directory, 'update-receipt.json')
     const outputPath = join(directory, 'latest.json')
-    const { candidate } = fictionalWindowsCandidate()
+    const { candidate, candidatePublicKey } = fictionalWindowsCandidate()
     await writeFile(candidatePath, JSON.stringify(candidate))
     const claims = updateReceiptV3(candidate).split('\n')
     claims[1] = '9.9.9'
@@ -182,6 +182,7 @@ test('static updater manifest refuses an update receipt that does not describe t
       env: {
         ...process.env,
         SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
         SESAME_UPDATE_RECEIPT_V3_FILE: receiptPath,
       },
     }), /does not describe this release set/)
@@ -195,10 +196,14 @@ test('static updater manifest refuses a release set with no updater-capable pack
   try {
     const candidatePath = join(directory, 'candidate.json')
     const outputPath = join(directory, 'latest.json')
-    const { candidate } = fictionalLinuxCandidate()
+    const { candidate, candidatePublicKey } = fictionalLinuxCandidate()
     await writeFile(candidatePath, JSON.stringify(candidate))
     await assert.rejects(run(process.execPath, [script, candidatePath, outputPath], {
-      env: { ...process.env, SESAME_PUBLIC_UPDATE_ARTIFACT_URL: 'https://releases.example.test/Sesame.AppImage' },
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: 'https://releases.example.test/Sesame.AppImage',
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+      },
     }), /updater-capable desktop release set/)
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -210,7 +215,7 @@ test('static updater manifest refuses insecure and package-mismatched public URL
   try {
     const candidatePath = join(directory, 'candidate.json')
     const outputPath = join(directory, 'latest.json')
-    const { candidate } = fictionalWindowsCandidate()
+    const { candidate, candidatePublicKey } = fictionalWindowsCandidate()
     await writeFile(candidatePath, JSON.stringify(candidate))
     for (const artifactURL of [
       `http://github.example.test/Sesame_${version}_x64-setup.exe`,
@@ -218,9 +223,83 @@ test('static updater manifest refuses insecure and package-mismatched public URL
       `https://github.example.test/Sesame_${version}_x64-setup.exe?token=fictional`,
     ]) {
       await assert.rejects(run(process.execPath, [script, candidatePath, outputPath], {
-        env: { ...process.env, SESAME_PUBLIC_UPDATE_ARTIFACT_URL: artifactURL },
+        env: {
+          ...process.env,
+          SESAME_PUBLIC_UPDATE_ARTIFACT_URL: artifactURL,
+          SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+        },
       }))
     }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest refuses to run without the candidate public key', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    const env = {
+      ...process.env,
+      SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+    }
+    delete env.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY
+    await assert.rejects(
+      run(process.execPath, [script, candidatePath, outputPath], { env }),
+      /SESAME_RELEASE_CANDIDATE_PUBLIC_KEY is required/,
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest refuses a candidate signature made by another key', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    const { publicKey: otherPublicKey } = generateKeyPairSync('ed25519')
+    const otherSPKI = otherPublicKey.export({ format: 'der', type: 'spki' })
+    await assert.rejects(run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: otherSPKI.subarray(otherSPKI.length - 32).toString('base64url'),
+      },
+    }), /candidate signature does not verify/)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest refuses an update receipt signed by another key', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const receiptPath = join(directory, 'update-receipt.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate, candidatePublicKey } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    const { privateKey: otherPrivateKey } = generateKeyPairSync('ed25519')
+    const payload = updateReceiptV3(candidate)
+    await writeFile(receiptPath, JSON.stringify({
+      payload,
+      signingKeyId: candidate.candidateSigningKeyId,
+      signature: sign(null, Buffer.from(payload), otherPrivateKey).toString('base64url'),
+    }))
+    await assert.rejects(run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`,
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+        SESAME_UPDATE_RECEIPT_V3_FILE: receiptPath,
+      },
+    }), /update receipt signature does not verify/)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

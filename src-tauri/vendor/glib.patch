@@ -1,0 +1,48 @@
+--- a/src/boxed_inline.rs	2006-07-24 04:21:28.000000000 +0300
++++ b/src/boxed_inline.rs	2026-09-05 10:19:02.278222717 +0300
+@@ -315,11 +315,14 @@
+                 )
+             }
+ 
++            #[allow(unused_unsafe)]
+             fn to_glib_full_from_slice(t: &[Self]) -> *mut $ffi_name {
+                 let v_ptr = unsafe {
+-                    let v_ptr = $crate::ffi::g_malloc(std::mem::size_of::<$ffi_name>()) as *mut $ffi_name;
++                    let v_ptr = $crate::ffi::g_malloc(std::mem::size_of::<$ffi_name>() * t.len()) as *mut $ffi_name;
+ 
+                     for (i, s) in t.iter().enumerate() {
++                        let init = |$init_arg: *mut $ffi_name| $init_expr;
++                        init(v_ptr.add(i));
+                         let copy_into = |$copy_into_arg_dest: *mut $ffi_name, $copy_into_arg_src: *const $ffi_name| $copy_into_expr;
+                         copy_into(v_ptr.add(i), &s.inner as *const $ffi_name);
+                     }
+--- a/src/lib.rs	2006-07-24 04:21:28.000000000 +0300
++++ b/src/lib.rs	2026-09-20 18:41:28.581014863 +0300
+@@ -3,6 +3,9 @@
+ #![cfg_attr(docsrs, feature(doc_cfg))]
+ #![allow(clippy::missing_safety_doc)]
+ #![allow(renamed_and_removed_lints)]
++#![allow(unknown_lints)]
++#![allow(mismatched_lifetime_syntaxes)]
++#![allow(unused_parens)]
+ #![doc = include_str!("../README.md")]
+ 
+ pub use bitflags;
+--- a/src/variant_iter.rs	2006-07-24 04:21:28.000000000 +0300
++++ b/src/variant_iter.rs	2026-09-05 10:19:02.292222699 +0300
+@@ -117,13 +117,13 @@
+ 
+     fn impl_get(&self, i: usize) -> &'a str {
+         unsafe {
+-            let p: *mut libc::c_char = std::ptr::null_mut();
++            let mut p: *mut libc::c_char = std::ptr::null_mut();
+             let s = b"&s\0";
+             ffi::g_variant_get_child(
+                 self.variant.to_glib_none().0,
+                 i,
+                 s as *const u8 as *const _,
+-                &p,
++                &mut p,
+                 std::ptr::null::<i8>(),
+             );
+             let p = std::ffi::CStr::from_ptr(p);
