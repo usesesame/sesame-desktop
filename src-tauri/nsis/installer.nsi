@@ -444,11 +444,18 @@ Function PageLeaveReinstall
         ClearErrors
         ${If} $4 != ""
         ${AndIf} $4 != $INSTDIR
-          ${If} ${FileExists} "$4\${MAINBINARYNAME}.exe"
-            RMDir /r "$4"
-          ${Else}
-            Delete "$4\uninstall.exe"
-          ${EndIf}
+          Delete "$4\${MAINBINARYNAME}.exe"
+          {{#each resources}}
+            Delete "$4\\{{this.[1]}}"
+          {{/each}}
+          {{#each binaries}}
+            Delete "$4\\{{this}}"
+          {{/each}}
+          Delete "$4\uninstall.exe"
+          {{#each resources_ancestors}}
+          RMDir "$4\\{{this}}"
+          {{/each}}
+          RMDir "$4"
         ${EndIf}
         ClearErrors
       ${EndIf}

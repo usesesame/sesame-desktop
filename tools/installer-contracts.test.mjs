@@ -46,12 +46,7 @@ test('the installer owns its own template and never offers to delete app data', 
   assert.doesNotMatch(code, /__NSD_CheckBox/)
   assert.doesNotMatch(code, /BM_GETCHECK/)
 
-  const recursiveRemovals = [...code.matchAll(/rmdir\s+\/r(?![a-z])\s+("[^"]*"|\S+)/gi)].map((match) => match[1])
-  assert.deepEqual(
-    recursiveRemovals,
-    ['"$4"'],
-    'the only recursive directory removal must be the recorded old install directory',
-  )
+  assert.doesNotMatch(code, /rmdir\s+\/r(?![a-z])/i)
 
   assert.doesNotMatch(code, /\$APPDATA\\\$\{BUNDLEID\}/)
   assert.doesNotMatch(code, /\$LOCALAPPDATA\\\$\{BUNDLEID\}/)
@@ -128,9 +123,28 @@ test('the installer only runs a pre-existing uninstaller from an administrator-o
 
   assert.match(
     untrusted,
-    /\$\{If\} \$4 != ""\s*\n\s*\$\{AndIf\} \$4 != \$INSTDIR\s*\n\s*\$\{If\} \$\{FileExists\} "\$4\\\$\{MAINBINARYNAME\}\.exe"\s*\n\s*RMDir \/r "\$4"\s*\n\s*\$\{Else\}\s*\n\s*Delete "\$4\\uninstall\.exe"/,
-    'the untrusted cleanup is not bound to the old executable existing and to paths other than $INSTDIR',
+    /\$\{If\} \$4 != ""\s*\n\s*\$\{AndIf\} \$4 != \$INSTDIR\s*\n/,
+    'the untrusted cleanup is not limited to a recorded directory other than $INSTDIR',
   )
+  const removals = [...untrusted.matchAll(/^\s*(Delete|RMDir)\s+(\S.*)$/gm)].map((match) => `${match[1]} ${match[2].trim()}`)
+  assert.deepEqual(
+    removals,
+    [
+      'Delete "$4\\${MAINBINARYNAME}.exe"',
+      'Delete "$4\\\\{{this.[1]}}"',
+      'Delete "$4\\\\{{this}}"',
+      'Delete "$4\\uninstall.exe"',
+      'RMDir "$4\\\\{{this}}"',
+      'RMDir "$4"',
+    ],
+    'the untrusted cleanup must remove only the files Sesame installed and then empty directories',
+  )
+  const uninstall = code.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)
+  assert.ok(uninstall, 'the uninstall section was not found, so this contract read nothing')
+  for (const list of ['resources', 'binaries', 'resources_ancestors']) {
+    assert.match(uninstall[1], new RegExp(String.raw`\{\{#each ${list}\}\}`), `the uninstaller no longer lists ${list}`)
+    assert.match(untrusted, new RegExp(String.raw`\{\{#each ${list}\}\}`), `the untrusted cleanup no longer lists ${list}`)
+  }
 })
 
 test('Windows executables use a safe DLL search order and install per-machine', () => {
