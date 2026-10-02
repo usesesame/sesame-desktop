@@ -38,6 +38,8 @@ const expected = [
   'SHA256SUMS-linux',
   manifest.sbom.filename,
   manifest.linuxLifecycle.shipped.filename,
+  manifest.linuxLifecycle.rpm.filename,
+  manifest.linuxLifecycle.appimage.filename,
   manifest.linuxLifecycle.vault.filename,
 ]
 const existing = new Set(await readdir(handoff))

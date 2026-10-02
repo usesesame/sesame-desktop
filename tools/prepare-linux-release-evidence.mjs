@@ -4,7 +4,7 @@ import path from 'node:path'
 import { RELEASE_REPOSITORY, fileSha256 } from './release-evidence-lib.mjs'
 import { LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW } from './linux-release-evidence.mjs'
 import { validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 
 const [appimageInput, debInput, rpmInput, sbomInput, outputInput] = process.argv.slice(2)
 if (!appimageInput || !debInput || !rpmInput || !sbomInput || !outputInput) {
@@ -28,8 +28,12 @@ if (repository !== RELEASE_REPOSITORY || ref !== `refs/tags/v${version}` || !/^[
 
 const shippedEvidencePath = path.resolve(required('SESAME_SHIPPED_PACKAGE_EVIDENCE'))
 const vaultEvidencePath = path.resolve(required('SESAME_VAULT_PACKAGE_EVIDENCE'))
+const rpmEvidencePath = path.resolve(required('SESAME_RPM_PACKAGE_EVIDENCE'))
+const appimageEvidencePath = path.resolve(required('SESAME_APPIMAGE_PACKAGE_EVIDENCE'))
 const shippedEvidence = validateLinuxShippedEvidence(JSON.parse(await readFile(shippedEvidencePath, 'utf8')))
 const vaultEvidence = validateLinuxPackageEvidence(JSON.parse(await readFile(vaultEvidencePath, 'utf8')))
+const rpmEvidence = validateLinuxRpmShippedEvidence(JSON.parse(await readFile(rpmEvidencePath, 'utf8')))
+const appimageEvidence = validateLinuxAppImageShippedEvidence(JSON.parse(await readFile(appimageEvidencePath, 'utf8')))
 
 const output = path.resolve(outputInput)
 await mkdir(output, { recursive: false })
@@ -60,14 +64,26 @@ const debArtifact = artifacts.find((artifact) => artifact.format === 'deb')
 if (debArtifact.sha256 !== shippedEvidence.package.sha256) {
   throw new Error('The shipped-package evidence does not describe the deb in this release set.')
 }
-if (shippedEvidence.package.version !== version || vaultEvidence.package.version !== version) {
-  throw new Error('The package evidence does not describe this release version.')
+const rpmArtifact = artifacts.find((artifact) => artifact.format === 'rpm')
+if (rpmArtifact.sha256 !== rpmEvidence.package.sha256) {
+  throw new Error('The rpm shipped-package evidence does not describe the rpm in this release set.')
+}
+const appimageArtifact = artifacts.find((artifact) => artifact.format === 'appimage')
+if (appimageArtifact.sha256 !== appimageEvidence.package.sha256) {
+  throw new Error('The AppImage shipped-package evidence does not describe the AppImage in this release set.')
+}
+for (const evidence of [shippedEvidence, rpmEvidence, appimageEvidence, vaultEvidence]) {
+  if (evidence.package.version !== version) {
+    throw new Error('The package evidence does not describe this release version.')
+  }
 }
 
 const copies = {}
 for (const [label, source, filename] of [
   ['sbom', path.resolve(sbomInput), 'sesame-linux.cdx.json'],
   ['shipped', shippedEvidencePath, 'linux-shipped-package.json'],
+  ['rpm', rpmEvidencePath, 'linux-rpm-shipped-package.json'],
+  ['appimage', appimageEvidencePath, 'linux-appimage-shipped-package.json'],
   ['vault', vaultEvidencePath, 'linux-installed-package.json'],
 ]) {
   const target = path.join(output, filename)
@@ -86,7 +102,7 @@ const manifest = {
   source: { repository, workflow: LINUX_RELEASE_WORKFLOW, ref, commit },
   artifacts,
   sbom: copies.sbom,
-  linuxLifecycle: { shipped: copies.shipped, vault: copies.vault },
+  linuxLifecycle: { shipped: copies.shipped, rpm: copies.rpm, appimage: copies.appimage, vault: copies.vault },
   sigstore: {
     issuer: 'https://token.actions.githubusercontent.com',
     certificateIdentity: `https://github.com/${repository}/${LINUX_RELEASE_WORKFLOW}@${ref}`,
@@ -96,6 +112,6 @@ const manifest = {
 }
 const manifestFilename = `sesame-${version}-linux-${architecture}.release.json`
 await writeFile(path.join(output, manifestFilename), `${JSON.stringify(manifest, null, 2)}\n`)
-const sums = [...artifacts, copies.sbom, copies.shipped, copies.vault].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
+const sums = [...artifacts, copies.sbom, copies.shipped, copies.rpm, copies.appimage, copies.vault].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
 await writeFile(path.join(output, 'SHA256SUMS-linux'), `${sums}\n`)
 process.stdout.write(`${manifestFilename}\n`)

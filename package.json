@@ -41,7 +41,7 @@
     "release:check": "npm run desktop:ci && npm run desktop:host:stage",
     "release:build": "npm run release:check && tauri build --no-bundle",
     "release:bundle:windows:unsigned": "tauri build --bundles nsis -- --locked",
-    "release:bundle:linux:unsigned": "npm run desktop:linux:bundle-prerequisites && npm run desktop:host:stage && tauri build --bundles deb,rpm,appimage --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'",
+    "release:bundle:linux:unsigned": "npm run desktop:linux:bundle-prerequisites && node tools/prepare-linux-bundle-tools.mjs && npm run desktop:host:stage && tauri build --bundles deb,rpm,appimage --config '{\"bundle\":{\"createUpdaterArtifacts\":false,\"useLocalToolsDir\":true}}'",
     "installer:evidence:collect": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/collect-installer-lifecycle-evidence.ps1",
     "installer:evidence:compare": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/compare-installer-lifecycle-evidence.ps1",
     "installer:lab:prepare": "node tools/prepare-installer-vm-pair.mjs",

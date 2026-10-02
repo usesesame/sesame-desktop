@@ -283,6 +283,8 @@ test('the counterpart lane shares the release without weakening asset checks', (
     'sesame-1.2.3-linux-x86_64.release.json.sigstore.json',
     'linux-sigstore-evidence.json',
     'linux-shipped-package.json',
+    'linux-rpm-shipped-package.json',
+    'linux-appimage-shipped-package.json',
     'linux-installed-package.json',
     'sesame-linux.cdx.json',
     'SHA256SUMS-linux',
