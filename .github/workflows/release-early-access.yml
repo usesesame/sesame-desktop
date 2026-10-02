@@ -91,7 +91,7 @@ jobs:
         run: npm run desktop:host:stage
 
       - name: Build the app with the test bridge
-        run: npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --no-bundle
+        run: npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --no-bundle -- --locked
 
       - name: Restore every historical fixture through the app
         shell: bash
@@ -175,6 +175,12 @@ jobs:
 
       - name: Run the complete release gate
         run: npm run release:check
+
+      - name: Verify the vendored glib tree
+        shell: pwsh
+        run: |
+          $env:Path = "$env:Path;$env:ProgramFiles\Git\usr\bin"
+          node tools/verify-glib-vendor.mjs
 
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom

@@ -93,6 +93,9 @@ jobs:
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
+      - name: Verify the vendored glib tree
+        run: node tools/verify-glib-vendor.mjs
+
       - name: Pin the Linux bundling tools by version and hash
         run: node tools/prepare-linux-bundle-tools.mjs
 
@@ -100,6 +103,7 @@ jobs:
         run: >-
           npx tauri build --bundles deb,rpm,appimage
           --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
+          -- --locked
 
       - name: Freeze the packages before the test build replaces the bundle
         run: |
@@ -142,7 +146,7 @@ jobs:
         env:
           VITE_SESAME_WDIO: 'true'
         run: |
-          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb
+          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb -- --locked
           xvfb-run -a node tools/linux-installed-package-gate.mjs \
             --package "$(ls src-tauri/target/release/bundle/deb/*.deb)" \
             --out linux-vault-evidence
