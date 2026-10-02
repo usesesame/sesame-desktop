@@ -37,6 +37,7 @@ test('nothing in tools/ is left behind unreferenced', () => {
   const workflowDirectory = join(root, '.github', 'workflows')
   const referrers = [
     { name: 'package.json', text: withoutComments(read('package.json')) },
+    ...['vite.config.ts', 'vitest.config.ts'].map((name) => ({ name, text: withoutComments(read(name)) })),
     ...readdirSync(workflowDirectory).map((name) => ({ name, text: withoutComments(read('.github', 'workflows', name)) })),
     ...filesMatching(/\.(mjs|js|ps1)$/, join(root, 'tools')).map((path) => ({
       name: relative(join(root, 'tools'), path),
