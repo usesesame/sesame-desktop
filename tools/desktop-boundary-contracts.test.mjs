@@ -226,11 +226,15 @@ test('test acceleration preserves application checks and release profiles', () =
   const manifest = read('src-tauri', 'Cargo.toml')
   const profiles = [...manifest.matchAll(/^\[(profile\.[^\]]+)\]\s*\n([^[]*)/gm)]
   assert.deepEqual(profiles.map((match) => match[1]).sort(), [
+    'profile.release',
     'profile.test.package.argon2',
     'profile.test.package.blake2',
   ])
-  for (const [, , settings] of profiles) {
-    assert.equal(settings.trim(), 'opt-level = 3')
+  for (const [, name, settings] of profiles) {
+    assert.equal(
+      settings.trim(),
+      name === 'profile.release' ? 'lto = true\nstrip = "symbols"\noverflow-checks = true' : 'opt-level = 3',
+    )
   }
 })
 

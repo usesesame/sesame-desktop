@@ -59,20 +59,21 @@ if (!objectFilename || publicFilename !== objectFilename) {
 
 const candidatePayload = releaseSetSigningPayload(candidate)
 
-const candidatePublicKey = process.env.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY?.trim()
-if (candidatePublicKey) {
-  const rawKey = Buffer.from(candidatePublicKey, 'base64url')
-  if (rawKey.length !== 32) {
-    throw new Error('SESAME_RELEASE_CANDIDATE_PUBLIC_KEY must be a base64url Ed25519 public key.')
-  }
-  const publicKey = createPublicKey({
-    key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), rawKey]),
-    format: 'der',
-    type: 'spki',
-  })
-  if (!verify(null, Buffer.from(candidatePayload), publicKey, Buffer.from(candidate.candidateSignature, 'base64url'))) {
-    throw new Error('The candidate signature does not verify over the reconstructed static-manifest receipt.')
-  }
+const candidatePublicKeyValue = process.env.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY?.trim()
+if (!candidatePublicKeyValue) {
+  throw new Error('SESAME_RELEASE_CANDIDATE_PUBLIC_KEY is required to verify the release candidate.')
+}
+const rawKey = Buffer.from(candidatePublicKeyValue, 'base64url')
+if (rawKey.length !== 32) {
+  throw new Error('SESAME_RELEASE_CANDIDATE_PUBLIC_KEY must be a base64url Ed25519 public key.')
+}
+const candidatePublicKey = createPublicKey({
+  key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), rawKey]),
+  format: 'der',
+  type: 'spki',
+})
+if (!verify(null, Buffer.from(candidatePayload), candidatePublicKey, Buffer.from(candidate.candidateSignature, 'base64url'))) {
+  throw new Error('The candidate signature does not verify over the reconstructed static-manifest receipt.')
 }
 
 // The manifest receipt must be verifiable by every released client. Clients
@@ -89,16 +90,7 @@ if (receiptFile) {
   ) {
     throw new Error('The provided update receipt does not describe this release set.')
   }
-  if (candidatePublicKey && !verify(
-    null,
-    Buffer.from(receipt.payload),
-    createPublicKey({
-      key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(candidatePublicKey, 'base64url')]),
-      format: 'der',
-      type: 'spki',
-    }),
-    Buffer.from(receipt.signature, 'base64url'),
-  )) {
+  if (!verify(null, Buffer.from(receipt.payload), candidatePublicKey, Buffer.from(receipt.signature, 'base64url'))) {
     throw new Error('The update receipt signature does not verify.')
   }
   candidateReceipt = { payload: receipt.payload, signingKeyId: receipt.signingKeyId, signature: receipt.signature }

@@ -474,6 +474,15 @@ test('the updater VM lab is ephemeral, loopback-only, and cannot alter shipping 
   assert.doesNotMatch(shippingConfig, /dangerousInsecureTransportProtocol/)
 })
 
+test('no release workflow enables the insecure loopback update path', () => {
+  const workflowDirectory = join(root, '.github', 'workflows')
+  const releaseWorkflows = readdirSync(workflowDirectory).filter((name) => /^release-.*\.ya?ml$/.test(name))
+  assert.ok(releaseWorkflows.length >= 2, `expected the tagged-release workflows, found ${releaseWorkflows.length}`)
+  const offenders = releaseWorkflows.filter((name) =>
+    readFileSync(join(workflowDirectory, name), 'utf8').includes('SESAME_ALLOW_INSECURE_UPDATE_LOOPBACK'))
+  assert.deepEqual(offenders, [], `a release workflow enables the loopback-only insecure update path:\n  ${offenders.join('\n  ')}`)
+})
+
 test('desktop updates use an account-independent signed static manifest', () => {
   const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
   const publicUpdates = read('src-tauri', 'src', 'adapters', 'network', 'public_updates.rs')
