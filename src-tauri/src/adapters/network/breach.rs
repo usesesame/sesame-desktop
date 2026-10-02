@@ -144,7 +144,6 @@ pub fn range_client() -> VaultResult<Client> {
         })
         .connect_timeout(Duration::from_secs(policy.connect_timeout_secs))
         .timeout(Duration::from_secs(policy.timeout_secs))
-        .no_proxy()
         .build()
         .map_err(|_| "Sesame could not prepare the breach check request.".to_string())
 }
