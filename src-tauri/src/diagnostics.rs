@@ -196,7 +196,6 @@ fn severity(code: &str) -> &'static str {
         | "unregister_ok"
         | "card_requested"
         | "card_approved"
-        | "fill_auto_approved"
         | "totp_requested"
         | "totp_approved" => "info",
         // Unknown or retired codes are routine, never misclassified failures.
@@ -562,7 +561,6 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "fill_connection_closed"
             | "fill_vault_changed"
             | "fill_listener_failed"
-            | "fill_auto_approved"
             | "save_requested"
             | "save_approved"
             | "save_denied"

@@ -140,16 +140,7 @@ pub struct SavePayload {
 struct FillInner {
     pending: Option<PendingApproval>,
     recent_request_ids: VecDeque<String>,
-    grants: Vec<FillGrant>,
-}
-
-/// One approval the user chose to extend to a single origin and login for a short window.
-/// Bound to the session epoch, so locking or changing the vault discards it.
-struct FillGrant {
-    origin: String,
-    login_id: String,
-    session_epoch: u64,
-    expires: Instant,
+    last_activation: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -163,28 +154,21 @@ impl BrowserFillState {
             if let Some(pending) = inner.pending.take() {
                 let _ = pending.sender.send(ApprovalDecision::Denied);
             }
-            inner.grants.clear();
         }
     }
 
-    /// An unexpired grant for this exact origin and epoch whose login is still offered.
-    fn granted_login(
-        &self,
-        origin: &NormalizedOrigin,
-        session_epoch: u64,
-        candidate_ids: &HashSet<String>,
-    ) -> Option<String> {
-        let mut inner = self.inner.lock().ok()?;
-        let now = Instant::now();
-        inner
-            .grants
-            .retain(|grant| grant.expires > now && grant.session_epoch == session_epoch);
-        let canonical = origin.canonical();
-        inner
-            .grants
-            .iter()
-            .find(|grant| grant.origin == canonical && candidate_ids.contains(&grant.login_id))
-            .map(|grant| grant.login_id.clone())
+    fn note_activation(&self, now: Instant) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        if inner
+            .last_activation
+            .is_some_and(|last| now.duration_since(last) < ACTIVATE_MIN_INTERVAL)
+        {
+            return false;
+        }
+        inner.last_activation = Some(now);
+        true
     }
 
     fn note_request_id(inner: &mut FillInner, request_id: &str) -> Result<(), &'static str> {
@@ -312,12 +296,7 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn decide(
-        &self,
-        approval_id: &str,
-        decision: ApprovalDecision,
-        remember: bool,
-    ) -> Result<(), &'static str> {
+    fn decide(&self, approval_id: &str, decision: ApprovalDecision) -> Result<(), &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let pending = inner.pending.as_ref().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -333,28 +312,11 @@ impl BrowserFillState {
                 return Err("selectionNotOffered");
             }
         }
-        let grant = match (&decision, remember, &pending.request) {
-            (ApprovalDecision::Selected(login_id), true, ApprovalRequest::Fill { .. }) => {
-                Some(FillGrant {
-                    origin: pending.origin.canonical(),
-                    login_id: login_id.clone(),
-                    session_epoch: pending.session_epoch,
-                    expires: Instant::now() + FILL_GRANT_DURATION,
-                })
-            }
-            _ => None,
-        };
         pending
             .sender
             .send(decision)
             .map_err(|_| "approvalExpired")?;
         inner.pending = None;
-        if let Some(grant) = grant {
-            inner
-                .grants
-                .retain(|held| held.origin != grant.origin || held.login_id != grant.login_id);
-            inner.grants.push(grant);
-        }
         Ok(())
     }
 
