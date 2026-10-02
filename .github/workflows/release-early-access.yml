@@ -177,7 +177,10 @@ jobs:
         run: npm run release:check
 
       - name: Verify the vendored glib tree
-        run: node tools/verify-glib-vendor.mjs
+        shell: pwsh
+        run: |
+          $env:Path = "$env:Path;$env:ProgramFiles\Git\usr\bin"
+          node tools/verify-glib-vendor.mjs
 
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
