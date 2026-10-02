@@ -4,31 +4,8 @@ use std::path::Path;
 use crate::util::random_id;
 use crate::VaultResult;
 
-#[derive(Debug)]
-pub struct ReplaceFailure {
-    message: &'static str,
-}
-
-impl ReplaceFailure {
-    pub(crate) fn new(message: &'static str) -> Self {
-        Self { message }
-    }
-}
-
-impl std::fmt::Display for ReplaceFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.message)
-    }
-}
-
-impl From<ReplaceFailure> for String {
-    fn from(failure: ReplaceFailure) -> Self {
-        failure.message.to_string()
-    }
-}
-
 #[cfg(windows)]
-pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFailure> {
+pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -48,17 +25,15 @@ pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFail
         )
     };
     if result == 0 {
-        return Err(ReplaceFailure::new(
-            "Sesame could not complete the local vault save.",
-        ));
+        return Err("Sesame could not complete the local vault save.".into());
     }
     Ok(())
 }
 
 #[cfg(unix)]
-pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFailure> {
+pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
     fs::rename(source, destination)
-        .map_err(|_| ReplaceFailure::new("Sesame could not complete the local vault save."))?;
+        .map_err(|_| "Sesame could not complete the local vault save.".to_string())?;
     let parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -68,9 +43,9 @@ pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFail
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn replace_file(source: &Path, destination: &Path) -> Result<(), ReplaceFailure> {
+pub fn replace_file(source: &Path, destination: &Path) -> VaultResult<()> {
     fs::rename(source, destination)
-        .map_err(|_| ReplaceFailure::new("Sesame could not complete the local vault save."))
+        .map_err(|_| "Sesame could not complete the local vault save.".to_string())
 }
 
 #[cfg(unix)]
@@ -130,7 +105,7 @@ pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
     }
     if let Err(error) = replace_file(&temporary, destination) {
         let _ = fs::remove_file(&temporary);
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }

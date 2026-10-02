@@ -74,26 +74,20 @@ pub fn clear_pin_throttle_state_at(path: &Path) -> VaultResult<()> {
     }
 }
 
-pub type SaveFailure = String;
-
-pub fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), SaveFailure> {
+pub fn write_vault_file(path: &Path, file: &VaultFile) -> VaultResult<()> {
     write_vault_file_inner(path, file, true)
 }
 
 /// No `.prev` copy: one would sit decryptable under the old password.
-pub fn write_vault_file_without_previous(path: &Path, file: &VaultFile) -> Result<(), SaveFailure> {
+pub fn write_vault_file_without_previous(path: &Path, file: &VaultFile) -> VaultResult<()> {
     write_vault_file_inner(path, file, false)
 }
 
-fn write_vault_file_inner(
-    path: &Path,
-    file: &VaultFile,
-    retain_previous: bool,
-) -> Result<(), SaveFailure> {
+fn write_vault_file_inner(path: &Path, file: &VaultFile, retain_previous: bool) -> VaultResult<()> {
     let bytes = serde_json::to_vec(file)
         .map_err(|_| "Sesame could not save the local vault.".to_string())?;
     if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
-        return Err(VAULT_SIZE_LIMIT_MESSAGE.to_string());
+        return Err(VAULT_SIZE_LIMIT_MESSAGE.into());
     }
     let parent = path
         .parent()
@@ -108,8 +102,8 @@ fn write_vault_file_inner(
     let written = tmp.write_all(&bytes).and_then(|_| tmp.sync_all());
     drop(tmp);
 
-    let outcome: Result<(), SaveFailure> = if written.is_err() {
-        Err("Sesame could not write the local vault.".to_string())
+    let outcome: VaultResult<()> = if written.is_err() {
+        Err("Sesame could not write the local vault.".into())
     } else {
         (|| {
             if retain_previous && path.exists() {
@@ -125,7 +119,7 @@ fn write_vault_file_inner(
                     }
                 }
             }
-            replace_file(&tmp_path, path).map_err(SaveFailure::from)
+            replace_file(&tmp_path, path)
         })()
     };
     if outcome.is_err() {
@@ -134,7 +128,7 @@ fn write_vault_file_inner(
     outcome
 }
 
-pub fn persist_session(session: &mut UnlockedVault) -> Result<(), SaveFailure> {
+pub fn persist_session(session: &mut UnlockedVault) -> VaultResult<()> {
     if !session.setup_complete {
         return Err("Verify your recovery kit before using this vault.".into());
     }
@@ -142,7 +136,7 @@ pub fn persist_session(session: &mut UnlockedVault) -> Result<(), SaveFailure> {
     persist_payload(session, payload.clone(), true)
 }
 
-pub fn persist_session_without_previous(session: &mut UnlockedVault) -> Result<(), SaveFailure> {
+pub fn persist_session_without_previous(session: &mut UnlockedVault) -> VaultResult<()> {
     if !session.setup_complete {
         return Err("Verify your recovery kit before using this vault.".into());
     }
@@ -154,7 +148,7 @@ fn persist_payload(
     session: &mut UnlockedVault,
     mut next_payload: VaultPayload,
     keep_previous: bool,
-) -> Result<(), SaveFailure> {
+) -> VaultResult<()> {
     let result = (|| {
         next_payload.revision += 1;
         let next_records = VaultRecordStore::from_payload(&next_payload)?;
@@ -224,7 +218,7 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
     if let Err(error) = persist_payload(session, payload.clone(), false) {
         session.recovery_kdf = previous_kdf;
         session.recovery_wrap = previous_wrap;
-        return Err(error.into());
+        return Err(error);
     }
     Ok(recovery_kit_for_display)
 }
@@ -258,7 +252,7 @@ pub fn complete_recovery_setup_for_session(
     session.setup_complete = true;
     if let Err(error) = persist_session(session) {
         session.setup_complete = false;
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }
@@ -315,7 +309,7 @@ pub fn rotate_master_password_for_session(
         session.recovery_wrap = previous_recovery_wrap;
         session.pin_wrap = previous_pin_wrap;
         session.hello_wrap = previous_hello_wrap;
-        return Err(error.into());
+        return Err(error);
     }
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
@@ -343,7 +337,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
     });
     if let Err(error) = persist_session(session) {
         session.pin_wrap = previous;
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }
@@ -352,7 +346,7 @@ pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.pin_wrap.take();
     if let Err(error) = persist_session(session) {
         session.pin_wrap = previous;
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }
@@ -362,7 +356,7 @@ pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> Va
     let previous = session.hello_wrap.replace(wrap);
     if let Err(error) = persist_session(session) {
         session.hello_wrap = previous;
-        return Err(error.into());
+        return Err(error);
     }
     if let Some(old) = previous {
         crate::windows_hello::delete_key(&old.key_name);
@@ -375,7 +369,7 @@ pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> 
     let previous = session.hello_wrap.take();
     if let Err(error) = persist_session(session) {
         session.hello_wrap = previous;
-        return Err(error.into());
+        return Err(error);
     }
     if let Some(old) = previous {
         crate::windows_hello::delete_key(&old.key_name);
@@ -422,14 +416,14 @@ pub fn derive_pin_wrapping_key(pin: &str, pin_wrap: &PinWrap) -> VaultResult<[u8
 pub fn commit_payload_change(
     session: &mut UnlockedVault,
     next_payload: VaultPayload,
-) -> Result<(), SaveFailure> {
+) -> VaultResult<()> {
     persist_payload(session, next_payload, true)
 }
 
 pub fn commit_payload_change_without_previous(
     session: &mut UnlockedVault,
     next_payload: VaultPayload,
-) -> Result<(), SaveFailure> {
+) -> VaultResult<()> {
     persist_payload(session, next_payload, false)
 }
 
@@ -913,7 +907,7 @@ pub fn atomic_replace(destination: &Path, bytes: &[u8]) -> VaultResult<()> {
     drop(file);
     if let Err(error) = replace_file(&temporary, destination) {
         let _ = fs::remove_file(&temporary);
-        return Err(error.into());
+        return Err(error);
     }
     Ok(())
 }
