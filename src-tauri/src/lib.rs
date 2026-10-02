@@ -16,7 +16,7 @@ mod vault;
 pub(crate) use adapters::network::website_icons;
 pub(crate) use adapters::platform::{
     app_identity, browser_host, browser_pipe, capabilities, clipboard, crash_protection,
-    desktop_shell, dll_search, session_guard,
+    desktop_settings, desktop_shell, dll_search, session_guard,
 };
 
 #[allow(unused_imports)]
@@ -158,6 +158,8 @@ macro_rules! sesame_invoke_handler {
             desktop_shell::set_quick_access_shortcut,
             desktop_shell::get_autostart_enabled,
             desktop_shell::set_autostart_enabled,
+            desktop_settings::get_website_icons_enabled,
+            desktop_settings::set_website_icons_enabled,
             website_icons::get_website_icon,
             website_icons::clear_website_icon_cache,
             website_icons::get_website_icon_cache_status,

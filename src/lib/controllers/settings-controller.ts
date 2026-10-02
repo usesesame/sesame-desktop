@@ -36,6 +36,9 @@ import {
   getServiceConnectionStatus,
   getVaultStatus,
   getWebsiteIconCacheStatus,
+  getWebsiteIconsEnabled,
+  grantPresence,
+  PRESENCE_REQUIRED,
 	linkDesktopService,
 	onDesktopUpdateProgress,
   previewMode,
@@ -48,6 +51,7 @@ import {
   setQuickAccessShortcut,
   setTrayEnabled,
   setUnlockPin,
+  setWebsiteIconsEnabled,
 } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
@@ -98,6 +102,9 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     quickAccessShortcutWorking: false,
     autostartEnabled: false,
     autostartWorking: false,
+    siteIconsWorking: false,
+    siteIconsPresenceRequired: false,
+    siteIconsPresencePassword: '',
     websiteIconCacheWorking: false,
     websiteIconCache: emptyWebsiteIconCache,
     changeMasterPasswordOpen: false,
@@ -121,6 +128,41 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   async function refreshWebsiteIconCache() {
     try { state.patch({ websiteIconCache: await getWebsiteIconCacheStatus() }) } catch { /* non-critical */ }
+  }
+
+  async function applyStoredWebsiteIconsSetting() {
+    const stored = await getWebsiteIconsEnabled().catch(() => undefined)
+    if (stored === undefined) return
+    if (stored === null) {
+      if (settings.value().siteIconsEnabled) {
+        settings.patch({ siteIconsEnabled: false })
+        storeSiteIcons(false)
+        feedback.showNotice('Website icons are off', 'Turn them on again in Settings to confirm the change on this device.')
+      }
+      return
+    }
+    if (stored !== settings.value().siteIconsEnabled) {
+      settings.patch({ siteIconsEnabled: stored })
+      storeSiteIcons(stored)
+    }
+  }
+
+  async function runWebsiteIconsUpdate(enabled: boolean) {
+    try {
+      await setWebsiteIconsEnabled(enabled)
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ siteIconsPresenceRequired: true, siteIconsPresencePassword: '' })
+        feedback.setErrorMessage('Confirm your master password before Sesame turns on website icons.')
+        return
+      }
+      feedback.setError(error)
+      return
+    }
+    state.patch({ siteIconsPresenceRequired: false, siteIconsPresencePassword: '' })
+    settings.patch({ siteIconsEnabled: enabled })
+    storeSiteIcons(enabled)
+    feedback.showNotice(enabled ? 'Website icons enabled' : 'Website icons disabled', enabled ? 'Sesame will reuse each downloaded icon for up to 30 days.' : 'Saved logins will use their initials instead.')
   }
 
   async function refreshAutostartStatus() {
@@ -234,6 +276,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
       void refreshDiagnosticStatus()
       void refreshWebsiteIconCache()
+      void applyStoredWebsiteIconsSetting()
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
@@ -280,10 +323,34 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     cycleTheme() {
       setTheme(nextTheme(settings.value().theme))
     },
-    setSiteIconsEnabled(enabled: boolean) {
-      settings.patch({ siteIconsEnabled: enabled })
-      storeSiteIcons(enabled)
-      feedback.showNotice(enabled ? 'Website icons enabled' : 'Website icons disabled', enabled ? 'Sesame will reuse each downloaded icon for up to 30 days.' : 'Saved logins will use their initials instead.')
+    async setSiteIconsEnabled(enabled: boolean) {
+      if (state.value().siteIconsWorking) return
+      state.patch({ siteIconsWorking: true })
+      feedback.clearError()
+      try {
+        await runWebsiteIconsUpdate(enabled)
+      } finally {
+        state.patch({ siteIconsWorking: false })
+      }
+    },
+    async confirmSiteIconsPresence() {
+      const secret = state.value().siteIconsPresencePassword
+      if (!secret || state.value().siteIconsWorking) return
+      state.patch({ siteIconsWorking: true })
+      feedback.clearError()
+      try {
+        await grantPresence(secret)
+        state.patch({ siteIconsPresencePassword: '' })
+        await runWebsiteIconsUpdate(true)
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ siteIconsWorking: false })
+      }
+    },
+    cancelSiteIconsPresence() {
+      state.patch({ siteIconsPresenceRequired: false, siteIconsPresencePassword: '', siteIconsWorking: false })
+      feedback.clearError()
     },
     async clearWebsiteIcons() {
       if (state.value().websiteIconCacheWorking) return
@@ -532,6 +599,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       modal.closeAll()
       state.patch({
         pinSetupValue: '', pinSetupConfirm: '', pinWorking: false, helloWorking: false,
+        siteIconsWorking: false, siteIconsPresenceRequired: false, siteIconsPresencePassword: '',
         currentMasterPassword: '', newMasterPassword: '',
         confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false,
         changingMasterPassword: false,

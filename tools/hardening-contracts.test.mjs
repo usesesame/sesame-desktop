@@ -176,7 +176,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   )
 
   const handler = read('src-tauri', 'src', 'lib.rs')
-  const registeredCommands = [...handler.matchAll(/(?:commands::(?:[a-z0-9_]+::)*|clipboard::|desktop_shell::|website_icons::|adapters::platform::external_url::)([a-z0-9_]+),/g)]
+  const registeredCommands = [...handler.matchAll(/(?:commands::(?:[a-z0-9_]+::)*|clipboard::|desktop_settings::|desktop_shell::|website_icons::|adapters::platform::external_url::)([a-z0-9_]+),/g)]
     .map((match) => match[1])
   const permissionCommands = new Set(
     [...permissions.matchAll(/commands\.allow\s*=\s*\[([\s\S]*?)\]/g)]

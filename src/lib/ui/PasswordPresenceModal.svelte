@@ -2,11 +2,33 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
+  type PresenceIntent = 'reveal' | 'copy' | 'enable-icons'
+
   export let presenceSecret = ''
-  export let intent: 'reveal' | 'copy' = 'reveal'
+  export let intent: PresenceIntent = 'reveal'
   export let errorMessage = ''
   export let onCancel: () => void
   export let onConfirm: () => void
+
+  const copyByIntent: Record<PresenceIntent, { heading: string; description: string; action: string }> = {
+    reveal: {
+      heading: 'Show this password',
+      description: 'Sesame asks for your master password again before it reveals a saved password.',
+      action: 'Show password',
+    },
+    copy: {
+      heading: 'Copy this password',
+      description: 'Sesame asks for your master password again before it copies a saved password. The password stays hidden.',
+      action: 'Copy password',
+    },
+    'enable-icons': {
+      heading: 'Turn on website icons',
+      description: 'Sesame asks for your master password before it turns on website icon downloads for this device.',
+      action: 'Turn on',
+    },
+  }
+
+  $: copy = copyByIntent[intent]
 </script>
 
 <ModalShell
@@ -18,8 +40,8 @@
   modalClass="presence-modal"
 >
   <span class="confirm-icon"><Icon name="key" size={20} /></span>
-  <h2 id="password-presence-heading">{intent === 'copy' ? 'Copy this password' : 'Show this password'}</h2>
-  <p id="password-presence-description">{intent === 'copy' ? 'Sesame asks for your master password again before it copies a saved password. The password stays hidden.' : 'Sesame asks for your master password again before it reveals a saved password.'}</p>
+  <h2 id="password-presence-heading">{copy.heading}</h2>
+  <p id="password-presence-description">{copy.description}</p>
   <form novalidate on:submit|preventDefault={onConfirm}>
     <label class="delete-vault-input" for="presence-password">Master password</label>
     <input
@@ -35,7 +57,7 @@
     {#if errorMessage}<p id="presence-error" class="form-error" role="alert">{errorMessage}</p>{/if}
     <div class="confirm-actions">
       <button type="button" class="secondary-button" on:click={onCancel}>Cancel</button>
-      <button type="submit" class="primary-button" disabled={!presenceSecret}>{intent === 'copy' ? 'Copy password' : 'Show password'}</button>
+      <button type="submit" class="primary-button" disabled={!presenceSecret}>{copy.action}</button>
     </div>
   </form>
 </ModalShell>
