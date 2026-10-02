@@ -100,14 +100,19 @@ commands.allow = [
 identifier = "backup-import"
 description = "Import, backup, export, restore, verification, and local-vault deletion for the main window."
 commands.allow = [
+  "choose_import_file",
   "preview_import",
   "commit_import",
   "cancel_import",
   "create_backup",
+  "choose_backup_export_destination",
   "export_backup",
+  "choose_csv_export_destination",
   "export_vault_csv",
+  "choose_recovery_kit_destination",
   "export_recovery_kit",
   "delete_local_vault",
+  "choose_backup_for_restore",
   "inspect_backup",
   "verify_backup",
   "restore_backup",
@@ -136,6 +141,7 @@ description = "Local diagnostic recording, review, export, and clearing for the 
 commands.allow = [
   "record_diagnostic",
   "get_diagnostic_status",
+  "choose_diagnostics_destination",
   "export_diagnostics",
   "clear_diagnostics",
 ]
@@ -232,4 +238,4 @@ commands.allow = [
 [[permission]]
 identifier = "desktop-e2e"
 description = "Compile-time-gated desktop test bridge for the main window."
-commands.allow = ["desktop_e2e_config"]
+commands.allow = ["desktop_e2e_config", "wdio_issue_file_choice"]

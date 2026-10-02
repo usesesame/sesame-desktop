@@ -108,14 +108,19 @@ macro_rules! sesame_invoke_handler {
             commands::restore_history_version,
             commands::merge_duplicate_logins,
             commands::get_merge_comparison,
+            commands::choose_import_file,
             commands::preview_import,
             commands::commit_import,
             commands::cancel_import,
             commands::create_backup,
+            commands::choose_backup_export_destination,
             commands::export_backup,
+            commands::choose_csv_export_destination,
             commands::export_vault_csv,
+            commands::choose_recovery_kit_destination,
             commands::export_recovery_kit,
             commands::delete_local_vault,
+            commands::choose_backup_for_restore,
             commands::inspect_backup,
             commands::verify_backup,
             commands::restore_backup,
@@ -130,6 +135,7 @@ macro_rules! sesame_invoke_handler {
             commands::download_and_install_desktop_update,
             commands::record_diagnostic,
             commands::get_diagnostic_status,
+            commands::choose_diagnostics_destination,
             commands::export_diagnostics,
             commands::clear_diagnostics,
             adapters::platform::external_url::open_external_url,
@@ -200,6 +206,7 @@ macro_rules! sesame_wdio_handler {
     () => {
         sesame_invoke_handler![
             desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
             commands::sync::sync_status,
             commands::sync::sync_enroll_device,
             commands::sync::sync_this_device_fingerprint,
@@ -226,7 +233,10 @@ macro_rules! sesame_wdio_handler {
 #[cfg(all(feature = "wdio", not(feature = "sync-preview")))]
 macro_rules! sesame_wdio_handler {
     () => {
-        sesame_invoke_handler![desktop_e2e::desktop_e2e_config]
+        sesame_invoke_handler![
+            desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
+        ]
     };
 }
 
@@ -279,6 +289,7 @@ pub fn run() {
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
         .manage(commands::QuickAccessConfirmations::default())
+        .manage(commands::FileSelectionState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())

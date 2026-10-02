@@ -99,8 +99,6 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'core:window:allow-toggle-maximize',
     'core:webview:deny-internal-toggle-devtools',
     'clipboard-manager:allow-write-text',
-    'dialog:allow-save',
-    'dialog:allow-open',
     'vault-lifecycle',
     'vault-read',
     'vault-edit',
@@ -138,6 +136,13 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   const vaultClient = read('src', 'lib', 'vault.ts')
   assert.doesNotMatch(vaultClient, /@tauri-apps\/plugin-opener|openUrl\(/)
   assert.match(vaultClient, /invoke\('open_external_url', \{ url, purpose \}\)/)
+  for (const path of filesMatching(/\.(ts|svelte)$/, join(root, 'src'))) {
+    assert.doesNotMatch(
+      readFileSync(path, 'utf8'),
+      /@tauri-apps\/plugin-dialog/,
+      `${relative(root, path)} can open a native file dialog without going through Rust`,
+    )
+  }
   const externalUrl = read('src-tauri', 'src', 'adapters', 'platform', 'external_url.rs')
   assert.match(externalUrl, /matches!\(parsed\.scheme\(\), "http" \| "https"\)/)
   assert.match(externalUrl, /parsed\.username\(\)\.is_empty\(\)/)
@@ -515,6 +520,58 @@ test('desktop updates use an account-independent signed static manifest', () => 
     .filter((line) => !/^\s*echo\b/.test(line))
     .join('\n')
   assert.doesNotMatch(commands, /gh release create|softprops\/action-gh-release/, 'the release workflow creates a GitHub release')
+})
+
+test('every file command resolves its path through a Rust-issued choice', () => {
+  const commands = [
+    ['backups.rs', 'export_backup'],
+    ['backups.rs', 'export_vault_csv'],
+    ['backups.rs', 'export_recovery_kit'],
+    ['backups.rs', 'inspect_backup'],
+    ['backups.rs', 'verify_backup'],
+    ['backups.rs', 'restore_backup'],
+    ['imports.rs', 'preview_import'],
+    ['support.rs', 'export_diagnostics'],
+  ]
+  for (const [file, command] of commands) {
+    const source = read('src-tauri', 'src', 'commands', file)
+    const start = source.indexOf(`pub fn ${command}(`)
+    assert.ok(start >= 0, `${command} does not exist in ${file}`)
+    const next = source.indexOf('\n#[tauri::command]', start)
+    const body = source.slice(start, next === -1 ? source.length : next)
+    const resolution = command === 'restore_backup' ? /claim\(/ : /resolve_path\(/
+    assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
+  }
+
+  const selection = read('src-tauri', 'src', 'commands', 'file_selection.rs')
+  const resolveBody = braceBody(selection, selection.indexOf('pub(crate) fn resolve_path('))
+  assert.match(
+    resolveBody,
+    /#\[cfg\(feature = "wdio"\)\][\s\S]*PathBuf::from\(path\)[\s\S]*#\[cfg\(not\(feature = "wdio"\)\)\]/,
+    'the raw path bypass is not confined to the wdio feature',
+  )
+  assert.match(
+    selection,
+    /#\[cfg\(feature = "wdio"\)\]\s*#\[tauri::command\]\s*pub fn wdio_issue_file_choice/,
+    'the file-choice test bridge is not confined to the wdio feature',
+  )
+})
+
+test('the restore gate redeems a Rust-issued file choice and never a raw path', () => {
+  const gate = read('tools', 'run-vault-restore-gate.mjs')
+  const calls = [...gate.matchAll(/bridge\.call\('restore_backup'/g)]
+  assert.ok(calls.length > 0, 'the restore gate never calls restore_backup')
+  for (const call of calls) {
+    const args = callArgumentSlice(gate, call.index + 'bridge.call'.length)
+    assert.ok(args, 'a restore_backup call could not be read')
+    assert.match(args, /\btoken\b/, 'a restore_backup call does not pass a Rust-issued token')
+    assert.doesNotMatch(args, /\bsource\b/, 'a restore_backup call still passes a raw source path')
+  }
+  assert.match(
+    gate,
+    /bridge\.call\('wdio_issue_file_choice'/,
+    'the restore gate never asks the Rust bridge for a file choice',
+  )
 })
 
 test('the installed-app test bridge is excluded from normal desktop builds', () => {

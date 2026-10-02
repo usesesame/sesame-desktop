@@ -1,7 +1,8 @@
-use std::{collections::HashSet, path::Path};
+use std::collections::HashSet;
 
 use tauri::State;
 
+use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{parse_import_entries, read_import_file, validate_import_entries};
 use crate::vault::pending_import::{take_matching, PendingImport};
@@ -47,9 +48,11 @@ fn insert_imported_items(
 
 #[tauri::command]
 pub fn preview_import(
-    path: String,
+    token: Option<String>,
+    path: Option<String>,
     source: String,
     state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<ImportPreviewResult> {
     // Unlock check first: a locked renderer must not use this as a file-format oracle.
     let unlocked = state
@@ -60,7 +63,14 @@ pub fn preview_import(
     if !unlocked {
         return Err("Unlock your vault before importing.".into());
     }
-    let content = read_import_file(Path::new(&path))?;
+    let path = resolve_path(
+        &selection,
+        token.as_deref(),
+        path.as_deref(),
+        FilePurpose::ImportSource,
+        true,
+    )?;
+    let content = read_import_file(&path)?;
     let mut parsed = parse_import_entries(&content, &source)?;
     drop(content);
     let missing_urls = parsed

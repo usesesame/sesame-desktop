@@ -17,7 +17,7 @@ beforeEach(() => {
 
 function renderRestore(compatibility: BackupCompatibility, overrides: Record<string, unknown> = {}) {
   return render(RestoreModal, {
-    restoreSelection: { source: '/tmp/fictional-backup.sesame', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true },
+    restoreSelection: { token: 'fictional-backup-token', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true },
     onClose: vi.fn(),
     onConfirm: vi.fn(),
     onConfirmPresence: vi.fn(),

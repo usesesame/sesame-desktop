@@ -27,6 +27,10 @@ function parseArguments(argv) {
   return options
 }
 
+function refused(result, message) {
+  return { ok: result.ok === false, value: result.value, error: result.ok === false ? undefined : message }
+}
+
 async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   const steps = []
   const password = manifestEntry.secrets.masterPassword
@@ -46,7 +50,9 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   const activeDigestBefore = sha256(await readFile(vaultPath))
 
   recordStep(steps, 'lock.before_locked_refusal', await bridge.call('lock_vault', {}))
-  const lockedRefusal = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  const issued = recordStep(steps, 'restore_backup.token_issued', await bridge.call('wdio_issue_file_choice', { path: fixture }))
+  const token = issued.value?.token
+  const lockedRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
   const lockedRefusalMessage = String(lockedRefusal.error ?? '')
   recordStep(steps, 'restore_backup.locked', {
     ok: lockedRefusal.ok === false && lockedRefusalMessage.includes('Unlock your vault before restoring a backup.'),
@@ -59,7 +65,7 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   })
   recordStep(steps, 'unlock.after_locked_refusal', await bridge.call('unlock_vault', { request: { masterPassword: createdPassword } }))
 
-  const presenceRefusal = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  const presenceRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
   const presenceRefusalMessage = String(presenceRefusal.error ?? '')
   recordStep(steps, 'restore_backup.without_presence', {
     ok: presenceRefusal.ok === false && presenceRefusalMessage.includes('presenceRequired'),
@@ -72,7 +78,7 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   })
 
   recordStep(steps, 'grant_presence.active', await bridge.call('grant_presence', { secret: createdPassword }))
-  const refused = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  const refused = await bridge.call('restore_backup', { request: { token, secret: password } })
   const refusalMessage = String(refused.error ?? '')
   recordStep(steps, 'restore_backup.different_vault', {
     ok: refused.ok === false && refusalMessage.includes('belongs to a different vault'),
@@ -87,12 +93,20 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   recordStep(steps, 'delete_local_vault', await bridge.call('delete_local_vault', { masterPassword: createdPassword }))
   recordStep(steps, 'delete_local_vault.removed', { ok: (await stat(vaultPath).catch(() => null)) === null })
 
-  const fresh = await bridge.call('restore_backup', { request: { source: fixture, secret: password } })
+  recordStep(steps, 'restore_backup.wrong_password_refused', refused(
+    await bridge.call('restore_backup', { request: { token, secret: 'fictional wrong master password' } }),
+    'A wrong master password restored the vault.',
+  ))
+  const fresh = await bridge.call('restore_backup', { request: { token, secret: password } })
   recordStep(steps, 'restore_backup.fresh', {
     ok: fresh.ok === true && !fresh.value?.safetyBackupName,
     error: fresh.error ?? 'the fresh restore named a safety backup',
     value: { safetyBackupName: fresh.value?.safetyBackupName ?? null },
   })
+  recordStep(steps, 'restore_backup.replay_refused', refused(
+    await bridge.call('restore_backup', { request: { token, secret: password } }),
+    'The spent restore token was accepted again.',
+  ))
   recordStep(steps, 'restore.source_unchanged', { ok: sha256(await readFile(fixture)) === beforeDigest })
 
   recordStep(steps, 'lock.before_unlock', await bridge.call('lock_vault', {}))
