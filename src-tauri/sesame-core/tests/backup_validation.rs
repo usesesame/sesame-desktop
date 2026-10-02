@@ -2,14 +2,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sesame_core::backup::validate_backup_file;
 use sesame_core::types::{CipherBlob, KdfParams, PinWrap, VaultFile};
-use sesame_core::VAULT_FORMAT_VERSION;
+use sesame_core::{MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB, VAULT_FORMAT_VERSION};
 
 fn kdf() -> KdfParams {
     KdfParams {
         algorithm: "argon2id".into(),
         salt: URL_SAFE_NO_PAD.encode([7_u8; 16]),
-        memory_kib: 19 * 1024,
-        iterations: 2,
+        memory_kib: MIN_KDF_MEMORY_KIB,
+        iterations: MIN_KDF_ITERATIONS,
         parallelism: 1,
     }
 }

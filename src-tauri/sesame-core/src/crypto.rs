@@ -10,7 +10,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     types::*, util::fill_random, VaultResult, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB,
-    MAX_KDF_PARALLELISM, MAX_KDF_TOTAL_WORK, MAX_VAULT_FILE_BYTES, VAULT_SIZE_LIMIT_MESSAGE,
+    MAX_KDF_PARALLELISM, MAX_KDF_TOTAL_WORK, MAX_VAULT_FILE_BYTES, MIN_KDF_ITERATIONS,
+    MIN_KDF_MEMORY_KIB, VAULT_SIZE_LIMIT_MESSAGE,
 };
 
 pub fn default_kdf_params() -> KdfParams {
@@ -19,8 +20,8 @@ pub fn default_kdf_params() -> KdfParams {
     KdfParams {
         algorithm: "argon2id".into(),
         salt: URL_SAFE_NO_PAD.encode(salt),
-        memory_kib: 65_536,
-        iterations: 3,
+        memory_kib: MIN_KDF_MEMORY_KIB,
+        iterations: MIN_KDF_ITERATIONS,
         parallelism: 4,
     }
 }
@@ -47,9 +48,9 @@ pub fn derive_key(password: &str, params: &KdfParams) -> VaultResult<[u8; 32]> {
 
 pub fn validate_kdf_params(params: &KdfParams) -> VaultResult<()> {
     if params.algorithm != "argon2id"
-        || params.memory_kib == 0
+        || params.memory_kib < MIN_KDF_MEMORY_KIB
         || params.memory_kib > MAX_KDF_MEMORY_KIB
-        || params.iterations == 0
+        || params.iterations < MIN_KDF_ITERATIONS
         || params.iterations > MAX_KDF_ITERATIONS
         || params.parallelism == 0
         || params.parallelism > MAX_KDF_PARALLELISM
