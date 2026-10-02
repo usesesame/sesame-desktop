@@ -534,7 +534,7 @@ button.no-totp, .credential-button, .more-button {
 .entry-row.selected .entry-title strong { color: var(--accent-link); }
 .entry-row-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: var(--space-3); border: 0; padding: 0; color: inherit; background: transparent; text-align: left; }
 .entry-row-main:focus-visible { border-radius: var(--radius-sm); outline-offset: 4px; }
-.entry-select-box { position: absolute; top: 50%; left: var(--space-3); z-index: 1; margin: -8.5px 0 0; opacity: 0; visibility: hidden; transform: scale(.6); }
+.entry-select-box { position: absolute; top: 50%; left: var(--space-3); z-index: 1; translate: 0 -50%; opacity: 0; visibility: hidden; transform: scale(.6); }
 .entry-list.selecting .entry-select-box { opacity: 1; visibility: visible; transform: none; }
 .entry-list.selecting .entry-row-main { transform: translateX(29px); }
 .entry-list.selecting .entry-favourite { opacity: 0; visibility: hidden; transform: scale(.7); pointer-events: none; }
