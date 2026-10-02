@@ -91,7 +91,7 @@ jobs:
         run: npm run desktop:host:stage
 
       - name: Build the app with the test bridge
-        run: npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --no-bundle
+        run: npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --no-bundle -- --locked
 
       - name: Restore every historical fixture through the app
         shell: bash
