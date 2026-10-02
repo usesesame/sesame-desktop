@@ -335,7 +335,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
         protected_pepper,
         key_wrap,
     });
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -344,7 +344,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
 pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.pin_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -354,7 +354,7 @@ pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
 /// The old KSP key is deleted only after the file no longer references it.
 pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> VaultResult<()> {
     let previous = session.hello_wrap.replace(wrap);
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }
@@ -367,7 +367,7 @@ pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> Va
 /// KSP key deleted only after the vault remains usable by password or kit.
 pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.hello_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }

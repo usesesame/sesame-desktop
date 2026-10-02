@@ -103,6 +103,11 @@ good-faith report that turns out to be out of scope is not held against you.
 Stated plainly so a report does not spend effort on a known position:
 
 - Sesame has not had an independent security audit.
+- PIN unlock is a convenience for the current device, not a second factor for a
+  copied vault file. The pepper inside the PIN wrap is protected by the platform
+  device key (DPAPI on Windows, the desktop wallet on Linux), which a process
+  running as the logged-in user can ask the platform to open. Anyone with the
+  vault file and that access can test six-digit PINs offline.
 - The recovery kit cannot be reset or recovered. That is a design decision, not
   a bug.
 - Sync is not enabled. Preview-only desktop code is gated by the

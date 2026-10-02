@@ -6,7 +6,6 @@ pub const PIN_FAILURES_BEFORE_LOCKOUT: u32 = 5;
 const PIN_BASE_COOLDOWN: Duration = Duration::from_secs(15);
 const PIN_MAX_COOLDOWN: Duration = Duration::from_secs(300);
 
-/// DPAPI-protected on disk: another process cannot lower the count or shorten the cooldown.
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedPinThrottle {

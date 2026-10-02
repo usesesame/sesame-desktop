@@ -122,7 +122,11 @@ icon, or start Sesame with `GDK_BACKEND=x11`.
 Linux keeps Sesame's random device-protection key in the desktop Secret Service
 wallet. PIN peppers, the linked-account token, and local attempt-throttle state
 are authenticated and encrypted with that key. Windows uses DPAPI for the same
-boundary. Windows Hello and auto-type remain unavailable on Linux.
+boundary. The wallet and DPAPI protect this data at rest against other users.
+They do not isolate Sesame from other processes running as the same user, so
+the PIN is a convenience unlock and does not add offline protection against an
+attacker who can also open the device key. Windows Hello and auto-type remain
+unavailable on Linux.
 
 PIN unlock requires a Secret Service wallet provider. When no wallet is
 running, Sesame starts `gnome-keyring-daemon` or `ksecretd` itself, so GNOME,
