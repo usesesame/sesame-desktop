@@ -47,6 +47,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Require npm to read the intake policy
+        run: |
+          test "$(npm config get ignore-scripts)" = "true"
+          test "$(npm config get allow-git)" = "none"
+          test "$(npm config get audit-level)" = "high"
+          test "$(npm config get min-release-age)" = "7"
+
       - name: Check the version contract
         run: npm run desktop:version:check
 
@@ -112,7 +119,7 @@ jobs:
       # Catches a production build that only breaks under release settings,
       # before a human runs it. No bundle, so there is nothing to sign here.
       - name: Build the desktop binary
-        run: npm run tauri -- build --no-bundle
+        run: npm run tauri -- build --no-bundle -- --locked
 
   desktop-linux:
     needs: [lint, typecheck]
@@ -173,8 +180,8 @@ jobs:
       - name: Lint and test the vault core
         run: |
           npm run desktop:lint:rust
-          cargo test --manifest-path src-tauri/Cargo.toml
-          cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+          cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview --locked
 
       # The host registers its manifests, unregisters them, and then completes
       # an authenticated native-messaging exchange with the live broker.
@@ -185,6 +192,7 @@ jobs:
         run: >-
           npm run tauri -- build --bundles deb,rpm,appimage
           --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          -- --locked
 
       # The shipped binary has no test bridge, so the package that installs
       # here is the test-featured build. It exercises the real deb layout,
@@ -193,7 +201,7 @@ jobs:
         env:
           VITE_SESAME_WDIO: 'true'
         run: |
-          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb
+          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb -- --locked
           xvfb-run -a node tools/linux-installed-package-gate.mjs \
             --package "$(ls src-tauri/target/release/bundle/deb/Sesame_*_amd64.deb)" \
             --out linux-package-evidence
