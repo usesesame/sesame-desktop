@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::util::domain_from_url;
 
@@ -2334,6 +2334,14 @@ impl Zeroize for VaultPayload {
     }
 }
 
+impl Drop for VaultPayload {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for VaultPayload {}
+
 impl Zeroize for TaggedItem {
     fn zeroize(&mut self) {
         match self {
@@ -2438,8 +2446,35 @@ impl Zeroize for DocumentMetadata {
         self.expiry_date.zeroize();
         self.notes.zeroize();
         self.tags.zeroize();
+        self.attachments.zeroize();
     }
 }
+
+impl Drop for DocumentMetadata {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for DocumentMetadata {}
+
+impl Zeroize for Attachment {
+    fn zeroize(&mut self) {
+        self.id.zeroize();
+        self.filename.zeroize();
+        self.content_type.zeroize();
+        self.size.zeroize();
+        self.data.zeroize();
+    }
+}
+
+impl Drop for Attachment {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Attachment {}
 
 impl Zeroize for CustomFieldEntry {
     fn zeroize(&mut self) {

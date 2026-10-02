@@ -174,16 +174,17 @@ fn fictional_payload(vault_id: Option<String>) -> VaultPayload {
             revision: 1,
             ..SoftwareLicense::default()
         }],
-        documents: vec![DocumentMetadata {
-            id: "document-alpha".to_string(),
-            title: "Fictional document".to_string(),
-            document_type: "pdf".to_string(),
-            document_number: "DOC-FICTION-001".to_string(),
-            issuing_authority: "Fictional Authority".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..DocumentMetadata::default()
+        documents: vec![{
+            let mut document = DocumentMetadata::default();
+            document.id = "document-alpha".to_string();
+            document.title = "Fictional document".to_string();
+            document.document_type = "pdf".to_string();
+            document.document_number = "DOC-FICTION-001".to_string();
+            document.issuing_authority = "Fictional Authority".to_string();
+            document.created_at = BASE;
+            document.updated_at = BASE + 40;
+            document.revision = 1;
+            document
         }],
         custom_records: vec![CustomRecord {
             id: "custom-alpha".to_string(),

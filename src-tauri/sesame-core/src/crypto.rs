@@ -187,22 +187,19 @@ mod tests {
 
     #[test]
     fn payload_serialization_rejects_an_oversized_change_early() {
-        let payload = VaultPayload {
-            vault_name: "fictional oversized vault".into(),
-            documents: vec![DocumentMetadata {
-                id: "fictional-document".into(),
-                title: "Fictional document".into(),
-                attachments: vec![Attachment {
-                    id: "fictional-attachment".into(),
-                    filename: "fictional.bin".into(),
-                    content_type: "application/octet-stream".into(),
-                    size: 4096,
-                    data: vec![7; 4096],
-                }],
-                ..DocumentMetadata::default()
-            }],
-            ..VaultPayload::default()
-        };
+        let mut document = DocumentMetadata::default();
+        document.id = "fictional-document".into();
+        document.title = "Fictional document".into();
+        document.attachments = vec![Attachment {
+            id: "fictional-attachment".into(),
+            filename: "fictional.bin".into(),
+            content_type: "application/octet-stream".into(),
+            size: 4096,
+            data: vec![7; 4096],
+        }];
+        let mut payload = VaultPayload::default();
+        payload.vault_name = "fictional oversized vault".into();
+        payload.documents = vec![document];
         let encoded = serialize_payload_capped(&payload, 256);
         assert_eq!(encoded.err().as_deref(), Some(VAULT_SIZE_LIMIT_MESSAGE));
         let accepted = serialize_payload_capped(&payload, 64 * 1024).expect("small limit passes");

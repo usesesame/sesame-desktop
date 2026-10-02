@@ -96,10 +96,8 @@ fn the_setup_flag_is_bound_into_the_payload_label() {
     claimed_pending.setup_complete = false;
     assert!(open_vault_with_key(&claimed_pending, key).is_err());
 
-    let pending_payload = VaultPayload {
-        vault_name: "Vault A".to_string(),
-        ..VaultPayload::default()
-    };
+    let mut pending_payload = VaultPayload::default();
+    pending_payload.vault_name = "Vault A".to_string();
     let mut honestly_pending = file.clone();
     honestly_pending.setup_complete = false;
     honestly_pending.payload = encrypt_bytes(

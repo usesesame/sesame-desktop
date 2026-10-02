@@ -565,10 +565,11 @@ mod tests {
                 license_key: "fictional-licence-canary".to_string(),
                 ..SoftwareLicense::default()
             }),
-            TaggedItem::Document(DocumentMetadata {
-                id: "document".to_string(),
-                document_number: "fictional-document-canary".to_string(),
-                ..DocumentMetadata::default()
+            TaggedItem::Document({
+                let mut document = DocumentMetadata::default();
+                document.id = "document".to_string();
+                document.document_number = "fictional-document-canary".to_string();
+                document
             }),
             TaggedItem::CustomRecord(CustomRecord {
                 id: "record".to_string(),
