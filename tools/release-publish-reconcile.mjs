@@ -48,6 +48,8 @@ export function linuxLaneAssetPatterns(version) {
     /^sesame-linux\.cdx\.json$/,
     /^linux-sigstore-evidence\.json$/,
     /^linux-shipped-package\.json$/,
+    /^linux-rpm-shipped-package\.json$/,
+    /^linux-appimage-shipped-package\.json$/,
     /^linux-installed-package\.json$/,
     new RegExp(`^sesame-${escaped}-linux-[^/]+\\.release\\.json(\\.sigstore\\.json)?$`),
     new RegExp(`^Sesame-${escaped}-.*\\.AppImage(\\.sigstore\\.json)?$`),

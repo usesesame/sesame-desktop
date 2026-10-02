@@ -34,6 +34,8 @@ async function evidenceFixture({ omitFormat } = {}) {
   for (const [label, content] of [
     ['sbom', '{"bomFormat":"CycloneDX"}\n'],
     ['shipped', '{"schema":"sesame.linux-shipped-package-run/1"}\n'],
+    ['rpm', '{"schema":"sesame.linux-rpm-shipped-package-run/1"}\n'],
+    ['appimage', '{"schema":"sesame.linux-appimage-shipped-package-run/1"}\n'],
     ['vault', '{"schema":"sesame.linux-installed-package-run/1"}\n'],
   ]) {
     await writeFile(path.join(root, `${label}.json`), content)
@@ -51,6 +53,8 @@ async function evidenceFixture({ omitFormat } = {}) {
     sbom: { filename: 'sbom.json', sha256: await fileSha256(path.join(root, 'sbom.json')), bytes: (await readFile(path.join(root, 'sbom.json'))).length },
     linuxLifecycle: {
       shipped: { filename: 'shipped.json', sha256: await fileSha256(path.join(root, 'shipped.json')), bytes: (await readFile(path.join(root, 'shipped.json'))).length },
+      rpm: { filename: 'rpm.json', sha256: await fileSha256(path.join(root, 'rpm.json')), bytes: (await readFile(path.join(root, 'rpm.json'))).length },
+      appimage: { filename: 'appimage.json', sha256: await fileSha256(path.join(root, 'appimage.json')), bytes: (await readFile(path.join(root, 'appimage.json'))).length },
       vault: { filename: 'vault.json', sha256: await fileSha256(path.join(root, 'vault.json')), bytes: (await readFile(path.join(root, 'vault.json'))).length },
     },
     sigstore: { issuer: 'https://token.actions.githubusercontent.com', certificateIdentity: identity, transparencyLogRequired: true },
@@ -78,7 +82,7 @@ async function evidenceFixture({ omitFormat } = {}) {
   return { root, manifest, manifestFilename, evidence, artifacts }
 }
 
-test('the Linux release manifest carries exactly the three packages and both lifecycle records', async () => {
+test('the Linux release manifest carries exactly the three packages and all four lifecycle records', async () => {
   const value = await evidenceFixture()
   try {
     const manifest = validateLinuxReleaseManifest(value.manifest)

@@ -21,8 +21,6 @@ env:
   SESAME_RELEASE_NOTES_URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
 
 jobs:
-  # The three packages are built once, then the shipped deb and the
-  # test-featured deb each pass their own gate before any evidence is frozen.
   build-and-test:
     runs-on: ubuntu-24.04
     environment: release-build
@@ -95,10 +93,17 @@ jobs:
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
+      - name: Verify the vendored glib tree
+        run: node tools/verify-glib-vendor.mjs
+
+      - name: Pin the Linux bundling tools by version and hash
+        run: node tools/prepare-linux-bundle-tools.mjs
+
       - name: Build the immutable Linux packages
         run: >-
           npx tauri build --bundles deb,rpm,appimage
-          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
+          -- --locked
 
       - name: Freeze the packages before the test build replaces the bundle
         run: |
@@ -114,11 +119,26 @@ jobs:
       - name: Strip the host-provided Wayland libraries from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"
 
-      - name: Prove the shipped package installs, launches, and uninstalls
+      - name: Prove the shipped deb installs, launches, and unregisters
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format deb \
             --package "$(ls release-packages/*.deb)" \
             --out linux-shipped-evidence
+
+      - name: Prove the shipped rpm installs, launches, and unregisters
+        run: |
+          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format rpm \
+            --package "$(ls release-packages/*.rpm)" \
+            --out linux-rpm-shipped-evidence
+
+      - name: Prove the shipped AppImage launches and refuses registration
+        run: |
+          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format appimage \
+            --package "$(ls release-packages/*.AppImage)" \
+            --out linux-appimage-shipped-evidence
 
       # The shipped binary has no test bridge, so vault behavior is proven on
       # the test-featured package through the same installed-package layout.
@@ -126,7 +146,7 @@ jobs:
         env:
           VITE_SESAME_WDIO: 'true'
         run: |
-          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb
+          npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb -- --locked
           xvfb-run -a node tools/linux-installed-package-gate.mjs \
             --package "$(ls src-tauri/target/release/bundle/deb/*.deb)" \
             --out linux-vault-evidence
@@ -135,6 +155,8 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           SESAME_SHIPPED_PACKAGE_EVIDENCE=linux-shipped-evidence/linux-shipped-package.json \
+          SESAME_RPM_PACKAGE_EVIDENCE=linux-rpm-shipped-evidence/linux-rpm-shipped-package.json \
+          SESAME_APPIMAGE_PACKAGE_EVIDENCE=linux-appimage-shipped-evidence/linux-appimage-shipped-package.json \
           SESAME_VAULT_PACKAGE_EVIDENCE=linux-vault-evidence/linux-installed-package.json \
           node tools/prepare-linux-release-evidence.mjs \
             "$(ls release-packages/*.AppImage)" \
