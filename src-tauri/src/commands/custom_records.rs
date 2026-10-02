@@ -23,7 +23,7 @@ fn normalised_field(field: CustomFieldEntry) -> VaultResult<CustomFieldEntry> {
         return Err("A field value is too long.".into());
     }
     let kind = if FIELD_KINDS.contains(&field.kind.as_str()) {
-        field.kind
+        field.kind.clone()
     } else {
         "text".to_string()
     };

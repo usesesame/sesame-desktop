@@ -274,14 +274,13 @@ mod browser_update_tests {
 
     fn payload_with_stored_login() -> VaultPayload {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            password: "fictional-stored-secret".to_string(),
-            updated_at: 41,
-            password_updated_at: 40,
-            revision: 7,
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.password = "fictional-stored-secret".to_string();
+        entry.updated_at = 41;
+        entry.password_updated_at = 40;
+        entry.revision = 7;
+        payload.entries.push(entry);
         payload
     }
 

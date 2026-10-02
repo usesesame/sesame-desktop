@@ -57,8 +57,8 @@ pub fn restore_item(payload: &VaultPayload, id: &str) -> VaultResult<VaultPayloa
         .iter()
         .position(|trashed| trashed.item.id() == id)
         .ok_or("That deleted item is no longer in trash.")?;
-    let trashed = next.trash.remove(position);
-    next.insert_active_item(trashed.item)
+    let mut trashed = next.trash.remove(position);
+    next.insert_active_item(&mut trashed.item)
         .map_err(|_| occupied_id_error())?;
     Ok(next)
 }

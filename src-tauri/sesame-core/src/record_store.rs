@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::crypto::{decrypt_bytes, encrypt_bytes};
 use crate::history::HISTORY_RETENTION_SECONDS;
@@ -34,6 +34,14 @@ impl Zeroize for VaultHeader {
         self.revision.zeroize();
     }
 }
+
+impl Drop for VaultHeader {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for VaultHeader {}
 
 struct SealedRecord {
     id: String,
@@ -177,7 +185,7 @@ impl VaultRecordStore {
                 item.zeroize();
                 return Err(invalid_store());
             }
-            push_active(&mut payload, item);
+            push_active(&mut payload, &mut item);
         }
         for record in &self.trash {
             let mut entry: TrashedItem = open_record(key, "trash", record)?;
@@ -332,17 +340,17 @@ fn open_active_record(key: &[u8; 32], record: &SealedRecord) -> VaultResult<Tagg
     Ok(item)
 }
 
-fn push_active(payload: &mut VaultPayload, item: TaggedItem) {
+fn push_active(payload: &mut VaultPayload, item: &mut TaggedItem) {
     match item {
-        TaggedItem::Login(item) => payload.entries.push(item),
-        TaggedItem::Identity(item) => payload.identities.push(item),
-        TaggedItem::SecureNote(item) => payload.secure_notes.push(item),
-        TaggedItem::Card(item) => payload.cards.push(item),
-        TaggedItem::WifiNetwork(item) => payload.wifi_networks.push(item),
-        TaggedItem::SshKey(item) => payload.ssh_keys.push(item),
-        TaggedItem::SoftwareLicense(item) => payload.software_licenses.push(item),
-        TaggedItem::Document(item) => payload.documents.push(item),
-        TaggedItem::CustomRecord(item) => payload.custom_records.push(item),
+        TaggedItem::Login(item) => payload.entries.push(std::mem::take(item)),
+        TaggedItem::Identity(item) => payload.identities.push(std::mem::take(item)),
+        TaggedItem::SecureNote(item) => payload.secure_notes.push(std::mem::take(item)),
+        TaggedItem::Card(item) => payload.cards.push(std::mem::take(item)),
+        TaggedItem::WifiNetwork(item) => payload.wifi_networks.push(std::mem::take(item)),
+        TaggedItem::SshKey(item) => payload.ssh_keys.push(std::mem::take(item)),
+        TaggedItem::SoftwareLicense(item) => payload.software_licenses.push(std::mem::take(item)),
+        TaggedItem::Document(item) => payload.documents.push(std::mem::take(item)),
+        TaggedItem::CustomRecord(item) => payload.custom_records.push(std::mem::take(item)),
     }
 }
 
@@ -386,22 +394,20 @@ mod tests {
     use super::*;
     use crate::types::VaultEntry;
 
+    fn login(id: &str, title: &str, password: &str) -> VaultEntry {
+        let mut entry = VaultEntry::default();
+        entry.id = id.to_string();
+        entry.title = title.to_string();
+        entry.password = password.to_string();
+        entry
+    }
+
     fn payload() -> VaultPayload {
         let mut payload = VaultPayload::default();
         payload.vault_name = "Fictional vault".to_string();
         payload.entries = vec![
-            VaultEntry {
-                id: "login-a".to_string(),
-                title: "Northwind".to_string(),
-                password: "fictional-alpha-secret".to_string(),
-                ..VaultEntry::default()
-            },
-            VaultEntry {
-                id: "login-b".to_string(),
-                title: "Contoso".to_string(),
-                password: "fictional-beta-secret".to_string(),
-                ..VaultEntry::default()
-            },
+            login("login-a", "Northwind", "fictional-alpha-secret"),
+            login("login-b", "Contoso", "fictional-beta-secret"),
         ];
         payload.vault_id = Some("vault-fictional".to_string());
         payload.revision = 7;
@@ -482,14 +488,33 @@ mod tests {
         assert!(opened.history.is_empty());
         assert!(opened.vault_name.is_empty());
 
-        let mut item = TaggedItem::Login(VaultEntry {
-            id: "login-a".to_string(),
-            password: "fictional-alpha-secret".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut item = TaggedItem::Login(login("login-a", "", "fictional-alpha-secret"));
         item.zeroize();
 
         assert!(matches!(&item, TaggedItem::Login(entry) if entry.password.is_empty()));
+    }
+
+    #[test]
+    fn dropped_vault_header_zeroizes_the_vault_name() {
+        fn require_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+
+        let mut header = VaultHeader {
+            vault_name: "fictional-vault-name".to_string(),
+            folders: vec![Folder {
+                id: "folder-a".to_string(),
+                name: "fictional-folder-name".to_string(),
+            }],
+            vault_id: Some("fictional-vault-id".to_string()),
+            revision: 7,
+        };
+        let pointer = header.vault_name.as_ptr();
+        let length = header.vault_name.len();
+
+        require_zeroize_on_drop::<VaultHeader>();
+        header.zeroize();
+
+        let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+        assert!(bytes.iter().all(|byte| *byte == 0));
     }
 
     #[test]

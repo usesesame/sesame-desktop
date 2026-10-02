@@ -416,13 +416,12 @@ mod tests {
     use crate::vault::VaultEntry;
 
     fn login() -> TaggedItem {
-        TaggedItem::Login(VaultEntry {
-            id: "fictional-login".to_string(),
-            title: "Northwind".to_string(),
-            username: "casey".to_string(),
-            password: "fictional-secret-canary".to_string(),
-            ..VaultEntry::default()
-        })
+        let mut entry = VaultEntry::default();
+        entry.id = "fictional-login".to_string();
+        entry.title = "Northwind".to_string();
+        entry.username = "casey".to_string();
+        entry.password = "fictional-secret-canary".to_string();
+        TaggedItem::Login(entry)
     }
 
     #[test]

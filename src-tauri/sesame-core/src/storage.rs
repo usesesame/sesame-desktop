@@ -852,7 +852,7 @@ pub fn merged_duplicate_payload(
     if merged.recovery_not_applicable {
         merged.backup_codes.clear();
     }
-    merged.backup_codes = unique_backup_codes(merged.backup_codes);
+    merged.backup_codes = unique_backup_codes(std::mem::take(&mut merged.backup_codes));
     merged.updated_at = unix_timestamp();
     merged.revision = merged.revision.saturating_add(1);
 
@@ -949,12 +949,11 @@ mod tests {
         let password = "fictional master password";
         let mut session = unlocked_at(path.clone(), password);
         let mut payload = session.open_payload().expect("opened payload").clone();
-        payload.entries.push(VaultEntry {
-            id: "fictional-login".to_string(),
-            title: "Northwind".to_string(),
-            password: "fictional-secret".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "fictional-login".to_string();
+        entry.title = "Northwind".to_string();
+        entry.password = "fictional-secret".to_string();
+        payload.entries.push(entry);
 
         commit_payload_change(&mut session, payload).expect("persisted session");
 
@@ -980,12 +979,10 @@ mod tests {
             id: "f1".to_string(),
             name: "Work".to_string(),
         });
-        let item = VaultEntry {
-            id: "one".to_string(),
-            title: "Example".to_string(),
-            folder_id: Some("f1".to_string()),
-            ..VaultEntry::default()
-        };
+        let mut item = VaultEntry::default();
+        item.id = "one".to_string();
+        item.title = "Example".to_string();
+        item.folder_id = Some("f1".to_string());
         payload.trash.push(TrashedItem {
             item: TaggedItem::Login(item.clone()),
             deleted_at: 1,
@@ -1034,17 +1031,15 @@ mod tests {
         use crate::types::Card;
 
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            title: "Northwind".to_string(),
-            tags: vec!["Work".to_string()],
-            ..VaultEntry::default()
-        });
-        payload.cards.push(Card {
-            id: "card-a".to_string(),
-            title: "Travel card".to_string(),
-            ..Card::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.title = "Northwind".to_string();
+        entry.tags = vec!["Work".to_string()];
+        payload.entries.push(entry);
+        let mut card = Card::default();
+        card.id = "card-a".to_string();
+        card.title = "Travel card".to_string();
+        payload.cards.push(card);
         let ids: HashSet<String> = ["login-a".to_string(), "card-a".to_string()]
             .into_iter()
             .collect();
@@ -1062,10 +1057,9 @@ mod tests {
     #[test]
     fn added_tags_are_rejected_when_empty_overlong_or_for_missing_items() {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        payload.entries.push(entry);
         let ids: HashSet<String> = ["login-a".to_string()].into_iter().collect();
 
         assert!(payload_with_added_item_tag(&payload, &ids, "   ").is_err());
