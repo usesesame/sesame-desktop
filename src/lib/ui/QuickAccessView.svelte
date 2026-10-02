@@ -2,7 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
-  import { copyToClipboard, getQuickAccessField, getQuickAccessStatus, openQuickAccessItem, previewMode, searchQuickAccessItems } from '../vault'
+  import { confirmQuickAccessField, copyToClipboard, getQuickAccessField, getQuickAccessStatus, openQuickAccessItem, previewMode, searchQuickAccessItems } from '../vault'
   import type { QuickAccessAction, QuickAccessItem } from '../types'
   import { itemKindIcon, itemKindLabel } from '../vault-items'
 
@@ -78,13 +78,20 @@
       }
       return
     }
-    if (action.guarded && confirming?.field !== action.field) {
-      confirming = { id: item.id, field: action.field }
+    if (action.guarded && (confirming?.id !== item.id || confirming?.field !== action.field)) {
+      workingId = item.id
+      try {
+        await confirmQuickAccessField(item.id, action.field)
+        confirming = { id: item.id, field: action.field }
+      } catch {
+        confirming = null
+      }
+      workingId = ''
       return
     }
     workingId = item.id
     try {
-      const { value } = await getQuickAccessField(item.id, action.field, action.guarded)
+      const { value } = await getQuickAccessField(item.id, action.field)
       if (!value) {
         workingId = ''
         return
