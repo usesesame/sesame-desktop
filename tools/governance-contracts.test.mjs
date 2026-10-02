@@ -29,6 +29,29 @@ const jobBlock = (body, job) => {
   return next ? rest.slice(0, afterFirst + next.index) : rest
 }
 
+const runScriptBlocks = (body) => {
+  const lines = body.split('\n')
+  const scripts = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(\s*)run:\s*(.*)$/)
+    if (!match) continue
+    const [, indentation, value] = match
+    if (!/^[>|][+-]?\s*$/.test(value)) {
+      scripts.push(value)
+      continue
+    }
+    const content = []
+    while (index + 1 < lines.length) {
+      const line = lines[index + 1]
+      if (line.trim() !== '' && line.match(/^\s*/)[0].length <= indentation.length) break
+      content.push(line)
+      index += 1
+    }
+    scripts.push(content.join('\n'))
+  }
+  return scripts
+}
+
 test('every workflow declares permissions and pins every third-party action', () => {
   assert.ok(workflows.length >= 4, `expected this repository's workflows, found ${workflows.length}`)
 
@@ -57,21 +80,81 @@ test('a workflow that writes says so at the job that writes', () => {
       `${workflow} should default to exactly contents: read at the top and widen per job`,
     )
   }
-  for (const [workflow, signingJob] of [
-    ['release-early-access.yml', 'build-and-attest'],
-    ['release-linux-early-access.yml', 'build-and-test'],
+  for (const [workflow, signingJob, publishJob] of [
+    ['release-early-access.yml', 'sign-and-attest', 'publish-candidate'],
+    ['release-linux-early-access.yml', 'sign-and-attest', 'publish'],
   ]) {
     const body = read('.github', 'workflows', workflow)
     const job = jobBlock(body, signingJob)
     assert.match(job, /^\s+id-token:\s*write\s*$/m, `${workflow} signs keylessly in ${signingJob} and needs an OIDC token there`)
     assert.match(job, /^\s+environment:\s*release-build\s*$/m, `${workflow} should build ${signingJob} behind its protected environment`)
-    const publishBlock = jobBlock(body, signingJob === 'build-and-attest' ? 'publish-candidate' : 'publish')
+    const publishBlock = jobBlock(body, publishJob)
     assert.match(
       publishBlock,
       /^\s+environment:\s*release-publish\s*$/m,
       `${workflow} should publish behind its protected environment`,
     )
   }
+})
+
+test('the Windows release build resolves the public keys without a signing key or OIDC identity', () => {
+  const body = read('.github', 'workflows', 'release-early-access.yml')
+  const build = jobBlock(body, 'build')
+  assert.match(
+    build,
+    /^\s+environment:\s*release-build\s*$/m,
+    'the release build takes the candidate public key from release-build and must carry no private key',
+  )
+  assert.doesNotMatch(build, /id-token/, 'the release build must not be able to mint an OIDC token')
+  for (const secret of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'SESAME_RELEASE_CANDIDATE_SIGNING_KEY']) {
+    assert.doesNotMatch(build, new RegExp(secret), `${secret} must not be available to the release build`)
+  }
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+id-token:\s*write\s*$/m, 'the signing job needs an OIDC token for keyless Sigstore')
+  assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the signing job must run behind its protected environment')
+})
+
+test('the Linux release build resolves the capability key without a signing key or OIDC identity', () => {
+  const body = read('.github', 'workflows', 'release-linux-early-access.yml')
+  const build = jobBlock(body, 'build-and-test')
+  assert.doesNotMatch(build, /^\s+environment:\s*release-build\s*$/m, 'the Linux release build must not run behind the signing environment')
+  assert.doesNotMatch(build, /id-token/, 'the Linux release build must not be able to mint an OIDC token')
+  assert.doesNotMatch(build, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate signing key must not be available to the Linux release build')
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+id-token:\s*write\s*$/m, 'the Linux signing job needs an OIDC token for keyless Sigstore')
+  assert.match(sign, /^\s+environment:\s*release-build\s*$/m, 'the Linux signing job must run behind its protected environment')
+})
+
+test('release build outputs reach the signing jobs as data, never as script text', () => {
+  const body = read('.github', 'workflows', 'release-early-access.yml')
+  for (const script of runScriptBlocks(body)) {
+    assert.doesNotMatch(script, /needs\.build\.outputs/, 'a build job output is pasted into a run script')
+    assert.doesNotMatch(script, /steps\.installer\.outputs\.path/, 'the installer path is pasted into a run script')
+  }
+  const sign = jobBlock(body, 'sign-and-attest')
+  assert.match(sign, /^\s+EXPECTED_INSTALLER:\s*\$\{\{\s*needs\.build\.outputs\.installer\s*\}\}\s*$/m, 'the expected installer name must arrive as environment data')
+  assert.match(sign, /^\s+EXPECTED_SHA256:\s*\$\{\{\s*needs\.build\.outputs\.installer-sha256\s*\}\}\s*$/m, 'the expected installer digest must arrive as environment data')
+  assert.match(sign, /^\s+INSTALLER_PATH:\s*\$\{\{\s*steps\.installer\.outputs\.path\s*\}\}\s*$/m, 'the signing step must read its path from the environment')
+  assert.doesNotMatch(sign, /build-output/, 'the signing job must not reach into the build job output directory')
+  assert.doesNotMatch(sign, /verify-updater-artifact/, 'the signing job must not run a verifier compiled by the build job')
+  assert.doesNotMatch(sign, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate signing key must stay out of the updater signing job')
+  const receipt = jobBlock(body, 'candidate-receipt')
+  assert.match(receipt, /^\s+needs:\s*\[sign-and-attest, verify-fresh\]\s*$/m, 'the candidate receipt must run after independent verification and must be able to read the manifest from the signing job')
+  assert.match(receipt, /^\s+environment:\s*release-build\s*$/m, 'the candidate receipt runs behind the protected release environment')
+  assert.match(receipt, /^\s+permissions:\s*\n\s+contents:\s*read\s*$/m, 'the candidate receipt only reads repository contents')
+  assert.doesNotMatch(receipt, /id-token/, 'the candidate receipt must not mint an OIDC token')
+  assert.match(receipt, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY/, 'the candidate receipt holds the candidate signing key')
+  assert.doesNotMatch(receipt, /cargo|desktop:host:stage|rust-toolchain/, 'the candidate receipt must not compile or stage build tools')
+  assert.match(receipt, /needs\.verify-fresh\.outputs\.candidate-sha256/, 'the receipt must compare the prepared candidate against the independent job digest')
+  assert.match(receipt, /create-updater-artifacts\.mjs --sign/, 'the receipt must sign prepared data only')
+  assert.doesNotMatch(receipt, /SESAME_UPDATER_VERIFY_BIN|verify-updater-artifact/, 'the receipt must not execute a compiled verifier')
+  const verify = jobBlock(body, 'verify-fresh')
+  assert.match(verify, /name: sesame-candidate-input-/, 'independent verification must publish prepared candidate data')
+  assert.doesNotMatch(verify, /SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY/, 'the verifier build must not have private signing keys')
+  assert.match(receipt, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*candidate-receipt\s*$/m, 'the candidate receipt uploads the candidate files from their own directory')
+  const publish = jobBlock(body, 'publish-candidate')
+  assert.match(publish, /needs:[^\n]*candidate-receipt/, 'publish waits for the candidate receipt')
+  assert.match(publish, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*release-handoff\s*$/m, 'publish merges the candidate files into the handoff directory')
 })
 
 test('every job a workflow depends on exists in that workflow', () => {
@@ -120,4 +203,18 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
   assert.match(body, /Report a vulnerability/, 'the policy does not name the private reporting route')
   assert.match(body, /## Scope/, 'the policy has no scope, so a reporter cannot tell what counts')
   assert.match(body, /vault/i, 'the policy is not scoped to this product')
+})
+
+
+test('private signing jobs cannot compile application code or stage sidecars', () => {
+  for (const workflow of workflows) {
+    const body = read(workflow)
+    for (const [, name] of body.matchAll(/^ {2}([a-z0-9_-]+):$/gm)) {
+      const job = jobBlock(body, name)
+      if (!/secrets\.(?:SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY)\s*\}\}/.test(job)) continue
+      for (const script of runScriptBlocks(job)) {
+        assert.doesNotMatch(script, /cargo\s+(?:build|test|run|install)|desktop:host:stage|tauri\s+build|desktop:ci|release:check/, `${workflow} ${name} compiles code beside a signing key`)
+      }
+    }
+  }
 })

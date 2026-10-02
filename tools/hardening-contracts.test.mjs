@@ -499,7 +499,7 @@ test('desktop updates use an account-independent signed static manifest', () => 
   assert.match(manifestTool, /const target = `\$\{candidate\.platform\}-\$\{candidate\.architecture\}-\$\{artifact\.format\}`/)
   assert.match(manifestTool, /candidateReceipt/)
   assert.match(manifestTool, /SESAME_PUBLIC_UPDATE_ARTIFACT_URL/)
-  assert.match(workflow, /create-static-update-manifest\.mjs \$candidate release-handoff\/latest\.json/)
+  assert.match(workflow, /create-static-update-manifest\.mjs \$candidate candidate-receipt\/latest\.json/)
   assert.match(workflow, /SESAME_RELEASE_CANDIDATE_PUBLIC_KEY/)
   const commands = workflow
     .split('\n')

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { createHash, createPrivateKey, createPublicKey, verify } from 'node:crypto'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -7,6 +8,8 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, fileSha256, releaseIdentity, validateEvidenceDirectory, validateReleaseManifest } from './release-evidence-lib.mjs'
+
+import { prepareReleaseSet, releaseSetSigningPayload } from './release-set.mjs'
 
 const run = promisify(execFile)
 
@@ -138,5 +141,92 @@ test('public evidence uses an explicit safe allowlist and rejects added secret m
   } finally {
     await rm(value.root, { recursive: true, force: true })
     await rm(publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('the candidate tool refuses to sign without a successful updater verifier run', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sesame-candidate-tool-'))
+  try {
+    const artifact = path.join(root, 'Sesame_1.2.3_x64-setup.exe')
+    const signature = `${artifact}.sig`
+    const sigstore = path.join(root, 'sigstore-evidence.json')
+    await writeFile(artifact, 'fictional installer bytes')
+    await writeFile(signature, 'A'.repeat(64))
+    await writeFile(sigstore, '{}')
+    const environment = {
+      ...process.env,
+      SESAME_RELEASE_ARCHITECTURE: 'x86_64',
+      SESAME_RELEASE_ARTIFACT_OBJECT_KEY: 'windows/1.2.3/Sesame_1.2.3_x64-setup.exe',
+      SESAME_UPDATER_SIGNING_KEY_ID: 'updater-1',
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: 'candidate-1',
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY: Buffer.alloc(32, 7).toString('base64url'),
+      SESAME_UPDATER_PUBLIC_KEY: 'fictional-updater-public-key',
+      SESAME_SUPPORTED_WINDOWS: 'Windows 10,Windows 11',
+      SESAME_RELEASE_NOTES_URL: 'https://usesesame.app/releases/1.2.3',
+      SESAME_PUBLIC_UPDATE_ARTIFACT_URL: 'https://github.com/usesesame/sesame-desktop/releases/download/v1.2.3/Sesame_1.2.3_x64-setup.exe',
+    }
+    const args = ['tools/create-updater-artifacts.mjs', artifact, signature, sigstore]
+    delete environment.SESAME_UPDATER_VERIFY_BIN
+    await assert.rejects(
+      run(process.execPath, args, { env: environment }),
+      /SESAME_UPDATER_VERIFY_BIN/,
+      'the tool must refuse to sign when the verifier executable is unset',
+    )
+    await assert.rejects(
+      run(process.execPath, args, { env: { ...environment, SESAME_UPDATER_VERIFY_BIN: process.execPath } }),
+      (error) => error.code === 1 && /Command failed/.test(String(error.stderr)),
+      'the tool must refuse to sign when the verifier exits non-zero',
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+
+test('receipt signing binds verified candidate bytes without executing a verifier', async () => {
+  const value = await fixture()
+  try {
+    const evidence = JSON.parse(await readFile(path.join(value.root, 'sigstore-evidence.json'), 'utf8'))
+    const candidate = prepareReleaseSet({
+      version: value.manifest.version, channel: 'beta', platform: 'windows', architecture: 'x86_64',
+      supportedWindows: value.manifest.supportedWindows, releaseNotesUrl: value.manifest.releaseNotesUrl,
+      artifacts: [{
+        format: 'nsis', architecture: 'x86_64', url: 'https://downloads.example.invalid/Sesame.exe',
+        objectKey: 'windows/1.2.3/Sesame.exe', sha256: value.manifest.artifact.sha256,
+        bytes: value.manifest.artifact.bytes, updaterCapable: true, updaterSignature: 'A'.repeat(64),
+        updaterSigningKeyId: 'fictional-updater-key', distributionClass: 'early_access',
+        sigstoreEvidence: evidence, sigstoreVerified: true, sigstoreIssuer: evidence.issuer,
+        sigstoreIdentity: evidence.certificateIdentity, sigstoreBundleSha256: evidence.artifactBundleSha256,
+        authenticodeVerified: false,
+      }],
+    })
+    const input = path.join(value.root, 'unsigned-candidate.json')
+    const output = path.join(value.root, 'signed')
+    const bytes = `${JSON.stringify(candidate)}\n`
+    await writeFile(input, bytes)
+    const seed = Buffer.alloc(32, 7)
+    const environment = {
+      ...process.env,
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY_ID: 'fictional-candidate-key',
+      SESAME_RELEASE_CANDIDATE_SIGNING_KEY: seed.toString('base64url'),
+      SESAME_UPDATER_VERIFY_BIN: path.join(value.root, 'verifier-must-not-run'),
+    }
+    delete environment.SESAME_VERIFIED_CANDIDATE_SHA256
+    const arguments_ = ['tools/create-updater-artifacts.mjs', '--sign', input, output]
+    await assert.rejects(run(process.execPath, arguments_, { env: environment }), /SESAME_VERIFIED_CANDIDATE_SHA256/)
+    environment.SESAME_VERIFIED_CANDIDATE_SHA256 = '0'.repeat(64)
+    await assert.rejects(run(process.execPath, arguments_, { env: environment }), /changed during handoff/)
+    environment.SESAME_VERIFIED_CANDIDATE_SHA256 = createHash('sha256').update(bytes).digest('hex')
+    await run(process.execPath, arguments_, { env: environment })
+    const signed = JSON.parse(await readFile(path.join(output, 'sesame-1.2.3-windows-x86_64.candidate.json'), 'utf8'))
+    const key = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' })
+    assert.equal(verify(null, Buffer.from(releaseSetSigningPayload(signed)), createPublicKey(key), Buffer.from(signed.candidateSignature, 'base64url')), true)
+    assert.equal(signed.setDigest, candidate.setDigest)
+    await writeFile(input, JSON.stringify({ ...candidate, version: 'malformed' }))
+    environment.SESAME_VERIFIED_CANDIDATE_SHA256 = await fileSha256(input)
+    await assert.rejects(run(process.execPath, arguments_, { env: environment }), /identity is invalid/)
+    await assert.rejects(run(process.execPath, ['tools/create-updater-artifacts.mjs', '--prepare'], { env: environment }), /must not receive a signing key/)
+  } finally {
+    await rm(value.root, { recursive: true, force: true })
   }
 })

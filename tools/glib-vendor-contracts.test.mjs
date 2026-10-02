@@ -30,7 +30,7 @@ test('the supply chain job verifies the vendored tree on every run', () => {
 
 test('both release jobs verify the vendored tree in the shipping build', () => {
   const jobs = [
-    ['release-early-access.yml', 'build-and-attest'],
+    ['release-early-access.yml', 'build'],
     ['release-linux-early-access.yml', 'build-and-test'],
   ]
   for (const [file, name] of jobs) {
