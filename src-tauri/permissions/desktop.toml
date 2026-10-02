@@ -198,6 +198,7 @@ commands.allow = [
   "get_quick_access_status",
   "search_quick_access_items",
   "get_quick_access_field",
+  "confirm_quick_access_field",
   "open_quick_access_item",
   "copy_secret",
   "clear_clipboard_if_unchanged",

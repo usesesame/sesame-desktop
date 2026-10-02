@@ -14,6 +14,12 @@ const channelSet = new Set(['owner', 'beta'])
 
 const describeFile = async (file) => ({ sha256: await fileSha256(file), bytes: (await stat(file)).size })
 
+export const lifecycleRecordNames = ['shipped', 'rpm', 'appimage', 'vault']
+
+export function linuxLifecycleRecords(manifest) {
+  return Object.fromEntries(lifecycleRecordNames.map((name) => [name, manifest.linuxLifecycle?.[name]]))
+}
+
 export function validateLinuxReleaseManifest(manifest) {
   if (manifest?.schemaVersion !== 1 || manifest.product !== 'Sesame' || manifest.releaseKind !== LINUX_RELEASE_KIND) {
     throw new Error('Linux release manifest identity is invalid.')
@@ -42,7 +48,7 @@ export function validateLinuxReleaseManifest(manifest) {
     if (names.has(artifact.filename)) throw new Error(`Linux release manifest repeats ${artifact.filename}.`)
     names.add(artifact.filename)
   }
-  for (const [label, file] of Object.entries({ sbom: manifest.sbom, shipped: manifest.linuxLifecycle?.shipped, vault: manifest.linuxLifecycle?.vault })) {
+  for (const [label, file] of Object.entries({ sbom: manifest.sbom, ...linuxLifecycleRecords(manifest) })) {
     assertSafeReleaseFilename(file?.filename, `${label} filename`)
     if (!sha256Pattern.test(file?.sha256 ?? '') || !Number.isSafeInteger(file?.bytes) || file.bytes <= 0) {
       throw new Error(`Linux release manifest ${label} record is invalid.`)
@@ -96,6 +102,25 @@ export function assertCandidateArtifactsBindAssets(candidate, assets, { reposito
   }
 }
 
+export async function validateLinuxHandoffPackageBytes(directory, manifestFilename) {
+  const root = path.resolve(directory)
+  assertSafeReleaseFilename(manifestFilename, 'Linux manifest filename')
+  const manifest = validateLinuxReleaseManifest(JSON.parse(await readFile(path.join(root, manifestFilename), 'utf8')))
+  for (const artifact of manifest.artifacts) {
+    const record = await describeFile(path.join(root, artifact.filename))
+    if (record.sha256 !== artifact.sha256 || record.bytes !== artifact.bytes) {
+      throw new Error(`The Linux ${artifact.format} package does not match the frozen release manifest.`)
+    }
+  }
+  for (const [label, file] of Object.entries({ sbom: manifest.sbom, shipped: manifest.linuxLifecycle.shipped, vault: manifest.linuxLifecycle.vault })) {
+    const record = await describeFile(path.join(root, file.filename))
+    if (record.sha256 !== file.sha256 || record.bytes !== file.bytes) {
+      throw new Error(`The Linux ${label} record does not match the frozen release manifest.`)
+    }
+  }
+  return manifest
+}
+
 export async function validateLinuxEvidenceDirectory(directory, manifestFilename) {
   const root = path.resolve(directory)
   assertSafeReleaseFilename(manifestFilename, 'Linux manifest filename')
@@ -120,7 +145,7 @@ export async function validateLinuxEvidenceDirectory(directory, manifestFilename
   if (manifestRecord.sha256 !== evidence.manifestSha256 || manifestBundle.sha256 !== evidence.manifestBundleSha256) {
     throw new Error('The Linux manifest or its Sigstore bundle was substituted after verification.')
   }
-  for (const [label, file] of Object.entries({ sbom: manifest.sbom, shipped: manifest.linuxLifecycle.shipped, vault: manifest.linuxLifecycle.vault })) {
+  for (const [label, file] of Object.entries({ sbom: manifest.sbom, ...linuxLifecycleRecords(manifest) })) {
     const filePath = path.join(root, file.filename)
     const record = await describeFile(filePath)
     if (record.sha256 !== file.sha256 || record.bytes !== file.bytes) throw new Error(`The Linux ${label} record does not match the manifest.`)

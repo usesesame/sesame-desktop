@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -32,6 +32,12 @@ test('the boundary carries every tool the standalone gate executes', () => {
   }
 
   const referenced = new Set()
+  for (const config of ['vite.config.ts', 'vitest.config.ts']) {
+    for (const match of read(config).matchAll(/from\s+['"](\.\.?\/[^'"]+\.mjs)['"]/g)) {
+      const imported = relative(root, resolve(root, match[1])).replaceAll('\\', '/')
+      assert.ok(inBoundary(imported), `${config} imports ${imported} outside the standalone boundary`)
+    }
+  }
   for (const name of closure) {
     for (const match of (pkg.scripts[name] ?? '').matchAll(/(tools\/[A-Za-z0-9._/-]+\.mjs)/g)) referenced.add(match[1])
   }
@@ -79,11 +85,17 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust:sync/)
   assert.match(pkg.scripts['desktop:lint:rust'], /cargo fmt --manifest-path src-tauri\/Cargo\.toml --all --check/)
-  assert.match(pkg.scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml$/)
-  assert.match(pkg.scripts['desktop:test:rust:sync'], /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview$/)
+  assert.match(pkg.scripts['desktop:lint:rust'], /cargo clippy --manifest-path src-tauri\/Cargo\.toml --all-targets --locked/)
+  assert.match(pkg.scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml --locked$/)
+  assert.match(pkg.scripts['desktop:test:rust:sync'], /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked$/)
+  assert.match(pkg.scripts['desktop:test:glib'], /cargo test --manifest-path src-tauri\/Cargo\.toml --release --test glib_patch --locked$/)
   assert.doesNotMatch(pkg.scripts['desktop:ci'], /website|admin|backend|extension:/)
   assert.match(pkg.scripts['release:bundle:linux:unsigned'], /^npm run desktop:linux:bundle-prerequisites/)
   assert.match(pkg.scripts['release:bundle:linux:unsigned'], /createUpdaterArtifacts":false/)
+  assert.match(pkg.scripts['release:bundle:windows:unsigned'], /tauri build --bundles nsis -- --locked$/)
+  const browserHost = read('tools', 'browser-host.mjs')
+  const sidecarArgs = browserHost.slice(browserHost.indexOf('const args ='), browserHost.indexOf("spawnSync('cargo'"))
+  assert.match(sidecarArgs, /'--locked'/, 'the browser host sidecar build must pass cargo --locked')
   assert.equal(pkg.scripts['desktop:linux:prerequisites'], 'node tools/check-linux-prerequisites.mjs')
   assert.equal(pkg.scripts['desktop:linux:bundle-prerequisites'], 'node tools/check-linux-prerequisites.mjs --bundle')
   assert.equal(pkg.scripts['desktop:linux:dev'], 'npm run desktop:linux:prerequisites && npm run tauri:dev:browser')
@@ -95,6 +107,19 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(workflow, /node-version-file: \.node-version/)
   assert.match(workflow, /npm ci/)
   assert.match(workflow, /npm run desktop:ci/)
+})
+
+test('the npm intake policy is pinned and the runner must read it', () => {
+  const policy = read('.npmrc')
+  for (const line of ['ignore-scripts=true', 'allow-git=none', 'audit-level=high', 'min-release-age=7']) {
+    assert.ok(policy.split(/\r?\n/).includes(line), `.npmrc no longer pins ${line}`)
+  }
+
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const lint = workflow.slice(workflow.indexOf('  lint:'), workflow.indexOf('  typecheck:'))
+  for (const key of ['ignore-scripts', 'allow-git', 'audit-level', 'min-release-age']) {
+    assert.match(lint, new RegExp(`npm config get ${key}\\b`), `CI does not require npm to read ${key}`)
+  }
 })
 
 test('desktop code and owned checks do not read a former product sibling', () => {
@@ -222,8 +247,8 @@ test('native CI waits for quick checks and still runs both feature configuration
     assert.doesNotMatch(job, /continue-on-error:|^\s+if:/m)
   }
   assert.match(windows, /run: npm run desktop:ci/)
-  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml\n/)
-  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview/)
+  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --locked\n/)
+  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked/)
   assert.match(linux, /linux-installed-package-gate\.mjs/)
   const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
   const pkg = JSON.parse(read('package.json'))

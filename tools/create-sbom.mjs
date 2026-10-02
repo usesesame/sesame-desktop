@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { readShippedPackages } from './shipped-packages.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const destination = path.join(root, 'release-evidence')
+const destination = process.env.SESAME_SBOM_OUTPUT_DIR
+  ? path.resolve(process.env.SESAME_SBOM_OUTPUT_DIR)
+  : path.join(root, 'release-evidence')
 const read = (file) => readFile(path.join(root, file), 'utf8')
 const digest = (value) => createHash('sha256').update(value).digest('hex')
 const npmLock = await read('package-lock.json')
@@ -14,14 +19,120 @@ const cargoLock = await read('src-tauri/Cargo.lock')
 const goSum = await read('backend/go.sum').catch(() => '')
 const manifest = JSON.parse(await read('package.json'))
 
-await mkdir(destination, { recursive: true })
-const components = [
-  ...Object.entries(JSON.parse(npmLock).packages ?? {}).filter(([name]) => name.startsWith('node_modules/')).map(([name, entry]) => ({ type: 'library', name: name.slice('node_modules/'.length), version: entry.version, purl: `pkg:npm/${name.slice('node_modules/'.length)}@${entry.version}` })),
-  ...[...cargoLock.matchAll(/name = "([^"]+)"\nversion = "([^"]+)"/g)].map(([, name, version]) => ({ type: 'library', name, version, purl: `pkg:cargo/${name}@${version}` })),
-  ...(goSum ? [...new Set([...goSum.matchAll(/^([^\s]+) v([^\s]+)/gm)].map(([, name, version]) => `${name}@${version}`))].map((value) => { const [name, version] = value.split('@'); return { type: 'library', name, version, purl: `pkg:golang/${name}@${version}` } }) : []),
-]
-const bom = { bomFormat: 'CycloneDX', specVersion: '1.5', serialNumber: `urn:uuid:${digest(`${npmLock}${cargoLock}${goSum}`).slice(0, 32)}`, version: 1, metadata: { component: { type: 'application', name: manifest.name, version: manifest.version } }, components }
-const provenance = { version: 1, source: { commit: process.env.GITHUB_SHA ?? 'local-uncommitted', npmLockSha256: digest(npmLock), cargoLockSha256: digest(cargoLock), ...(goSum ? { goSumSha256: digest(goSum) } : {}) }, sbomSha256: digest(JSON.stringify(bom)), protectedValuesIncluded: false }
-await writeFile(path.join(destination, `sesame-${manifest.version}.cdx.json`), `${JSON.stringify(bom, null, 2)}\n`)
-await writeFile(path.join(destination, `sesame-${manifest.version}.provenance.json`), `${JSON.stringify(provenance, null, 2)}\n`)
-console.log(`Wrote ${components.length} locked components to release-evidence/`)
+const npmHash = (integrity) => {
+  const match = typeof integrity === 'string' ? integrity.match(/^sha512-([A-Za-z0-9+/=]+)$/) : null
+  return match ? { alg: 'SHA-512', content: Buffer.from(match[1], 'base64').toString('hex') } : null
+}
+
+const shippedPackagesFile = process.env.SESAME_SHIPPED_PACKAGES
+  ? path.resolve(process.env.SESAME_SHIPPED_PACKAGES)
+  : path.join(root, 'dist', 'shipped-npm-packages.json')
+
+const npmComponents = (shippedPackages) =>
+  Object.entries(JSON.parse(npmLock).packages ?? {})
+    .filter(([name]) => name.includes('node_modules/'))
+    .map(([name, entry]) => {
+      const packageName =
+        entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
+      const component = {
+        type: 'library',
+        name: packageName,
+        version: entry.version,
+        purl: `pkg:npm/${packageName}@${entry.version}`,
+        scope: entry.dev && !shippedPackages.has(packageName) ? 'excluded' : 'required',
+      }
+      const hash = npmHash(entry.integrity)
+      if (hash) component.hashes = [hash]
+      return component
+    })
+
+const cargoComponents = cargoLock
+  .split('[[package]]')
+  .slice(1)
+  .map((block) => {
+    const field = (name) => block.match(new RegExp(`^${name} = "([^"]+)"`, 'm'))?.[1]
+    const name = field('name')
+    const version = field('version')
+    const source = field('source')
+    const checksum = field('checksum')
+    const component = { type: 'library', name, version, purl: `pkg:cargo/${name}@${version}` }
+    if (checksum) component.hashes = [{ alg: 'SHA-256', content: checksum }]
+    if (!source) component.properties = [{ name: 'sesame:source', value: 'path' }]
+    return component
+  })
+
+export const vendorTreeDigest = async (directory, base = root) => {
+  const files = []
+  const walk = async (current) => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name)
+      if (entry.isDirectory()) await walk(full)
+      else files.push(full)
+    }
+  }
+  await walk(directory)
+  const relativeFiles = files
+    .map((file) => path.relative(base, file).split(path.sep).join('/'))
+    .sort()
+  const hash = createHash('sha256')
+  for (const relative of relativeFiles) {
+    hash.update(relative)
+    hash.update('\0')
+    hash.update(await readFile(path.join(base, relative)))
+    hash.update('\0')
+  }
+  return hash.digest('hex')
+}
+
+const main = async () => {
+  const shippedPackages = await readShippedPackages(shippedPackagesFile)
+  const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
+  for (const component of cargoComponents) {
+    if (component.name === 'glib' && component.properties) {
+      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
+    }
+  }
+
+  await mkdir(destination, { recursive: true })
+  const components = [
+    ...npmComponents(shippedPackages),
+    ...cargoComponents,
+    ...(goSum
+      ? [
+          ...new Set(
+            [...goSum.matchAll(/^([^\s]+) v([^\s]+)/gm)].map(([, name, version]) => `${name}@${version}`),
+          ),
+        ].map((value) => {
+          const [name, version] = value.split('@')
+          return { type: 'library', name, version, purl: `pkg:golang/${name}@${version}` }
+        })
+      : []),
+  ]
+  const bom = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.5',
+    serialNumber: `urn:uuid:${digest(`${npmLock}${cargoLock}${goSum}`).slice(0, 32)}`,
+    version: 1,
+    metadata: { component: { type: 'application', name: manifest.name, version: manifest.version } },
+    components,
+  }
+  const provenance = {
+    version: 1,
+    source: {
+      commit: process.env.GITHUB_SHA ?? 'local-uncommitted',
+      npmLockSha256: digest(npmLock),
+      cargoLockSha256: digest(cargoLock),
+      vendorTreeSha256: vendorTree,
+      ...(goSum ? { goSumSha256: digest(goSum) } : {}),
+    },
+    sbomSha256: digest(JSON.stringify(bom)),
+    protectedValuesIncluded: false,
+  }
+  await writeFile(path.join(destination, `sesame-${manifest.version}.cdx.json`), `${JSON.stringify(bom, null, 2)}\n`)
+  await writeFile(path.join(destination, `sesame-${manifest.version}.provenance.json`), `${JSON.stringify(provenance, null, 2)}\n`)
+  console.log(`Wrote ${components.length} locked components to release-evidence/`)
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main()
+}

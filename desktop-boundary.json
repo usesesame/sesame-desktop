@@ -12,6 +12,7 @@
     ".gitattributes",
     ".gitignore",
     ".node-version",
+    ".npmrc",
     "CONTRIBUTING.md",
     "LICENSE",
     "README.md",
@@ -55,6 +56,7 @@
     "tools/linux-installed-package-gate.mjs",
     "tools/linux-package-gate-contracts.test.mjs",
     "tools/linux-shipped-package-gate.mjs",
+    "tools/prepare-linux-bundle-tools.mjs",
     "tools/linux-release-evidence.mjs",
     "tools/create-linux-sigstore-evidence.mjs",
     "tools/prepare-linux-release-evidence.mjs",
@@ -88,6 +90,7 @@
     "tools/build-browser-host.mjs",
     "tools/check-linux-prerequisites.mjs",
     "tools/stage-browser-host.mjs",
+    "tools/shipped-packages.mjs",
     "tools/generate-types.mjs",
     "tools/refresh-two-factor-sites.mjs",
     ".cargo/config.toml"

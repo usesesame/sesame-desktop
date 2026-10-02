@@ -18,6 +18,8 @@ const manifest = JSON.parse(await readFile(path.join(workspace, 'package.json'),
 const candidatePath = path.join(workspace, 'release-artifacts', `sesame-${manifest.version}-windows-${architecture}.candidate.json`)
 const run = promisify(execFile)
 
-await run(process.execPath, ['tools/create-updater-artifacts.mjs', ...artifactArgs], { cwd: workspace, env: process.env })
+await run('cargo', ['build', '--manifest-path', 'src-tauri/Cargo.toml', '--bin', 'verify-updater-artifact'], { cwd: workspace, env: process.env })
+const verifyBin = path.join(workspace, 'src-tauri', 'target', 'debug', `verify-updater-artifact${process.platform === 'win32' ? '.exe' : ''}`)
+await run(process.execPath, ['tools/create-updater-artifacts.mjs', ...artifactArgs], { cwd: workspace, env: { ...process.env, SESAME_UPDATER_VERIFY_BIN: verifyBin } })
 await run(process.execPath, ['tools/submit-release-candidate.mjs', candidatePath], { cwd: workspace, env: process.env })
 console.log(`Published verified release candidate: ${candidatePath}`)

@@ -6,7 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evidence-lib.mjs'
-import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
+import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
 import { planStrippedLibraries } from './strip-appimage-host-libs.mjs'
@@ -34,6 +34,8 @@ async function evidenceFixture({ omitFormat } = {}) {
   for (const [label, content] of [
     ['sbom', '{"bomFormat":"CycloneDX"}\n'],
     ['shipped', '{"schema":"sesame.linux-shipped-package-run/1"}\n'],
+    ['rpm', '{"schema":"sesame.linux-rpm-shipped-package-run/1"}\n'],
+    ['appimage', '{"schema":"sesame.linux-appimage-shipped-package-run/1"}\n'],
     ['vault', '{"schema":"sesame.linux-installed-package-run/1"}\n'],
   ]) {
     await writeFile(path.join(root, `${label}.json`), content)
@@ -51,6 +53,8 @@ async function evidenceFixture({ omitFormat } = {}) {
     sbom: { filename: 'sbom.json', sha256: await fileSha256(path.join(root, 'sbom.json')), bytes: (await readFile(path.join(root, 'sbom.json'))).length },
     linuxLifecycle: {
       shipped: { filename: 'shipped.json', sha256: await fileSha256(path.join(root, 'shipped.json')), bytes: (await readFile(path.join(root, 'shipped.json'))).length },
+      rpm: { filename: 'rpm.json', sha256: await fileSha256(path.join(root, 'rpm.json')), bytes: (await readFile(path.join(root, 'rpm.json'))).length },
+      appimage: { filename: 'appimage.json', sha256: await fileSha256(path.join(root, 'appimage.json')), bytes: (await readFile(path.join(root, 'appimage.json'))).length },
       vault: { filename: 'vault.json', sha256: await fileSha256(path.join(root, 'vault.json')), bytes: (await readFile(path.join(root, 'vault.json'))).length },
     },
     sigstore: { issuer: 'https://token.actions.githubusercontent.com', certificateIdentity: identity, transparencyLogRequired: true },
@@ -78,7 +82,7 @@ async function evidenceFixture({ omitFormat } = {}) {
   return { root, manifest, manifestFilename, evidence, artifacts }
 }
 
-test('the Linux release manifest carries exactly the three packages and both lifecycle records', async () => {
+test('the Linux release manifest carries exactly the three packages and all four lifecycle records', async () => {
   const value = await evidenceFixture()
   try {
     const manifest = validateLinuxReleaseManifest(value.manifest)
@@ -107,6 +111,23 @@ test('the Linux evidence directory binds every package, bundle, and record', asy
     await writeFile(path.join(bundle.root, `${bundle.artifacts[0].filename}.sigstore.json`), '{"substituted":true}')
     await assert.rejects(validateLinuxEvidenceDirectory(bundle.root, bundle.manifestFilename), /Sigstore bundle was substituted/)
   } finally { await rm(bundle.root, { recursive: true, force: true }) }
+})
+
+test('the Linux handoff verifier checks downloaded bytes against the frozen manifest', async () => {
+  const value = await evidenceFixture()
+  try {
+    const manifest = await validateLinuxHandoffPackageBytes(value.root, value.manifestFilename)
+    assert.deepEqual(manifest.artifacts.map((artifact) => artifact.filename).sort(), value.artifacts.map((artifact) => artifact.filename).sort())
+    await writeFile(path.join(value.root, value.artifacts[1].filename), 'swapped package bytes')
+    await assert.rejects(validateLinuxHandoffPackageBytes(value.root, value.manifestFilename), /does not match the frozen release manifest/)
+  } finally { await rm(value.root, { recursive: true, force: true }) }
+  const counts = await evidenceFixture()
+  try {
+    const manifest = structuredClone(counts.manifest)
+    manifest.artifacts[0].bytes += 1
+    await writeFile(path.join(counts.root, counts.manifestFilename), `${JSON.stringify(manifest, null, 2)}\n`)
+    await assert.rejects(validateLinuxHandoffPackageBytes(counts.root, counts.manifestFilename), /does not match the frozen release manifest/)
+  } finally { await rm(counts.root, { recursive: true, force: true }) }
 })
 
 test('the Linux sigstore record must verify every package', async () => {
@@ -179,8 +200,10 @@ test('the Linux release workflow publishes only after both installed-package gat
   assert.match(workflow, /prepare-linux-release-evidence\.mjs/, 'the lane does not freeze the Linux release manifest')
   assert.match(workflow, /verify-linux-release-evidence\.mjs/, 'the lane does not independently verify the downloaded evidence')
   const publish = workflow.slice(workflow.indexOf('publish:'))
-  assert.match(publish, /needs: \[build-and-test, verify-fresh\]/, 'publication does not wait for the gates')
+  assert.match(publish, /needs: \[sign-and-attest, verify-fresh\]/, 'publication does not wait for the gates')
   assert.match(publish, /submit-release-candidate\.mjs/, 'the lane does not submit the server candidate')
+  const build = workflow.slice(workflow.indexOf('\n  build-and-test:\n'), workflow.indexOf('\n  sign-and-attest:\n'))
+  assert.doesNotMatch(build, /id-token/, 'the Linux build job must not be able to mint an OIDC token')
 })
 
 test('the AppImage keeps host-provided Wayland libraries out of the bundle', () => {

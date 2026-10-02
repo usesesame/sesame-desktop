@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -36,6 +37,7 @@ test('nothing in tools/ is left behind unreferenced', () => {
   const workflowDirectory = join(root, '.github', 'workflows')
   const referrers = [
     { name: 'package.json', text: withoutComments(read('package.json')) },
+    ...['vite.config.ts', 'vitest.config.ts'].map((name) => ({ name, text: withoutComments(read(name)) })),
     ...readdirSync(workflowDirectory).map((name) => ({ name, text: withoutComments(read('.github', 'workflows', name)) })),
     ...filesMatching(/\.(mjs|js|ps1)$/, join(root, 'tools')).map((path) => ({
       name: relative(join(root, 'tools'), path),
@@ -161,6 +163,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
       'get_quick_access_status',
       'search_quick_access_items',
       'get_quick_access_field',
+      'confirm_quick_access_field',
       'open_quick_access_item',
       'copy_secret',
       'clear_clipboard_if_unchanged',
@@ -192,6 +195,243 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   assert.match(quickCommands, /window\.label\(\) == QUICK_ACCESS_WINDOW/)
   assert.match(quickCommands, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
   assert.doesNotMatch(quickCommands.split('#[cfg(test)]')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
+})
+
+function assertNoUpdaterPermissions(projectRoot) {
+  const tauriRoot = join(projectRoot, 'src-tauri')
+  const capabilities = []
+  const collect = (value, source) => {
+    assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${source} must define a capability object`)
+    assert.ok(typeof value.identifier === 'string' && value.identifier.length > 0, `${source} must define a capability identifier`)
+    assert.ok(Array.isArray(value.permissions), `${source} must define a permissions array`)
+    capabilities.push({ ...value, source })
+  }
+  for (const path of filesMatching(/\.(json|json5|toml)$/, join(tauriRoot, 'capabilities'))) {
+    const source = relative(projectRoot, path).replaceAll('\\', '/')
+    assert.ok(path.endsWith('.json'), `${source} must use JSON so the updater permission gate can inspect it`)
+    const value = JSON.parse(readFileSync(path, 'utf8'))
+    const hasCapabilities = value && !Array.isArray(value) && Object.hasOwn(value, 'capabilities')
+    assert.ok(!hasCapabilities || !Object.hasOwn(value, 'identifier'), `${source} must define one capability shape`)
+    const entries = Array.isArray(value) ? value : hasCapabilities ? value.capabilities : [value]
+    assert.ok(Array.isArray(entries), `${source} must define a capability or a capabilities array`)
+    for (const capability of entries) collect(capability, source)
+  }
+  for (const name of readdirSync(tauriRoot)) {
+    if (!/^tauri(?:\.[^.]+)*\.conf\.(json|json5)$/.test(name) && !/^Tauri(?:\.[^.]+)*\.toml$/.test(name)) continue
+    assert.ok(name.endsWith('.json'), `${name} must use JSON so the updater permission gate can inspect it`)
+    const config = JSON.parse(readFileSync(join(tauriRoot, name), 'utf8'))
+    const entries = config.app?.security?.capabilities ?? []
+    assert.ok(Array.isArray(entries), `${name} must define a capabilities array`)
+    for (const capability of entries) {
+      if (typeof capability === 'string') {
+        assert.ok(capability.length > 0, `${name} must reference a capability identifier`)
+      } else {
+        collect(capability, name)
+      }
+    }
+  }
+  const offenders = capabilities.flatMap((capability) => capability.permissions.map((permission) => {
+    const identifier = typeof permission === 'string' ? permission : permission?.identifier
+    assert.ok(typeof identifier === 'string' && identifier.length > 0, `${capability.source} must define a permission identifier`)
+    return identifier.startsWith('updater:') ? `${capability.source} grants ${identifier}` : null
+  }).filter(Boolean))
+  assert.deepEqual(offenders, [], `updater permissions would hand the webview the updater plugin surface:\n  ${offenders.join('\n  ')}`)
+}
+
+test('no capability grants a webview an updater permission', () => {
+  assertNoUpdaterPermissions(root)
+})
+
+test('the updater permission gate inspects inline and grouped capabilities', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'sesame-updater-permissions-'))
+  const tauriRoot = join(fixture, 'src-tauri')
+  const capabilityRoot = join(tauriRoot, 'capabilities')
+  const configPath = join(tauriRoot, 'tauri.conf.json')
+  mkdirSync(capabilityRoot, { recursive: true })
+  const safe = { identifier: 'fictional-safe', windows: ['main'], permissions: ['core:window:allow-show'] }
+  const updater = { identifier: 'fictional-updater', windows: ['main'], permissions: ['updater:default'] }
+  const configure = (capabilities) => writeFileSync(configPath, JSON.stringify({ app: { security: { capabilities } } }))
+  const capabilityPath = join(capabilityRoot, 'fictional.json')
+  try {
+    configure([safe])
+    writeFileSync(capabilityPath, JSON.stringify(safe))
+    assert.doesNotThrow(() => assertNoUpdaterPermissions(fixture))
+    configure([updater])
+    assert.throws(() => assertNoUpdaterPermissions(fixture), /tauri.conf.json grants updater:default/)
+    configure([{ ...updater, permissions: [{ identifier: 'updater:allow-download', allow: [] }] }])
+    assert.throws(() => assertNoUpdaterPermissions(fixture), /tauri.conf.json grants updater:allow-download/)
+    configure(['fictional-safe'])
+    for (const value of [updater, [safe, updater], { capabilities: [safe, updater] }]) {
+      writeFileSync(capabilityPath, JSON.stringify(value))
+      assert.throws(() => assertNoUpdaterPermissions(fixture), /fictional.json grants updater:default/)
+    }
+    writeFileSync(capabilityPath, JSON.stringify({ ...updater, capabilities: [safe] }))
+    assert.throws(() => assertNoUpdaterPermissions(fixture), /must define one capability shape/)
+    writeFileSync(capabilityPath, JSON.stringify({ capabilities: null }))
+    assert.throws(() => assertNoUpdaterPermissions(fixture), /must define a capability or a capabilities array/)
+    writeFileSync(capabilityPath, JSON.stringify(safe))
+    const platformPath = join(tauriRoot, 'tauri.windows.conf.json')
+    writeFileSync(platformPath, JSON.stringify({ app: { security: { capabilities: [updater] } } }))
+    assert.throws(() => assertNoUpdaterPermissions(fixture), /tauri.windows.conf.json grants updater:default/)
+    rmSync(platformPath)
+    for (const capability of [null, { ...safe, permissions: null }, { ...safe, permissions: [null] }]) {
+      configure([capability])
+      assert.throws(() => assertNoUpdaterPermissions(fixture), /must define/)
+    }
+    configure([safe])
+    writeFileSync(capabilityPath, '{invalid')
+    assert.throws(() => assertNoUpdaterPermissions(fixture), SyntaxError)
+    writeFileSync(capabilityPath, JSON.stringify(safe))
+    for (const name of ['fictional.toml', 'fictional.json5']) {
+      const path = join(capabilityRoot, name)
+      writeFileSync(path, 'fictional unsupported capability')
+      assert.throws(() => assertNoUpdaterPermissions(fixture), /must use JSON/)
+      rmSync(path)
+    }
+    for (const name of ['Tauri.toml', 'tauri.conf.json5']) {
+      const path = join(tauriRoot, name)
+      writeFileSync(path, 'fictional unsupported config')
+      assert.throws(() => assertNoUpdaterPermissions(fixture), /must use JSON/)
+      rmSync(path)
+    }
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+function generatedPermission(manifests, identifier) {
+  const separator = identifier.lastIndexOf(':')
+  if (separator > 0) {
+    const scoped = manifests[identifier.slice(0, separator)]?.permissions?.[identifier.slice(separator + 1)]
+    if (scoped) return scoped
+  }
+  return manifests['__app-acl__'].permissions[identifier] ?? null
+}
+
+function capabilityCommands(manifests, capabilities, identifier) {
+  const capability = capabilities[identifier]
+  assert.ok(capability, `the generated ACL does not define the ${identifier} capability`)
+  const commands = new Set()
+  for (const name of capability.permissions) {
+    const permission = generatedPermission(manifests, name)
+    assert.ok(permission, `${identifier} names permission ${name}, which the generated ACL does not define`)
+    for (const command of permission.commands.allow) commands.add(command)
+  }
+  return commands
+}
+
+function topLevelArguments(slice) {
+  const parts = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < slice.length; i += 1) {
+    const character = slice[i]
+    if (character === '(' || character === '[' || character === '{' || character === '<') depth += 1
+    else if (character === ')' || character === ']' || character === '}' || character === '>') depth -= 1
+    else if (character === ',' && depth === 0) {
+      parts.push(slice.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(slice.slice(start))
+  return parts.map((part) => part.trim()).filter(Boolean)
+}
+
+function callerSuppliedBooleanGates(text) {
+  const gates = []
+  for (const match of text.matchAll(/#\[tauri::command[^\]]*\]\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\(/g)) {
+    const open = text.indexOf('(', match.index + match[0].length - 1)
+    const slice = callArgumentSlice(text, open, false)
+    if (slice === null) continue
+    for (const raw of topLevelArguments(slice)) {
+      const parameter = raw.replace(/^#\s*\[[^\]]*\]\s*/, '').replace(/^mut\s+/, '')
+      const named = parameter.match(/^([a-z_][a-z0-9_]*)\s*:\s*(.+)$/)
+      if (!named || !/^(?:Option\s*<\s*)?bool\s*>?$/.test(named[2])) continue
+      if (['confirmed', 'secret', 'reveal'].includes(named[1])) gates.push(`${match[1]}:${named[1]}`)
+    }
+  }
+  return gates
+}
+
+test('the quick-access window cannot reach deliberate release or input-injection commands', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+  const forbidden = ['reveal_login_secret', 'auto_type', 'export_backup', 'export_vault_csv', 'export_recovery_kit']
+
+  const permission = manifests['__app-acl__'].permissions['quick-access']
+  assert.ok(permission, 'the generated ACL does not define the quick-access permission')
+  const granted = new Set(permission.commands.allow)
+  const permissionOffenders = forbidden.filter((command) => granted.has(command))
+  assert.deepEqual(
+    permissionOffenders,
+    [],
+    `the quick-access permission grants deliberate release or input commands: ${permissionOffenders.join(', ')}`,
+  )
+
+  const reachable = capabilityCommands(manifests, capabilities, 'quick-access-capability')
+  const windowOffenders = forbidden.filter((command) => reachable.has(command))
+  assert.deepEqual(
+    windowOffenders,
+    [],
+    `the quick-access window can now reach deliberate release or input commands: ${windowOffenders.join(', ')}`,
+  )
+})
+
+test('only the quick-access permission hands out get_quick_access_field', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+
+  const holders = []
+  for (const manifest of Object.values(manifests)) {
+    for (const definition of Object.values(manifest.permissions ?? {})) {
+      if (definition.commands.allow.includes('get_quick_access_field')) holders.push(definition.identifier)
+    }
+  }
+  assert.deepEqual(
+    holders.sort(),
+    ['quick-access'],
+    `get_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
+  )
+  assert.ok(
+    !capabilityCommands(manifests, capabilities, 'main-capability').has('get_quick_access_field'),
+    'the main window capability gained get_quick_access_field',
+  )
+})
+
+test('only the quick-access permission hands out confirm_quick_access_field', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+
+  const holders = []
+  for (const manifest of Object.values(manifests)) {
+    for (const definition of Object.values(manifest.permissions ?? {})) {
+      if (definition.commands.allow.includes('confirm_quick_access_field')) holders.push(definition.identifier)
+    }
+  }
+  assert.deepEqual(
+    holders.sort(),
+    ['quick-access'],
+    `confirm_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
+  )
+  assert.ok(
+    capabilityCommands(manifests, capabilities, 'quick-access-capability').has('confirm_quick_access_field'),
+    'the quick-access window capability lost confirm_quick_access_field',
+  )
+  assert.ok(
+    !capabilityCommands(manifests, capabilities, 'main-capability').has('confirm_quick_access_field'),
+    'the main window capability gained confirm_quick_access_field',
+  )
+})
+
+test('caller-supplied boolean gates on the command surface stay pinned', () => {
+  const gates = filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))
+    .flatMap((path) => callerSuppliedBooleanGates(readFileSync(path, 'utf8')))
+    .sort()
+  assert.deepEqual(
+    gates,
+    [],
+    'a command gained a caller-supplied boolean authorization gate; confirmation state must live in backend state',
+  )
 })
 
 test('desktop OS and reusable HTTP adapters stay in their named Rust boundaries', () => {
@@ -268,7 +508,7 @@ test('desktop updates use an account-independent signed static manifest', () => 
   assert.match(manifestTool, /const target = `\$\{candidate\.platform\}-\$\{candidate\.architecture\}-\$\{artifact\.format\}`/)
   assert.match(manifestTool, /candidateReceipt/)
   assert.match(manifestTool, /SESAME_PUBLIC_UPDATE_ARTIFACT_URL/)
-  assert.match(workflow, /create-static-update-manifest\.mjs \$candidate release-handoff\/latest\.json/)
+  assert.match(workflow, /create-static-update-manifest\.mjs \$candidate candidate-receipt\/latest\.json/)
   assert.match(workflow, /SESAME_RELEASE_CANDIDATE_PUBLIC_KEY/)
   const commands = workflow
     .split('\n')
