@@ -310,7 +310,7 @@ pub fn restore_backup(
 ) -> VaultResult<RestoreBackupResult> {
     let source = PathBuf::from(request.source);
     let destination = vault_path(&app)?;
-    let mut secret = request.secret;
+    let secret = Zeroizing::new(request.secret);
 
     let active = destination.exists();
     let current = {
@@ -333,7 +333,7 @@ pub fn restore_backup(
 
     // Authenticate before invalidating anything: a failure must not lock the user out.
     let prepared = prepare_backup_for_restore(&source, &destination, &secret);
-    secret.zeroize();
+    drop(secret);
     let prepared = prepared?;
 
     let (restored_revision, replaced_revision) = match current {
