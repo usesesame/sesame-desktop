@@ -479,7 +479,7 @@ pub fn change_master_password(
         let session = session
             .as_mut()
             .ok_or("Unlock your vault before changing its master password.")?;
-        let recovery_kit = crate::vault::storage::rotate_master_password_for_session(
+        let rotation = crate::vault::storage::rotate_master_password_for_session(
             session,
             &current_password,
             &new_password,
@@ -488,7 +488,10 @@ pub fn change_master_password(
         state.cache_hello_unlock(false);
         discard_pin_throttle_state(&app, &state);
         state.advance_session_epoch();
-        Ok(ChangeMasterPasswordResult { recovery_kit })
+        Ok(ChangeMasterPasswordResult {
+            recovery_kit: rotation.recovery_kit,
+            backups_remaining: rotation.backups_remaining,
+        })
     })();
     current_password.zeroize();
     new_password.zeroize();

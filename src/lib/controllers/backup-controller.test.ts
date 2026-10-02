@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppStores } from '../stores/app-stores'
+import { PRESENCE_REQUIRED } from '../vault'
 import { createBackupController } from './backup-controller'
 import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
@@ -28,6 +29,14 @@ function selection(compatibility: 'current' | 'upgrade') {
   return { source: '/tmp/fictional-backup.sesame', fileName: 'fictional-backup.sesame', formatVersion: compatibility === 'current' ? 10 : 8, compatibility, setupComplete: true }
 }
 
+function restoredResult(overrides: Record<string, unknown> = {}) {
+  return { safetyBackupName: 'sesame-before-restore-1-a.sesame', pinUnlockAvailable: false, helloUnlockAvailable: false, restoredRevision: 2, replacedRevision: 1, ...overrides }
+}
+
+function verification() {
+  return { ...selection('current'), vaultName: 'Fictional vault', entryCount: 2, vaultId: 'fictional-vault', revision: 2 }
+}
+
 function harness() {
   const stores = createAppStores()
   stores.vault.patch({ status: STATUS })
@@ -53,18 +62,45 @@ beforeEach(() => {
 })
 
 describe('backup restore messages', () => {
-  it('names the safety backup when a current backup is restored', async () => {
+  it('names the safety backup and the revision delta when a current backup is restored', async () => {
     const running = await restoreWith('current')
-    vaultApi.restoreBackup.mockResolvedValue({ safetyBackupName: 'sesame-before-restore-1-a.sesame', pinUnlockAvailable: false, helloUnlockAvailable: false })
+    vaultApi.restoreBackup.mockResolvedValue(restoredResult())
     await running.controller.confirmRestore()
-    expect(running.restored).toEqual(['Backup restored. Sesame kept the previous vault as sesame-before-restore-1-a.sesame.'])
+    expect(running.restored).toEqual(['Backup restored. Sesame kept the previous vault as sesame-before-restore-1-a.sesame. The restored vault is at revision 2, replacing revision 1.'])
   })
 
   it('says an older backup was upgraded and names the safety backup', async () => {
     const running = await restoreWith('upgrade')
-    vaultApi.restoreBackup.mockResolvedValue({ safetyBackupName: 'sesame-before-restore-2-b.sesame', pinUnlockAvailable: false, helloUnlockAvailable: false })
+    vaultApi.restoreBackup.mockResolvedValue(restoredResult({ safetyBackupName: 'sesame-before-restore-2-b.sesame' }))
     await running.controller.confirmRestore()
-    expect(running.restored).toEqual(['Older backup upgraded and restored. Sesame kept the previous vault as sesame-before-restore-2-b.sesame.'])
+    expect(running.restored).toEqual(['Older backup upgraded and restored. Sesame kept the previous vault as sesame-before-restore-2-b.sesame. The restored vault is at revision 2, replacing revision 1.'])
+  })
+
+  it('omits the revision delta when there was no vault to replace', async () => {
+    const running = harness()
+    running.stores.vault.patch({ status: { ...STATUS, exists: false } })
+    vaultApi.getVaultStatus.mockResolvedValue({ ...STATUS, exists: false })
+    vaultApi.chooseBackupForRestore.mockResolvedValue(selection('current'))
+    await running.controller.beginRestore()
+    running.controller.state.patch({ restoreSecret: 'fictional master password 01', restoreConfirmed: true })
+    vaultApi.restoreBackup.mockResolvedValue(restoredResult({ safetyBackupName: undefined, replacedRevision: undefined }))
+    await running.controller.confirmRestore()
+    expect(running.restored).toEqual(['Backup restored. Unlock with the master password or recovery kit from that backup.'])
+  })
+
+  it('asks for the current master password before retrying a restore', async () => {
+    const running = await restoreWith('current')
+    vaultApi.restoreBackup.mockRejectedValueOnce(new Error(PRESENCE_REQUIRED)).mockResolvedValueOnce(restoredResult({ safetyBackupName: undefined }))
+    await running.controller.confirmRestore()
+    expect(running.controller.state.value().restorePresenceRequired).toBe(true)
+    expect(running.feedback.state.value().errorMessage).toBe('Confirm your current master password before Sesame replaces the vault.')
+
+    running.controller.state.patch({ restorePresencePassword: 'fictional master password 01' })
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    await running.controller.confirmRestorePresence()
+    expect(vaultApi.grantPresence).toHaveBeenCalledWith('fictional master password 01')
+    expect(running.controller.state.value().restorePresenceRequired).toBe(false)
+    expect(running.restored).toEqual(['Backup restored. The restored vault is at revision 2, replacing revision 1.'])
   })
 
   it('reports a failed migration with the exact next action and leaves the vault in place', async () => {
@@ -75,6 +111,29 @@ describe('backup restore messages', () => {
     expect(running.feedback.state.value().errorMessage).toBe(migrationFailure)
     expect(running.restored).toEqual([])
     expect(running.controller.state.value().restoringBackup).toBe(false)
+  })
+})
+
+describe('backup drill restore', () => {
+  it('asks for the current master password before retrying a drill restore', async () => {
+    const running = harness()
+    running.controller.openDrill()
+    vaultApi.chooseBackupForRestore.mockResolvedValue(selection('current'))
+    await running.controller.chooseDrillBackup()
+    vaultApi.verifyBackup.mockResolvedValue(verification())
+    running.controller.state.patch({ drillSecret: 'fictional master password 01' })
+    await running.controller.verifyDrillBackup()
+
+    vaultApi.restoreBackup.mockRejectedValueOnce(new Error(PRESENCE_REQUIRED))
+    await running.controller.restoreVerifiedBackup()
+    expect(running.controller.state.value().drillPresenceRequired).toBe(true)
+
+    running.controller.state.patch({ drillPresencePassword: 'fictional master password 01' })
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.restoreBackup.mockResolvedValue(restoredResult({ safetyBackupName: undefined }))
+    await running.controller.confirmDrillPresence()
+    expect(running.controller.state.value().drillError).toBe('')
+    expect(running.restored).toEqual(['Recovery drill complete. The verified backup was restored. The restored vault is at revision 2, replacing revision 1.'])
   })
 })
 

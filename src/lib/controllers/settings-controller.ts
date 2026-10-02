@@ -105,6 +105,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     newMasterPassword: '',
     confirmNewMasterPassword: '',
     newRecoveryKit: '',
+    newBackupsRemaining: null as number | null,
     newRecoveryConfirmed: false,
     changingMasterPassword: false,
   })
@@ -174,7 +175,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
   function clearMasterPasswordState() {
     state.patch({
       changeMasterPasswordOpen: false, currentMasterPassword: '', newMasterPassword: '',
-      confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false, changingMasterPassword: false,
+      confirmNewMasterPassword: '', newRecoveryKit: '', newBackupsRemaining: null, newRecoveryConfirmed: false, changingMasterPassword: false,
     })
   }
 
@@ -445,7 +446,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       try {
         const result = await changeMasterPassword(current.currentMasterPassword, current.newMasterPassword)
         vault.patch({ status: await getVaultStatus() })
-        state.patch({ currentMasterPassword: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit })
+        state.patch({ currentMasterPassword: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit, newBackupsRemaining: result.backupsRemaining ?? null })
       } catch (error) {
         feedback.setError(error)
       } finally {

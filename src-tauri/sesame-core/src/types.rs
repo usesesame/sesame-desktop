@@ -22,6 +22,7 @@ pub struct ChangeMasterPasswordRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeMasterPasswordResult {
     pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -610,6 +611,9 @@ pub struct RestoreBackupResult {
     pub safety_backup_name: Option<String>,
     pub pin_unlock_available: bool,
     pub hello_unlock_available: bool,
+    pub restored_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_revision: Option<u64>,
 }
 
 /// Proves the encrypted payload opens; never replaces the active vault.

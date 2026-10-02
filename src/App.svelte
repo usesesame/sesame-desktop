@@ -814,6 +814,7 @@
         bind:newPassword={$settingsState.newMasterPassword}
         bind:confirmPassword={$settingsState.confirmNewMasterPassword}
         bind:recoveryKit={$settingsState.newRecoveryKit}
+        backupsRemaining={$settingsState.newBackupsRemaining}
         bind:recoveryConfirmed={$settingsState.newRecoveryConfirmed}
         errorMessage={$feedbackState.errorMessage}
         working={$settingsState.changingMasterPassword}
@@ -856,9 +857,12 @@
         bind:restoreSecret={$backupState.restoreSecret}
         restoringBackup={$backupState.restoringBackup}
         replacesVault={$vault.status.exists}
+        presenceRequired={$backupState.restorePresenceRequired}
+        bind:presencePassword={$backupState.restorePresencePassword}
         errorMessage={$feedbackState.errorMessage}
         onClose={backupController.closeRestore}
         onConfirm={backupController.confirmRestore}
+        onConfirmPresence={backupController.confirmRestorePresence}
       />
     {:else if active?.kind === 'backup-drill'}
       <BackupDrillModal
@@ -867,10 +871,13 @@
         verification={$backupState.drillVerification}
         working={$backupState.drillWorking}
         restoring={$backupState.drillRestoring}
+        presenceRequired={$backupState.drillPresenceRequired}
+        bind:presencePassword={$backupState.drillPresencePassword}
         error={$backupState.drillError}
         onChoose={backupController.chooseDrillBackup}
         onVerify={backupController.verifyDrillBackup}
         onRestore={backupController.restoreVerifiedBackup}
+        onConfirmPresence={backupController.confirmDrillPresence}
         onClose={backupController.closeDrill}
       />
     {:else if active?.kind === 'login-editor'}

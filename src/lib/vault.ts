@@ -1285,7 +1285,7 @@ export async function restoreBackup(source: string, secret: string): Promise<Res
   if (previewMode) {
     const hadVault = previewUnlocked
     previewUnlocked = false
-    return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false }
+    return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false, restoredRevision: previewSnapshot.revision, replacedRevision: hadVault ? previewSnapshot.revision : undefined }
   }
   return invoke<RestoreBackupResult>('restore_backup', { request: { source, secret } })
 }
