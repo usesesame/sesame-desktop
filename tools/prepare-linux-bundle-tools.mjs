@@ -33,8 +33,8 @@ export const pinnedBundleTools = {
     },
     {
       name: 'linuxdeploy-plugin-appimage.AppImage',
-      url: 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage',
-      sha256: '0441769ab38009504d2678c38cd7e526955388dd30a215b4a20afaa5471652f2',
+      url: 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage',
+      sha256: '992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3',
     },
   ],
 }
