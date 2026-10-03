@@ -104,7 +104,7 @@
     },
     {
       "name": "eslint",
-      "version": "10.10",
+      "version": "10.11",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
