@@ -534,13 +534,16 @@ button.no-totp, .credential-button, .more-button {
 .entry-row.selected .entry-title strong { color: var(--accent-link); }
 .entry-row-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: var(--space-3); border: 0; padding: 0; color: inherit; background: transparent; text-align: left; }
 .entry-row-main:focus-visible { border-radius: var(--radius-sm); outline-offset: 4px; }
-.entry-select-box { position: absolute; top: 50%; left: var(--space-3); z-index: 1; translate: 0 -50%; opacity: 0; visibility: hidden; transform: scale(.6); }
+.entry-select-box { position: absolute; top: calc(50% - 8.5px); left: var(--space-3); z-index: 1; opacity: 0; visibility: hidden; transform: scale(.6); }
 .entry-list.selecting .entry-select-box { opacity: 1; visibility: visible; transform: none; }
 .entry-list.selecting .entry-row-main { transform: translateX(29px); }
 .entry-list.selecting .entry-favourite { opacity: 0; visibility: hidden; transform: scale(.7); pointer-events: none; }
-.entry-row[data-animate] .entry-select-box, .entry-row[data-animate] .entry-favourite { transition: opacity .16s ease, transform .22s var(--ease-out), visibility 0s linear .22s; }
-.entry-list.selecting .entry-row[data-animate] .entry-select-box { transition: opacity .16s ease .04s, transform .22s var(--ease-out), visibility 0s; }
-.entry-row[data-animate] .entry-row-main { transition: transform .22s var(--ease-out); }
+.entry-row[data-animate] .entry-select-box { transition: opacity .1s ease, transform .12s ease-in, visibility 0s linear .12s; }
+.entry-row[data-animate] .entry-row-main { transition: transform .22s var(--ease-out) .08s; }
+.entry-row[data-animate] .entry-favourite { transition: opacity .16s ease .14s, transform .22s var(--ease-out) .14s, visibility 0s linear .14s; }
+.entry-list.selecting .entry-row[data-animate] .entry-select-box { transition: opacity .16s ease .06s, transform .22s var(--ease-out) .06s, visibility 0s; }
+.entry-list.selecting .entry-row[data-animate] .entry-row-main { transition: transform .22s var(--ease-out); }
+.entry-list.selecting .entry-row[data-animate] .entry-favourite { transition: opacity .1s ease, transform .12s ease-in, visibility 0s linear .12s; }
 .entry-list.selecting { padding-bottom: 112px; }
 .bulk-toolbar .sort-menu { top: auto; bottom: calc(100% + 5px); transform-origin: bottom; }
 .entry-favourite, .card-favourite { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-faint); background: transparent; }
