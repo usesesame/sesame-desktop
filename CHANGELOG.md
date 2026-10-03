@@ -6,6 +6,29 @@ release cannot be published without saying what changed in it.
 
 ## 0.3.0
 
+### Unlock
+
+- A PIN can have 6 to 12 digits. Repeated digits and runs in order are
+  refused, and every existing 6-digit PIN still unlocks.
+- The PIN is one field that shows a dot per digit instead of a box per digit.
+- A new master password needs 12 characters and must pass the strength
+  checks. Passwords are compared in Unicode normalized form, so an accented
+  letter typed as one character or as a letter and an accent unlocks the same
+  vault, and existing vaults open unchanged.
+- The vault locks on wake when the computer slept longer than the auto-lock
+  delay, even without a screen locker.
+- On Linux the device key is created only when you set a PIN, link an
+  account, or enroll a device, so an ordinary unlock cannot replace the key a
+  PIN depends on.
+
+### Security checkup
+
+- The checkup adds breached password, card expiry, and two-factor and
+  passkey findings. Breach checks run in the app and send only the first five
+  characters of a password hash.
+- Each login listed under a finding opens that login, and Change on site
+  opens the saved website so the browser extension can fill the change form.
+
 ### Account
 
 - Sesame account linking is available on Linux. It uses the desktop Secret
@@ -18,6 +41,12 @@ release cannot be published without saying what changed in it.
 
 ### Browser integration
 
+- Every fill asks for approval. The 15-minute remembered approval is gone.
+- The extension can explain why a login matches the page, fill one-time
+  codes after a fresh approval, and warn before filling a lookalike website.
+- Requests from old extension protocol versions are refused, and the
+  extension no longer learns whether the vault is locked before you approve.
+  Update the extension together with the desktop app.
 - The browser connection works on Linux from the deb and rpm packages. The
   release gate registers the native host in a scratch home, checks the pinned
   extension origin and the sidecar path, verifies the broker socket is
@@ -36,6 +65,15 @@ release cannot be published without saying what changed in it.
 
 ### Vault and backups
 
+- When a vault exists, restoring a backup needs it unlocked and your master
+  password, and a backup from a different vault is refused.
+- Changing the master password removes local backups that still open with
+  the old password.
+- Readable exports keep secret values exactly as saved, warn about values a
+  spreadsheet could run as formulas, and are written as private files.
+- Imports are bounded while they are read, so a hostile file cannot exhaust
+  memory.
+- On Linux the vault folder is flushed to disk after each save.
 - Export, restore, and open no longer lose data silently. Partial and
   attachment-losing exports name what was left out, SSH-only Bitwarden
   exports are accepted, document history no longer stores attachment bytes,
@@ -45,12 +83,32 @@ release cannot be published without saying what changed in it.
 
 ### Security
 
+- Revealed passwords are not cached in the window, the clipboard timer runs in
+  the app's native code, and the clipboard clears when the vault locks.
+- Saved items of every kind are wiped from memory when they are dropped.
+- Import, export, backup and diagnostics files are chosen through the system
+  dialog in the app, so the window cannot name a file path.
+- Vaults whose key derivation settings fall below the minimum are refused
+  before any work starts.
+- Website icons are fetched only after you turn them on, and the breach check
+  follows the system proxy.
+- Update manifests must be signed, the updater cannot be reached from the
+  window, and release builds no longer hold the signing keys.
 - The vault writer bounds the plaintext at the storage limit before it
   serializes, and decrypted payload, key-wrapper, and sealed-record buffers
   are wiped when dropped.
 
 ### Interface
 
+- One type scale, measurable contrast for fields and quiet text, and one
+  control style for fields, tabs, menus and buttons.
+- Vault search ranks results, tolerates small typos, and has keyboard
+  shortcuts and bulk actions.
+- The vault list can copy a password without showing it.
+- Status screens, empty and loading states, and the browser approval prompt
+  are easier to read.
+- Website icons fall back to the icon a site declares.
+- Selection checkboxes sit centered on their rows.
 - Quick access renders the plain initial block when website icons are denied
   instead of an icon that never loads.
 - Modal teardown, opening a second modal while one is active, duplicate tags,
@@ -61,6 +119,9 @@ release cannot be published without saying what changed in it.
 
 ### Diagnostics and release pipeline
 
+- Dependency installs are locked, every dependency is checked against the
+  lockfiles, and release evidence records dependency hashes.
+- The vendored GLib patch and every Linux package format are checked in CI.
 - Card-fill and quick-access diagnostic codes are now on the allowlist and
   every allowlisted code carries a severity, so those events are recorded
   instead of dropped or pruned.
