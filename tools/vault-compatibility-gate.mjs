@@ -56,7 +56,7 @@ export async function loadCompatibilityPolicy(root = repositoryRoot) {
     requireCondition(SUPPORTED_PLATFORMS.includes(platform), `The vault compatibility policy names an unknown platform: ${platform}.`)
   }
   const decision = policy.minimumFormatDecision
-  requireCondition(decision?.status === 'recorded', 'The minimum supported vault format needs a recorded owner decision.')
+  requireCondition(decision?.status === 'recorded', 'The minimum supported vault format needs a recorded decision.')
   requireCondition(typeof decision.recordedBy === 'string' && decision.recordedBy.length > 0, 'The compatibility decision must name who recorded it.')
   requireCondition(typeof decision.date === 'string' && !Number.isNaN(Date.parse(decision.date)), 'The compatibility decision must carry a date.')
   requireCondition(typeof decision.note === 'string' && decision.note.length > 0, 'The compatibility decision must carry a note.')

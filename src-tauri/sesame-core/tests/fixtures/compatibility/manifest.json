@@ -130,7 +130,7 @@
         "recordedBy": "owner",
         "date": "2026-09-05",
         "readersRetained": true,
-        "note": "Owner approved limiting the compatibility promise to the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 remain available as unproven recovery attempts, without a promise that historical files authenticate or migrate. This compatibility and recovery decision resolves the missing-writer acceptance dependency for VAULT-02; it does not establish historical compatibility or complete the later restore and release gates."
+        "note": "The compatibility promise covers the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 remain available as unproven recovery attempts, without a promise that historical files authenticate or migrate."
       },
       "recoveryPath": {
         "status": "approvedUnprovenRecovery",
@@ -139,9 +139,9 @@
           "Recover the original pre-public source revision and lockfile, or original executable and its provenance, from maintainer archives for each format 2 through 9. The public tags and reachable format-constant history do not contain these writers.",
           "Identify the exact envelope, payload schema, KDF parameters, wrapper construction, authentication labels, and setup states from that writer. Do not infer them by relabelling a format 10 file or trying alternate authentication labels.",
           "Run the recovered writer in an isolated environment with fictional data for every available record type, folders, trash, history, Unicode, empty optionals, and each supported recovery path. Record the writer digest, fixture digest, fictional credentials, stable identifiers, and expected decoded contents.",
-          "Require those genuine fixtures to authenticate and preserve their expected contents through the compatibility tests before describing that format as proven. If its reader must be retired, obtain owner approval for a separately retained read-only recovery build or converter and test it against the same fixtures first."
+          "Require those genuine fixtures to authenticate and preserve their expected contents through the compatibility tests before describing that format as proven. If its reader must be retired, keep a separate read-only recovery build or converter and test it against the same fixtures first."
         ],
-        "limitation": "Formats 2 through 9 are owner-approved exclusions from the compatibility promise. Their existing readers remain available, but no genuine historical fixture or tested standalone converter establishes recovery. Original-writer recovery and fixture validation are required before adding any of these formats to the compatibility promise."
+        "limitation": "Formats 2 through 9 are outside the compatibility promise. Their existing readers remain available, but no genuine historical fixture or tested standalone converter establishes recovery. Original-writer recovery and fixture validation are required before adding any of these formats to the compatibility promise."
       }
     }
   ],

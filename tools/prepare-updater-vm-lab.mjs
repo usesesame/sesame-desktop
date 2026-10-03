@@ -177,7 +177,7 @@ try {
   const receipt = { payload: receiptPayload, signingKeyId: keyID, signature: candidateSignature }
   const manifest = {
     version: '0.1.1',
-    notes: 'Fictional REL-003 signed updater lab.',
+    notes: 'Fictional signed updater lab.',
     pub_date: '2026-08-12T00:00:00Z',
     url: `http://${host}:${port}/artifact`,
     signature: updaterSignature,
@@ -235,7 +235,7 @@ try {
     'Updater VM lab. Copy this directory into the lab VM, run serve-updater-vm-lab.mjs, then verify-updater-vm-lab.mjs. Loopback only.\n',
   ) 
   completed = true
-  console.log(`Created REL-003 updater lab: ${output}`)
+  console.log(`Created updater lab: ${output}`)
 } finally {
   await rm(privateDirectory, { recursive: true, force: true })
   if (!completed) await rm(output, { recursive: true, force: true })
