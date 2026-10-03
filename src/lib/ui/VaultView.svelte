@@ -284,7 +284,7 @@
     clearTimeout(rowAnimationTimer)
     rowAnimationTimer = setTimeout(() => {
       entryList?.querySelectorAll<HTMLElement>('.entry-row[data-animate]').forEach((row) => delete row.dataset.animate)
-    }, 260)
+    }, 360)
   })
 
   function activateRow(item: VaultItem) {
