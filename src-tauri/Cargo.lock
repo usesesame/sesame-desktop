@@ -4005,6 +4005,7 @@ dependencies = [
  "sha2 0.11.0",
  "totp-rs",
  "ts-rs",
+ "unicode-normalization",
  "url",
  "windows-sys 0.61.2",
  "x25519-dalek",

@@ -42,8 +42,12 @@ test('the release sentinel and the grant command agree across the seam', () => {
 
 test('release verification re-authenticates instead of trusting the session', () => {
   const presence = read('src-tauri', 'src', 'release.rs')
-  assert.match(presence, /derive_key\(/)
+  assert.match(presence, /unwrap_with_password\(/)
   assert.match(presence, /bytes_match\(/)
+  const crypto = read('src-tauri', 'sesame-core', 'src', 'crypto.rs')
+  const unwrap = crypto.slice(crypto.indexOf('pub fn unwrap_with_password('), crypto.indexOf('fn derive_key_from_exact('))
+  assert.match(unwrap, /derive_key_from_exact\(/)
+  assert.match(unwrap, /decrypt_bytes\(/)
   assert.doesNotMatch(presence, /secret == |password == |\.key ==/)
 })
 

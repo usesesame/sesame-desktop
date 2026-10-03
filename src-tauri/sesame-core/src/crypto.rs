@@ -6,6 +6,7 @@ use chacha20poly1305::{
 };
 use serde_json;
 use std::io::{self, Write};
+use unicode_normalization::UnicodeNormalization;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -27,6 +28,40 @@ pub fn default_kdf_params() -> KdfParams {
 }
 
 pub fn derive_key(password: &str, params: &KdfParams) -> VaultResult<[u8; 32]> {
+    let normalized = Zeroizing::new(password.nfc().collect::<String>());
+    derive_key_from_exact(&normalized, params)
+}
+
+pub fn password_forms(password: &str) -> Vec<Zeroizing<String>> {
+    let mut forms: Vec<Zeroizing<String>> = Vec::with_capacity(3);
+    for form in [
+        Zeroizing::new(password.nfc().collect::<String>()),
+        Zeroizing::new(password.nfd().collect::<String>()),
+        Zeroizing::new(password.to_string()),
+    ] {
+        if !forms.iter().any(|seen| seen.as_str() == form.as_str()) {
+            forms.push(form);
+        }
+    }
+    forms
+}
+
+pub fn unwrap_with_password(
+    password: &str,
+    params: &KdfParams,
+    blob: &CipherBlob,
+    aad: &[u8],
+) -> VaultResult<Option<Zeroizing<Vec<u8>>>> {
+    for form in password_forms(password) {
+        let wrapping_key = Zeroizing::new(derive_key_from_exact(&form, params)?);
+        if let Ok(bytes) = decrypt_bytes(&wrapping_key, blob, aad) {
+            return Ok(Some(bytes));
+        }
+    }
+    Ok(None)
+}
+
+fn derive_key_from_exact(password: &str, params: &KdfParams) -> VaultResult<[u8; 32]> {
     validate_kdf_params(params)?;
     let salt = URL_SAFE_NO_PAD
         .decode(&params.salt)
@@ -173,6 +208,78 @@ pub fn bytes_match(left: &[u8], right: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::types::{Attachment, DocumentMetadata};
+    use crate::WRAP_AAD;
+
+    const COMPOSED: &str = "fictional caf\u{e9} na\u{ef}ve password";
+    const DECOMPOSED: &str = "fictional cafe\u{301} nai\u{308}ve password";
+
+    fn wrap_with_exact(password: &str, params: &KdfParams, secret: &[u8]) -> CipherBlob {
+        let key = derive_key_from_exact(password, params).expect("legacy key");
+        encrypt_bytes(&key, secret, WRAP_AAD).expect("legacy wrap")
+    }
+
+    #[test]
+    fn an_ascii_password_derives_the_same_key_as_before_normalization() {
+        let params = default_kdf_params();
+        let password = "fictional ascii password 42";
+        assert_eq!(
+            derive_key(password, &params).expect("normalized"),
+            derive_key_from_exact(password, &params).expect("exact")
+        );
+        assert_eq!(password_forms(password).len(), 1);
+    }
+
+    #[test]
+    fn composed_and_decomposed_forms_derive_one_key() {
+        assert_ne!(COMPOSED, DECOMPOSED);
+        let params = default_kdf_params();
+        assert_eq!(
+            derive_key(COMPOSED, &params).expect("composed"),
+            derive_key(DECOMPOSED, &params).expect("decomposed")
+        );
+    }
+
+    #[test]
+    fn a_wrap_written_from_the_decomposed_form_opens_with_the_composed_form() {
+        let params = default_kdf_params();
+        let wrap = wrap_with_exact(DECOMPOSED, &params, &[5_u8; 32]);
+        let opened = unwrap_with_password(COMPOSED, &params, &wrap, WRAP_AAD)
+            .expect("derivation")
+            .expect("opened");
+        assert_eq!(opened.as_slice(), &[5_u8; 32]);
+    }
+
+    #[test]
+    fn a_wrap_written_from_the_composed_form_opens_with_the_decomposed_form() {
+        let params = default_kdf_params();
+        let wrap = wrap_with_exact(COMPOSED, &params, &[6_u8; 32]);
+        let opened = unwrap_with_password(DECOMPOSED, &params, &wrap, WRAP_AAD)
+            .expect("derivation")
+            .expect("opened");
+        assert_eq!(opened.as_slice(), &[6_u8; 32]);
+    }
+
+    #[test]
+    fn a_wrong_password_opens_nothing_in_any_form() {
+        let params = default_kdf_params();
+        let wrap = wrap_with_exact(COMPOSED, &params, &[7_u8; 32]);
+        assert!(unwrap_with_password(
+            "fictional caf\u{e9} other password",
+            &params,
+            &wrap,
+            WRAP_AAD
+        )
+        .expect("derivation")
+        .is_none());
+    }
+
+    #[test]
+    fn invalid_kdf_settings_are_an_error_not_a_wrong_password() {
+        let mut params = default_kdf_params();
+        let wrap = wrap_with_exact(COMPOSED, &params, &[8_u8; 32]);
+        params.memory_kib = 0;
+        assert!(unwrap_with_password(COMPOSED, &params, &wrap, WRAP_AAD).is_err());
+    }
 
     #[test]
     fn capped_buffer_keeps_only_bytes_under_the_limit() {

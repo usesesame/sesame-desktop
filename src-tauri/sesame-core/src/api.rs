@@ -67,9 +67,7 @@ pub fn open_vault_bytes(bytes: &[u8], secret: &str) -> VaultResult<OpenedVault> 
 
 /// Fresh vault; the recovery kit returns in plain text exactly once.
 pub fn create_vault(password: &str, vault_name: &str) -> VaultResult<(OpenedVault, String)> {
-    if password.chars().count() < 12 {
-        return Err("Use a master password with at least 12 characters.".into());
-    }
+    crate::password_analysis::check_new_master_password(password)?;
     let mut vault_key = Zeroizing::new([0_u8; 32]);
     fill_random(&mut *vault_key);
     let kdf = default_kdf_params();
