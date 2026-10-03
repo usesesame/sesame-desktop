@@ -8,10 +8,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
     bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
+    unwrap_with_password,
 };
 use crate::platform::{
-    copy_private_file, create_private_dir, open_private_file, protect_for_device, replace_file,
-    unprotect_for_device,
+    copy_private_file, create_private_dir, ensure_device_protection, open_private_file,
+    protect_for_device, replace_file, unprotect_for_device,
 };
 use crate::snapshot::duplicate_key;
 use crate::{
@@ -268,13 +269,11 @@ pub fn rotate_master_password_for_session(
     current_password: &str,
     new_password: &str,
 ) -> VaultResult<MasterPasswordRotation> {
-    if new_password.chars().count() < 12 {
-        return Err("Use a new master password with at least 12 characters.".into());
-    }
+    crate::password_analysis::check_new_master_password(new_password)?;
 
-    let current_wrapping_key = Zeroizing::new(derive_key(current_password, &session.kdf)?);
-    let mut confirmed_key = decrypt_bytes(&current_wrapping_key, &session.key_wrap, WRAP_AAD)
-        .map_err(|_| "Your current master password is not correct.".to_string())?;
+    let mut confirmed_key =
+        unwrap_with_password(current_password, &session.kdf, &session.key_wrap, WRAP_AAD)?
+            .ok_or("Your current master password is not correct.")?;
     let matches_session =
         session.expose_vault_key(|key| Ok(bytes_match(confirmed_key.as_slice(), key)))?;
     confirmed_key.zeroize();
@@ -334,6 +333,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
     let mut pepper = [0_u8; 32];
     fill_random(&mut pepper);
+    ensure_device_protection()?;
     let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&pepper)?);
     let kdf = default_kdf_params();
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(pepper)));
@@ -389,9 +389,16 @@ pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> 
     Ok(())
 }
 
+pub const MIN_PIN_DIGITS: usize = 6;
+pub const MAX_PIN_DIGITS: usize = 12;
+
 pub fn validate_unlock_pin(pin: &str) -> VaultResult<()> {
-    if pin.len() != 6 || !pin.bytes().all(|value| value.is_ascii_digit()) {
-        return Err("Use a 6-digit PIN.".into());
+    if !(MIN_PIN_DIGITS..=MAX_PIN_DIGITS).contains(&pin.len())
+        || !pin.bytes().all(|value| value.is_ascii_digit())
+    {
+        return Err(format!(
+            "Use a PIN of {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits."
+        ));
     }
     Ok(())
 }
@@ -402,12 +409,12 @@ pub fn validate_new_unlock_pin(pin: &str) -> VaultResult<()> {
     validate_unlock_pin(pin)?;
     let digits: Vec<u8> = pin.bytes().map(|value| value - b'0').collect();
     if digits.windows(2).all(|pair| pair[0] == pair[1]) {
-        return Err("Choose a PIN that is not the same digit six times.".into());
+        return Err("Choose a PIN that is not one digit repeated.".into());
     }
-    let ascending = digits.windows(2).all(|pair| pair[1] == pair[0] + 1);
-    let descending = digits.windows(2).all(|pair| pair[0] == pair[1] + 1);
+    let ascending = digits.windows(2).all(|pair| pair[1] == (pair[0] + 1) % 10);
+    let descending = digits.windows(2).all(|pair| pair[0] == (pair[1] + 1) % 10);
     if ascending || descending {
-        return Err("Choose a PIN that is not six digits in a row.".into());
+        return Err("Choose a PIN that is not a run of digits in order.".into());
     }
     Ok(())
 }
@@ -417,9 +424,8 @@ pub fn derive_pin_wrapping_key(pin: &str, pin_wrap: &PinWrap) -> VaultResult<[u8
     let protected_pepper = URL_SAFE_NO_PAD
         .decode(&pin_wrap.protected_pepper)
         .map_err(|_| "The PIN unlock data is invalid. Use another unlock method.".to_string())?;
-    let mut pepper = unprotect_for_device(&protected_pepper).map_err(|error| {
-        format!("PIN unlock could not access this device's protected credential store: {error}")
-    })?;
+    let mut pepper = unprotect_for_device(&protected_pepper)
+        .map_err(|error| format!("PIN unlock is unavailable. {error}"))?;
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(&pepper)));
     pepper.zeroize();
     derive_key(secret.as_str(), &pin_wrap.kdf)

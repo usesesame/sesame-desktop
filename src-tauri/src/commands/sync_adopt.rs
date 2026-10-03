@@ -131,9 +131,13 @@ pub async fn sync_adopt_vault(
             .ok_or("Unlock Sesame before joining a synced vault.")?;
 
         // Proves ownership of this vault before its key is replaced.
-        let wrapping_key = derive_key(&master_password, &vault.kdf)?;
-        let mut confirmed = decrypt_bytes(&wrapping_key, &vault.key_wrap, WRAP_AAD)
-            .map_err(|_| "That master password is not correct.".to_string())?;
+        let mut confirmed = crate::vault::crypto::unwrap_with_password(
+            &master_password,
+            &vault.kdf,
+            &vault.key_wrap,
+            WRAP_AAD,
+        )?
+        .ok_or("That master password is not correct.")?;
         let matches = vault.expose_vault_key(|key| Ok(bytes_match(confirmed.as_slice(), key)))?;
         confirmed.zeroize();
         if !matches {

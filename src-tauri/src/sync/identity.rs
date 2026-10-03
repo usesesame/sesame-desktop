@@ -104,6 +104,7 @@ impl DeviceIdentity {
     }
 
     pub fn save(&self, path: &Path) -> VaultResult<()> {
+        crate::vault::platform::ensure_device_protection()?;
         let mut signing_seed = self.signing.to_bytes();
         let protected_signing = protect_for_device(&signing_seed);
         signing_seed.zeroize();

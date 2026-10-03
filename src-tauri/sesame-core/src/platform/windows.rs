@@ -79,3 +79,7 @@ pub fn unprotect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
 pub fn device_protection_available() -> bool {
     true
 }
+
+pub fn ensure_device_protection() -> VaultResult<()> {
+    Ok(())
+}

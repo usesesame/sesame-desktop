@@ -19,6 +19,7 @@ const WALLET_DAEMONS: [(&str, &[&str]); 2] = [
 ];
 const DEVICE_KEY_HEADER: &[u8] = b"sesame:linux-device-key:v1\0";
 const DEVICE_KEY_AAD: &[u8] = b"sesame:linux-device-protection:v1";
+const DEVICE_KEY_CHANGED: &str = "The Sesame device key in your system wallet has changed since this was saved. This happens when the wallet is reset or a different wallet app is running. Unlock with your master password or recovery kit, then set your PIN again in Settings.";
 
 const SECRET_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const SECRET_SERVICE_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
@@ -98,13 +99,25 @@ fn run_linux_device_key_lookup(
 }
 
 fn start_wallet_daemons() {
-    start_wallet_daemons_in(&TRUSTED_BINARY_DIRECTORIES);
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    start_wallet_daemon_in(&TRUSTED_BINARY_DIRECTORIES, &desktop);
 }
 
-fn start_wallet_daemons_in(directories: &[&str]) {
+fn wallet_daemon_order(desktop: &str) -> [(&'static str, &'static [&'static str]); 2] {
+    let kde = desktop
+        .split(':')
+        .any(|name| name.eq_ignore_ascii_case("KDE"));
+    if kde {
+        WALLET_DAEMONS
+    } else {
+        [WALLET_DAEMONS[1], WALLET_DAEMONS[0]]
+    }
+}
+
+fn start_wallet_daemon_in(directories: &[&str], desktop: &str) -> Option<&'static str> {
     use std::process::{Command, Stdio};
 
-    for (daemon, arguments) in WALLET_DAEMONS {
+    for (daemon, arguments) in wallet_daemon_order(desktop) {
         let Some(binary) = trusted_binary_in(directories, daemon) else {
             continue;
         };
@@ -120,7 +133,9 @@ fn start_wallet_daemons_in(directories: &[&str]) {
         std::thread::spawn(move || {
             let _ = child.wait();
         });
+        return Some(daemon);
     }
+    None
 }
 
 fn device_key_lookup_settled(output: &std::process::Output) -> bool {
@@ -262,7 +277,7 @@ fn linux_device_key(create: bool) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
         Some(key) => Ok(key),
         None if create => create_linux_device_key(&secret_tool),
         None => Err(
-            "The Linux device key is unavailable. Use your master password or recovery kit.".into(),
+            "Your system wallet does not hold a Sesame device key. If you use more than one wallet app, start the one that held it, or unlock with your master password or recovery kit.".into(),
         ),
     }
 }
@@ -314,13 +329,17 @@ fn unprotect_with_linux_key(data: &[u8], key: &[u8; 32]) -> VaultResult<Vec<u8>>
                 aad: DEVICE_KEY_AAD,
             },
         )
-        .map_err(|_| "The Linux device-protected value could not be opened.".to_string())
+        .map_err(|_| DEVICE_KEY_CHANGED.to_string())
+}
+
+pub fn ensure_device_protection() -> VaultResult<()> {
+    linux_device_key(true).map(|_| ())
 }
 
 pub fn protect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
     use rand::Rng;
 
-    let key = linux_device_key(true)?;
+    let key = linux_device_key(false)?;
     let mut nonce = [0_u8; 24];
     rand::rng().fill_bytes(&mut nonce);
     protect_with_linux_key(data, &key, &nonce)
@@ -385,39 +404,75 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn wallet_remediation_starts_every_daemon_it_finds() -> VaultResult<()> {
-        let directory = std::env::temp_dir().join(format!("sesame-wallets-{}", std::process::id()));
+    fn probe_wallets(name: &str, daemons: &[&str]) -> VaultResult<PathBuf> {
+        let directory =
+            std::env::temp_dir().join(format!("sesame-wallets-{name}-{}", std::process::id()));
         fs::create_dir_all(&directory)
             .map_err(|_| "could not create the probe directory".to_string())?;
-        let mut markers = Vec::new();
-        for (daemon, _) in WALLET_DAEMONS {
-            let marker = directory.join(format!("{daemon}.started"));
-            let script = format!("#!/bin/sh\ntouch '{}'\n", marker.to_string_lossy());
+        for daemon in daemons {
             let binary = directory.join(daemon);
-            fs::write(&binary, script.as_bytes())
+            fs::write(&binary, b"#!/bin/sh\nexit 0\n")
                 .map_err(|_| "could not write the probe binary".to_string())?;
             fs::set_permissions(&binary, PermissionsExt::from_mode(0o755))
                 .map_err(|_| "could not make the probe binary executable".to_string())?;
-            markers.push(marker);
         }
+        Ok(directory)
+    }
 
+    #[test]
+    fn wallet_remediation_starts_only_the_desktop_wallet() -> VaultResult<()> {
+        let directory = probe_wallets("both", &[KDE_SECRET_SERVICE, GNOME_KEYRING_DAEMON])?;
         let directories = [directory.to_string_lossy().into_owned()];
         let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
-        start_wallet_daemons_in(&borrowed);
 
-        // The assertion is that the daemons start, not how fast they start while the
-        // rest of the parallel suite is competing for memory and processes.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !markers.iter().all(|marker| marker.exists()) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the wallet daemons never ran"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        assert_eq!(
+            start_wallet_daemon_in(&borrowed, "KDE"),
+            Some(KDE_SECRET_SERVICE)
+        );
+        assert_eq!(
+            start_wallet_daemon_in(&borrowed, "ubuntu:GNOME"),
+            Some(GNOME_KEYRING_DAEMON)
+        );
+        assert_eq!(
+            start_wallet_daemon_in(&borrowed, "Hyprland"),
+            Some(GNOME_KEYRING_DAEMON)
+        );
+        assert_eq!(
+            start_wallet_daemon_in(&borrowed, ""),
+            Some(GNOME_KEYRING_DAEMON)
+        );
 
         let _ = fs::remove_dir_all(&directory);
+        Ok(())
+    }
+
+    #[test]
+    fn wallet_remediation_falls_back_to_the_only_installed_wallet() -> VaultResult<()> {
+        let directory = probe_wallets("kde-only", &[KDE_SECRET_SERVICE])?;
+        let directories = [directory.to_string_lossy().into_owned()];
+        let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
+
+        assert_eq!(
+            start_wallet_daemon_in(&borrowed, "GNOME"),
+            Some(KDE_SECRET_SERVICE)
+        );
+        let _ = fs::remove_dir_all(&directory);
+
+        let empty = probe_wallets("none", &[])?;
+        let directories = [empty.to_string_lossy().into_owned()];
+        let borrowed: Vec<&str> = directories.iter().map(String::as_str).collect();
+        assert_eq!(start_wallet_daemon_in(&borrowed, "KDE"), None);
+        let _ = fs::remove_dir_all(&empty);
+        Ok(())
+    }
+
+    #[test]
+    fn a_value_protected_under_another_device_key_explains_the_recovery() -> VaultResult<()> {
+        let protected = protect_with_linux_key(b"pepper", &[7_u8; 32], &[9_u8; 24])?;
+        assert_eq!(
+            unprotect_with_linux_key(&protected, &[8_u8; 32]),
+            Err(DEVICE_KEY_CHANGED.to_string())
+        );
         Ok(())
     }
 

@@ -75,6 +75,7 @@ pub async fn link_desktop_service(
         return Err("The account service returned an incomplete desktop connection.".into());
     }
     let token_bytes = linked.access_token.as_bytes().to_vec();
+    crate::vault::platform::ensure_device_protection()?;
     let protected_token = protect_for_device(&token_bytes)?;
     let mut token_bytes = token_bytes;
     token_bytes.zeroize();

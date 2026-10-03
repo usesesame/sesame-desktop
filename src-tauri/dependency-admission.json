@@ -283,6 +283,11 @@
       "reason": "UTS #39 confusable skeletons and mixed-script detection for the FILL-03 lookalike check. Owner approved 2026-09-27."
     },
     {
+      "name": "unicode-normalization",
+      "version": "0.1",
+      "reason": "NFC normalization of master passwords per RFC 8265, so the same password typed in another Unicode form still unlocks. Already in the shipped build through unicode-security. Owner approved 2026-10-02."
+    },
+    {
       "name": "url",
       "version": "2.5",
       "reason": "In use before this gate was adopted."

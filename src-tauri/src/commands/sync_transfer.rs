@@ -431,16 +431,13 @@ pub async fn sync_remove_device(
             return Err("The unlocked vault is not the Sync vault for this account.".into());
         }
         // Verify the current wrapper before asking the service to commit: a mistype must not orphan every path.
-        let wrapping_key = zeroize::Zeroizing::new(crate::vault::crypto::derive_key(
+        let mut confirmed = crate::vault::crypto::unwrap_with_password(
             &master_password,
             &vault.kdf,
-        )?);
-        let mut confirmed = crate::vault::crypto::decrypt_bytes(
-            &wrapping_key,
             &vault.key_wrap,
             crate::vault::WRAP_AAD,
-        )
-        .map_err(|_| "That master password is not correct.".to_string())?;
+        )?
+        .ok_or("That master password is not correct.")?;
         let matches = vault.expose_vault_key(|key| {
             Ok(crate::vault::crypto::bytes_match(confirmed.as_slice(), key))
         })?;
