@@ -159,7 +159,6 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_KEY "${UNINSTKEY}"
   !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_VALUENAME "CurrentUser"
   !define MULTIUSER_INSTALLMODEPAGE_SHOWUSERNAME
-  !define MULTIUSER_INSTALLMODE_FUNCTION RestorePreviousInstallLocation
   !define MULTIUSER_EXECUTIONLEVEL Highest
   !include MultiUser.nsh
 !endif
@@ -410,11 +409,43 @@ Function PageLeaveReinstall
       ExecWait '$R1' $0
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-      ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
-      ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
-      StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
-      ExecWait '$R1' $0
+      StrCpy $R5 ""
+      ClearErrors
+      GetFullPathName $R5 "$4"
+
+      StrCpy $R2 0
+      StrLen $R0 "$PROGRAMFILES64"
+      IntOp $R0 $R0 + 1
+      StrCpy $R3 $R5 $R0
+      ${If} $R3 == "$PROGRAMFILES64\"
+        StrCpy $R2 1
+      ${EndIf}
+      StrLen $R0 "$PROGRAMFILES"
+      IntOp $R0 $R0 + 1
+      StrCpy $R3 $R5 $R0
+      ${If} $R3 == "$PROGRAMFILES\"
+        StrCpy $R2 1
+      ${EndIf}
+
+      ${If} $R2 = 1
+        StrCpy $R1 '"$R5\uninstall.exe"'
+        ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
+        ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
+        StrCpy $R1 "$R1 _?=$R5" ; append uninstall directory
+        ClearErrors
+        ExecWait '$R1' $0
+
+        ${If} $0 = 0
+        ${AndIfNot} ${Errors}
+        ${AndIf} $R5 != $INSTDIR
+          Delete "$R5\uninstall.exe"
+          RMDir "$R5"
+          ClearErrors
+        ${EndIf}
+      ${Else}
+        StrCpy $0 0
+        ClearErrors
+      ${EndIf}
     ${EndIf}
 
     BringToFront
@@ -440,10 +471,6 @@ Function PageLeaveReinstall
     ${EndIf}
   reinst_done:
 FunctionEnd
-
-; 5. Choose install directory page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_DIRECTORY
 
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
@@ -558,26 +585,11 @@ Function .onInit
 
   !insertmacro SetContext
 
-  ${If} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
-    ; Set default install location
-    !if "${INSTALLMODE}" == "perMachine"
-      ${If} ${RunningX64}
-        !if "${ARCH}" == "x64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else if "${ARCH}" == "arm64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
-        !else
-          StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-        !endif
-      ${Else}
-        StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
-      ${EndIf}
-    !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
-    !endif
-
-    Call RestorePreviousInstallLocation
-  ${EndIf}
+  !if "${INSTALLMODE}" == "perMachine"
+    StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+  !else if "${INSTALLMODE}" == "currentUser"
+    StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+  !endif
 
 
   !if "${INSTALLMODE}" == "both"
@@ -966,12 +978,6 @@ Section Uninstall
     SetAutoClose true
   ${EndIf}
 SectionEnd
-
-Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
-FunctionEnd
 
 Function Skip
   Abort

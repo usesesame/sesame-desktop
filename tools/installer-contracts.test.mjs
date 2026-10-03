@@ -56,6 +56,74 @@ test('the installer owns its own template and never offers to delete app data', 
   assert.match(code, /Section EarlyChecks[\s\S]*SetErrorLevel 3\s*Quit[\s\S]*SectionEnd/)
 })
 
+test('the installer pins the install directory instead of offering a choice', () => {
+  const installer = read('src-tauri', 'nsis', 'installer.nsi')
+  const code = installer
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+
+  assert.doesNotMatch(code, /MUI_PAGE_DIRECTORY/)
+  assert.doesNotMatch(code, /RestorePreviousInstallLocation/)
+  assert.doesNotMatch(code, /\$\{GetOptions\}\s+\$CMDLINE\s+"\/D/i)
+  assert.doesNotMatch(code, /(?:ReadRegStr|ReadINIStr)\s+\$INSTDIR/)
+
+  const onInit = code.match(/Function \.onInit\b([\s\S]*?)FunctionEnd/)
+  assert.ok(onInit, 'the installer has no .onInit function, so this contract read nothing')
+  assert.doesNotMatch(onInit[1], /\$INSTDIR\s*(?:==|!=)/)
+  assert.match(
+    onInit[1],
+    /!if "\$\{INSTALLMODE\}" == "perMachine"\s*\n\s*StrCpy \$INSTDIR "\$PROGRAMFILES64\\\$\{PRODUCTNAME\}"/,
+  )
+
+  const assignments = [...code.matchAll(/StrCpy\s+\$INSTDIR\s+("[^"]*"|\S+)/g)].map((match) => match[1])
+  assert.deepEqual(assignments, ['"$PROGRAMFILES64\\${PRODUCTNAME}"', '"$LOCALAPPDATA\\${PRODUCTNAME}"'])
+})
+
+test('the installer only runs a pre-existing uninstaller from an administrator-owned location', () => {
+  const installer = read('src-tauri', 'nsis', 'installer.nsi')
+  const code = installer
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+
+  const reinstall = code.match(/reinst_uninstall:([\s\S]*?)reinst_done:/)
+  assert.ok(reinstall, 'reinst_uninstall was not found, so this contract read nothing')
+  const block = reinstall[1]
+
+  const recorded = block.search(/ReadRegStr \$4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/)
+  const canonical = block.search(/GetFullPathName \$R5 "\$4"/)
+  assert.ok(recorded >= 0, 'the reinstall flow no longer reads the recorded old install directory')
+  assert.ok(canonical > recorded, 'the recorded directory is not canonicalized before the trust check')
+  assert.doesNotMatch(block, /StrCpy \$R3 \$4 /, 'the trust check reads the raw recorded directory')
+
+  const prefixCheck = (name) =>
+    String.raw`StrLen \$R0 "\$${name}"\s*\n\s*IntOp \$R0 \$R0 \+ 1\s*\n\s*StrCpy \$R3 \$R5 \$R0\s*\n\s*\$\{If\} \$R3 == "\$${name}\\"`
+  const root64 = block.search(new RegExp(prefixCheck('PROGRAMFILES64')))
+  const root32 = block.search(new RegExp(prefixCheck('PROGRAMFILES')))
+  assert.ok(root64 > canonical, 'the trust check no longer matches $PROGRAMFILES64 on the canonical path')
+  assert.ok(root32 > canonical, 'the trust check no longer matches $PROGRAMFILES on the canonical path')
+
+  const gate = block.search(/\$\{If\} \$R2 = 1/)
+  assert.ok(gate >= 0, 'the recorded uninstaller launch is not gated on a trust result')
+  assert.ok(root64 < gate && root32 < gate, 'the launch is gated before both trust roots are checked')
+
+  const branches = block.match(/\$\{If\} \$R2 = 1\s*\n([\s\S]*?)\n {6}\$\{Else\}\s*\n([\s\S]*?)\n {6}\$\{EndIf\}/)
+  assert.ok(branches, 'the trust result has no trusted and untrusted branches')
+  const [, trusted, untrusted] = branches
+
+  assert.match(trusted, /StrCpy \$R1 '"\$R5\\uninstall\.exe"'/, 'the trusted branch does not run the uninstaller from the checked directory')
+  assert.match(trusted, /StrCpy \$R1 "\$R1 _\?=\$R5"/)
+  assert.match(trusted, /ExecWait '\$R1' \$0/, 'the trusted branch no longer runs the old uninstaller')
+  assert.match(
+    trusted,
+    /\$\{If\} \$0 = 0[\s\S]*?\$\{AndIf\} \$R5 != \$INSTDIR[\s\S]*?Delete "\$R5\\uninstall\.exe"[\s\S]*?RMDir "\$R5"/,
+    'the trusted branch no longer removes the leftover old uninstaller',
+  )
+
+  assert.doesNotMatch(untrusted, /Exec|RunAsUser|Delete|RMDir|Rename/i, 'the untrusted branch must neither run nor remove anything')
+})
+
 test('Windows executables use a safe DLL search order and install per-machine', () => {
   const cargo = read('src-tauri', 'Cargo.toml')
   const desktop = read('src-tauri', 'src', 'lib.rs')
@@ -174,4 +242,21 @@ test('the installer never launches an executable through an unquoted path', () =
       `ExecWait launches an executable through an unquoted path: ${launch}`,
     )
   }
+})
+
+test('Windows CI builds the installer and runs its install lifecycle', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const windows = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  desktop-linux:'))
+  assert.match(windows, /npx tauri build --bundles nsis --config \$config -- --locked/)
+  assert.match(windows, /createUpdaterArtifacts":false/)
+  assert.match(windows, /\.\/tools\/test-windows-installer\.ps1 -InstallerPath/)
+
+  const lifecycle = read('tools', 'test-windows-installer.ps1')
+  for (const step of [/Invoke-Installer \$installer @\('\/S'\)/, /Invoke-Installer \$installer @\('\/P'\)/, /'\/S', "_\?=\$expectedDirectory"/]) {
+    assert.match(lifecycle, step)
+  }
+  assert.match(lifecycle, /the old uninstaller outside Program Files never runs/)
+  assert.match(lifecycle, /nothing is removed from the old directory/)
+  assert.match(lifecycle, /the old uninstaller inside Program Files runs/)
+  assert.match(lifecycle, /a traversal path into Program Files does not run the old uninstaller/)
 })
