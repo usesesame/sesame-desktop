@@ -409,54 +409,41 @@ Function PageLeaveReinstall
       ExecWait '$R1' $0
     ${Else}
       ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+      StrCpy $R5 ""
+      ClearErrors
+      GetFullPathName $R5 "$4"
 
       StrCpy $R2 0
       StrLen $R0 "$PROGRAMFILES64"
       IntOp $R0 $R0 + 1
-      StrCpy $R3 $4 $R0
+      StrCpy $R3 $R5 $R0
       ${If} $R3 == "$PROGRAMFILES64\"
         StrCpy $R2 1
       ${EndIf}
       StrLen $R0 "$PROGRAMFILES"
       IntOp $R0 $R0 + 1
-      StrCpy $R3 $4 $R0
+      StrCpy $R3 $R5 $R0
       ${If} $R3 == "$PROGRAMFILES\"
         StrCpy $R2 1
       ${EndIf}
 
       ${If} $R2 = 1
+        StrCpy $R1 '"$R5\uninstall.exe"'
         ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
         ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
-        StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
+        StrCpy $R1 "$R1 _?=$R5" ; append uninstall directory
         ClearErrors
         ExecWait '$R1' $0
 
         ${If} $0 = 0
         ${AndIfNot} ${Errors}
-        ${AndIf} $4 != $INSTDIR
-          Delete "$4\uninstall.exe"
-          RMDir "$4"
+        ${AndIf} $R5 != $INSTDIR
+          Delete "$R5\uninstall.exe"
+          RMDir "$R5"
           ClearErrors
         ${EndIf}
       ${Else}
         StrCpy $0 0
-        ClearErrors
-        ${If} $4 != ""
-        ${AndIf} $4 != $INSTDIR
-          Delete "$4\${MAINBINARYNAME}.exe"
-          {{#each resources}}
-            Delete "$4\\{{this.[1]}}"
-          {{/each}}
-          {{#each binaries}}
-            Delete "$4\\{{this}}"
-          {{/each}}
-          Delete "$4\uninstall.exe"
-          {{#each resources_ancestors}}
-          RMDir "$4\\{{this}}"
-          {{/each}}
-          RMDir "$4"
-        ${EndIf}
         ClearErrors
       ${EndIf}
     ${EndIf}

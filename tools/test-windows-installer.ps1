@@ -98,13 +98,32 @@ Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $untrustedDi
 $code = Invoke-Installer $installer @('/P')
 Assert-True ($code -eq 0) "the passive reinstall exits 0, got $code"
 Assert-True (-not (Test-Path -LiteralPath $decoyMarker)) 'the old uninstaller outside Program Files never runs'
-Assert-True (-not (Test-Path -LiteralPath (Join-Path $untrustedDirectory $mainBinary))) "the old $mainBinary is removed"
-Assert-True (-not (Test-Path -LiteralPath (Join-Path $untrustedDirectory 'uninstall.exe'))) 'the old uninstaller is removed'
-Assert-True (Test-Path -LiteralPath (Join-Path $untrustedDirectory 'keep.txt')) 'a file the installer did not place is kept'
+$kept = @($mainBinary, 'uninstall.exe', 'keep.txt') | Where-Object { Test-Path -LiteralPath (Join-Path $untrustedDirectory $_) }
+Assert-True ($kept.Count -eq 3) 'nothing is removed from the old directory outside Program Files'
 Assert-True (Test-Path -LiteralPath (Join-Path $expectedDirectory $mainBinary)) "$mainBinary is installed in Program Files"
 Assert-True ((Get-ItemProperty -LiteralPath $uninstallKey).InstallLocation.Trim('"') -eq $expectedDirectory) 'the uninstall key points at Program Files'
 
+Write-Host 'Reinstall over an old install inside Program Files'
+$trustedOldDirectory = Join-Path $env:ProgramFiles 'SesameOldInstall'
+New-Item -ItemType Directory -Path $trustedOldDirectory -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $untrustedDirectory 'uninstall.exe') -Destination (Join-Path $trustedOldDirectory 'uninstall.exe')
+Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $trustedOldDirectory
+$code = Invoke-Installer $installer @('/P')
+Assert-True ($code -eq 0) "the passive reinstall over a Program Files install exits 0, got $code"
+Assert-True (Test-Path -LiteralPath $decoyMarker) 'the old uninstaller inside Program Files runs'
+Assert-True (-not (Test-Path -LiteralPath $trustedOldDirectory)) 'the old Program Files directory is removed after its uninstaller succeeds'
+Remove-Item -LiteralPath $decoyMarker -Force
+
+Write-Host 'Reinstall over a recorded traversal path'
+$traversal = Join-Path $env:ProgramFiles "..\$(Split-Path -Leaf $untrustedDirectory)"
+Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $traversal
+$code = Invoke-Installer $installer @('/P')
+Assert-True ($code -eq 0) "the passive reinstall over a traversal path exits 0, got $code"
+Assert-True (-not (Test-Path -LiteralPath $decoyMarker)) 'a traversal path into Program Files does not run the old uninstaller'
+Assert-True (Test-Path -LiteralPath (Join-Path $untrustedDirectory 'uninstall.exe')) 'the old uninstaller behind the traversal path is left in place'
+Assert-True (Test-Path -LiteralPath (Join-Path $expectedDirectory $mainBinary)) "$mainBinary is still installed in Program Files"
+
 $code = Invoke-Installer (Join-Path $expectedDirectory 'uninstall.exe') @('/S', "_?=$expectedDirectory")
 Assert-True ($code -eq 0) "the final uninstall exits 0, got $code"
-Remove-Item -LiteralPath $expectedDirectory, $untrustedDirectory -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $expectedDirectory, $untrustedDirectory, $trustedOldDirectory -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host 'Installer lifecycle passed'

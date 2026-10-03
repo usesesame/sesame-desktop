@@ -91,18 +91,18 @@ test('the installer only runs a pre-existing uninstaller from an administrator-o
   assert.ok(reinstall, 'reinst_uninstall was not found, so this contract read nothing')
   const block = reinstall[1]
 
-  assert.match(
-    block,
-    /ReadRegStr \$4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/,
-    'the reinstall flow no longer reads the recorded old install directory',
-  )
+  const recorded = block.search(/ReadRegStr \$4 SHCTX "\$\{MANUPRODUCTKEY\}" ""/)
+  const canonical = block.search(/GetFullPathName \$R5 "\$4"/)
+  assert.ok(recorded >= 0, 'the reinstall flow no longer reads the recorded old install directory')
+  assert.ok(canonical > recorded, 'the recorded directory is not canonicalized before the trust check')
+  assert.doesNotMatch(block, /StrCpy \$R3 \$4 /, 'the trust check reads the raw recorded directory')
 
   const prefixCheck = (name) =>
-    String.raw`StrLen \$R0 "\$${name}"\s*\n\s*IntOp \$R0 \$R0 \+ 1\s*\n\s*StrCpy \$R3 \$4 \$R0\s*\n\s*\$\{If\} \$R3 == "\$${name}\\"`
+    String.raw`StrLen \$R0 "\$${name}"\s*\n\s*IntOp \$R0 \$R0 \+ 1\s*\n\s*StrCpy \$R3 \$R5 \$R0\s*\n\s*\$\{If\} \$R3 == "\$${name}\\"`
   const root64 = block.search(new RegExp(prefixCheck('PROGRAMFILES64')))
   const root32 = block.search(new RegExp(prefixCheck('PROGRAMFILES')))
-  assert.ok(root64 >= 0, 'the trust check no longer matches $PROGRAMFILES64 with its trailing backslash')
-  assert.ok(root32 >= 0, 'the trust check no longer matches $PROGRAMFILES with its trailing backslash')
+  assert.ok(root64 > canonical, 'the trust check no longer matches $PROGRAMFILES64 on the canonical path')
+  assert.ok(root32 > canonical, 'the trust check no longer matches $PROGRAMFILES on the canonical path')
 
   const gate = block.search(/\$\{If\} \$R2 = 1/)
   assert.ok(gate >= 0, 'the recorded uninstaller launch is not gated on a trust result')
@@ -112,39 +112,16 @@ test('the installer only runs a pre-existing uninstaller from an administrator-o
   assert.ok(branches, 'the trust result has no trusted and untrusted branches')
   const [, trusted, untrusted] = branches
 
-  assert.match(trusted, /ExecWait '\$R1' \$0/, 'the trusted branch no longer runs the recorded uninstaller')
-  assert.doesNotMatch(untrusted, /Exec|RunAsUser/i, 'the untrusted branch must not execute the recorded uninstaller')
-
+  assert.match(trusted, /StrCpy \$R1 '"\$R5\\uninstall\.exe"'/, 'the trusted branch does not run the uninstaller from the checked directory')
+  assert.match(trusted, /StrCpy \$R1 "\$R1 _\?=\$R5"/)
+  assert.match(trusted, /ExecWait '\$R1' \$0/, 'the trusted branch no longer runs the old uninstaller')
   assert.match(
     trusted,
-    /\$\{If\} \$0 = 0[\s\S]*?\$\{AndIf\} \$4 != \$INSTDIR[\s\S]*?Delete "\$4\\uninstall\.exe"[\s\S]*?RMDir "\$4"/,
+    /\$\{If\} \$0 = 0[\s\S]*?\$\{AndIf\} \$R5 != \$INSTDIR[\s\S]*?Delete "\$R5\\uninstall\.exe"[\s\S]*?RMDir "\$R5"/,
     'the trusted branch no longer removes the leftover old uninstaller',
   )
 
-  assert.match(
-    untrusted,
-    /\$\{If\} \$4 != ""\s*\n\s*\$\{AndIf\} \$4 != \$INSTDIR\s*\n/,
-    'the untrusted cleanup is not limited to a recorded directory other than $INSTDIR',
-  )
-  const removals = [...untrusted.matchAll(/^\s*(Delete|RMDir)\s+(\S.*)$/gm)].map((match) => `${match[1]} ${match[2].trim()}`)
-  assert.deepEqual(
-    removals,
-    [
-      'Delete "$4\\${MAINBINARYNAME}.exe"',
-      'Delete "$4\\\\{{this.[1]}}"',
-      'Delete "$4\\\\{{this}}"',
-      'Delete "$4\\uninstall.exe"',
-      'RMDir "$4\\\\{{this}}"',
-      'RMDir "$4"',
-    ],
-    'the untrusted cleanup must remove only the files Sesame installed and then empty directories',
-  )
-  const uninstall = code.match(/Section Uninstall\b([\s\S]*?)SectionEnd/)
-  assert.ok(uninstall, 'the uninstall section was not found, so this contract read nothing')
-  for (const list of ['resources', 'binaries', 'resources_ancestors']) {
-    assert.match(uninstall[1], new RegExp(String.raw`\{\{#each ${list}\}\}`), `the uninstaller no longer lists ${list}`)
-    assert.match(untrusted, new RegExp(String.raw`\{\{#each ${list}\}\}`), `the untrusted cleanup no longer lists ${list}`)
-  }
+  assert.doesNotMatch(untrusted, /Exec|RunAsUser|Delete|RMDir|Rename/i, 'the untrusted branch must neither run nor remove anything')
 })
 
 test('Windows executables use a safe DLL search order and install per-machine', () => {
@@ -279,5 +256,7 @@ test('Windows CI builds the installer and runs its install lifecycle', () => {
     assert.match(lifecycle, step)
   }
   assert.match(lifecycle, /the old uninstaller outside Program Files never runs/)
-  assert.match(lifecycle, /a file the installer did not place is kept/)
+  assert.match(lifecycle, /nothing is removed from the old directory/)
+  assert.match(lifecycle, /the old uninstaller inside Program Files runs/)
+  assert.match(lifecycle, /a traversal path into Program Files does not run the old uninstaller/)
 })
