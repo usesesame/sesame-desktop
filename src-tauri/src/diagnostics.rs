@@ -196,7 +196,6 @@ fn severity(code: &str) -> &'static str {
         | "unregister_ok"
         | "card_requested"
         | "card_approved"
-        | "fill_auto_approved"
         | "totp_requested"
         | "totp_approved" => "info",
         // Unknown or retired codes are routine, never misclassified failures.
@@ -378,16 +377,15 @@ fn prune_stale_at(path: &Path, now: u64) -> DiagnosticResult<()> {
     fs::write(path, kept).map_err(|_| "Sesame could not tidy its local diagnostic log.".to_string())
 }
 
-pub fn export(app: &AppHandle, destination: &str) -> DiagnosticResult<String> {
+pub fn export(app: &AppHandle, destination: &Path) -> DiagnosticResult<String> {
     let source = diagnostic_path(app)?;
     if !source.is_file() {
         return Err("There is no local diagnostic log to export yet.".into());
     }
-    let destination = PathBuf::from(destination);
     if destination.extension().and_then(|value| value.to_str()) != Some("jsonl") {
         return Err("Save the diagnostic log with a .jsonl extension.".into());
     }
-    fs::copy(&source, &destination)
+    fs::copy(&source, destination)
         .map_err(|_| "Sesame could not export the local diagnostic log.".to_string())?;
     destination
         .file_name()
@@ -563,7 +561,6 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "fill_connection_closed"
             | "fill_vault_changed"
             | "fill_listener_failed"
-            | "fill_auto_approved"
             | "save_requested"
             | "save_approved"
             | "save_denied"

@@ -59,7 +59,7 @@ try {
   }
   await writeFile(join(output, 'SHA256SUMS.txt'), `${lines.join('\n')}\n`)
   completed = true
-  console.log(`Created REL-003 installer VM pair: ${output}`)
+  console.log(`Created installer VM pair: ${output}`)
 } finally {
   if (!completed) await rm(output, { recursive: true, force: true })
 }

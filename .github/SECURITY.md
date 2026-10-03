@@ -42,18 +42,12 @@ so and we will work out a safe way to reproduce it.
 - We tell you when a fix ships and credit you in the advisory unless you prefer
   otherwise.
 
-This is a small project. If you have not heard back in the windows above, send
-a follow-up rather than assuming the report was received.
+If you have not heard back in that time, send a follow-up.
 
 ## Supported versions
 
-Only the current release receives fixes. The practical guidance is to update
-rather than to patch an older build.
-
-| Version | Supported |
-| --- | --- |
-| Current release | Yes |
-| Any earlier build | No. Update instead |
+Only the current release receives fixes. Update rather than patch an older
+build.
 
 ## Scope
 
@@ -100,10 +94,28 @@ good-faith report that turns out to be out of scope is not held against you.
 
 ## Known limits
 
-Stated plainly so a report does not spend effort on a known position:
-
-- Sesame has not had an independent security audit.
-- The recovery kit cannot be reset or recovered. That is a design decision, not
-  a bug.
+- PIN unlock is a convenience for this device, not a second factor. A program
+  running as you can open the device key, and with the vault file it can test
+  PINs offline. Each extra PIN digit makes that search ten times longer.
+- A lost recovery kit cannot be recovered. A new one can only be issued with
+  the master password after a 72-hour wait.
 - Sync is not enabled. Preview-only desktop code is gated by the
   `sync-preview` Cargo feature, which shipping builds do not enable.
+- Sesame cannot protect an unlocked vault from software that controls your
+  computer. Malware running as you, or as an administrator, can read the
+  app's memory, drive its window, record your keystrokes, or capture the
+  screen while a secret is shown.
+- Malware that controls your browser profile can act as the extension. The
+  approval prompt in the Sesame window is the last check before a fill.
+- Changing the master password cannot reach copies made before the change:
+  exported backups, readable exports, operating system backups, cloud-synced
+  folders, and data left on an SSD.
+- Anyone who can write to the vault folder can put back an older vault file.
+  Sesame does not yet detect that rollback.
+- A master password or recovery kit that someone else learns opens any copy
+  of your vault file. Keep the recovery kit offline.
+- The 72-hour wait for a new recovery kit uses HTTPS time from usesesame.app
+  and github.com, so it needs an internet connection. Someone who knows the
+  password and keeps access for 72 hours can complete it, and software that
+  can add trusted certificates could forge the time. The warning on every
+  unlock is the check against both.

@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     api::OpenedVault,
-    crypto::{decrypt_bytes, derive_key, validate_kdf_params},
+    crypto::{decrypt_bytes, derive_key, unwrap_with_password, validate_kdf_params},
     migration::{migrate_payload, migrate_vault_file, MIN_SUPPORTED_VAULT_FORMAT},
     payload_aad_for_file, BackupCompatibility, CipherBlob, VaultFile, VaultPayload,
     MAX_VAULT_FILE_BYTES, RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
@@ -107,6 +107,12 @@ impl AuthenticatedPayload {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct FormatProbe {
+    #[serde(rename = "formatVersion")]
+    format_version: u8,
+}
+
 pub struct VaultLoader;
 
 impl VaultLoader {
@@ -158,13 +164,9 @@ impl VaultLoader {
         if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
             return Err(LoadFailure::SizeLimit);
         }
-        let value: serde_json::Value =
+        let probe: FormatProbe =
             serde_json::from_slice(bytes).map_err(|_| LoadFailure::InvalidStructure)?;
-        value
-            .get("formatVersion")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|format| u8::try_from(format).ok())
-            .ok_or(LoadFailure::InvalidStructure)
+        Ok(probe.format_version)
     }
 
     pub fn compatibility(format: u8) -> BackupCompatibility {
@@ -221,13 +223,16 @@ impl VaultLoader {
         Self::validate(file)?;
         match credential {
             Credential::VaultKey(key) => Ok(Zeroizing::new(*key)),
-            Credential::MasterPassword(password) => unwrap(
-                password,
-                &file.kdf,
-                &file.key_wrap,
-                WRAP_AAD,
-                LoadFailure::WrongPassword,
-            ),
+            Credential::MasterPassword(password) => {
+                let bytes = unwrap_with_password(password, &file.kdf, &file.key_wrap, WRAP_AAD)
+                    .map_err(|_| LoadFailure::UnsafeKdf)?
+                    .ok_or(LoadFailure::WrongPassword)?;
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map(Zeroizing::new)
+                    .map_err(|_| LoadFailure::InvalidStructure)
+            }
             Credential::RecoveryKit(kit) => {
                 let normalized = Zeroizing::new(kit.trim().to_ascii_uppercase());
                 match (&file.recovery_kdf, &file.recovery_wrap) {

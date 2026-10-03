@@ -1,5 +1,5 @@
 import type { AppStores } from '../stores/app-stores'
-import type { BackupSelection, BackupVerification, RecoveryHealth } from '../types'
+import type { BackupSelection, BackupVerification, RecoveryHealth, RestoreBackupResult } from '../types'
 import {
   chooseBackupForRestore,
   createBackup,
@@ -30,11 +30,15 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     restoreConfirmed: false,
     restoreSecret: '',
     restoringBackup: false,
+    restorePresenceRequired: false,
+    restorePresencePassword: '',
     drillSelection: null as BackupSelection | null,
     drillSecret: '',
     drillVerification: null as BackupVerification | null,
     drillWorking: false,
     drillRestoring: false,
+    drillPresenceRequired: false,
+    drillPresencePassword: '',
     drillError: '',
     health: null as RecoveryHealth | null,
     healthLoading: false,
@@ -49,8 +53,16 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       drillVerification: null,
       drillWorking: false,
       drillRestoring: false,
+      drillPresenceRequired: false,
+      drillPresencePassword: '',
       drillError: '',
     })
+  }
+
+  function restoreRevisionCopy(restored: RestoreBackupResult): string {
+    return restored.replacedRevision === undefined
+      ? ''
+      : ` The restored vault is at revision ${restored.restoredRevision}, replacing revision ${restored.replacedRevision}.`
   }
 
   async function applyRestoredVault(message: string) {
@@ -58,6 +70,64 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault' })
     state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })
     onRestored(message)
+  }
+
+  async function runRestore() {
+    const current = state.value()
+    if (!current.restoreSelection || !current.restoreSecret || current.restoringBackup) return
+    if (vault.value().status.exists && !current.restoreConfirmed) return
+    state.patch({ restoringBackup: true })
+    feedback.clearError()
+    try {
+      const hadVault = vault.value().status.exists
+      const upgraded = current.restoreSelection.compatibility === 'upgrade'
+      const restored = await restoreBackup(current.restoreSelection.token, current.restoreSecret)
+      const action = upgraded ? 'Older backup upgraded and restored.' : 'Backup restored.'
+      const message = restored.safetyBackupName
+        ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.${restoreRevisionCopy(restored)}`
+        : hadVault
+          ? `${action}${restoreRevisionCopy(restored)}`
+          : `${action} Unlock with the master password or recovery kit from that backup.`
+      modal.close('restore')
+      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
+      await applyRestoredVault(message)
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ restorePresenceRequired: true, restorePresencePassword: '' })
+        feedback.setErrorMessage('Confirm your current master password before Sesame replaces the vault.')
+      } else {
+        feedback.setError(error)
+      }
+    } finally {
+      state.patch({ restoringBackup: false })
+    }
+  }
+
+  async function runDrillRestore() {
+    const current = state.value()
+    if (!current.drillSelection || !current.drillVerification || !current.drillSecret || current.drillRestoring) return
+    state.patch({ drillRestoring: true, drillError: '', drillPresenceRequired: false })
+    try {
+      const upgraded = current.drillVerification.compatibility === 'upgrade'
+      const restored = await restoreBackup(current.drillSelection.token, current.drillSecret)
+      const action = upgraded
+        ? 'Recovery drill complete. The older backup was upgraded and restored.'
+        : 'Recovery drill complete. The verified backup was restored.'
+      const message = restored.safetyBackupName
+        ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.${restoreRevisionCopy(restored)}`
+        : `${action}${restoreRevisionCopy(restored)}`
+      modal.close('backup-drill')
+      clearDrill()
+      await applyRestoredVault(message)
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ drillPresenceRequired: true })
+      } else {
+        state.patch({ drillError: error instanceof Error ? error.message : 'The verified backup could not be restored.' })
+      }
+    } finally {
+      state.patch({ drillRestoring: false })
+    }
   }
 
   async function refreshHealth() {
@@ -142,31 +212,23 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     closeRestore() {
       if (state.value().restoringBackup) return
       modal.close('restore')
-      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '' })
+      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
     },
     async confirmRestore() {
+      if (state.value().restorePresenceRequired) return
+      await runRestore()
+    },
+    async confirmRestorePresence() {
       const current = state.value()
-      if (!current.restoreSelection || !current.restoreSecret) return
-      if (vault.value().status.exists && !current.restoreConfirmed) return
-      state.patch({ restoringBackup: true })
+      const secret = current.restorePresencePassword
+      if (!secret || current.restoringBackup) return
       feedback.clearError()
       try {
-        const hadVault = vault.value().status.exists
-        const upgraded = current.restoreSelection.compatibility === 'upgrade'
-        const restored = await restoreBackup(current.restoreSelection.source, current.restoreSecret)
-        const action = upgraded ? 'Older backup upgraded and restored.' : 'Backup restored.'
-        const message = restored.safetyBackupName
-          ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.`
-          : hadVault
-            ? action
-            : `${action} Unlock with the master password or recovery kit from that backup.`
-        modal.close('restore')
-        state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '' })
-        await applyRestoredVault(message)
+        await grantPresence(secret)
+        state.patch({ restorePresencePassword: '', restorePresenceRequired: false })
+        await runRestore()
       } catch (error) {
         feedback.setError(error)
-      } finally {
-        state.patch({ restoringBackup: false })
       }
     },
     openDrill() {
@@ -197,7 +259,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       if (!current.drillSelection || !current.drillSecret.trim() || current.drillWorking) return
       state.patch({ drillWorking: true, drillError: '' })
       try {
-        state.patch({ drillVerification: await verifyBackup(current.drillSelection.source, current.drillSecret) })
+        state.patch({ drillVerification: await verifyBackup(current.drillSelection.token, current.drillSecret) })
         await refreshHealth()
       } catch (error) {
         state.patch({ drillVerification: null, drillError: error instanceof Error ? error.message : 'That backup could not be verified.' })
@@ -206,25 +268,19 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       }
     },
     async restoreVerifiedBackup() {
+      await runDrillRestore()
+    },
+    async confirmDrillPresence() {
       const current = state.value()
-      if (!current.drillSelection || !current.drillVerification || !current.drillSecret || current.drillRestoring) return
+      const secret = current.drillPresencePassword
+      if (!secret || current.drillRestoring) return
       state.patch({ drillRestoring: true, drillError: '' })
       try {
-        const upgraded = current.drillVerification.compatibility === 'upgrade'
-        const restored = await restoreBackup(current.drillSelection.source, current.drillSecret)
-        const action = upgraded
-          ? 'Recovery drill complete. The older backup was upgraded and restored.'
-          : 'Recovery drill complete. The verified backup was restored.'
-        const message = restored.safetyBackupName
-          ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.`
-          : action
-        modal.close('backup-drill')
-        clearDrill()
-        await applyRestoredVault(message)
+        await grantPresence(secret)
+        state.patch({ drillPresencePassword: '', drillPresenceRequired: false, drillRestoring: false })
+        await runDrillRestore()
       } catch (error) {
-        state.patch({ drillError: error instanceof Error ? error.message : 'The verified backup could not be restored.' })
-      } finally {
-        state.patch({ drillRestoring: false })
+        state.patch({ drillRestoring: false, drillError: error instanceof Error ? error.message : 'That master password did not match.' })
       }
     },
     clearSecrets() {
@@ -234,11 +290,15 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
         restoreConfirmed: false,
         restoreSecret: '',
         restoringBackup: false,
+        restorePresenceRequired: false,
+        restorePresencePassword: '',
         drillSelection: null,
         drillSecret: '',
         drillVerification: null,
         drillWorking: false,
         drillRestoring: false,
+        drillPresenceRequired: false,
+        drillPresencePassword: '',
         drillError: '',
         health: null,
         healthLoading: false,

@@ -97,6 +97,7 @@ dependencies = [
  "blake2",
  "cpufeatures 0.3.1",
  "password-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -568,6 +569,7 @@ dependencies = [
  "cipher",
  "cpufeatures 0.3.1",
  "rand_core",
+ "zeroize",
 ]
 
 [[package]]
@@ -580,6 +582,7 @@ dependencies = [
  "chacha20",
  "cipher",
  "poly1305",
+ "zeroize",
 ]
 
 [[package]]
@@ -4002,6 +4005,7 @@ dependencies = [
  "sha2 0.11.0",
  "totp-rs",
  "ts-rs",
+ "unicode-normalization",
  "url",
  "windows-sys 0.61.2",
  "x25519-dalek",
@@ -4623,9 +4627,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-updater"
-version = "2.11.0"
+version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b28d8cabdeb0564f03ae261963de4bc3d98321cd3d213e76a81b7d344e5df606"
+checksum = "7a5cad8ed5948d988e1018ecd31e27cacedbf72ce3fb972940c3e4bf51639e4b"
 dependencies = [
  "base64 0.22.1",
  "dirs 6.0.0",

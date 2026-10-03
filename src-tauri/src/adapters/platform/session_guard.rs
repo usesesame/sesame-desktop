@@ -3,7 +3,7 @@
 
 #[cfg(any(windows, target_os = "linux"))]
 mod monitor {
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use tauri::{AppHandle, Emitter, Manager};
 
@@ -18,18 +18,22 @@ mod monitor {
     pub(super) fn run<M: SessionMonitor>(app: AppHandle, monitor: M) {
         let mut was_locked = monitor.locked();
         let mut warning_shown = false;
+        let mut last_tick = SystemTime::now();
         loop {
             std::thread::sleep(POLL_INTERVAL);
+            let now = SystemTime::now();
+            let asleep = asleep_for(last_tick, now);
+            last_tick = now;
             let locked = monitor.locked();
-            if locked && !was_locked {
+            let timeout = Duration::from_secs(
+                app.state::<crate::vault::VaultState>()
+                    .auto_lock_minutes()
+                    .saturating_mul(60),
+            );
+            if (locked && !was_locked) || slept_past(asleep, timeout) {
                 crate::desktop_shell::lock_vault_if_unlocked(&app);
                 warning_shown = clear_warning(&app, warning_shown);
             } else if !locked {
-                let timeout = Duration::from_secs(
-                    app.state::<crate::vault::VaultState>()
-                        .auto_lock_minutes()
-                        .saturating_mul(60),
-                );
                 match monitor.idle_for() {
                     Some(idle) if idle >= timeout => {
                         crate::desktop_shell::lock_vault_if_unlocked(&app);
@@ -44,6 +48,16 @@ mod monitor {
             }
             was_locked = locked;
         }
+    }
+
+    pub(super) fn asleep_for(previous: SystemTime, now: SystemTime) -> Duration {
+        now.duration_since(previous)
+            .unwrap_or_default()
+            .saturating_sub(POLL_INTERVAL)
+    }
+
+    pub(super) fn slept_past(asleep: Duration, timeout: Duration) -> bool {
+        !timeout.is_zero() && asleep >= timeout
     }
 
     pub(super) fn should_warn(remaining: Duration, session_open: bool) -> bool {
@@ -342,7 +356,8 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     use super::linux_session;
-    use super::monitor::{should_warn, POLL_INTERVAL, WARNING_WINDOW};
+    use super::monitor::{asleep_for, should_warn, slept_past, POLL_INTERVAL, WARNING_WINDOW};
+    use std::time::SystemTime;
 
     #[test]
     fn a_locked_vault_is_never_warned_about() {
@@ -364,6 +379,28 @@ mod tests {
     #[test]
     fn time_beyond_the_window_is_not_warned_about_yet() {
         assert!(!should_warn(WARNING_WINDOW + POLL_INTERVAL, true));
+    }
+
+    #[test]
+    fn a_sleep_longer_than_the_auto_lock_delay_locks() {
+        let before = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let five_minutes = Duration::from_secs(300);
+        let asleep = asleep_for(before, before + POLL_INTERVAL + five_minutes);
+        assert_eq!(asleep, five_minutes);
+        assert!(slept_past(asleep, five_minutes));
+        assert!(!slept_past(asleep, five_minutes + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn an_ordinary_poll_or_a_clock_set_backwards_is_not_a_sleep() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        assert_eq!(asleep_for(now, now + POLL_INTERVAL), Duration::ZERO);
+        assert_eq!(
+            asleep_for(now, now - Duration::from_secs(3_600)),
+            Duration::ZERO
+        );
+        assert!(!slept_past(Duration::ZERO, Duration::from_secs(60)));
+        assert!(!slept_past(Duration::from_secs(600), Duration::ZERO));
     }
 
     #[cfg(target_os = "linux")]

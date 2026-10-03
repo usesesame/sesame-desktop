@@ -9,7 +9,8 @@ use sesame_core::{
     default_kdf_params, derive_key, encrypt_bytes, random_id, serialize_payload,
     validate_kdf_params, verify_backup_file, CipherBlob, KdfParams, VaultEntry, VaultFile,
     VaultPayload, MAX_BACKUP_BYTES, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB, MAX_KDF_PARALLELISM,
-    MAX_KDF_TOTAL_WORK, PAYLOAD_AAD, PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
+    MAX_KDF_TOTAL_WORK, MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB, PAYLOAD_AAD,
+    PENDING_SETUP_PAYLOAD_AAD, WRAP_AAD,
 };
 
 const PASSWORD_A: &str = "fictional master password one";
@@ -17,14 +18,13 @@ const PASSWORD_B: &str = "fictional master password beta";
 const CANARY_PASSWORD: &str = "fictional-secret-canary";
 
 fn login(id: &str) -> VaultEntry {
-    VaultEntry {
-        id: id.to_string(),
-        title: "Northwind".to_string(),
-        username: "casey".to_string(),
-        password: CANARY_PASSWORD.to_string(),
-        url: "https://northwind.test".to_string(),
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = id.to_string();
+    entry.title = "Northwind".to_string();
+    entry.username = "casey".to_string();
+    entry.password = CANARY_PASSWORD.to_string();
+    entry.url = "https://northwind.test".to_string();
+    entry
 }
 
 fn complete_vault(password: &str, name: &str) -> (VaultFile, [u8; 32], String) {
@@ -95,10 +95,8 @@ fn the_setup_flag_is_bound_into_the_payload_label() {
     claimed_pending.setup_complete = false;
     assert!(open_vault_with_key(&claimed_pending, key).is_err());
 
-    let pending_payload = VaultPayload {
-        vault_name: "Vault A".to_string(),
-        ..VaultPayload::default()
-    };
+    let mut pending_payload = VaultPayload::default();
+    pending_payload.vault_name = "Vault A".to_string();
     let mut honestly_pending = file.clone();
     honestly_pending.setup_complete = false;
     honestly_pending.payload = encrypt_bytes(
@@ -287,6 +285,29 @@ fn kdf_parameters_outside_the_limits_are_refused_before_any_work() {
     let mut hostile_file = file.clone();
     hostile_file.kdf.memory_kib = MAX_KDF_MEMORY_KIB + 1;
     assert!(open_vault_with_password(&hostile_file, PASSWORD_A).is_err());
+}
+
+#[test]
+fn kdf_parameters_below_the_floor_are_refused() {
+    let mut memory_below = default_kdf_params();
+    memory_below.memory_kib = MIN_KDF_MEMORY_KIB - 1;
+    assert!(validate_kdf_params(&memory_below).is_err());
+    assert!(derive_key(PASSWORD_A, &memory_below).is_err());
+
+    let mut iterations_below = default_kdf_params();
+    iterations_below.iterations = MIN_KDF_ITERATIONS - 1;
+    assert!(validate_kdf_params(&iterations_below).is_err());
+    assert!(derive_key(PASSWORD_A, &iterations_below).is_err());
+
+    let mut at_floor = default_kdf_params();
+    at_floor.memory_kib = MIN_KDF_MEMORY_KIB;
+    at_floor.iterations = MIN_KDF_ITERATIONS;
+    assert!(validate_kdf_params(&at_floor).is_ok());
+    assert!(derive_key(PASSWORD_A, &at_floor).is_ok());
+
+    let mut widest_parallelism = at_floor.clone();
+    widest_parallelism.parallelism = MAX_KDF_PARALLELISM;
+    assert!(validate_kdf_params(&widest_parallelism).is_ok());
 }
 
 #[test]

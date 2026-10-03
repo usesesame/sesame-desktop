@@ -14,7 +14,22 @@ export const EVIDENCE_SCHEMA = 'sesame.vault-compatibility-evidence/1'
 export const SUPPORTED_PLATFORMS = ['linux', 'windows']
 
 const sha256Pattern = /^[0-9a-f]{64}$/
-const requiredRestoreSteps = ['create_vault', 'restore_backup', 'unlock.password', 'backup.restored', 'verify.restored_backup']
+const requiredRestoreSteps = [
+  'create_vault',
+  'restore_backup.locked',
+  'active_vault.unchanged_after_locked_refusal',
+  'restore_backup.without_presence',
+  'active_vault.unchanged_after_presence_refusal',
+  'restore_backup.different_vault',
+  'active_vault.unchanged_after_refusal',
+  'delete_local_vault',
+  'restore_backup.fresh',
+  'unlock.password',
+  'backup.restored',
+  'verify.restored_backup',
+  'restore_backup.same_vault',
+  'safety_backup.same_vault',
+]
 const requiredRestartSteps = ['restart.unlock.password', 'restart.unlock.recovery_kit']
 
 const requireCondition = (condition, message) => {
@@ -41,7 +56,7 @@ export async function loadCompatibilityPolicy(root = repositoryRoot) {
     requireCondition(SUPPORTED_PLATFORMS.includes(platform), `The vault compatibility policy names an unknown platform: ${platform}.`)
   }
   const decision = policy.minimumFormatDecision
-  requireCondition(decision?.status === 'recorded', 'The minimum supported vault format needs a recorded owner decision.')
+  requireCondition(decision?.status === 'recorded', 'The minimum supported vault format needs a recorded decision.')
   requireCondition(typeof decision.recordedBy === 'string' && decision.recordedBy.length > 0, 'The compatibility decision must name who recorded it.')
   requireCondition(typeof decision.date === 'string' && !Number.isNaN(Date.parse(decision.date)), 'The compatibility decision must carry a date.')
   requireCondition(typeof decision.note === 'string' && decision.note.length > 0, 'The compatibility decision must carry a note.')

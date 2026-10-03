@@ -183,7 +183,7 @@ async function probeDesktop(environment) {
         settle(JSON.parse(buffer.subarray(4, 4 + size).toString('utf8')))
       })
       host.once('exit', (code) => fail(new Error(`native host exited (code ${code}) before responding`)))
-      host.stdin.write(frame({ version: 1, type: 'capabilities', requestId: 'pipe-check-1' }))
+      host.stdin.write(frame({ version: 6, type: 'capabilities', requestId: 'pipe-check-1' }))
     })
   } finally {
     clearTimeout(timer)

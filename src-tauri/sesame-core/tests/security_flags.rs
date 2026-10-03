@@ -2,20 +2,18 @@ use sesame_core::snapshot::{duplicate_key_counts, issue_kinds_for, password_coun
 use sesame_core::types::{VaultEntry, VaultPayload};
 
 fn login(url: &str, username: &str, password: &str) -> VaultEntry {
-    VaultEntry {
-        title: "Example".into(),
-        url: url.into(),
-        username: username.into(),
-        password: password.into(),
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.url = url.into();
+    entry.username = username.into();
+    entry.password = password.into();
+    entry
 }
 
 fn payload(entries: Vec<VaultEntry>) -> VaultPayload {
-    VaultPayload {
-        entries,
-        ..VaultPayload::default()
-    }
+    let mut payload = VaultPayload::default();
+    payload.entries = entries;
+    payload
 }
 
 #[test]

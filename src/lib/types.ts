@@ -77,6 +77,7 @@ export type { DuplicateGroup } from './generated/DuplicateGroup'
 export type { BackupCompatibility } from './generated/BackupCompatibility'
 export type { BackupInspection } from './generated/BackupInspection'
 export type { BackupVerification } from './generated/BackupVerification'
+export type { ChosenFile } from './generated/ChosenFile'
 export type { RestoreBackupResult } from './generated/RestoreBackupResult'
 export type { PasswordIssue } from './generated/PasswordIssue'
 export type { Folder } from './generated/Folder'
@@ -134,13 +135,12 @@ export interface PasswordAnalysis {
 }
 
 export type { RecoveryHealth } from './generated/RecoveryHealth'
+export type { RecoveryReplacementStatus } from './generated/RecoveryReplacementStatus'
 export type { DiagnosticStatus } from './generated/DiagnosticStatus'
 export type { WebsiteIconCacheStatus } from './generated/WebsiteIconCacheStatus'
 
-// Hand-written: no dedicated Rust struct of this shape, a frontend-only
-// extension of the generated `BackupInspection` with the file's picked source.
 export interface BackupSelection extends BackupInspection {
-  source: string
+  token: string
 }
 
 export type { DesktopUpdateStatus } from './generated/DesktopUpdateStatus'

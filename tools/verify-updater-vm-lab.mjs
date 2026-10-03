@@ -150,4 +150,4 @@ async function probe(mode) {
 
 await probe('good')
 await probe('relabelled')
-console.log('REL-003 updater VM lab structure, signatures, and loopback protocol verified.')
+console.log('Updater VM lab structure, signatures, and loopback protocol verified.')

@@ -7,6 +7,7 @@ pub(crate) mod capabilities;
 pub(crate) mod public_updates;
 #[cfg(feature = "sync-preview")]
 pub(crate) mod sync;
+pub(crate) mod trusted_time;
 pub(crate) mod website_icons;
 
 pub(crate) fn ensure_crypto_provider() {

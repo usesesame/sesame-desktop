@@ -5,6 +5,7 @@ use sesame_core::{
     api, backup, encrypt_bytes,
     loader::{Credential, FormatState, LoadFailure, VaultLoader},
     payload_aad_for_file, random_id, CipherBlob, VaultFile, MAX_VAULT_FILE_BYTES,
+    MIN_KDF_ITERATIONS, MIN_KDF_MEMORY_KIB,
 };
 
 const PASSWORD: &str = "fictional master password 01";
@@ -149,6 +150,12 @@ fn envelope_failures_are_bounded_and_do_not_become_wrong_password() {
     file.kdf.memory_kib = 1;
     assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
     file = fixture();
+    file.kdf.memory_kib = MIN_KDF_MEMORY_KIB - 1;
+    assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
+    file = fixture();
+    file.kdf.iterations = MIN_KDF_ITERATIONS - 1;
+    assert_eq!(VaultLoader::validate(&file), Err(LoadFailure::UnsafeKdf));
+    file = fixture();
     file.recovery_wrap = None;
     assert_eq!(
         VaultLoader::validate(&file),
@@ -179,6 +186,34 @@ fn envelope_failures_are_bounded_and_do_not_become_wrong_password() {
         .set_len(MAX_VAULT_FILE_BYTES + 1)
         .expect("sparse length");
     assert_eq!(VaultLoader::read(&path).err(), Some(LoadFailure::SizeLimit));
+}
+
+#[test]
+fn format_probing_keeps_the_documented_outcomes() {
+    assert_eq!(
+        VaultLoader::probe_format(&vec![b' '; MAX_VAULT_FILE_BYTES as usize + 1]),
+        Err(LoadFailure::SizeLimit)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":10}"#),
+        Ok(10)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":10,"future":{"deep":[1,2,3]}}"#),
+        Ok(10)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":256}"#),
+        Err(LoadFailure::InvalidStructure)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"other":1}"#),
+        Err(LoadFailure::InvalidStructure)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(b"{"),
+        Err(LoadFailure::InvalidStructure)
+    );
 }
 
 #[test]

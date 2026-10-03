@@ -6,69 +6,101 @@ release cannot be published without saying what changed in it.
 
 ## 0.3.0
 
+### Unlock
+
+- A PIN can have 6 to 12 digits and shows as one field with a dot per digit.
+  Repeated digits and runs in order are refused. Existing 6-digit PINs still
+  unlock.
+- A new master password needs 12 characters and must pass the strength
+  checks. Passwords are compared in Unicode normalized form, and existing
+  vaults open unchanged.
+- Changing the master password needs the current password and then the
+  recovery kit. A forgotten password can be reset with the recovery kit.
+- If you know the master password but lost the recovery kit, you can request
+  a new kit. It is ready after 72 hours, measured with the time from
+  usesesame.app and github.com, and a warning shows on every unlock until then.
+- The vault locks on wake when the computer slept longer than the auto-lock
+  delay.
+- On Linux the device key is created only when you set a PIN, link an
+  account, or enroll a device.
+
+### Security checkup
+
+- The checkup finds breached passwords and expiring cards, and lists sites
+  that offer two-factor or passkey sign-in. Breach checks send only the first
+  five characters of a password hash.
+- Each finding opens its login, and Change on site opens the saved website.
+
 ### Account
 
-- Sesame account linking is available on Linux. It uses the desktop Secret
-  Service wallet to encrypt the account token with the same device key that
-  protects the PIN pepper and local attempt-throttle state, and the setting
-  stays hidden on systems without a wallet.
-- The release pipeline requires the account capability public key. A tagged
-  release fails before the build when it is missing or malformed instead of
-  shipping a desktop where every link attempt fails.
+- Account linking works on Linux when a Secret Service wallet is available.
+- A tagged release fails before the build when the account capability public
+  key is missing or malformed.
 
 ### Browser integration
 
-- The browser connection works on Linux from the deb and rpm packages. The
-  release gate registers the native host in a scratch home, checks the pinned
-  extension origin and the sidecar path, verifies the broker socket is
-  private, and completes a request with the live desktop. The package gates
-  require an executable `sesame-browser-host` and its startup registration.
-- The extension suite can run against the real native host and the running
-  desktop on Linux.
+- Every fill of a matched login asks for approval. The 15-minute remembered
+  approval is gone.
+- The extension explains why a login matches and can fill one-time codes after
+  a fresh approval. A fill on a lookalike website is refused.
+- Old extension protocol versions are refused, and the extension no longer
+  learns whether the vault is locked before you approve. Update the extension
+  together with the desktop app.
+- The browser connection works on Linux from the deb and rpm packages, and the
+  release gate tests it against the live desktop.
 
 ### Linux packaging
 
 - The AppImage no longer bundles the Wayland client and cursor libraries, so
-  its window renders on hosts with a newer Wayland stack instead of staying
-  blank white.
-- Publishing tolerates the AppImage file name Tauri produces, so a Linux
-  asset no longer stops the Windows publish step of the same release.
+  its window no longer stays blank on newer Wayland hosts.
+- The AppImage file name no longer stops the Windows publish step.
 
 ### Vault and backups
 
-- Export, restore, and open no longer lose data silently. Partial and
-  attachment-losing exports name what was left out, SSH-only Bitwarden
-  exports are accepted, document history no longer stores attachment bytes,
-  duplicate item ids repair on open, staged vault temporary files are
-  cleaned up, and the presence grant drops when the vault locks.
+- Restoring a backup over an existing vault needs it unlocked and your master
+  password, and a backup from a different vault is refused.
+- Changing the master password tries to remove the local backups and says
+  when any remain.
+- Readable exports keep values exactly as saved, warn about values a
+  spreadsheet could run as formulas, and are written as private files.
+  Partial exports name what was left out.
+- Imports are bounded while they are read. SSH-only Bitwarden exports are
+  accepted.
+- On Linux Sesame flushes the vault folder after each save.
 - Backup compatibility is shown before a restore starts.
 
 ### Security
 
-- The vault writer bounds the plaintext at the storage limit before it
-  serializes, and decrypted payload, key-wrapper, and sealed-record buffers
-  are wiped when dropped.
+- Revealed passwords are not cached in the window. The clipboard timer runs in
+  native code, and locking clears a secret Sesame copied.
+- Saved items and decrypted buffers are wiped from memory when dropped.
+- Files are chosen through the system dialog, so the window cannot name a
+  file path.
+- Vaults with key derivation settings below the minimum are refused.
+- Website icons are fetched only after you turn them on. The breach check
+  follows the system proxy.
+- Update manifests must be signed, the window cannot use the updater plugin
+  directly, and release builds no longer hold the signing keys.
 
 ### Interface
 
-- Quick access renders the plain initial block when website icons are denied
-  instead of an icon that never loads.
-- Modal teardown, opening a second modal while one is active, duplicate tags,
-  fields, and URLs, async results that returned to the wrong item, and
-  needless whole-window repaints are repaired.
-- Settings copy names the local platform instead of assuming a Windows
-  desktop.
+- One type scale, measurable contrast for fields and quiet text, and one
+  control style.
+- Vault search ranks results, tolerates small typos, and has keyboard
+  shortcuts and bulk actions.
+- The vault list can copy a password without showing it.
+- Status screens, empty states and the browser approval prompt are easier to
+  read. Selection checkboxes sit centered on their rows.
+- Fixes for modal teardown, duplicate tags, fields and URLs, async results
+  landing on the wrong item, and needless repaints.
 
 ### Diagnostics and release pipeline
 
-- Card-fill and quick-access diagnostic codes are now on the allowlist and
-  every allowlisted code carries a severity, so those events are recorded
-  instead of dropped or pruned.
-- The cross-repository contract suites run in the desktop gate: workflow
-  governance, design tokens, installer hooks, the command surface, and the
-  lockfile version check.
-- The build uses the TypeScript 7 native compiler beside the TypeScript 6
-  API that the lint and Svelte tools consume.
+- Dependency installs are locked and checked against the lockfiles, and
+  release evidence records dependency hashes.
+- The vendored GLib patch and every Linux package format are checked in CI.
+- Card-fill and quick-access diagnostic codes are recorded instead of dropped.
+- The build uses the TypeScript 7 native compiler.
 
 ## 0.2.5
 

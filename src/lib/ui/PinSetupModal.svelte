@@ -2,6 +2,7 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
   import SetupProgress from './SetupProgress.svelte'
+  import { MAX_PIN_DIGITS, MIN_PIN_DIGITS, pinDigits } from '../pin-rules'
 
   export let pin = ''
   export let confirmPin = ''
@@ -12,13 +13,13 @@
   export let onEdit: () => void = () => {}
   export let setupStep = 0
 
-  $: pinsComplete = pin.length === 6 && confirmPin.length === 6
+  $: pinsComplete = pin.length >= MIN_PIN_DIGITS && confirmPin.length >= MIN_PIN_DIGITS
   $: pinsMatch = pin === confirmPin
-  $: showMismatch = confirmPin.length === 6 && !pinsMatch
+  $: showMismatch = confirmPin.length >= Math.max(pin.length, MIN_PIN_DIGITS) && !pinsMatch
 
   function inputDigits(event: Event) {
     const input = event.currentTarget as HTMLInputElement
-    const value = input.value.replace(/\D/g, '').slice(0, 6)
+    const value = pinDigits(input.value)
     input.value = value
     onEdit()
     return value
@@ -47,12 +48,12 @@
     {#if setupStep}<SetupProgress step={setupStep} />{/if}
   </div>
   <h2 id="pin-setup-heading">Set a PIN</h2>
-  <p id="pin-setup-description">Use six digits for everyday unlock on this device. Your master password or recovery kit remains the fallback.</p>
+  <p id="pin-setup-description">Use {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits for everyday unlock on this device. Each extra digit makes the PIN ten times harder to guess. Your master password or recovery kit remains the fallback.</p>
   <form novalidate on:submit|preventDefault={onSave}>
     <label for="unlock-pin">PIN</label>
-    <input id="unlock-pin" name="new-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={pin} on:input={updatePin} />
+    <input id="unlock-pin" name="new-unlock-pin" type="password" inputmode="numeric" maxlength={MAX_PIN_DIGITS} autocomplete="new-password" value={pin} on:input={updatePin} />
     <label for="confirm-unlock-pin">Confirm PIN</label>
-    <input id="confirm-unlock-pin" name="confirm-unlock-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" value={confirmPin} aria-invalid={showMismatch} aria-describedby={showMismatch || errorMessage ? 'pin-setup-error' : undefined} on:input={updateConfirmation} />
+    <input id="confirm-unlock-pin" name="confirm-unlock-pin" type="password" inputmode="numeric" maxlength={MAX_PIN_DIGITS} autocomplete="new-password" value={confirmPin} aria-invalid={showMismatch} aria-describedby={showMismatch || errorMessage ? 'pin-setup-error' : undefined} on:input={updateConfirmation} />
     {#if showMismatch}<p id="pin-setup-error" class="form-error" role="alert">Those PINs do not match.</p>
     {:else if errorMessage}<p id="pin-setup-error" class="form-error" role="alert">{errorMessage}</p>{/if}
     <p class="pin-security-note"><Icon name="monitor" size={15} /><span>The PIN is combined with a random secret kept in this device's protected credential store before it wraps your vault key.</span></p>

@@ -20,9 +20,13 @@ import {
   storeTheme,
 } from '../preferences'
 import type { AppStores } from '../stores/app-stores'
-import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
+import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
 import {
+  cancelRecoveryReplacement,
   changeMasterPassword,
+  completeRecoveryReplacement,
+  getRecoveryReplacementStatus,
+  requestRecoveryReplacement,
 	checkDesktopUpdate,
   clearDiagnostics,
   disableWindowsHello,
@@ -36,6 +40,9 @@ import {
   getServiceConnectionStatus,
   getVaultStatus,
   getWebsiteIconCacheStatus,
+  getWebsiteIconsEnabled,
+  grantPresence,
+  PRESENCE_REQUIRED,
 	linkDesktopService,
 	onDesktopUpdateProgress,
   previewMode,
@@ -48,11 +55,13 @@ import {
   setQuickAccessShortcut,
   setTrayEnabled,
   setUnlockPin,
+  setWebsiteIconsEnabled,
 } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 import { clearCachedWebsiteIcons } from '../website-icons'
+import { isTrivialPin, isValidPinLength, MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
 
 interface SettingsControllerOptions {
   stores: AppStores
@@ -64,14 +73,6 @@ interface SettingsControllerOptions {
 const emptyDiagnostics: DiagnosticStatus = { exists: false, eventCount: 0, errorCount: 0, sizeBytes: 0, localOnly: true, byOperation: [], byCode: [], recent: [] }
 const emptyService: ServiceConnectionStatus = { state: 'disconnected', connected: false, online: false, syncAvailable: false, browserHelperAvailable: false }
 const emptyWebsiteIconCache: WebsiteIconCacheStatus = { entryCount: 0, iconCount: 0, sizeBytes: 0 }
-
-export function isTrivialPin(pin: string): boolean {
-  const digits = Array.from(pin, (character) => Number(character))
-  const repeated = digits.every((digit) => digit === digits[0])
-  const ascending = digits.every((digit, index) => index === 0 || digit === digits[index - 1] + 1)
-  const descending = digits.every((digit, index) => index === 0 || digit === digits[index - 1] - 1)
-  return repeated || ascending || descending
-}
 
 export function createSettingsController({ stores, feedback, modal, onPinSetupFinished }: SettingsControllerOptions) {
   const { selection, settings, vault } = stores
@@ -98,13 +99,26 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     quickAccessShortcutWorking: false,
     autostartEnabled: false,
     autostartWorking: false,
+    siteIconsWorking: false,
+    siteIconsPresenceRequired: false,
+    siteIconsPresencePassword: '',
     websiteIconCacheWorking: false,
     websiteIconCache: emptyWebsiteIconCache,
     changeMasterPasswordOpen: false,
+    settingsTab: 'general' as 'general' | 'security' | 'connections' | 'data',
+    recoveryReplacement: null as RecoveryReplacementStatus | null,
+    recoveryPresenceIntent: null as 'request-kit' | 'issue-kit' | null,
+    recoveryPresencePassword: '',
+    recoveryWorking: false,
+    issuedRecoveryKit: '',
+    issuedRecoveryConfirmed: false,
+    changeMasterPasswordStep: 'verify' as 'verify' | 'details',
     currentMasterPassword: '',
+    currentRecoveryKit: '',
     newMasterPassword: '',
     confirmNewMasterPassword: '',
     newRecoveryKit: '',
+    newBackupsRemaining: null as number | null,
     newRecoveryConfirmed: false,
     changingMasterPassword: false,
   })
@@ -120,6 +134,41 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   async function refreshWebsiteIconCache() {
     try { state.patch({ websiteIconCache: await getWebsiteIconCacheStatus() }) } catch { /* non-critical */ }
+  }
+
+  async function applyStoredWebsiteIconsSetting() {
+    const stored = await getWebsiteIconsEnabled().catch(() => undefined)
+    if (stored === undefined) return
+    if (stored === null) {
+      if (settings.value().siteIconsEnabled) {
+        settings.patch({ siteIconsEnabled: false })
+        storeSiteIcons(false)
+        feedback.showNotice('Website icons are off', 'Turn them on again in Settings to confirm the change on this device.')
+      }
+      return
+    }
+    if (stored !== settings.value().siteIconsEnabled) {
+      settings.patch({ siteIconsEnabled: stored })
+      storeSiteIcons(stored)
+    }
+  }
+
+  async function runWebsiteIconsUpdate(enabled: boolean) {
+    try {
+      await setWebsiteIconsEnabled(enabled)
+    } catch (error) {
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ siteIconsPresenceRequired: true, siteIconsPresencePassword: '' })
+        feedback.setErrorMessage('Confirm your master password before Sesame turns on website icons.')
+        return
+      }
+      feedback.setError(error)
+      return
+    }
+    state.patch({ siteIconsPresenceRequired: false, siteIconsPresencePassword: '' })
+    settings.patch({ siteIconsEnabled: enabled })
+    storeSiteIcons(enabled)
+    feedback.showNotice(enabled ? 'Website icons enabled' : 'Website icons disabled', enabled ? 'Sesame will reuse each downloaded icon for up to 30 days.' : 'Saved logins will use their initials instead.')
   }
 
   async function refreshAutostartStatus() {
@@ -173,8 +222,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   function clearMasterPasswordState() {
     state.patch({
-      changeMasterPasswordOpen: false, currentMasterPassword: '', newMasterPassword: '',
-      confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false, changingMasterPassword: false,
+      changeMasterPasswordOpen: false, changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
+      confirmNewMasterPassword: '', newRecoveryKit: '', newBackupsRemaining: null, newRecoveryConfirmed: false, changingMasterPassword: false,
     })
   }
 
@@ -233,6 +282,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
       void refreshDiagnosticStatus()
       void refreshWebsiteIconCache()
+      void applyStoredWebsiteIconsSetting()
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
@@ -279,10 +329,34 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     cycleTheme() {
       setTheme(nextTheme(settings.value().theme))
     },
-    setSiteIconsEnabled(enabled: boolean) {
-      settings.patch({ siteIconsEnabled: enabled })
-      storeSiteIcons(enabled)
-      feedback.showNotice(enabled ? 'Website icons enabled' : 'Website icons disabled', enabled ? 'Sesame will reuse each downloaded icon for up to 30 days.' : 'Saved logins will use their initials instead.')
+    async setSiteIconsEnabled(enabled: boolean) {
+      if (state.value().siteIconsWorking) return
+      state.patch({ siteIconsWorking: true })
+      feedback.clearError()
+      try {
+        await runWebsiteIconsUpdate(enabled)
+      } finally {
+        state.patch({ siteIconsWorking: false })
+      }
+    },
+    async confirmSiteIconsPresence() {
+      const secret = state.value().siteIconsPresencePassword
+      if (!secret || state.value().siteIconsWorking) return
+      state.patch({ siteIconsWorking: true })
+      feedback.clearError()
+      try {
+        await grantPresence(secret)
+        state.patch({ siteIconsPresencePassword: '' })
+        await runWebsiteIconsUpdate(true)
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ siteIconsWorking: false })
+      }
+    },
+    cancelSiteIconsPresence() {
+      state.patch({ siteIconsPresenceRequired: false, siteIconsPresencePassword: '', siteIconsWorking: false })
+      feedback.clearError()
     },
     async clearWebsiteIcons() {
       if (state.value().websiteIconCacheWorking) return
@@ -321,8 +395,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     async savePin() {
       const current = state.value()
       if (current.pinWorking) return
-      if (!/^\d{6}$/.test(current.pinSetupValue)) return feedback.setErrorMessage('Use exactly six digits.')
-      if (isTrivialPin(current.pinSetupValue)) return feedback.setErrorMessage('Choose a PIN that is not one repeated digit or six digits in a row.')
+      if (!isValidPinLength(current.pinSetupValue)) return feedback.setErrorMessage(`Use a PIN of ${MIN_PIN_DIGITS} to ${MAX_PIN_DIGITS} digits.`)
+      if (isTrivialPin(current.pinSetupValue)) return feedback.setErrorMessage('Choose a PIN that is not one digit repeated or a run of digits in order.')
       if (current.pinSetupValue !== current.pinSetupConfirm) return feedback.setErrorMessage('Those PINs do not match.')
       state.patch({ pinWorking: true })
       feedback.clearError()
@@ -435,22 +509,117 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       clearMasterPasswordState()
       feedback.clearError()
     },
-    async saveChangedMasterPassword() {
+    async verifyCurrentMasterPassword() {
       const current = state.value()
-      if (current.changingMasterPassword) return
-      if (current.newMasterPassword.length < 12) return feedback.setErrorMessage('Use a new master password with at least 12 characters.')
-      if (current.newMasterPassword !== current.confirmNewMasterPassword) return feedback.setErrorMessage('Those new passwords do not match.')
+      if (current.changingMasterPassword || !current.currentMasterPassword) return
       state.patch({ changingMasterPassword: true })
       feedback.clearError()
       try {
-        const result = await changeMasterPassword(current.currentMasterPassword, current.newMasterPassword)
-        vault.patch({ status: await getVaultStatus() })
-        state.patch({ currentMasterPassword: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit })
+        await grantPresence(current.currentMasterPassword)
+        state.patch({ changeMasterPasswordStep: 'details' })
       } catch (error) {
         feedback.setError(error)
       } finally {
         state.patch({ changingMasterPassword: false })
       }
+    },
+    useRecoveryKitForMasterPasswordChange() {
+      if (state.value().changingMasterPassword) return
+      feedback.clearError()
+      state.patch({ currentMasterPassword: '', changeMasterPasswordStep: 'details' })
+    },
+    backToMasterPasswordCheck() {
+      if (state.value().changingMasterPassword) return
+      feedback.clearError()
+      state.patch({ currentMasterPassword: '', currentRecoveryKit: '', changeMasterPasswordStep: 'verify' })
+    },
+    async saveChangedMasterPassword() {
+      const current = state.value()
+      if (current.changingMasterPassword) return
+      if (!current.currentRecoveryKit.trim()) return feedback.setErrorMessage('Enter your recovery kit to change the master password.')
+      if (current.newMasterPassword.length < 12) return feedback.setErrorMessage('Use a new master password with at least 12 characters.')
+      if (current.newMasterPassword !== current.confirmNewMasterPassword) return feedback.setErrorMessage('Those new passwords do not match.')
+      state.patch({ changingMasterPassword: true })
+      feedback.clearError()
+      try {
+        const result = await changeMasterPassword(current.currentMasterPassword || null, current.currentRecoveryKit.trim().toUpperCase(), current.newMasterPassword)
+        vault.patch({ status: await getVaultStatus() })
+        state.patch({ currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit, newBackupsRemaining: result.backupsRemaining ?? null, recoveryReplacement: null })
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ changingMasterPassword: false })
+      }
+    },
+    async loadRecoveryReplacement() {
+      try {
+        state.patch({ recoveryReplacement: await getRecoveryReplacementStatus() })
+      } catch {
+        state.patch({ recoveryReplacement: null })
+      }
+    },
+    openRecoveryKitSettings() {
+      state.patch({ settingsTab: 'security' })
+    },
+    requestNewRecoveryKitFromChange() {
+      if (state.value().changingMasterPassword) return
+      modal.close('change-master-password')
+      clearMasterPasswordState()
+      feedback.clearError()
+      state.patch({ settingsTab: 'security', recoveryPresenceIntent: 'request-kit', recoveryPresencePassword: '' })
+    },
+    startRecoveryKitRequest() {
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: 'request-kit', recoveryPresencePassword: '' })
+    },
+    startRecoveryKitIssue() {
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '' })
+    },
+    cancelRecoveryPresence() {
+      if (state.value().recoveryWorking) return
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+    },
+    async confirmRecoveryPresence() {
+      const current = state.value()
+      if (current.recoveryWorking || !current.recoveryPresenceIntent || !current.recoveryPresencePassword) return
+      state.patch({ recoveryWorking: true })
+      feedback.clearError()
+      try {
+        await grantPresence(current.recoveryPresencePassword)
+        if (current.recoveryPresenceIntent === 'request-kit') {
+          const status = await requestRecoveryReplacement()
+          state.patch({ recoveryReplacement: status, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+          feedback.showNotice('New recovery kit requested', 'It will be ready in 72 hours. Sesame shows a warning until then.')
+        } else {
+          const kit = await completeRecoveryReplacement()
+          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false, timeConfirmed: true }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+        }
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ recoveryWorking: false })
+      }
+    },
+    async cancelRecoveryKitRequest() {
+      if (state.value().recoveryWorking) return
+      state.patch({ recoveryWorking: true })
+      feedback.clearError()
+      try {
+        await cancelRecoveryReplacement()
+        state.patch({ recoveryReplacement: { ready: false, timeConfirmed: true } })
+        feedback.showNotice('Recovery kit request cancelled', 'Your current recovery kit still works.')
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ recoveryWorking: false })
+      }
+    },
+    finishIssuedRecoveryKit() {
+      if (!state.value().issuedRecoveryConfirmed) return
+      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false })
+      feedback.showNotice('New recovery kit saved', 'Your old recovery kit no longer opens this vault.')
     },
     finishMasterPasswordChange() {
       if (!state.value().newRecoveryConfirmed) return
@@ -531,9 +700,12 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       modal.closeAll()
       state.patch({
         pinSetupValue: '', pinSetupConfirm: '', pinWorking: false, helloWorking: false,
-        currentMasterPassword: '', newMasterPassword: '',
+        siteIconsWorking: false, siteIconsPresenceRequired: false, siteIconsPresencePassword: '',
+        changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
         confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false,
         changingMasterPassword: false,
+        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryWorking: false,
+        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, recoveryReplacement: null,
       })
     },
   }

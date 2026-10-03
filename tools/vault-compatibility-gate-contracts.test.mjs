@@ -83,7 +83,7 @@ function fictionalRun({ matrix, matrixDigest, platform, fixtureId, overrides = {
     startedAt: '2026-09-13T00:00:00.000Z',
     finishedAt: '2026-09-13T00:10:00.000Z',
     phases: {
-      restore: { passed: 14, failed: 0, steps: ['create_vault', 'restore_backup', 'unlock.password', 'backup.restored', 'verify.restored_backup'].map((name) => ({ name, ok: true })) },
+      restore: { passed: 14, failed: 0, steps: ['create_vault', 'restore_backup.locked', 'active_vault.unchanged_after_locked_refusal', 'restore_backup.without_presence', 'active_vault.unchanged_after_presence_refusal', 'restore_backup.different_vault', 'active_vault.unchanged_after_refusal', 'delete_local_vault', 'restore_backup.fresh', 'unlock.password', 'backup.restored', 'verify.restored_backup', 'restore_backup.same_vault', 'safety_backup.same_vault'].map((name) => ({ name, ok: true })) },
       restart: { passed: 6, failed: 0, steps: ['restart.unlock.password', 'restart.unlock.recovery_kit'].map((name) => ({ name, ok: true })) },
     },
     ...overrides,
@@ -164,8 +164,21 @@ test('a skipped, failed, or digest-mismatched installed run cannot merge', async
   mismatched[0].fixtureSha256 = 'f'.repeat(64)
   assert.throws(() => mergeInstalledEvidence({ runs: mismatched, matrix, policy, matrixDigest }), /recorded fixture bytes/)
   const partialPhase = structuredClone(runs)
-  partialPhase[0].phases.restore.steps = partialPhase[0].phases.restore.steps.filter((step) => step.name !== 'restore_backup')
-  assert.throws(() => mergeInstalledEvidence({ runs: partialPhase, matrix, policy, matrixDigest }), /did not pass restore_backup/)
+  partialPhase[0].phases.restore.steps = partialPhase[0].phases.restore.steps.filter((step) => step.name !== 'restore_backup.same_vault')
+  assert.throws(() => mergeInstalledEvidence({ runs: partialPhase, matrix, policy, matrixDigest }), /did not pass restore_backup\.same_vault/)
+})
+
+test('a restore run missing a refusal step cannot merge', async () => {
+  const { matrix, policy, matrixDigest } = await assertRepositoryCompatibility(repository)
+  const runs = ['linux', 'windows'].flatMap((platform) => matrix.publishedVersions.map((entry) => fictionalRun({ matrix, matrixDigest, platform, fixtureId: entry.fixtureId })))
+  for (const omitted of ['restore_backup.locked', 'active_vault.unchanged_after_locked_refusal', 'restore_backup.without_presence', 'active_vault.unchanged_after_presence_refusal']) {
+    const partial = structuredClone(runs)
+    partial[0].phases.restore.steps = partial[0].phases.restore.steps.filter((step) => step.name !== omitted)
+    assert.throws(
+      () => mergeInstalledEvidence({ runs: partial, matrix, policy, matrixDigest }),
+      new RegExp(`did not pass ${omitted.replace(/\./g, '\\.')}`),
+    )
+  }
 })
 
 test('the release workflow gates publication on installed-app compatibility evidence', async () => {
@@ -175,8 +188,8 @@ test('the release workflow gates publication on installed-app compatibility evid
   assert.match(workflow, /vault-compatibility-gate\.mjs merge/, 'the compatibility job does not merge platform evidence')
   assert.match(workflow, /SESAME_VAULT_COMPATIBILITY_FILE/, 'release evidence does not take the compatibility evidence')
   const publish = workflow.slice(workflow.indexOf('publish-candidate:'))
-  assert.match(publish, /needs: \[build-and-attest, verify-fresh\]/, 'publication does not wait for the evidence jobs')
-  const build = workflow.slice(workflow.indexOf('build-and-attest:'), workflow.indexOf('verify-fresh:'))
+  assert.match(publish, /needs: \[sign-and-attest, verify-fresh, candidate-receipt\]/, 'publication does not wait for the evidence jobs')
+  const build = workflow.slice(workflow.indexOf('\n  build:\n'), workflow.indexOf('\n  sign-and-attest:\n'))
   assert.match(build, /needs: \[vault-compatibility\]/, 'the release build does not wait for installed-app compatibility')
 })
 

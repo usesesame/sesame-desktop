@@ -8,10 +8,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
     bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
+    unwrap_with_password,
 };
 use crate::platform::{
-    copy_private_file, create_private_dir, open_private_file, protect_for_device, replace_file,
-    unprotect_for_device,
+    copy_private_file, create_private_dir, ensure_device_protection, open_private_file,
+    protect_for_device, replace_file, unprotect_for_device,
 };
 use crate::snapshot::duplicate_key;
 use crate::{
@@ -223,14 +224,7 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
     Ok(recovery_kit_for_display)
 }
 
-/// The kit must authenticate before the completion bit, which selects the payload AEAD, changes.
-pub fn complete_recovery_setup_for_session(
-    session: &mut UnlockedVault,
-    recovery_kit: &str,
-) -> VaultResult<()> {
-    if session.setup_complete {
-        return Err("This vault has already finished recovery setup.".into());
-    }
+fn verify_recovery_kit(session: &UnlockedVault, recovery_kit: &str) -> VaultResult<()> {
     let recovery_kdf = session
         .recovery_kdf
         .as_ref()
@@ -248,6 +242,36 @@ pub fn complete_recovery_setup_for_session(
     if !matches {
         return Err("That recovery kit is not correct.".into());
     }
+    Ok(())
+}
+
+fn verify_current_password(session: &UnlockedVault, current_password: &str) -> VaultResult<()> {
+    let mut confirmed_key =
+        unwrap_with_password(current_password, &session.kdf, &session.key_wrap, WRAP_AAD)?
+            .ok_or("Your current master password is not correct.")?;
+    let matches_session =
+        session.expose_vault_key(|key| Ok(bytes_match(confirmed_key.as_slice(), key)))?;
+    confirmed_key.zeroize();
+    if !matches_session {
+        return Err("Your current master password is not correct.".into());
+    }
+    Ok(())
+}
+
+pub struct RotationCredentials<'a> {
+    pub current_password: Option<&'a str>,
+    pub recovery_kit: Option<&'a str>,
+}
+
+/// The kit must authenticate before the completion bit, which selects the payload AEAD, changes.
+pub fn complete_recovery_setup_for_session(
+    session: &mut UnlockedVault,
+    recovery_kit: &str,
+) -> VaultResult<()> {
+    if session.setup_complete {
+        return Err("This vault has already finished recovery setup.".into());
+    }
+    verify_recovery_kit(session, recovery_kit)?;
 
     session.setup_complete = true;
     if let Err(error) = persist_session(session) {
@@ -257,24 +281,103 @@ pub fn complete_recovery_setup_for_session(
     Ok(())
 }
 
+pub const RECOVERY_REPLACEMENT_DELAY_SECS: u64 = 72 * 60 * 60;
+const RECOVERY_REPLACEMENT_AAD: &[u8] = b"sesame:recovery-replacement:v1:";
+
+fn recovery_replacement_aad(session: &UnlockedVault) -> VaultResult<Vec<u8>> {
+    let vault_id = session
+        .snapshot()
+        .vault_id
+        .ok_or("This vault has no identifier, so a new recovery kit cannot be requested.")?;
+    Ok([RECOVERY_REPLACEMENT_AAD, vault_id.as_bytes()].concat())
+}
+
+pub fn seal_recovery_replacement_request(
+    session: &UnlockedVault,
+    requested_at: u64,
+) -> VaultResult<CipherBlob> {
+    let aad = recovery_replacement_aad(session)?;
+    session.expose_vault_key(|key| encrypt_bytes(key, &requested_at.to_be_bytes(), &aad))
+}
+
+pub fn open_recovery_replacement_request(
+    session: &UnlockedVault,
+    sealed: &CipherBlob,
+) -> VaultResult<u64> {
+    let aad = recovery_replacement_aad(session)?;
+    let opened = session
+        .expose_vault_key(|key| decrypt_bytes(key, sealed, &aad))
+        .map_err(|_| "The recovery kit request does not belong to this vault.".to_string())?;
+    let bytes: [u8; 8] = opened
+        .as_slice()
+        .try_into()
+        .map_err(|_| "The recovery kit request is not valid.".to_string())?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+pub fn recovery_replacement_ready(requested_at: u64, now: u64) -> bool {
+    now >= requested_at && now - requested_at >= RECOVERY_REPLACEMENT_DELAY_SECS
+}
+
+pub fn replace_recovery_kit_for_session(
+    session: &mut UnlockedVault,
+    requested_at: u64,
+    now: u64,
+) -> VaultResult<String> {
+    if !session.setup_complete {
+        return Err("Finish recovery setup before replacing the recovery kit.".into());
+    }
+    if !recovery_replacement_ready(requested_at, now) {
+        return Err("The new recovery kit is not ready yet.".into());
+    }
+
+    let recovery_kit = Zeroizing::new(generate_recovery_kit());
+    let recovery_kit_for_display = recovery_kit.to_string();
+    let recovery_kdf = default_kdf_params();
+    let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
+    let recovery_wrap = session
+        .expose_vault_key(|key| encrypt_bytes(&recovery_wrapping_key, key, RECOVERY_WRAP_AAD))?;
+
+    let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
+    let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
+    if let Err(error) = persist_session_without_previous(session) {
+        session.recovery_kdf = previous_kdf;
+        session.recovery_wrap = previous_wrap;
+        return Err(error);
+    }
+    Ok(recovery_kit_for_display)
+}
+
+pub struct MasterPasswordRotation {
+    pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
+}
+
 /// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
 pub fn rotate_master_password_for_session(
     session: &mut UnlockedVault,
-    current_password: &str,
+    credentials: RotationCredentials<'_>,
     new_password: &str,
-) -> VaultResult<String> {
-    if new_password.chars().count() < 12 {
-        return Err("Use a new master password with at least 12 characters.".into());
-    }
+) -> VaultResult<MasterPasswordRotation> {
+    crate::password_analysis::check_new_master_password(new_password)?;
 
-    let current_wrapping_key = Zeroizing::new(derive_key(current_password, &session.kdf)?);
-    let mut confirmed_key = decrypt_bytes(&current_wrapping_key, &session.key_wrap, WRAP_AAD)
-        .map_err(|_| "Your current master password is not correct.".to_string())?;
-    let matches_session =
-        session.expose_vault_key(|key| Ok(bytes_match(confirmed_key.as_slice(), key)))?;
-    confirmed_key.zeroize();
-    if !matches_session {
-        return Err("Your current master password is not correct.".into());
+    let current_password = credentials
+        .current_password
+        .filter(|password| !password.is_empty());
+    let recovery_kit = credentials
+        .recovery_kit
+        .filter(|kit| !kit.trim().is_empty());
+    if session.recovery_wrap.is_some() {
+        let recovery_kit =
+            recovery_kit.ok_or("Enter your recovery kit to change the master password.")?;
+        if let Some(current_password) = current_password {
+            verify_current_password(session, current_password)?;
+        }
+        verify_recovery_kit(session, recovery_kit)?;
+    } else {
+        let current_password =
+            current_password.ok_or("Enter your current master password to change it.")?;
+        verify_current_password(session, current_password)?;
     }
 
     let mut new_vault_key = Zeroizing::new([0_u8; 32]);
@@ -314,7 +417,14 @@ pub fn rotate_master_password_for_session(
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
-    Ok(recovery_kit_for_display)
+    let backups_remaining = match crate::backup::prune_vault_backups(&session.path) {
+        Ok(outcome) => Some(outcome.remaining),
+        Err(_) => None,
+    };
+    Ok(MasterPasswordRotation {
+        recovery_kit: recovery_kit_for_display,
+        backups_remaining,
+    })
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
@@ -322,6 +432,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
     let mut pepper = [0_u8; 32];
     fill_random(&mut pepper);
+    ensure_device_protection()?;
     let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&pepper)?);
     let kdf = default_kdf_params();
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(pepper)));
@@ -335,7 +446,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
         protected_pepper,
         key_wrap,
     });
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -344,7 +455,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
 pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.pin_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -354,7 +465,7 @@ pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
 /// The old KSP key is deleted only after the file no longer references it.
 pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> VaultResult<()> {
     let previous = session.hello_wrap.replace(wrap);
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }
@@ -367,7 +478,7 @@ pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> Va
 /// KSP key deleted only after the vault remains usable by password or kit.
 pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.hello_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }
@@ -377,9 +488,16 @@ pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> 
     Ok(())
 }
 
+pub const MIN_PIN_DIGITS: usize = 6;
+pub const MAX_PIN_DIGITS: usize = 12;
+
 pub fn validate_unlock_pin(pin: &str) -> VaultResult<()> {
-    if pin.len() != 6 || !pin.bytes().all(|value| value.is_ascii_digit()) {
-        return Err("Use a 6-digit PIN.".into());
+    if !(MIN_PIN_DIGITS..=MAX_PIN_DIGITS).contains(&pin.len())
+        || !pin.bytes().all(|value| value.is_ascii_digit())
+    {
+        return Err(format!(
+            "Use a PIN of {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits."
+        ));
     }
     Ok(())
 }
@@ -390,12 +508,12 @@ pub fn validate_new_unlock_pin(pin: &str) -> VaultResult<()> {
     validate_unlock_pin(pin)?;
     let digits: Vec<u8> = pin.bytes().map(|value| value - b'0').collect();
     if digits.windows(2).all(|pair| pair[0] == pair[1]) {
-        return Err("Choose a PIN that is not the same digit six times.".into());
+        return Err("Choose a PIN that is not one digit repeated.".into());
     }
-    let ascending = digits.windows(2).all(|pair| pair[1] == pair[0] + 1);
-    let descending = digits.windows(2).all(|pair| pair[0] == pair[1] + 1);
+    let ascending = digits.windows(2).all(|pair| pair[1] == (pair[0] + 1) % 10);
+    let descending = digits.windows(2).all(|pair| pair[0] == (pair[1] + 1) % 10);
     if ascending || descending {
-        return Err("Choose a PIN that is not six digits in a row.".into());
+        return Err("Choose a PIN that is not a run of digits in order.".into());
     }
     Ok(())
 }
@@ -405,9 +523,8 @@ pub fn derive_pin_wrapping_key(pin: &str, pin_wrap: &PinWrap) -> VaultResult<[u8
     let protected_pepper = URL_SAFE_NO_PAD
         .decode(&pin_wrap.protected_pepper)
         .map_err(|_| "The PIN unlock data is invalid. Use another unlock method.".to_string())?;
-    let mut pepper = unprotect_for_device(&protected_pepper).map_err(|error| {
-        format!("PIN unlock could not access this device's protected credential store: {error}")
-    })?;
+    let mut pepper = unprotect_for_device(&protected_pepper)
+        .map_err(|error| format!("PIN unlock is unavailable. {error}"))?;
     let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(&pepper)));
     pepper.zeroize();
     derive_key(secret.as_str(), &pin_wrap.kdf)
@@ -840,7 +957,7 @@ pub fn merged_duplicate_payload(
     if merged.recovery_not_applicable {
         merged.backup_codes.clear();
     }
-    merged.backup_codes = unique_backup_codes(merged.backup_codes);
+    merged.backup_codes = unique_backup_codes(std::mem::take(&mut merged.backup_codes));
     merged.updated_at = unix_timestamp();
     merged.revision = merged.revision.saturating_add(1);
 
@@ -924,10 +1041,21 @@ mod tests {
     }
 
     fn unlocked_at(path: PathBuf, password: &str) -> UnlockedVault {
-        let (opened, _) = create_vault(password, "Fictional vault").expect("created test vault");
+        unlocked_with_kit_at(path, password).0
+    }
+
+    fn unlocked_with_kit_at(path: PathBuf, password: &str) -> (UnlockedVault, String) {
+        let (opened, kit) = create_vault(password, "Fictional vault").expect("created test vault");
         let mut unlocked = UnlockedVault::from_opened(path, &opened).expect("unlocked vault");
         unlocked.setup_complete = true;
-        unlocked
+        (unlocked, kit)
+    }
+
+    fn password_and_kit<'a>(password: &'a str, kit: &'a str) -> RotationCredentials<'a> {
+        RotationCredentials {
+            current_password: Some(password),
+            recovery_kit: Some(kit),
+        }
     }
 
     #[test]
@@ -937,12 +1065,11 @@ mod tests {
         let password = "fictional master password";
         let mut session = unlocked_at(path.clone(), password);
         let mut payload = session.open_payload().expect("opened payload").clone();
-        payload.entries.push(VaultEntry {
-            id: "fictional-login".to_string(),
-            title: "Northwind".to_string(),
-            password: "fictional-secret".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "fictional-login".to_string();
+        entry.title = "Northwind".to_string();
+        entry.password = "fictional-secret".to_string();
+        payload.entries.push(entry);
 
         commit_payload_change(&mut session, payload).expect("persisted session");
 
@@ -968,12 +1095,10 @@ mod tests {
             id: "f1".to_string(),
             name: "Work".to_string(),
         });
-        let item = VaultEntry {
-            id: "one".to_string(),
-            title: "Example".to_string(),
-            folder_id: Some("f1".to_string()),
-            ..VaultEntry::default()
-        };
+        let mut item = VaultEntry::default();
+        item.id = "one".to_string();
+        item.title = "Example".to_string();
+        item.folder_id = Some("f1".to_string());
         payload.trash.push(TrashedItem {
             item: TaggedItem::Login(item.clone()),
             deleted_at: 1,
@@ -1022,17 +1147,15 @@ mod tests {
         use crate::types::Card;
 
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            title: "Northwind".to_string(),
-            tags: vec!["Work".to_string()],
-            ..VaultEntry::default()
-        });
-        payload.cards.push(Card {
-            id: "card-a".to_string(),
-            title: "Travel card".to_string(),
-            ..Card::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.title = "Northwind".to_string();
+        entry.tags = vec!["Work".to_string()];
+        payload.entries.push(entry);
+        let mut card = Card::default();
+        card.id = "card-a".to_string();
+        card.title = "Travel card".to_string();
+        payload.cards.push(card);
         let ids: HashSet<String> = ["login-a".to_string(), "card-a".to_string()]
             .into_iter()
             .collect();
@@ -1050,10 +1173,9 @@ mod tests {
     #[test]
     fn added_tags_are_rejected_when_empty_overlong_or_for_missing_items() {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        payload.entries.push(entry);
         let ids: HashSet<String> = ["login-a".to_string()].into_iter().collect();
 
         assert!(payload_with_added_item_tag(&payload, &ids, "   ").is_err());
@@ -1070,18 +1192,292 @@ mod tests {
         let path = directory.join("vault.sesame");
         let old_password = "fictional old password";
         let new_password = "fictional new password";
-        let mut session = unlocked_at(path.clone(), old_password);
+        let (mut session, old_kit) = unlocked_with_kit_at(path.clone(), old_password);
         persist_session(&mut session).expect("initial persisted session");
 
-        let recovery_kit =
-            rotate_master_password_for_session(&mut session, old_password, new_password)
-                .expect("rotated password");
+        let rotation = rotate_master_password_for_session(
+            &mut session,
+            password_and_kit(old_password, &old_kit),
+            new_password,
+        )
+        .expect("rotated password");
+        let recovery_kit = rotation.recovery_kit;
+        assert_eq!(rotation.backups_remaining, Some(0));
 
         let bytes = fs::read(&path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
         assert!(open_vault_with_password(&file, old_password).is_err());
         assert!(open_vault_with_password(&file, new_password).is_ok());
         assert!(open_vault_with_recovery_kit(&file, &recovery_kit).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &old_kit).is_err());
+        assert!(!path.with_extension("sesame.prev").exists());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_removes_backups_that_open_with_the_old_password() {
+        let directory = test_path("record-rotation-backups");
+        let path = directory.join("vault.sesame");
+        let old_password = "fictional old password";
+        let new_password = "fictional new password";
+        let (mut session, old_kit) = unlocked_with_kit_at(path.clone(), old_password);
+        persist_session(&mut session).expect("initial persisted session");
+
+        let old_copy = fs::read(&path).expect("vault bytes");
+        let old_file: VaultFile = serde_json::from_slice(&old_copy).expect("vault file");
+        assert!(open_vault_with_password(&old_file, old_password).is_ok());
+
+        let backup_dir = directory.join("backups");
+        fs::create_dir_all(&backup_dir).expect("backup folder");
+        fs::write(backup_dir.join("sesame-backup-fictional.sesame"), &old_copy)
+            .expect("backup copy");
+        fs::write(
+            backup_dir.join("sesame-before-import-fictional.sesame"),
+            &old_copy,
+        )
+        .expect("revision copy");
+
+        let rotation = rotate_master_password_for_session(
+            &mut session,
+            password_and_kit(old_password, &old_kit),
+            new_password,
+        )
+        .expect("rotated password");
+
+        assert_eq!(rotation.backups_remaining, Some(0));
+        assert_eq!(fs::read_dir(&backup_dir).expect("backup folder").count(), 0);
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_succeeds_without_a_backup_folder() {
+        let directory = test_path("record-rotation-no-backups");
+        let path = directory.join("vault.sesame");
+        let (mut session, kit) = unlocked_with_kit_at(path.clone(), "fictional old password");
+        persist_session(&mut session).expect("initial persisted session");
+        assert!(!directory.join("backups").exists());
+
+        let rotation = rotate_master_password_for_session(
+            &mut session,
+            password_and_kit("fictional old password", &kit),
+            "fictional new password",
+        )
+        .expect("rotated password");
+        assert_eq!(rotation.backups_remaining, Some(0));
+
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    enum TestKit<'a> {
+        Missing,
+        Own,
+        Given(&'a str),
+    }
+
+    fn rotation_is_refused(
+        name: &str,
+        current_password: Option<&str>,
+        kit: TestKit<'_>,
+        expected: &str,
+    ) {
+        let directory = test_path(name);
+        let path = directory.join("vault.sesame");
+        let old_password = "fictional old password";
+        let (mut session, own_kit) = unlocked_with_kit_at(path.clone(), old_password);
+        persist_session(&mut session).expect("initial persisted session");
+        let before = fs::read(&path).expect("vault bytes");
+        let recovery_kit = match kit {
+            TestKit::Missing => None,
+            TestKit::Own => Some(own_kit.as_str()),
+            TestKit::Given(kit) => Some(kit),
+        };
+
+        let error = rotate_master_password_for_session(
+            &mut session,
+            RotationCredentials {
+                current_password,
+                recovery_kit,
+            },
+            "fictional new password",
+        )
+        .err()
+        .expect("rotation refused");
+
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(fs::read(&path).expect("vault bytes"), before);
+        let file: VaultFile = serde_json::from_slice(&before).expect("vault file");
+        assert!(open_vault_with_password(&file, old_password).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &own_kit).is_ok());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn rotation_needs_the_recovery_kit_besides_the_current_password() {
+        rotation_is_refused(
+            "rotation-no-kit",
+            Some("fictional old password"),
+            TestKit::Missing,
+            "Enter your recovery kit",
+        );
+    }
+
+    #[test]
+    fn rotation_refuses_a_recovery_kit_from_another_vault() {
+        let (_, other_kit) =
+            create_vault("fictional other password", "Other vault").expect("other vault");
+        rotation_is_refused(
+            "rotation-wrong-kit",
+            Some("fictional old password"),
+            TestKit::Given(&other_kit),
+            "recovery kit is not correct",
+        );
+    }
+
+    #[test]
+    fn rotation_refuses_a_wrong_current_password_even_with_the_kit() {
+        rotation_is_refused(
+            "rotation-wrong-password",
+            Some("fictional wrong password"),
+            TestKit::Own,
+            "current master password is not correct",
+        );
+    }
+
+    #[test]
+    fn rotation_refuses_an_empty_recovery_kit() {
+        rotation_is_refused(
+            "rotation-empty-kit",
+            Some("fictional old password"),
+            TestKit::Given("   "),
+            "Enter your recovery kit",
+        );
+    }
+
+    #[test]
+    fn the_recovery_kit_alone_resets_a_forgotten_master_password() {
+        let directory = test_path("rotation-kit-only");
+        let path = directory.join("vault.sesame");
+        let (mut session, kit) = unlocked_with_kit_at(path.clone(), "fictional old password");
+        persist_session(&mut session).expect("initial persisted session");
+
+        let rotation = rotate_master_password_for_session(
+            &mut session,
+            RotationCredentials {
+                current_password: None,
+                recovery_kit: Some(&kit.to_ascii_lowercase()),
+            },
+            "fictional new password",
+        )
+        .expect("reset with the recovery kit");
+
+        let file: VaultFile =
+            serde_json::from_slice(&fs::read(&path).expect("vault bytes")).expect("vault file");
+        assert!(open_vault_with_password(&file, "fictional new password").is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &rotation.recovery_kit).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &kit).is_err());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn a_vault_without_a_recovery_wrapper_still_needs_the_current_password() {
+        let directory = test_path("rotation-no-recovery-wrapper");
+        let path = directory.join("vault.sesame");
+        let mut session = unlocked_at(path.clone(), "fictional old password");
+        session.recovery_wrap = None;
+        session.recovery_kdf = None;
+
+        let refused = rotate_master_password_for_session(
+            &mut session,
+            RotationCredentials {
+                current_password: None,
+                recovery_kit: Some("FICTIONAL-KIT"),
+            },
+            "fictional new password",
+        );
+        assert!(refused
+            .err()
+            .expect("refused without a password")
+            .contains("Enter your current master password"));
+
+        persist_session(&mut session).expect("initial persisted session");
+        rotate_master_password_for_session(
+            &mut session,
+            RotationCredentials {
+                current_password: Some("fictional old password"),
+                recovery_kit: None,
+            },
+            "fictional new password",
+        )
+        .expect("rotated with the password");
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn a_recovery_kit_request_opens_only_for_its_own_vault() {
+        let (session, _) = unlocked_with_kit_at(
+            test_path("replacement-seal").join("vault.sesame"),
+            "fictional master password",
+        );
+        let (other, _) = unlocked_with_kit_at(
+            test_path("replacement-other").join("vault.sesame"),
+            "fictional other password",
+        );
+        let sealed =
+            seal_recovery_replacement_request(&session, 1_700_000_000).expect("sealed request");
+
+        assert_eq!(
+            open_recovery_replacement_request(&session, &sealed),
+            Ok(1_700_000_000)
+        );
+        assert!(open_recovery_replacement_request(&other, &sealed).is_err());
+        let mut tampered = sealed.clone();
+        tampered.ciphertext = seal_recovery_replacement_request(&session, 1)
+            .expect("second request")
+            .ciphertext;
+        assert!(open_recovery_replacement_request(&session, &tampered).is_err());
+    }
+
+    #[test]
+    fn a_recovery_kit_request_waits_the_full_delay() {
+        let requested_at = 1_700_000_000;
+        assert!(!recovery_replacement_ready(requested_at, requested_at));
+        assert!(!recovery_replacement_ready(
+            requested_at,
+            requested_at + RECOVERY_REPLACEMENT_DELAY_SECS - 1
+        ));
+        assert!(recovery_replacement_ready(
+            requested_at,
+            requested_at + RECOVERY_REPLACEMENT_DELAY_SECS
+        ));
+        assert!(!recovery_replacement_ready(requested_at, requested_at - 1));
+    }
+
+    #[test]
+    fn replacing_the_recovery_kit_keeps_the_password_and_drops_the_old_kit() {
+        let directory = test_path("replacement-complete");
+        let path = directory.join("vault.sesame");
+        let password = "fictional master password";
+        let (mut session, old_kit) = unlocked_with_kit_at(path.clone(), password);
+        persist_session(&mut session).expect("initial persisted session");
+        let before = fs::read(&path).expect("vault bytes");
+        let requested_at = 1_700_000_000;
+        let ready_at = requested_at + RECOVERY_REPLACEMENT_DELAY_SECS;
+
+        assert!(
+            replace_recovery_kit_for_session(&mut session, requested_at, ready_at - 1).is_err()
+        );
+        assert!(
+            replace_recovery_kit_for_session(&mut session, requested_at, requested_at - 1).is_err()
+        );
+        assert_eq!(fs::read(&path).expect("vault bytes"), before);
+
+        let new_kit = replace_recovery_kit_for_session(&mut session, requested_at, ready_at)
+            .expect("replaced kit");
+        let file: VaultFile =
+            serde_json::from_slice(&fs::read(&path).expect("vault bytes")).expect("vault file");
+        assert!(open_vault_with_password(&file, password).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &new_kit).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &old_kit).is_err());
         assert!(!path.with_extension("sesame.prev").exists());
         fs::remove_dir_all(directory).expect("removed test directory");
     }

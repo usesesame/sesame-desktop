@@ -2,6 +2,7 @@
   import Icon from '../Icon.svelte'
   import DuplicateReview from './DuplicateReview.svelte'
   import ViewHeader from './ViewHeader.svelte'
+  import WebsiteIcon from './WebsiteIcon.svelte'
   import { issueKindLabels } from '../issue-kinds'
   import type { BreachScanReport, CleanupEntry, DuplicateGroup, IssueKind, TwoFactorSiteLogin, VaultSnapshot } from '../types'
 
@@ -23,6 +24,8 @@
   export let breachScanError = ''
   export let onStartBreachScan: () => void
   export let onCancelBreachScan: () => void
+  export let onOpenLogin: (id: string) => void
+  export let siteIconsEnabled = false
 
   type Finding = {
     key: string
@@ -40,6 +43,7 @@
   const DISPLAY_LIMIT = 5
 
   $: goodCount = snapshot?.security.good ?? 0
+  $: loginCount = snapshot?.entries.length ?? 0
   $: security = snapshot?.security
 
   function loginFinding(kind: Exclude<IssueKind, 'duplicate'>, icon: string, count: number, activeText: string, clearText: string, weight: number): Finding {
@@ -68,8 +72,12 @@
   $: unknownResults = breachScan?.phase === 'finished' ? breachScan.results.filter((result) => result.verdict === 'unknown') : []
   $: progressPercent = breachScan?.total ? Math.round((breachScan.checked / breachScan.total) * 100) : 0
 
-  function loginTitle(id: string): string {
-    return snapshot?.entries.find((entry) => entry.id === id)?.title ?? 'Saved login'
+  let showAllBreached = false
+  $: if (breachScan?.phase !== 'finished') showAllBreached = false
+  $: visibleBreached = showAllBreached ? breachedResults : breachedResults.slice(0, DISPLAY_LIMIT)
+
+  function savedLogin(id: string) {
+    return snapshot?.entries.find((entry) => entry.id === id)
   }
 </script>
 
@@ -94,19 +102,21 @@
 {:else}
 <section class="checkup-view">
   <ViewHeader title={snapshot?.security.needsAttention ? 'Review your vault' : 'No issues found'}>
-    <div slot="aside" class="view-header-aside"><strong>{goodCount}</strong><span>{goodCount === 1 ? 'account ready' : 'accounts ready'}</span></div>
+    <div slot="aside" class="view-header-aside" class:none={goodCount === 0}><strong>{goodCount} of {loginCount}</strong><span>{loginCount === 1 ? 'login in good shape' : 'logins in good shape'}</span></div>
   </ViewHeader>
   <section class="findings-list" aria-label="Security findings">
     {#each actionableFindings as finding (finding.key)}
       {#if finding.onClick}
         <button class="finding-row" class:danger={finding.danger} on:click={finding.onClick}><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong><Icon name="chevron-right" size={18} /></button>
       {:else}
-        <div class="finding-row"><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong></div>
+        <div class="finding-row"><span class="finding-icon"><Icon name={finding.icon} size={15} /></span><div><h3>{finding.title}</h3><p>{finding.activeText}</p></div><strong>{finding.count}</strong><span class="finding-chevron-space" aria-hidden="true"></span></div>
       {/if}
       {#if finding.logins?.length}
-        <ul class="finding-logins" aria-label={finding.title}>
-          {#each finding.logins as login (login.id)}<li><strong>{login.title}</strong><span>{login.site}</span></li>{/each}
-          {#if finding.count > finding.logins.length}<li class="finding-logins-more">and {finding.count - finding.logins.length} more</li>{/if}
+        <ul class="checkup-logins finding-logins" aria-label={finding.title}>
+          {#each finding.logins as login (login.id)}
+            <li><button type="button" class="checkup-login" on:click={() => onOpenLogin(login.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login.site} initials={savedLogin(login.id)?.initials ?? login.title.slice(0, 1).toUpperCase()} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong>{login.title}</strong><small>{login.site}</small></span><Icon name="chevron-right" size={15} /></button></li>
+          {/each}
+          {#if finding.count > finding.logins.length}<li class="checkup-logins-more">and {finding.count - finding.logins.length} more</li>{/if}
         </ul>
       {/if}
     {/each}
@@ -151,10 +161,15 @@
       <button type="button" class="text-button" on:click={onCancelBreachScan}>Cancel</button>
     {:else if breachScan?.phase === 'finished' || breachScan?.phase === 'cancelled'}
       {#if breachedResults.length}
-        <ul class="breach-check-list">
-          {#each breachedResults.slice(0, DISPLAY_LIMIT) as result (result.id)}<li>{loginTitle(result.id)}</li>{/each}
-          {#if breachedResults.length > DISPLAY_LIMIT}<li class="finding-logins-more">and {breachedResults.length - DISPLAY_LIMIT} more</li>{/if}
+        <ul class="checkup-logins breach-check-list" aria-label="Logins with breached passwords">
+          {#each visibleBreached as result (result.id)}
+            {@const login = savedLogin(result.id)}
+            <li><button type="button" class="checkup-login" disabled={!login} on:click={() => login && onOpenLogin(result.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login?.site ?? ''} initials={login?.initials ?? '?'} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong>{login?.title ?? 'Deleted login'}</strong><small>{login?.site || 'No website saved'}</small></span><Icon name="chevron-right" size={15} /></button></li>
+          {/each}
         </ul>
+        {#if breachedResults.length > DISPLAY_LIMIT}
+          <button type="button" class="text-button breach-check-more" aria-expanded={showAllBreached} on:click={() => (showAllBreached = !showAllBreached)}>{showAllBreached ? 'Show fewer' : `Show all ${breachedResults.length}`}</button>
+        {/if}
       {/if}
       <button type="button" class="secondary-button" on:click={onStartBreachScan}>Check again</button>
     {:else}

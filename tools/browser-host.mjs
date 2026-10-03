@@ -30,7 +30,7 @@ export function buildBrowserHost({ manifest, release }) {
       : '-C target-feature=+crt-static'
   }
 
-  const args = ['build', '--manifest-path', manifest]
+  const args = ['build', '--locked', '--manifest-path', manifest]
   if (release) args.push('--release')
   args.push('--features', 'browser-helper-dev', '--bin', 'sesame-browser-host')
 

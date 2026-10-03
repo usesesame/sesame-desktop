@@ -1,3 +1,4 @@
+import { isValidPinLength } from '../pin-rules'
 import type { AppStores } from '../stores/app-stores'
 import type { ItemKind, VaultSnapshot } from '../types'
 import {
@@ -190,7 +191,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
     },
     async unlockUsingPin() {
       const current = state.value()
-      if (current.unlockPin.length !== 6 || current.isWorking) return
+      if (!isValidPinLength(current.unlockPin) || current.isWorking) return
       state.patch({ isWorking: true })
       feedback.clearError()
       try {

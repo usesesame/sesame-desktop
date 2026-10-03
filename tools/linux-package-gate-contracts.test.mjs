@@ -1,13 +1,83 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { requiredShippedSteps } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { chromeHostManifestMatches, pinnedChromeOrigin } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
+
+const bundlerFetchedToolNames = [
+  'AppRun-x86_64',
+  'linuxdeploy-x86_64.AppImage',
+  'linuxdeploy-plugin-gtk.sh',
+  'linuxdeploy-plugin-gstreamer.sh',
+  'linuxdeploy-plugin-appimage.AppImage',
+]
+
+function shippedRecord(overrides = {}) {
+  return {
+    schema: SHIPPED_RUN_SCHEMA,
+    format: 'deb',
+    platform: 'linux',
+    architecture: 'x86_64',
+    version: '1.2.3',
+    installKind: 'dpkg',
+    package: { filename: 'Sesame_1.2.3_amd64.deb', sha256: 'a'.repeat(64), bytes: 1024, name: 'sesame', version: '1.2.3', architecture: 'amd64' },
+    previousPackage: null,
+    binarySha256: 'b'.repeat(64),
+    steps: requiredShippedSteps.map((name) => ({ name, ok: true })),
+    result: 'passed',
+    skipped: false,
+    startedAt: '2026-09-13T00:00:00.000Z',
+    finishedAt: '2026-09-13T00:05:00.000Z',
+    ...overrides,
+  }
+}
+
+function rpmRecord(overrides = {}) {
+  return {
+    schema: RPM_RUN_SCHEMA,
+    format: 'rpm',
+    platform: 'linux',
+    architecture: 'x86_64',
+    version: '1.2.3',
+    installKind: 'rpm',
+    package: { filename: 'Sesame-1.2.3-1.x86_64.rpm', sha256: 'd'.repeat(64), bytes: 2048, name: 'sesame', version: '1.2.3', release: '1', architecture: 'x86_64' },
+    previousPackage: null,
+    binarySha256: 'e'.repeat(64),
+    steps: requiredRpmSteps.map((name) => ({ name, ok: true })),
+    result: 'passed',
+    skipped: false,
+    startedAt: '2026-09-13T00:00:00.000Z',
+    finishedAt: '2026-09-13T00:05:00.000Z',
+    ...overrides,
+  }
+}
+
+function appimageRecord(overrides = {}) {
+  return {
+    schema: APPIMAGE_RUN_SCHEMA,
+    format: 'appimage',
+    platform: 'linux',
+    architecture: 'x86_64',
+    version: '1.2.3',
+    installKind: 'appimage-extract',
+    package: { filename: 'Sesame_1.2.3_amd64.AppImage', sha256: 'f'.repeat(64), bytes: 4096, version: '1.2.3', architecture: 'x86_64' },
+    previousPackage: null,
+    binarySha256: 'a'.repeat(64),
+    steps: requiredAppImageSteps.map((name) => ({ name, ok: true })),
+    result: 'passed',
+    skipped: false,
+    startedAt: '2026-09-13T00:00:00.000Z',
+    finishedAt: '2026-09-13T00:05:00.000Z',
+    ...overrides,
+  }
+}
 
 function packageRecord(overrides = {}) {
   return {
@@ -122,5 +192,141 @@ test('both package gates require an executable browser host', async () => {
   for (const file of ['linux-installed-package-gate.mjs', 'linux-shipped-package-gate.mjs']) {
     const source = await readFile(path.join(repository, 'tools', file), 'utf8')
     assert.match(source, /0o111/, `${file} does not require the host to be executable`)
+  }
+})
+
+test('the shipped deb record still satisfies the release lane', () => {
+  const evidence = shippedRecord()
+  assert.equal(validateLinuxShippedEvidence(evidence), evidence)
+  assert.throws(() => validateLinuxShippedEvidence(shippedRecord({ installKind: 'extracted' })), /real package installation/)
+  assert.equal(validateLinuxShippedEvidence(shippedRecord({ installKind: 'extracted' }), { requireInstall: false }).installKind, 'extracted')
+})
+
+test('a shipped deb run without native-host cleanup is not evidence', () => {
+  const missing = shippedRecord()
+  missing.steps = missing.steps.filter((step) => step.name !== 'browser.registration_removed')
+  assert.throws(() => validateLinuxShippedEvidence(missing), /did not pass browser\.registration_removed/)
+})
+
+test('the rpm shipped record requires a real install and native-host cleanup', () => {
+  const evidence = rpmRecord()
+  assert.equal(validateLinuxRpmShippedEvidence(evidence), evidence)
+  const missing = rpmRecord()
+  missing.steps = missing.steps.filter((step) => step.name !== 'browser.registration_removed')
+  assert.throws(() => validateLinuxRpmShippedEvidence(missing), /did not pass browser\.registration_removed/)
+  assert.throws(() => validateLinuxRpmShippedEvidence(rpmRecord({ installKind: 'extracted' })), /real rpm installation/)
+  assert.throws(() => validateLinuxRpmShippedEvidence(rpmRecord({ skipped: true })), /did not pass/)
+  assert.throws(() => validateLinuxRpmShippedEvidence({ ...rpmRecord(), schema: SHIPPED_RUN_SCHEMA }), /wrong schema/)
+})
+
+test('the AppImage shipped record requires an extracted payload and no registration', () => {
+  const evidence = appimageRecord()
+  assert.equal(validateLinuxAppImageShippedEvidence(evidence), evidence)
+  const missing = appimageRecord()
+  missing.steps = missing.steps.filter((step) => step.name !== 'browser.registration_refused')
+  assert.throws(() => validateLinuxAppImageShippedEvidence(missing), /did not pass browser\.registration_refused/)
+  assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ schema: RPM_RUN_SCHEMA })), /wrong schema/)
+  assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ binarySha256: 'nope' })), /package and binary digests/)
+  assert.ok(!requiredAppImageSteps.includes('package.uninstall'), 'the AppImage gate must not require an uninstall step that only deletes its own staging directory')
+})
+
+test('the shipped evidence filenames and format inference stay stable', () => {
+  assert.deepEqual(evidenceFilenameByFormat, {
+    deb: 'linux-shipped-package.json',
+    rpm: 'linux-rpm-shipped-package.json',
+    appimage: 'linux-appimage-shipped-package.json',
+  })
+  assert.equal(formatForPackage('/tmp/Sesame_1.2.3_amd64.deb'), 'deb')
+  assert.equal(formatForPackage('/tmp/Sesame-1.2.3-1.x86_64.rpm'), 'rpm')
+  assert.equal(formatForPackage('/tmp/Sesame_1.2.3_amd64.AppImage'), 'appimage')
+  assert.throws(() => formatForPackage('/tmp/Sesame-1.2.3.dmg'), /Unsupported Linux package/)
+})
+
+test('the gate exercises rpm installs, AppImage extraction, and both cleanup paths', async () => {
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /const rpm = \(\.\.\.args\) => command\('rpm', \['--dbpath', rpmDatabase, \.\.\.args\]\)/)
+  assert.match(source, /'rpm', '--dbpath', rpmDatabase, '-i', '--nodeps', '--force'/)
+  assert.match(source, /'rpm', '--dbpath', rpmDatabase, '-e', '--nodeps'/)
+  assert.match(source, /'dpkg', '-r'/)
+  assert.match(source, /--appimage-extract/)
+  assert.match(source, /APPIMAGE_EXTRACT_AND_RUN/)
+  assert.ok(requiredRpmSteps.includes('browser.registration_removed'))
+  assert.ok(requiredAppImageSteps.includes('browser.registration_refused'))
+})
+
+test('the release lane gates every shipped format before freezing evidence', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  assert.equal((workflow.match(/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'the lane does not gate each shipped format')
+  assert.equal((workflow.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'the lane does not run each shipped-format gate under a display server')
+  for (const format of ['deb', 'rpm', 'appimage']) {
+    assert.match(workflow, new RegExp(`--format ${format}\\b`), `the lane does not gate the shipped ${format}`)
+  }
+  assert.match(workflow, /SESAME_RPM_PACKAGE_EVIDENCE=linux-rpm-shipped-evidence\/linux-rpm-shipped-package\.json/)
+  assert.match(workflow, /SESAME_APPIMAGE_PACKAGE_EVIDENCE=linux-appimage-shipped-evidence\/linux-appimage-shipped-package\.json/)
+  assert.ok(workflow.indexOf('linux-shipped-package-gate.mjs') < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the gates must run before the evidence freeze')
+})
+
+test('every tool the Tauri bundler can fetch is pinned by version and hash', async () => {
+  const pins = pinnedBundleTools.x86_64
+  assert.deepEqual(pins.map((pin) => pin.name).sort(), [...bundlerFetchedToolNames].sort(), 'the pin table does not cover exactly the tools the bundler fetches')
+  for (const pin of pins) {
+    assert.match(pin.name, /^[A-Za-z0-9._-]+$/)
+    assert.match(pin.url, /^https:\/\/(github\.com|raw\.githubusercontent\.com)\//)
+    assert.match(pin.sha256, /^[0-9a-f]{64}$/)
+  }
+  const apprun = pins.find((pin) => pin.name === 'AppRun-x86_64')
+  assert.equal(apprun.url, 'https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64')
+  const linuxdeploy = pins.find((pin) => pin.name.startsWith('linuxdeploy-') && pin.name.endsWith('.AppImage'))
+  assert.equal(linuxdeploy.name, 'linuxdeploy-x86_64.AppImage')
+  assert.equal(linuxdeploy.url, 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage')
+  const plugin = pins.find((pin) => pin.name === 'linuxdeploy-plugin-appimage.AppImage')
+  assert.equal(plugin.url, 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage')
+  for (const pin of pins) {
+    assert.doesNotMatch(pin.url, /\/releases\/download\/continuous\//, `${pin.name} comes from a rolling release whose bytes change under the pin`)
+  }
+  const gtk = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
+  assert.match(gtk.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gtk\/[0-9a-f]{40}\/linuxdeploy-plugin-gtk\.sh$/, 'the gtk plugin is not pinned to an immutable commit')
+  const gstreamer = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gstreamer.sh')
+  assert.match(gstreamer.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gstreamer\/[0-9a-f]{40}\/linuxdeploy-plugin-gstreamer\.sh$/, 'the gstreamer plugin is not pinned to an immutable commit')
+  const lock = JSON.parse(await readFile(path.join(repository, 'package-lock.json'), 'utf8'))
+  assert.equal(lock.packages['node_modules/@tauri-apps/cli'].version, verifiedCliVersion, 'the pinned Linux bundling tools target a different Tauri CLI; re-verify every bundler tool name and hash')
+})
+
+test('a download that does not match its pinned hash is refused before it is written', async () => {
+  const tool = pinnedBundleTools.x86_64.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
+  const toolsDir = await mkdtemp(path.join(tmpdir(), 'sesame-bundle-tools-'))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('fictional tampered tool', { status: 200 })
+  try {
+    await assert.rejects(installPinnedTool(tool, toolsDir), /does not match its pinned SHA-256/)
+    assert.equal(await readFile(path.join(toolsDir, tool.name)).catch(() => null), null, 'the rejected tool was written')
+    assert.equal(await readFile(path.join(toolsDir, `${tool.name}.download`)).catch(() => null), null, 'the rejected tool was staged for rename')
+  } finally {
+    globalThis.fetch = originalFetch
+    await rm(toolsDir, { recursive: true, force: true })
+  }
+})
+
+test('Linux CI exercises the shipped rpm and AppImage gates before tagging', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const job = workflow.slice(workflow.indexOf('desktop-linux:'))
+  for (const format of ['rpm', 'appimage']) {
+    assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
+  }
+  assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
+})
+
+test('the bundling tools are verified before the bundler can download its own', async () => {
+  const source = await readFile(path.join(repository, 'tools', 'prepare-linux-bundle-tools.mjs'), 'utf8')
+  assert.match(source, /createHash\('sha256'\)/)
+  assert.match(source, /does not match its pinned SHA-256/)
+  assert.match(source, /cargo metadata/)
+  for (const workflow of ['ci.yml', 'release-linux-early-access.yml']) {
+    const body = await readFile(path.join(repository, '.github', 'workflows', workflow), 'utf8')
+    const prepare = body.indexOf('prepare-linux-bundle-tools.mjs')
+    const build = body.indexOf('--bundles deb,rpm,appimage')
+    assert.ok(prepare >= 0, `${workflow} does not run the pinned tool preparation`)
+    assert.ok(prepare < build, `${workflow} must verify the bundling tools before the bundle build`)
+    assert.match(body, /useLocalToolsDir":true/, `${workflow} does not keep bundling tools in the project target directory`)
   }
 })

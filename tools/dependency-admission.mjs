@@ -1,104 +1,330 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const manifests = ['src-tauri/Cargo.toml', 'src-tauri/sesame-core/Cargo.toml']
 const admissionFile = 'src-tauri/dependency-admission.json'
+const cargoLockFile = 'src-tauri/Cargo.lock'
+const cargoManifest = 'src-tauri/Cargo.toml'
+const npmLockFile = 'package-lock.json'
+const npmRegistryHost = 'registry.npmjs.org'
+const cratesIoSources = new Set([
+  'registry+https://github.com/rust-lang/crates.io-index',
+  'registry+https://index.crates.io/',
+])
+const admissionSources = new Set(['crates.io', 'npm', 'path'])
+const admittedVersion = /^\d+(\.\d+){0,2}$/
+const cargoChecksum = /^[0-9a-f]{64}$/
 
-const SECTION = /^\[([^\]]+)\]\s*$/
-const DEPENDENCY_SECTION = /(^|\.)dependencies$/
-const ENTRY = /^([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/
-const VERSION_IN_TABLE = /version\s*=\s*"([^"]+)"/
-const VERSION_STRING = /^"([^"]+)"/
-
-export function parseDirectDependencies(manifestText) {
-  const dependencies = new Map()
-  let section = ''
-  for (const rawLine of manifestText.split('\n')) {
-    const line = rawLine.split('#')[0].trim()
-    if (!line) continue
-    const header = line.match(SECTION)
-    if (header) {
-      section = header[1]
-      continue
-    }
-    if (!DEPENDENCY_SECTION.test(section)) continue
-    const entry = line.match(ENTRY)
-    if (!entry) continue
-    const [, name, value] = entry
-    if (/^\{/.test(value)) {
-      const workspace = /\bworkspace\s*=\s*true\b/.test(value)
-      const version = value.match(VERSION_IN_TABLE)?.[1] ?? null
-      dependencies.set(name, { version: workspace ? 'workspace' : version, path: /\bpath\s*=/.test(value) })
-    } else {
-      dependencies.set(name, { version: value.match(VERSION_STRING)?.[1] ?? null, path: false })
-    }
-  }
-  return dependencies
+function hasSha512Integrity(value) {
+  return typeof value === 'string' && value.split(/\s+/).some((hash) => hash.startsWith('sha512-'))
 }
 
-export function checkAdmission(manifests, admission) {
+export function parseCargoLock(text) {
+  const packages = []
+  let current = null
+  for (const line of text.split('\n')) {
+    if (line.startsWith('[')) {
+      current = line.trim() === '[[package]]' ? {} : null
+      if (current) packages.push(current)
+      continue
+    }
+    if (!current) continue
+    const field = line.match(/^([A-Za-z0-9_]+) = "([^"]*)"$/)
+    if (field) current[field[1]] = field[2]
+  }
+  return packages
+}
+
+function packageNameFromKey(key) {
+  const marker = key.lastIndexOf('node_modules/')
+  return marker === -1 ? key : key.slice(marker + 'node_modules/'.length)
+}
+
+function aliasTarget(spec) {
+  if (typeof spec !== 'string' || !spec.startsWith('npm:')) return null
+  const target = spec.slice('npm:'.length)
+  const marker = target.lastIndexOf('@')
+  return marker <= 0 ? target : target.slice(0, marker)
+}
+
+export function parsePackageLock(text) {
+  const lock = JSON.parse(text)
+  const root = lock?.packages?.['']
+  if (
+    typeof lock?.lockfileVersion !== 'number' ||
+    lock.lockfileVersion < 2 ||
+    typeof lock?.packages !== 'object' ||
+    lock.packages === null ||
+    typeof root !== 'object' ||
+    root === null
+  ) {
+    throw new Error(`${npmLockFile} must be a lockfileVersion 2 or newer lock with a packages map.`)
+  }
+  const packages = []
+  for (const [key, entry] of Object.entries(lock.packages)) {
+    if (key === '') continue
+    const keyName = packageNameFromKey(key)
+    const lockedName = typeof entry?.name === 'string' && entry.name ? entry.name : null
+    packages.push({
+      name: lockedName ?? keyName,
+      version: typeof entry?.version === 'string' ? entry.version : null,
+      resolved: typeof entry?.resolved === 'string' ? entry.resolved : null,
+      integrity: typeof entry?.integrity === 'string' ? entry.integrity : null,
+    })
+  }
+  const declared = {
+    ...root.dependencies,
+    ...root.devDependencies,
+    ...root.optionalDependencies,
+    ...root.peerDependencies,
+  }
+  const direct = []
+  for (const [name, spec] of Object.entries(declared)) {
+    const entry = lock.packages[`node_modules/${name}`]
+    const lockedName = typeof entry?.name === 'string' && entry.name ? entry.name : null
+    direct.push({
+      name,
+      spec: typeof spec === 'string' ? spec : null,
+      realName: lockedName ?? name,
+      version: typeof entry?.version === 'string' ? entry.version : null,
+    })
+  }
+  const overrides = typeof root.overrides === 'object' && root.overrides !== null ? Object.keys(root.overrides) : []
+  return { packages, direct, overrides }
+}
+
+export function directDependenciesFromMetadata(metadata) {
+  const packagesById = new Map((metadata.packages ?? []).map((pkg) => [pkg.id, pkg]))
+  const workspaceMembers = new Set(metadata.workspace_members ?? [])
+  const direct = new Map()
+  for (const node of metadata.resolve?.nodes ?? []) {
+    if (!workspaceMembers.has(node.id)) continue
+    for (const dep of node.deps ?? []) {
+      if (workspaceMembers.has(dep.pkg)) continue
+      const pkg = packagesById.get(dep.pkg)
+      if (!pkg) continue
+      direct.set(`${pkg.name}\u0000${pkg.version}\u0000${pkg.source ?? ''}`, {
+        name: pkg.name,
+        version: pkg.version,
+        source: pkg.source ?? null,
+      })
+    }
+  }
+  return [...direct.values()]
+}
+
+export function matchesVersion(version, admitted) {
+  if (admitted === '*') return true
+  const locked = version.split(/[-+]/)[0].split('.').map(Number)
+  const required = admitted.split('.').map(Number)
+  return required.every((part, index) => locked[index] === part)
+}
+
+function validateAdmission(admission) {
   if (admission?.schemaVersion !== 1 || !Array.isArray(admission?.packages)) {
     throw new Error('The dependency admission file must carry schemaVersion 1 and a packages array.')
   }
-  const admitted = new Map()
-  for (const entry of admission.packages) {
-    if (typeof entry?.name !== 'string' || !entry.name) throw new Error(`An admission entry is missing a package name.`)
-    if (admitted.has(entry.name)) throw new Error(`Package ${entry.name} is admitted more than once.`)
-    if (typeof entry?.version !== 'string' || !entry.version) throw new Error(`Admission for ${entry.name} is missing a version.`)
-    admitted.set(entry.name, entry)
+  const seen = new Set()
+  return admission.packages.map((entry) => {
+    if (typeof entry?.name !== 'string' || !entry.name) {
+      throw new Error('An admission entry is missing a package name.')
+    }
+    const source = entry.source ?? 'crates.io'
+    if (!admissionSources.has(source)) {
+      throw new Error(`Admission for ${entry.name} names an unsupported source: ${source}`)
+    }
+    if (typeof entry?.version !== 'string' || (entry.version !== '*' && !admittedVersion.test(entry.version))) {
+      throw new Error(`Admission for ${entry.name} needs a version such as "2", "2.1", "2.1.3", or "*".`)
+    }
+    if (typeof entry?.reason !== 'string' || !entry.reason.trim()) {
+      throw new Error(`Admission for ${entry.name} is missing a reason.`)
+    }
+    const key = `${source}\u0000${entry.name}`
+    if (seen.has(key)) throw new Error(`Package ${entry.name} is admitted more than once for ${source}.`)
+    seen.add(key)
+    return { name: entry.name, version: entry.version, source }
+  })
+}
+
+function registryUrl(resolved) {
+  if (typeof resolved !== 'string') return null
+  try {
+    return new URL(resolved)
+  } catch {
+    return null
   }
+}
+
+function registryTarballMatches(name, version, url) {
+  const prefix = `/${name}/-/`
+  if (!url.pathname.startsWith(prefix)) return false
+  const file = url.pathname.slice(prefix.length)
+  if (file.includes('/')) return false
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  if (typeof version === 'string' && version) return file === `${base}-${version}.tgz`
+  return file.startsWith(`${base}-`) && file.endsWith('.tgz')
+}
+
+export function checkAdmission({ cargoLock, npmLock, metadata, admission }) {
+  const entries = validateAdmission(admission)
+  const cargoPackages = parseCargoLock(cargoLock)
+  const npm = parsePackageLock(npmLock)
+  const directCargo = directDependenciesFromMetadata(metadata)
+  const admitted = new Map([...admissionSources].map((source) => [source, new Map()]))
+  for (const entry of entries) admitted.get(entry.source).set(entry.name, entry)
+
+  const foreignSources = []
+  const missingChecksums = []
+  const missingIntegrity = []
   const unadmitted = []
-  const stale = []
   const mismatched = []
-  for (const [file, text] of manifests) {
-    for (const [name, requirement] of parseDirectDependencies(text)) {
-      if (requirement.version === 'workspace' || requirement.path) continue
-      const entry = admitted.get(name)
+  const stale = []
+
+  const metadataPackages = new Map((metadata.packages ?? []).map((pkg) => [pkg.id, pkg]))
+  const workspaceMembers = new Set(
+    (metadata.workspace_members ?? []).map((id) => {
+      const pkg = metadataPackages.get(id)
+      return pkg ? `${pkg.name}@${pkg.version}` : id
+    }),
+  )
+
+  for (const pkg of cargoPackages) {
+    if (!pkg.source) {
+      if (workspaceMembers.has(`${pkg.name}@${pkg.version}`)) continue
+      const entry = admitted.get('path').get(pkg.name)
       if (!entry) {
-        unadmitted.push(`${file}: ${name} ${requirement.version ?? '(no version)'}`)
-      } else if (requirement.version && !satisfied(requirement.version, entry.version)) {
-        mismatched.push(`${file}: ${name} requires ${requirement.version} but admission records ${entry.version}`)
+        foreignSources.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} has no registry source and no admitted path entry`)
+      } else if (!matchesVersion(pkg.version, entry.version)) {
+        mismatched.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} does not match the admitted path version ${entry.version}`)
       }
+      continue
+    }
+    if (!cratesIoSources.has(pkg.source)) {
+      foreignSources.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} comes from ${pkg.source}`)
+      continue
+    }
+    if (!cargoChecksum.test(pkg.checksum ?? '')) {
+      missingChecksums.push(`${cargoLockFile}: ${pkg.name} ${pkg.version} does not carry a sha256 checksum`)
     }
   }
-  for (const name of admitted.keys()) {
-    if (![...manifests.values()].some((text) => parseDirectDependencies(text).has(name))) {
-      stale.push(name)
+
+  for (const dep of directCargo) {
+    if (!dep.source || !cratesIoSources.has(dep.source)) continue
+    const entry = admitted.get('crates.io').get(dep.name)
+    if (!entry) {
+      unadmitted.push(`${cargoManifest}: ${dep.name} ${dep.version} is not recorded in ${admissionFile}`)
+    } else if (!matchesVersion(dep.version, entry.version)) {
+      mismatched.push(`${dep.name} is admitted at ${entry.version} but ${cargoLockFile} resolves ${dep.version}`)
     }
   }
-  return { unadmitted, stale, mismatched }
-}
 
-function satisfied(requirement, admitted) {
-  if (admitted === '*') return true
-  const numbers = (value) => value.split(/[.<>=^~\s,-]+/).filter((part) => /^\d+$/.test(part)).map(Number)
-  const [required, allowed] = [numbers(requirement), numbers(admitted)]
-  for (let index = 0; index < Math.max(required.length, allowed.length); index += 1) {
-    const left = required[index] ?? 0
-    const right = allowed[index] ?? 0
-    if (left !== right) return left < right
+  for (const pkg of npm.packages) {
+    const url = registryUrl(pkg.resolved)
+    if (!url || url.protocol !== 'https:' || url.host !== npmRegistryHost) {
+      foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to ${pkg.resolved ?? 'no registry URL'}`)
+      continue
+    }
+    if (!registryTarballMatches(pkg.name, pkg.version, url)) {
+      foreignSources.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} resolves to a tarball for another package: ${pkg.resolved}`)
+      continue
+    }
+    if (!hasSha512Integrity(pkg.integrity)) {
+      missingIntegrity.push(`${npmLockFile}: ${pkg.name} ${pkg.version ?? ''} does not carry a sha512 integrity hash`)
+    }
   }
-  return true
+
+  for (const name of npm.overrides) {
+    unadmitted.push(`package.json: overrides.${name} is not admitted by this gate; remove the override`)
+  }
+
+  for (const dep of npm.direct) {
+    const declaredTarget = aliasTarget(dep.spec)
+    if (declaredTarget !== null && declaredTarget !== dep.realName) {
+      foreignSources.push(`package.json: ${dep.name} is declared as ${dep.spec} but ${npmLockFile} installs ${dep.realName}`)
+      continue
+    }
+    if (declaredTarget === null && dep.realName !== dep.name) {
+      foreignSources.push(`${npmLockFile}: ${dep.name} installs ${dep.realName} without an npm: alias declaration in package.json`)
+      continue
+    }
+    const entry = admitted.get('npm').get(dep.realName)
+    if (!entry) {
+      unadmitted.push(`package.json: ${dep.name} resolves to ${dep.realName}, which is not recorded in ${admissionFile}`)
+      continue
+    }
+    if (!dep.version) {
+      unadmitted.push(`${npmLockFile}: ${dep.name} is declared but has no locked version`)
+      continue
+    }
+    if (!matchesVersion(dep.version, entry.version)) {
+      mismatched.push(`${dep.name} resolves to ${dep.realName} ${dep.version}, which does not match the admitted version ${entry.version}`)
+    }
+  }
+
+  for (const entry of entries) {
+    let used = false
+    if (entry.source === 'npm') used = npm.direct.some((dep) => dep.realName === entry.name)
+    else if (entry.source === 'path') used = cargoPackages.some((pkg) => !pkg.source && pkg.name === entry.name)
+    else used = directCargo.some((dep) => dep.name === entry.name && dep.source && cratesIoSources.has(dep.source))
+    if (!used) stale.push(`${entry.name} is admitted for ${entry.source} but nothing in the lockfiles uses it`)
+  }
+
+  return { foreignSources, missingChecksums, missingIntegrity, unadmitted, mismatched, stale }
 }
 
-export function checkWorkspace({ manifestRoot = repoRoot, files = manifests, admissionPath = admissionFile } = {}) {
-  const manifests = new Map(files.map((file) => [file, readFileSync(join(manifestRoot, file), 'utf8')]))
-  const admission = JSON.parse(readFileSync(join(manifestRoot, admissionPath), 'utf8'))
-  return checkAdmission(manifests, admission)
+export function readCargoMetadata(manifestRoot) {
+  try {
+    const output = execFileSync(
+      'cargo',
+      ['metadata', '--locked', '--manifest-path', cargoManifest, '--format-version', '1'],
+      { cwd: manifestRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 },
+    )
+    return JSON.parse(output)
+  } catch (error) {
+    const detail = typeof error?.stderr === 'string' && error.stderr.trim() ? error.stderr.trim() : error.message
+    if (typeof error?.status === 'number') {
+      throw new Error(`${cargoLockFile} does not resolve: cargo metadata --locked failed\n${detail}`, { cause: error })
+    }
+    throw new Error(`cargo metadata --locked could not run: ${detail}`, { cause: error })
+  }
+}
+
+export function checkWorkspace({ manifestRoot = repoRoot, metadata = null } = {}) {
+  const admission = JSON.parse(readFileSync(join(manifestRoot, admissionFile), 'utf8'))
+  const cargoLock = readFileSync(join(manifestRoot, cargoLockFile), 'utf8')
+  const npmLock = readFileSync(join(manifestRoot, npmLockFile), 'utf8')
+  return checkAdmission({
+    cargoLock,
+    npmLock,
+    metadata: metadata ?? readCargoMetadata(manifestRoot),
+    admission,
+  })
 }
 
 function main() {
-  const result = checkWorkspace()
-  const problems = [...result.unadmitted, ...result.mismatched, ...result.stale.map((name) => `${name} is admitted but no manifest uses it`)]
-  if (problems.length > 0) {
-    process.stderr.write(`Dependency admission failed:\n${problems.map((line) => `  ${line}`).join('\n')}\n`)
-    process.stderr.write('Record every direct dependency in src-tauri/dependency-admission.json with a reason, and remove stale admissions. New production dependencies need owner approval first.\n')
+  try {
+    const result = checkWorkspace()
+    const problems = [
+      ...result.foreignSources,
+      ...result.missingChecksums,
+      ...result.missingIntegrity,
+      ...result.unadmitted,
+      ...result.mismatched,
+      ...result.stale,
+    ]
+    if (problems.length > 0) {
+      process.stderr.write(`Dependency admission failed:\n${problems.map((line) => `  ${line}`).join('\n')}\n`)
+      process.stderr.write('Every locked package must come from crates.io or registry.npmjs.org, carry a checksum or integrity hash, and every direct dependency must be recorded in src-tauri/dependency-admission.json with a reason. New dependencies need review before they are added.\n')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write('Dependency admission: every locked package is from an allowed registry, and every direct dependency is recorded.\n')
+  } catch (error) {
+    process.stderr.write(`Dependency admission failed:\n  ${error.message}\n`)
     process.exitCode = 1
-    return
   }
-  process.stdout.write('Dependency admission: every direct dependency is recorded.\n')
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -4,8 +4,7 @@
   import SetupProgress from './SetupProgress.svelte'
   import type { VaultStatus } from '../types'
   import { platformCapabilities } from '../platform'
-
-  const PIN_LENGTH = 6
+  import { MAX_PIN_DIGITS, MIN_PIN_DIGITS, pinDigits as keepPinDigits } from '../pin-rules'
 
   export let status: VaultStatus
   export let recoveryUnlockOpen = false
@@ -20,14 +19,14 @@
   export let onSubmitMasterPassword: () => void
 
   let pinField: HTMLInputElement
-  let pinSubmitted = false
   let masterPasswordInput: HTMLInputElement
 
-  $: pinDigits = Array.from({ length: PIN_LENGTH }, (_, index) => unlockPin[index] ?? '')
+  $: pinDots = Array.from({ length: Math.max(MIN_PIN_DIGITS, unlockPin.length) }, (_, index) => index < unlockPin.length)
+  $: pinReady = unlockPin.length >= MIN_PIN_DIGITS
 
   function onPinInput(event: Event) {
     const field = event.currentTarget as HTMLInputElement
-    const digits = field.value.replace(/\D/g, '').slice(0, PIN_LENGTH)
+    const digits = keepPinDigits(field.value)
     if (field.value !== digits) field.value = digits
     unlockPin = digits
     errorMessage = ''
@@ -59,10 +58,9 @@
 
   $: showPin = status.exists && status.pinUnlockAvailable && $platformCapabilities.pinUnlock && !recoveryUnlockOpen
   $: showHello = status.exists && status.helloUnlockAvailable && $platformCapabilities.biometricUnlock && !recoveryUnlockOpen
-  $: if (unlockPin.length < PIN_LENGTH) pinSubmitted = false
-  $: if (showPin && unlockPin.length === PIN_LENGTH && !isWorking && !pinSubmitted) {
-    pinSubmitted = true
-    onUnlockWithPin()
+
+  function submitPin() {
+    if (pinReady && !isWorking) onUnlockWithPin()
   }
 
   onMount(async () => {
@@ -86,8 +84,8 @@
     {/if}
 
     {#if showPin}
-      <form novalidate on:submit|preventDefault={onUnlockWithPin}>
-        <div class="pin-field">
+      <form novalidate on:submit|preventDefault={submitPin}>
+        <div class="pin-field" class:rejected={Boolean(errorMessage)}>
           <input
             bind:this={pinField}
             class="pin-entry"
@@ -96,22 +94,21 @@
             inputmode="numeric"
             autocomplete="off"
             spellcheck="false"
-            maxlength={PIN_LENGTH}
+            maxlength={MAX_PIN_DIGITS}
             disabled={isWorking}
-            aria-label="Six-digit PIN"
+            aria-label={`PIN, ${MIN_PIN_DIGITS} to ${MAX_PIN_DIGITS} digits`}
             aria-invalid={Boolean(errorMessage)}
             aria-describedby={errorMessage ? 'unlock-error' : undefined}
             on:input={onPinInput}
           />
-          {#each pinDigits as digit, index (index)}
-            <span class="pin-cell" class:filled={digit !== ''} class:next={index === unlockPin.length} aria-hidden="true"></span>
-          {/each}
+          <span class="pin-dots" aria-hidden="true">
+            {#each pinDots as filled, index (index)}<span class="pin-dot" class:filled></span>{/each}
+          </span>
         </div>
         {#if errorMessage}
           <p id="unlock-error" class="form-error" role="alert">{errorMessage}</p>
-        {:else if isWorking}
-          <p class="pin-status" role="status">Unlocking…</p>
         {/if}
+        <button class="primary-button full pin-submit" type="submit" disabled={isWorking || !pinReady}>{isWorking ? 'Unlocking…' : 'Unlock vault'}</button>
       </form>
       <button type="button" class="text-button unlock-alternative" on:click={openRecovery}>Use master password or recovery kit</button>
     {:else}

@@ -16,7 +16,7 @@ mod vault;
 pub(crate) use adapters::network::website_icons;
 pub(crate) use adapters::platform::{
     app_identity, browser_host, browser_pipe, capabilities, clipboard, crash_protection,
-    desktop_shell, dll_search, session_guard,
+    desktop_settings, desktop_shell, dll_search, session_guard,
 };
 
 #[allow(unused_imports)]
@@ -39,6 +39,10 @@ macro_rules! sesame_invoke_handler {
             commands::complete_recovery_setup,
             commands::unlock_vault,
             commands::change_master_password,
+            commands::get_recovery_replacement_status,
+            commands::request_recovery_replacement,
+            commands::cancel_recovery_replacement,
+            commands::complete_recovery_replacement,
             commands::unlock_recovery_vault,
             commands::set_unlock_pin,
             commands::remove_unlock_pin,
@@ -51,6 +55,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_quick_access_status,
             commands::search_quick_access_items,
             commands::get_quick_access_field,
+            commands::confirm_quick_access_field,
             commands::open_quick_access_item,
             commands::get_login_card,
             commands::search_items,
@@ -107,14 +112,19 @@ macro_rules! sesame_invoke_handler {
             commands::restore_history_version,
             commands::merge_duplicate_logins,
             commands::get_merge_comparison,
+            commands::choose_import_file,
             commands::preview_import,
             commands::commit_import,
             commands::cancel_import,
             commands::create_backup,
+            commands::choose_backup_export_destination,
             commands::export_backup,
+            commands::choose_csv_export_destination,
             commands::export_vault_csv,
+            commands::choose_recovery_kit_destination,
             commands::export_recovery_kit,
             commands::delete_local_vault,
+            commands::choose_backup_for_restore,
             commands::inspect_backup,
             commands::verify_backup,
             commands::restore_backup,
@@ -129,6 +139,7 @@ macro_rules! sesame_invoke_handler {
             commands::download_and_install_desktop_update,
             commands::record_diagnostic,
             commands::get_diagnostic_status,
+            commands::choose_diagnostics_destination,
             commands::export_diagnostics,
             commands::clear_diagnostics,
             adapters::platform::external_url::open_external_url,
@@ -151,6 +162,8 @@ macro_rules! sesame_invoke_handler {
             desktop_shell::set_quick_access_shortcut,
             desktop_shell::get_autostart_enabled,
             desktop_shell::set_autostart_enabled,
+            desktop_settings::get_website_icons_enabled,
+            desktop_settings::set_website_icons_enabled,
             website_icons::get_website_icon,
             website_icons::clear_website_icon_cache,
             website_icons::get_website_icon_cache_status,
@@ -199,6 +212,7 @@ macro_rules! sesame_wdio_handler {
     () => {
         sesame_invoke_handler![
             desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
             commands::sync::sync_status,
             commands::sync::sync_enroll_device,
             commands::sync::sync_this_device_fingerprint,
@@ -225,7 +239,10 @@ macro_rules! sesame_wdio_handler {
 #[cfg(all(feature = "wdio", not(feature = "sync-preview")))]
 macro_rules! sesame_wdio_handler {
     () => {
-        sesame_invoke_handler![desktop_e2e::desktop_e2e_config]
+        sesame_invoke_handler![
+            desktop_e2e::desktop_e2e_config,
+            commands::wdio_issue_file_choice,
+        ]
     };
 }
 
@@ -277,6 +294,8 @@ pub fn run() {
         )
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
+        .manage(commands::QuickAccessConfirmations::default())
+        .manage(commands::FileSelectionState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
         .manage(desktop_shell::DesktopShellState::default())

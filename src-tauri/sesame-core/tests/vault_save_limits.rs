@@ -88,12 +88,10 @@ fn oversized_attachment_changes_preserve_both_files_and_session_then_allow_a_sma
     let mut changed = original.clone();
     drop(original);
     for document_index in 0..2 {
-        let mut document = DocumentMetadata {
-            id: format!("fictional-document-{document_index}"),
-            title: "Fictional document".into(),
-            revision: 1,
-            ..DocumentMetadata::default()
-        };
+        let mut document = DocumentMetadata::default();
+        document.id = format!("fictional-document-{document_index}");
+        document.title = "Fictional document".into();
+        document.revision = 1;
         for index in 0..4 {
             let size = 5 * 1024 * 1024;
             document.attachments.push(Attachment {
