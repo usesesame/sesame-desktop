@@ -163,5 +163,5 @@ const server = http.createServer(async (request, response) => {
 })
 
 server.listen(config.port, config.host, () => {
-  console.log(`REL-003 updater lab listening on http://${config.host}:${config.port} in ${mode} mode.`)
+  console.log(`Updater lab listening on http://${config.host}:${config.port} in ${mode} mode.`)
 })
