@@ -93,7 +93,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
-minisign-verify = "0.2.5"
+minisign-verify = "0.3.0"
 totp-rs = { version = "6", features = ["otpauth", "zeroize"] }
 url = "2.5"
 zeroize = { version = "1.8", features = ["derive"] }
