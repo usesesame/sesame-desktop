@@ -491,6 +491,7 @@ pub fn change_master_password(
         state.cache_pin_unlock(false);
         state.cache_hello_unlock(false);
         discard_pin_throttle_state(&app, &state);
+        crate::commands::discard_recovery_replacement(&app);
         state.advance_session_epoch();
         Ok(ChangeMasterPasswordResult {
             recovery_kit: rotation.recovery_kit,

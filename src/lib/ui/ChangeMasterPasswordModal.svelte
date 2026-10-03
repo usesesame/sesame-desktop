@@ -16,6 +16,7 @@
   export let onVerify: () => void
   export let onUseRecoveryKit: () => void
   export let onBack: () => void
+  export let onRequestNewKit: () => void = () => {}
   export let onSave: () => void
   export let onDone: () => void
 
@@ -72,6 +73,7 @@
     <p id="change-master-password-description">{usingRecoveryOnly ? 'Enter your recovery kit and choose a new master password.' : 'Step 2 of 2. Enter your recovery kit and choose a new master password.'} This creates a new encryption key and recovery kit, and turns off PIN and Windows Hello unlock until you enable them again.</p>
     <form on:submit|preventDefault={onSave}>
       <label>Recovery kit<input name="current-recovery-kit" type="password" bind:value={currentRecoveryKit} autocomplete="off" spellcheck="false" autocapitalize="characters" /></label>
+      <button type="button" class="text-button change-password-forgot" disabled={working} on:click={onRequestNewKit}>No recovery kit? Request a new one</button>
       <label>New master password<input name="new-master-password" type="password" bind:value={newPassword} autocomplete="new-password" /></label>
       <label>Confirm new password<input name="confirm-new-master-password" type="password" bind:value={confirmPassword} autocomplete="new-password" /></label>
       {#if confirmPassword && !passwordsMatch}<p class="form-error" role="alert">Those new passwords do not match.</p>{:else if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}

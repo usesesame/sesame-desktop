@@ -88,6 +88,7 @@ pub fn strip_unusable_device_material(file: &mut VaultFile) {
 }
 
 pub const RECOVERY_HEALTH_FILE: &str = "recovery-health.sesame";
+pub const RECOVERY_REPLACEMENT_FILE: &str = "recovery-replacement.sesame";
 
 pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
     let parent = vault.parent().unwrap_or_else(|| Path::new(""));
@@ -97,6 +98,7 @@ pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
         vault.with_extension("sesame.tmp"),
         parent.join(crate::storage::PIN_THROTTLE_FILE),
         parent.join(RECOVERY_HEALTH_FILE),
+        parent.join(RECOVERY_REPLACEMENT_FILE),
         parent.join("backups"),
     ];
     if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {

@@ -2,7 +2,7 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
-  type PresenceIntent = 'reveal' | 'copy' | 'enable-icons'
+  type PresenceIntent = 'reveal' | 'copy' | 'enable-icons' | 'request-kit' | 'issue-kit'
 
   export let presenceSecret = ''
   export let intent: PresenceIntent = 'reveal'
@@ -25,6 +25,16 @@
       heading: 'Turn on website icons',
       description: 'Sesame asks for your master password before it turns on website icon downloads for this device.',
       action: 'Turn on',
+    },
+    'request-kit': {
+      heading: 'Request a new recovery kit',
+      description: 'Enter your master password. The new kit is ready in 72 hours, and Sesame shows a warning on every unlock until then so a request you did not make can be cancelled.',
+      action: 'Request kit',
+    },
+    'issue-kit': {
+      heading: 'Get your new recovery kit',
+      description: 'Enter your master password. The new kit replaces your current one, and the old kit stops opening this vault.',
+      action: 'Get kit',
     },
   }
 

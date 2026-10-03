@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
 
 use crate::vault::crypto::unwrap_with_password;
 use crate::vault::{bytes_match, UnlockedVault, VaultResult, WRAP_AAD};

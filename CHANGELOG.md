@@ -19,6 +19,10 @@ release cannot be published without saying what changed in it.
   the recovery kit with the new password. Someone who learned the password
   alone cannot replace the recovery kit. A forgotten password can be reset with
   the recovery kit.
+- Someone who knows the master password but lost the recovery kit, for
+  example after restoring a backup, can request a new kit. It is ready 72
+  hours later, and a warning shows on every unlock until then so a request
+  they did not make can be cancelled.
 - The vault locks on wake when the computer slept longer than the auto-lock
   delay, even without a screen locker.
 - On Linux the device key is created only when you set a PIN, link an

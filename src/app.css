@@ -1025,6 +1025,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-view article .setting-copy { flex: 1; min-width: 0; }
 .setting-copy { min-width: 0; }
 .settings-manage { min-height: 34px; padding: 0 var(--space-4); }
+.setting-copy p.recovery-request-warning { color: var(--warn-text); }
 .diagnostic-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 /* Rows that reveal a panel below themselves: the panel is a full-width flex line
    of its own, so the copy column keeps its width instead of being crushed. */

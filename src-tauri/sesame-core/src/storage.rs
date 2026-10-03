@@ -281,6 +281,73 @@ pub fn complete_recovery_setup_for_session(
     Ok(())
 }
 
+pub const RECOVERY_REPLACEMENT_DELAY_SECS: u64 = 72 * 60 * 60;
+const RECOVERY_REPLACEMENT_AAD: &[u8] = b"sesame:recovery-replacement:v1:";
+
+fn recovery_replacement_aad(session: &UnlockedVault) -> VaultResult<Vec<u8>> {
+    let vault_id = session
+        .snapshot()
+        .vault_id
+        .ok_or("This vault has no identifier, so a new recovery kit cannot be requested.")?;
+    Ok([RECOVERY_REPLACEMENT_AAD, vault_id.as_bytes()].concat())
+}
+
+pub fn seal_recovery_replacement_request(
+    session: &UnlockedVault,
+    requested_at: u64,
+) -> VaultResult<CipherBlob> {
+    let aad = recovery_replacement_aad(session)?;
+    session.expose_vault_key(|key| encrypt_bytes(key, &requested_at.to_be_bytes(), &aad))
+}
+
+pub fn open_recovery_replacement_request(
+    session: &UnlockedVault,
+    sealed: &CipherBlob,
+) -> VaultResult<u64> {
+    let aad = recovery_replacement_aad(session)?;
+    let opened = session
+        .expose_vault_key(|key| decrypt_bytes(key, sealed, &aad))
+        .map_err(|_| "The recovery kit request does not belong to this vault.".to_string())?;
+    let bytes: [u8; 8] = opened
+        .as_slice()
+        .try_into()
+        .map_err(|_| "The recovery kit request is not valid.".to_string())?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+pub fn recovery_replacement_ready(requested_at: u64, now: u64) -> bool {
+    now >= requested_at && now - requested_at >= RECOVERY_REPLACEMENT_DELAY_SECS
+}
+
+pub fn replace_recovery_kit_for_session(
+    session: &mut UnlockedVault,
+    requested_at: u64,
+    now: u64,
+) -> VaultResult<String> {
+    if !session.setup_complete {
+        return Err("Finish recovery setup before replacing the recovery kit.".into());
+    }
+    if !recovery_replacement_ready(requested_at, now) {
+        return Err("The new recovery kit is not ready yet.".into());
+    }
+
+    let recovery_kit = Zeroizing::new(generate_recovery_kit());
+    let recovery_kit_for_display = recovery_kit.to_string();
+    let recovery_kdf = default_kdf_params();
+    let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
+    let recovery_wrap = session
+        .expose_vault_key(|key| encrypt_bytes(&recovery_wrapping_key, key, RECOVERY_WRAP_AAD))?;
+
+    let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
+    let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
+    if let Err(error) = persist_session_without_previous(session) {
+        session.recovery_kdf = previous_kdf;
+        session.recovery_wrap = previous_wrap;
+        return Err(error);
+    }
+    Ok(recovery_kit_for_display)
+}
+
 pub struct MasterPasswordRotation {
     pub recovery_kit: String,
     pub backups_remaining: Option<usize>,
@@ -1342,6 +1409,76 @@ mod tests {
             "fictional new password",
         )
         .expect("rotated with the password");
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn a_recovery_kit_request_opens_only_for_its_own_vault() {
+        let (session, _) = unlocked_with_kit_at(
+            test_path("replacement-seal").join("vault.sesame"),
+            "fictional master password",
+        );
+        let (other, _) = unlocked_with_kit_at(
+            test_path("replacement-other").join("vault.sesame"),
+            "fictional other password",
+        );
+        let sealed =
+            seal_recovery_replacement_request(&session, 1_700_000_000).expect("sealed request");
+
+        assert_eq!(
+            open_recovery_replacement_request(&session, &sealed),
+            Ok(1_700_000_000)
+        );
+        assert!(open_recovery_replacement_request(&other, &sealed).is_err());
+        let mut tampered = sealed.clone();
+        tampered.ciphertext = seal_recovery_replacement_request(&session, 1)
+            .expect("second request")
+            .ciphertext;
+        assert!(open_recovery_replacement_request(&session, &tampered).is_err());
+    }
+
+    #[test]
+    fn a_recovery_kit_request_waits_the_full_delay() {
+        let requested_at = 1_700_000_000;
+        assert!(!recovery_replacement_ready(requested_at, requested_at));
+        assert!(!recovery_replacement_ready(
+            requested_at,
+            requested_at + RECOVERY_REPLACEMENT_DELAY_SECS - 1
+        ));
+        assert!(recovery_replacement_ready(
+            requested_at,
+            requested_at + RECOVERY_REPLACEMENT_DELAY_SECS
+        ));
+        assert!(!recovery_replacement_ready(requested_at, requested_at - 1));
+    }
+
+    #[test]
+    fn replacing_the_recovery_kit_keeps_the_password_and_drops_the_old_kit() {
+        let directory = test_path("replacement-complete");
+        let path = directory.join("vault.sesame");
+        let password = "fictional master password";
+        let (mut session, old_kit) = unlocked_with_kit_at(path.clone(), password);
+        persist_session(&mut session).expect("initial persisted session");
+        let before = fs::read(&path).expect("vault bytes");
+        let requested_at = 1_700_000_000;
+        let ready_at = requested_at + RECOVERY_REPLACEMENT_DELAY_SECS;
+
+        assert!(
+            replace_recovery_kit_for_session(&mut session, requested_at, ready_at - 1).is_err()
+        );
+        assert!(
+            replace_recovery_kit_for_session(&mut session, requested_at, requested_at - 1).is_err()
+        );
+        assert_eq!(fs::read(&path).expect("vault bytes"), before);
+
+        let new_kit = replace_recovery_kit_for_session(&mut session, requested_at, ready_at)
+            .expect("replaced kit");
+        let file: VaultFile =
+            serde_json::from_slice(&fs::read(&path).expect("vault bytes")).expect("vault file");
+        assert!(open_vault_with_password(&file, password).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &new_kit).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &old_kit).is_err());
+        assert!(!path.with_extension("sesame.prev").exists());
         fs::remove_dir_all(directory).expect("removed test directory");
     }
 }

@@ -126,3 +126,7 @@ Stated plainly so a report does not spend effort on a known position:
   Sesame does not yet detect that rollback.
 - A master password or recovery kit that someone else learns opens any copy
   of your vault file. Keep the recovery kit offline.
+- A new recovery kit can be issued with the master password after a 72-hour
+  wait. Someone who knows the password and keeps access to the computer for
+  that long, or changes its clock, can complete it. The warning on every unlock
+  is the check against that.

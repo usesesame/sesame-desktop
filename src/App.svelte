@@ -401,6 +401,12 @@
   onRestored = unlockController.markRestored
   onNativeVaultLocked = () => unlockController.applyLockedUi('Vault locked.')
 
+  let recoveryStatusLoadedForUnlock = false
+  $: if ($vault.status.unlocked !== recoveryStatusLoadedForUnlock) {
+    recoveryStatusLoadedForUnlock = $vault.status.unlocked
+    if (recoveryStatusLoadedForUnlock) void settingsController.loadRecoveryReplacement()
+  }
+
   $: if ($vault.status.unlocked && $settingsState.preferenceLoaded) {
     onboardingController.startIfNeeded($settingsState.betaOnboardingDismissed, $vault.status.onboardingRequired ?? false)
   }
@@ -517,7 +523,7 @@
   <meta name="description" content="Local-first password and recovery vault." />
 </svelte:head>
 
-<AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} />
+<AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} recoveryRequestPending={$vault.status.unlocked && $settingsState.recoveryReplacement?.requestedAt !== undefined} onReviewRecoveryRequest={() => { settingsController.openRecoveryKitSettings(); navigate('settings') }} />
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
   <main class="loading-screen state-panel" aria-live="polite">
@@ -720,6 +726,19 @@
         helloWorking={$settingsState.helloWorking}
         onToggleHello={settingsController.toggleHelloUnlock}
         onChangeMasterPassword={settingsController.openChangeMasterPassword}
+        bind:tab={$settingsState.settingsTab}
+        recoveryReplacement={$settingsState.recoveryReplacement}
+        recoveryWorking={$settingsState.recoveryWorking}
+        recoveryPresenceIntent={$settingsState.recoveryPresenceIntent}
+        bind:recoveryPresencePassword={$settingsState.recoveryPresencePassword}
+        issuedRecoveryKit={$settingsState.issuedRecoveryKit}
+        bind:issuedRecoveryConfirmed={$settingsState.issuedRecoveryConfirmed}
+        onRequestRecoveryKit={settingsController.startRecoveryKitRequest}
+        onIssueRecoveryKit={settingsController.startRecoveryKitIssue}
+        onCancelRecoveryRequest={() => void settingsController.cancelRecoveryKitRequest()}
+        onConfirmRecoveryPresence={() => void settingsController.confirmRecoveryPresence()}
+        onCancelRecoveryPresence={settingsController.cancelRecoveryPresence}
+        onFinishIssuedRecoveryKit={settingsController.finishIssuedRecoveryKit}
         keepInTray={$settings.keepInTray}
         trayWorking={$settingsState.trayWorking}
         onToggleTray={settingsController.toggleTray}
@@ -832,6 +851,7 @@
         onVerify={() => void settingsController.verifyCurrentMasterPassword()}
         onUseRecoveryKit={settingsController.useRecoveryKitForMasterPasswordChange}
         onBack={settingsController.backToMasterPasswordCheck}
+        onRequestNewKit={() => { settingsController.requestNewRecoveryKitFromChange(); navigate('settings') }}
         onSave={() => void settingsController.saveChangedMasterPassword()}
         onDone={settingsController.finishMasterPasswordChange}
       />
