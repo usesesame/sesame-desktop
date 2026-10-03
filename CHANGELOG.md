@@ -15,6 +15,10 @@ release cannot be published without saying what changed in it.
   checks. Passwords are compared in Unicode normalized form, so an accented
   letter typed as one character or as a letter and an accent unlocks the same
   vault, and existing vaults open unchanged.
+- Changing the master password takes two steps: the current password, then
+  the recovery kit with the new password. Someone who learned the password
+  alone cannot replace the recovery kit. A forgotten password can be reset with
+  the recovery kit.
 - The vault locks on wake when the computer slept longer than the auto-lock
   delay, even without a screen locker.
 - On Linux the device key is created only when you set a PIN, link an
