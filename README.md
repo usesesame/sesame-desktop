@@ -77,23 +77,12 @@ npm run desktop:linux:dev
 ```
 
 `npm run release:bundle:windows:unsigned` builds the NSIS installer.
-`npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage.
-Release tooling records Windows NSIS or the complete Linux AppImage, DEB, and
-RPM group as one digest-bound artifact set. Linux packages explicitly record
-that automatic updates are unavailable.
-Linux packaging also requires `patchelf`, `dpkg-deb`, and `rpmbuild`. On Arch,
-install them with `sudo pacman -S --needed patchelf dpkg rpm-tools`. The Linux
-bundle command checks these tools before building.
+`npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage, and
+also needs `patchelf`, `dpkg-deb`, and `rpmbuild`.
 
-Run checks for the area you changed. While you work, `npm run desktop:test`
-runs the interface unit tests, the vault core tests, and the contract checks
-in one command. The usual full local check is:
-
-```powershell
-npm.cmd run desktop:ci
-```
-
-The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
+`npm run desktop:test` runs the unit, vault core, and contract tests.
+`npm run desktop:ci` is the full local check. The contributor workflow is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Platforms
 
@@ -111,37 +100,20 @@ The contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md).
 | Account linking | Yes | Secret Service wallet, validation pending |
 | Signed desktop updates | Yes | No |
 
-Linux reads screen-lock status from systemd-logind and falls back to the
-desktop screensaver interface. It reads idle time from GNOME or KDE. The
-automatic-lock delay is hidden when neither desktop provides an idle monitor.
+On Linux:
 
-Wayland has no global-hotkey protocol. Sesame registers the quick-access
-shortcut only in X11 sessions and hides the setting elsewhere. Use the tray
-icon, or start Sesame with `GDK_BACKEND=x11`.
+- Idle time comes from GNOME or KDE. The automatic-lock delay is hidden on
+  other desktops.
+- Wayland has no global-hotkey protocol. Use the tray icon, or start Sesame
+  with `GDK_BACKEND=x11`.
+- PIN unlock and account linking need a Secret Service wallet. Sesame starts
+  `gnome-keyring-daemon` or `ksecretd` when none is running. On Arch, install
+  `gnome-keyring` or `kwallet` if the desktop has neither.
+- The AppImage cannot register the browser connection. Use the deb or rpm.
 
-Linux keeps Sesame's random device-protection key in the desktop Secret Service
-wallet. PIN peppers, the linked-account token, and local attempt-throttle state
-are authenticated and encrypted with that key. Windows uses DPAPI for the same
-boundary. The wallet and DPAPI protect this data at rest against other users.
-They do not isolate Sesame from other processes running as the same user, so
-the PIN is a convenience unlock and does not add offline protection against an
-attacker who can also open the device key. Windows Hello and auto-type remain
-unavailable on Linux.
-
-PIN unlock requires a Secret Service wallet provider. When no wallet is
-running, Sesame starts `gnome-keyring-daemon` or `ksecretd` itself, so GNOME,
-KDE, and minimal desktops such as Hyprland need no manual start-up. On Arch,
-install either `kwallet` or `gnome-keyring` if the desktop does not already
-provide one.
-
-The browser connection uses a socket in the per-user runtime directory rather
-than a named pipe. Both ends check the peer's user id and executable path
-before any vault data moves, and the peer's process start time is recorded so a
-reused process id cannot inherit an approved connection.
-
-Browser registration requires a stable native-host path, so it is disabled in
-the AppImage build. The DEB and RPM paths are built but remain beta until the
-extension's clean-profile verification passes on Linux.
+The wallet on Linux and DPAPI on Windows protect the PIN data from other
+users. They do not protect it from other programs running as you, so the PIN
+is a convenience unlock. See [.github/SECURITY.md](.github/SECURITY.md#known-limits).
 
 ## Licence and trademarks
 
@@ -150,11 +122,9 @@ Sesame is licensed under the
 desktop app and native-messaging host in this repository. The related Sesame
 repositories publish their own licence files.
 
-The source licence does not grant rights to present a modified build or hosted
-service as an official Sesame product. The separate [trademark policy](TRADEMARKS.md)
-allows truthful compatibility and attribution references, while requiring
-modified distributions to use their own product name, artwork, identifiers,
-and publisher identity.
+The licence does not let a modified build or hosted service present itself as
+official Sesame. The [trademark policy](TRADEMARKS.md) sets what modified
+distributions must rename.
 
 ## Security
 
