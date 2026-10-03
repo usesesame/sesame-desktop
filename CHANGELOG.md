@@ -23,9 +23,9 @@ release cannot be published without saying what changed in it.
 
 ### Security checkup
 
-- The checkup adds breached password, card expiry, and two-factor and
-  passkey findings. Breach checks run in the app and send only the first five
-  characters of a password hash.
+- The checkup finds breached passwords and expiring cards, and lists the
+  sites that offer two-factor or passkey sign-in. Breach checks run in the app
+  and send only the first five characters of a password hash.
 - Each login listed under a finding opens that login, and Change on site
   opens the saved website so the browser extension can fill the change form.
 
@@ -41,9 +41,10 @@ release cannot be published without saying what changed in it.
 
 ### Browser integration
 
-- Every fill asks for approval. The 15-minute remembered approval is gone.
-- The extension can explain why a login matches the page, fill one-time
-  codes after a fresh approval, and warn before filling a lookalike website.
+- Every fill of a matched login asks for approval. The 15-minute remembered
+  approval is gone.
+- The extension can explain why a login matches the page and fill one-time
+  codes after a fresh approval. A fill on a lookalike website is refused.
 - Requests from old extension protocol versions are refused, and the
   extension no longer learns whether the vault is locked before you approve.
   Update the extension together with the desktop app.
@@ -67,13 +68,14 @@ release cannot be published without saying what changed in it.
 
 - When a vault exists, restoring a backup needs it unlocked and your master
   password, and a backup from a different vault is refused.
-- Changing the master password removes local backups that still open with
-  the old password.
+- Changing the master password tries to remove the local backups in the vault
+  folder and says when any remain.
 - Readable exports keep secret values exactly as saved, warn about values a
   spreadsheet could run as formulas, and are written as private files.
 - Imports are bounded while they are read, so a hostile file cannot exhaust
   memory.
-- On Linux the vault folder is flushed to disk after each save.
+- On Linux Sesame also asks the system to flush the vault folder after each
+  save.
 - Export, restore, and open no longer lose data silently. Partial and
   attachment-losing exports name what was left out, SSH-only Bitwarden
   exports are accepted, document history no longer stores attachment bytes,
@@ -83,8 +85,9 @@ release cannot be published without saying what changed in it.
 
 ### Security
 
-- Revealed passwords are not cached in the window, the clipboard timer runs in
-  the app's native code, and the clipboard clears when the vault locks.
+- Revealed passwords are not cached in the window, and the clipboard timer runs
+  in the app's native code. When the vault locks, Sesame clears a secret it
+  copied if the clipboard still holds it.
 - Saved items of every kind are wiped from memory when they are dropped.
 - Import, export, backup and diagnostics files are chosen through the system
   dialog in the app, so the window cannot name a file path.
@@ -92,8 +95,8 @@ release cannot be published without saying what changed in it.
   before any work starts.
 - Website icons are fetched only after you turn them on, and the breach check
   follows the system proxy.
-- Update manifests must be signed, the updater cannot be reached from the
-  window, and release builds no longer hold the signing keys.
+- Update manifests must be signed, the window can no longer use the updater
+  plugin directly, and release builds no longer hold the signing keys.
 - The vault writer bounds the plaintext at the storage limit before it
   serializes, and decrypted payload, key-wrapper, and sealed-record buffers
   are wiped when dropped.
