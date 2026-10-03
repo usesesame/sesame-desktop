@@ -354,7 +354,6 @@ pub fn unprotect_for_device(data: &[u8]) -> VaultResult<Vec<u8>> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn linux_device_protection_round_trips_and_authenticates() -> VaultResult<()> {
@@ -407,14 +406,16 @@ mod tests {
     fn probe_wallets(name: &str, daemons: &[&str]) -> VaultResult<PathBuf> {
         let directory =
             std::env::temp_dir().join(format!("sesame-wallets-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
         fs::create_dir_all(&directory)
             .map_err(|_| "could not create the probe directory".to_string())?;
+        let true_binary = ["/usr/bin/true", "/bin/true"]
+            .into_iter()
+            .find(|path| Path::new(path).is_file())
+            .ok_or("could not find the true binary")?;
         for daemon in daemons {
-            let binary = directory.join(daemon);
-            fs::write(&binary, b"#!/bin/sh\nexit 0\n")
-                .map_err(|_| "could not write the probe binary".to_string())?;
-            fs::set_permissions(&binary, PermissionsExt::from_mode(0o755))
-                .map_err(|_| "could not make the probe binary executable".to_string())?;
+            std::os::unix::fs::symlink(true_binary, directory.join(daemon))
+                .map_err(|_| "could not link the probe binary".to_string())?;
         }
         Ok(directory)
     }
