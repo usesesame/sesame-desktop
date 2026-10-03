@@ -818,7 +818,9 @@
       />
     {:else if active?.kind === 'change-master-password'}
       <ChangeMasterPasswordModal
+        step={$settingsState.changeMasterPasswordStep}
         bind:currentPassword={$settingsState.currentMasterPassword}
+        bind:currentRecoveryKit={$settingsState.currentRecoveryKit}
         bind:newPassword={$settingsState.newMasterPassword}
         bind:confirmPassword={$settingsState.confirmNewMasterPassword}
         bind:recoveryKit={$settingsState.newRecoveryKit}
@@ -827,6 +829,9 @@
         errorMessage={$feedbackState.errorMessage}
         working={$settingsState.changingMasterPassword}
         onCancel={settingsController.cancelChangeMasterPassword}
+        onVerify={() => void settingsController.verifyCurrentMasterPassword()}
+        onUseRecoveryKit={settingsController.useRecoveryKitForMasterPasswordChange}
+        onBack={settingsController.backToMasterPasswordCheck}
         onSave={() => void settingsController.saveChangedMasterPassword()}
         onDone={settingsController.finishMasterPasswordChange}
       />
