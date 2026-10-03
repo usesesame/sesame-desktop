@@ -285,7 +285,7 @@
     {
       "name": "unicode-normalization",
       "version": "0.1",
-      "reason": "NFC normalization of master passwords per RFC 8265, so the same password typed in another Unicode form still unlocks. Already in the shipped build through unicode-security. Owner approved 2026-10-02."
+      "reason": "NFC normalization of master passwords per RFC 8265, so the same password typed in another Unicode form still unlocks. Already in the shipped build through unicode-security."
     },
     {
       "name": "url",
