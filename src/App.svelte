@@ -729,6 +729,12 @@
         onUpdateQuickAccessShortcut={settingsController.updateQuickAccessShortcut}
         onSetTheme={settingsController.setTheme}
         onSetSiteIconsEnabled={settingsController.setSiteIconsEnabled}
+        siteIconsWorking={$settingsState.siteIconsWorking}
+        siteIconsPresenceRequired={$settingsState.siteIconsPresenceRequired}
+        bind:siteIconsPresencePassword={$settingsState.siteIconsPresencePassword}
+        errorMessage={$feedbackState.errorMessage}
+        onConfirmSiteIconsPresence={settingsController.confirmSiteIconsPresence}
+        onCancelSiteIconsPresence={settingsController.cancelSiteIconsPresence}
         websiteIconCacheWorking={$settingsState.websiteIconCacheWorking}
         websiteIconCacheEntryCount={$settingsState.websiteIconCache.entryCount}
         websiteIconCacheIconCount={$settingsState.websiteIconCache.iconCount}
@@ -785,7 +791,7 @@
   {/if}
 
   {#if $browserFill.request}
-    <BrowserFillApprovalModal request={$browserFill.request} working={$browserFill.working} onCancel={() => void browserFillController.resolve(null)} onConfirm={() => void browserFillController.resolve($browserFill.selectedId, $browserFill.remember)} />
+    <BrowserFillApprovalModal request={$browserFill.request} working={$browserFill.working} onCancel={() => void browserFillController.resolve(null)} onConfirm={() => void browserFillController.resolve($browserFill.selectedId)} />
   {:else if $browserIdentityFill.request}
     <BrowserIdentityFillApprovalModal request={$browserIdentityFill.request} working={$browserIdentityFill.working} onCancel={() => void identityFillController.resolve(null)} onConfirm={() => void identityFillController.resolve($browserIdentityFill.selectedId)} />
   {:else if $browserCardFill.request}
@@ -814,6 +820,7 @@
         bind:newPassword={$settingsState.newMasterPassword}
         bind:confirmPassword={$settingsState.confirmNewMasterPassword}
         bind:recoveryKit={$settingsState.newRecoveryKit}
+        backupsRemaining={$settingsState.newBackupsRemaining}
         bind:recoveryConfirmed={$settingsState.newRecoveryConfirmed}
         errorMessage={$feedbackState.errorMessage}
         working={$settingsState.changingMasterPassword}
@@ -856,9 +863,12 @@
         bind:restoreSecret={$backupState.restoreSecret}
         restoringBackup={$backupState.restoringBackup}
         replacesVault={$vault.status.exists}
+        presenceRequired={$backupState.restorePresenceRequired}
+        bind:presencePassword={$backupState.restorePresencePassword}
         errorMessage={$feedbackState.errorMessage}
         onClose={backupController.closeRestore}
         onConfirm={backupController.confirmRestore}
+        onConfirmPresence={backupController.confirmRestorePresence}
       />
     {:else if active?.kind === 'backup-drill'}
       <BackupDrillModal
@@ -867,10 +877,13 @@
         verification={$backupState.drillVerification}
         working={$backupState.drillWorking}
         restoring={$backupState.drillRestoring}
+        presenceRequired={$backupState.drillPresenceRequired}
+        bind:presencePassword={$backupState.drillPresencePassword}
         error={$backupState.drillError}
         onChoose={backupController.chooseDrillBackup}
         onVerify={backupController.verifyDrillBackup}
         onRestore={backupController.restoreVerifiedBackup}
+        onConfirmPresence={backupController.confirmDrillPresence}
         onClose={backupController.closeDrill}
       />
     {:else if active?.kind === 'login-editor'}

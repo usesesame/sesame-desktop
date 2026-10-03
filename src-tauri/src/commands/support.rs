@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::browser_fill::SaveKind;
+use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
 use crate::vault::imports::entry_from_input;
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;
@@ -18,7 +19,19 @@ pub fn get_diagnostic_status(app: AppHandle) -> VaultResult<diagnostics::Diagnos
 }
 
 #[tauri::command]
-pub fn export_diagnostics(app: AppHandle, destination: String) -> VaultResult<String> {
+pub fn export_diagnostics(
+    app: AppHandle,
+    token: Option<String>,
+    destination: Option<String>,
+    selection: State<'_, FileSelectionState>,
+) -> VaultResult<String> {
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::DiagnosticsExport,
+        true,
+    )?;
     diagnostics::export(&app, &destination)
 }
 
@@ -54,9 +67,8 @@ pub fn resolve_browser_fill(
     state: State<'_, browser_fill::BrowserFillState>,
     approval_id: String,
     login_id: Option<String>,
-    remember: bool,
 ) -> VaultResult<()> {
-    browser_fill::resolve(&app, state, approval_id, login_id, remember)
+    browser_fill::resolve(&app, state, approval_id, login_id)
 }
 
 #[tauri::command]
@@ -274,14 +286,13 @@ mod browser_update_tests {
 
     fn payload_with_stored_login() -> VaultPayload {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            password: "fictional-stored-secret".to_string(),
-            updated_at: 41,
-            password_updated_at: 40,
-            revision: 7,
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.password = "fictional-stored-secret".to_string();
+        entry.updated_at = 41;
+        entry.password_updated_at = 40;
+        entry.revision = 7;
+        payload.entries.push(entry);
         payload
     }
 

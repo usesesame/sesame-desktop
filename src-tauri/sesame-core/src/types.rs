@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::util::domain_from_url;
 
@@ -22,6 +22,7 @@ pub struct ChangeMasterPasswordRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeMasterPasswordResult {
     pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -54,7 +55,10 @@ pub struct RecoveryKitRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreBackupRequest {
-    pub source: String,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
     pub secret: String,
 }
 
@@ -610,6 +614,9 @@ pub struct RestoreBackupResult {
     pub safety_backup_name: Option<String>,
     pub pin_unlock_available: bool,
     pub hello_unlock_available: bool,
+    pub restored_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_revision: Option<u64>,
 }
 
 /// Proves the encrypted payload opens; never replaces the active vault.
@@ -1855,7 +1862,7 @@ impl VaultPayload {
         None
     }
 
-    pub fn insert_active_item(&mut self, item: TaggedItem) -> Result<(), String> {
+    pub fn insert_active_item(&mut self, item: &mut TaggedItem) -> Result<(), String> {
         let id = item.id();
         if self.entries.iter().any(|item| item.id == id)
             || self.identities.iter().any(|item| item.id == id)
@@ -1870,15 +1877,15 @@ impl VaultPayload {
             return Err("A saved item with that id already exists.".into());
         }
         match item {
-            TaggedItem::Login(item) => self.entries.push(item),
-            TaggedItem::Identity(item) => self.identities.push(item),
-            TaggedItem::SecureNote(item) => self.secure_notes.push(item),
-            TaggedItem::Card(item) => self.cards.push(item),
-            TaggedItem::WifiNetwork(item) => self.wifi_networks.push(item),
-            TaggedItem::SshKey(item) => self.ssh_keys.push(item),
-            TaggedItem::SoftwareLicense(item) => self.software_licenses.push(item),
-            TaggedItem::Document(item) => self.documents.push(item),
-            TaggedItem::CustomRecord(item) => self.custom_records.push(item),
+            TaggedItem::Login(item) => self.entries.push(std::mem::take(item)),
+            TaggedItem::Identity(item) => self.identities.push(std::mem::take(item)),
+            TaggedItem::SecureNote(item) => self.secure_notes.push(std::mem::take(item)),
+            TaggedItem::Card(item) => self.cards.push(std::mem::take(item)),
+            TaggedItem::WifiNetwork(item) => self.wifi_networks.push(std::mem::take(item)),
+            TaggedItem::SshKey(item) => self.ssh_keys.push(std::mem::take(item)),
+            TaggedItem::SoftwareLicense(item) => self.software_licenses.push(std::mem::take(item)),
+            TaggedItem::Document(item) => self.documents.push(std::mem::take(item)),
+            TaggedItem::CustomRecord(item) => self.custom_records.push(std::mem::take(item)),
         }
         Ok(())
     }
@@ -1962,20 +1969,22 @@ impl VaultPayload {
             return Err("The vault mixes legacy collections with v8 items.");
         }
         let mut ids = std::collections::HashSet::new();
-        for item in items {
+        for mut item in items {
             if !ids.insert(item.id().to_string()) {
                 return Err("The vault contains duplicate item ids.");
             }
-            match item {
-                TaggedItem::Login(item) => payload.entries.push(item),
-                TaggedItem::Identity(item) => payload.identities.push(item),
-                TaggedItem::SecureNote(item) => payload.secure_notes.push(item),
-                TaggedItem::Card(item) => payload.cards.push(item),
-                TaggedItem::WifiNetwork(item) => payload.wifi_networks.push(item),
-                TaggedItem::SshKey(item) => payload.ssh_keys.push(item),
-                TaggedItem::SoftwareLicense(item) => payload.software_licenses.push(item),
-                TaggedItem::Document(item) => payload.documents.push(item),
-                TaggedItem::CustomRecord(item) => payload.custom_records.push(item),
+            match &mut item {
+                TaggedItem::Login(item) => payload.entries.push(std::mem::take(item)),
+                TaggedItem::Identity(item) => payload.identities.push(std::mem::take(item)),
+                TaggedItem::SecureNote(item) => payload.secure_notes.push(std::mem::take(item)),
+                TaggedItem::Card(item) => payload.cards.push(std::mem::take(item)),
+                TaggedItem::WifiNetwork(item) => payload.wifi_networks.push(std::mem::take(item)),
+                TaggedItem::SshKey(item) => payload.ssh_keys.push(std::mem::take(item)),
+                TaggedItem::SoftwareLicense(item) => {
+                    payload.software_licenses.push(std::mem::take(item))
+                }
+                TaggedItem::Document(item) => payload.documents.push(std::mem::take(item)),
+                TaggedItem::CustomRecord(item) => payload.custom_records.push(std::mem::take(item)),
             }
         }
         Ok(payload)
@@ -1983,42 +1992,46 @@ impl VaultPayload {
 }
 
 impl TaggedItem {
-    pub(crate) fn restored_over(self, current: TaggedItem, now: u64) -> Result<Self, String> {
+    pub(crate) fn restored_over(
+        &mut self,
+        current: &TaggedItem,
+        now: u64,
+    ) -> Result<TaggedItem, String> {
         macro_rules! restore {
             ($restored:ident, $current:ident, $variant:ident) => {{
                 $restored.created_at = $current.created_at;
                 $restored.updated_at = now;
                 $restored.revision = $current.revision.saturating_add(1);
-                Ok(TaggedItem::$variant($restored))
+                Ok(TaggedItem::$variant(std::mem::take($restored)))
             }};
         }
         match (self, current) {
-            (TaggedItem::Login(mut restored), TaggedItem::Login(current)) => {
+            (TaggedItem::Login(restored), TaggedItem::Login(current)) => {
                 restore!(restored, current, Login)
             }
-            (TaggedItem::Identity(mut restored), TaggedItem::Identity(current)) => {
+            (TaggedItem::Identity(restored), TaggedItem::Identity(current)) => {
                 restore!(restored, current, Identity)
             }
-            (TaggedItem::SecureNote(mut restored), TaggedItem::SecureNote(current)) => {
+            (TaggedItem::SecureNote(restored), TaggedItem::SecureNote(current)) => {
                 restore!(restored, current, SecureNote)
             }
-            (TaggedItem::Card(mut restored), TaggedItem::Card(current)) => {
+            (TaggedItem::Card(restored), TaggedItem::Card(current)) => {
                 restore!(restored, current, Card)
             }
-            (TaggedItem::WifiNetwork(mut restored), TaggedItem::WifiNetwork(current)) => {
+            (TaggedItem::WifiNetwork(restored), TaggedItem::WifiNetwork(current)) => {
                 restore!(restored, current, WifiNetwork)
             }
-            (TaggedItem::SshKey(mut restored), TaggedItem::SshKey(current)) => {
+            (TaggedItem::SshKey(restored), TaggedItem::SshKey(current)) => {
                 restore!(restored, current, SshKey)
             }
-            (TaggedItem::SoftwareLicense(mut restored), TaggedItem::SoftwareLicense(current)) => {
+            (TaggedItem::SoftwareLicense(restored), TaggedItem::SoftwareLicense(current)) => {
                 restore!(restored, current, SoftwareLicense)
             }
-            (TaggedItem::Document(mut restored), TaggedItem::Document(current)) => {
+            (TaggedItem::Document(restored), TaggedItem::Document(current)) => {
                 restored.attachments = current.attachments.clone();
                 restore!(restored, current, Document)
             }
-            (TaggedItem::CustomRecord(mut restored), TaggedItem::CustomRecord(current)) => {
+            (TaggedItem::CustomRecord(restored), TaggedItem::CustomRecord(current)) => {
                 restore!(restored, current, CustomRecord)
             }
             _ => Err(
@@ -2330,6 +2343,14 @@ impl Zeroize for VaultPayload {
     }
 }
 
+impl Drop for VaultPayload {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for VaultPayload {}
+
 impl Zeroize for TaggedItem {
     fn zeroize(&mut self) {
         match self {
@@ -2346,11 +2367,27 @@ impl Zeroize for TaggedItem {
     }
 }
 
+impl Drop for TaggedItem {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for TaggedItem {}
+
 impl Zeroize for TrashedItem {
     fn zeroize(&mut self) {
         self.item.zeroize();
     }
 }
+
+impl Drop for TrashedItem {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for TrashedItem {}
 
 impl Zeroize for HistoryEntry {
     fn zeroize(&mut self) {
@@ -2358,6 +2395,14 @@ impl Zeroize for HistoryEntry {
         self.item.zeroize();
     }
 }
+
+impl Drop for HistoryEntry {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for HistoryEntry {}
 
 impl Zeroize for SecureNote {
     fn zeroize(&mut self) {
@@ -2368,6 +2413,14 @@ impl Zeroize for SecureNote {
         self.legacy_fields.zeroize();
     }
 }
+
+impl Drop for SecureNote {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for SecureNote {}
 
 impl Zeroize for Card {
     fn zeroize(&mut self) {
@@ -2385,6 +2438,14 @@ impl Zeroize for Card {
     }
 }
 
+impl Drop for Card {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Card {}
+
 impl Zeroize for WifiNetwork {
     fn zeroize(&mut self) {
         self.id.zeroize();
@@ -2396,6 +2457,14 @@ impl Zeroize for WifiNetwork {
         self.tags.zeroize();
     }
 }
+
+impl Drop for WifiNetwork {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for WifiNetwork {}
 
 impl Zeroize for SshKey {
     fn zeroize(&mut self) {
@@ -2410,6 +2479,14 @@ impl Zeroize for SshKey {
     }
 }
 
+impl Drop for SshKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for SshKey {}
+
 impl Zeroize for SoftwareLicense {
     fn zeroize(&mut self) {
         self.id.zeroize();
@@ -2423,6 +2500,14 @@ impl Zeroize for SoftwareLicense {
     }
 }
 
+impl Drop for SoftwareLicense {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for SoftwareLicense {}
+
 impl Zeroize for DocumentMetadata {
     fn zeroize(&mut self) {
         self.id.zeroize();
@@ -2434,8 +2519,35 @@ impl Zeroize for DocumentMetadata {
         self.expiry_date.zeroize();
         self.notes.zeroize();
         self.tags.zeroize();
+        self.attachments.zeroize();
     }
 }
+
+impl Drop for DocumentMetadata {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for DocumentMetadata {}
+
+impl Zeroize for Attachment {
+    fn zeroize(&mut self) {
+        self.id.zeroize();
+        self.filename.zeroize();
+        self.content_type.zeroize();
+        self.size.zeroize();
+        self.data.zeroize();
+    }
+}
+
+impl Drop for Attachment {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Attachment {}
 
 impl Zeroize for CustomFieldEntry {
     fn zeroize(&mut self) {
@@ -2444,6 +2556,14 @@ impl Zeroize for CustomFieldEntry {
         self.kind.zeroize();
     }
 }
+
+impl Drop for CustomFieldEntry {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for CustomFieldEntry {}
 
 impl Zeroize for CustomRecord {
     fn zeroize(&mut self) {
@@ -2454,6 +2574,14 @@ impl Zeroize for CustomRecord {
         self.tags.zeroize();
     }
 }
+
+impl Drop for CustomRecord {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for CustomRecord {}
 
 impl Zeroize for Identity {
     fn zeroize(&mut self) {
@@ -2472,12 +2600,28 @@ impl Zeroize for Identity {
     }
 }
 
+impl Drop for Identity {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Identity {}
+
 impl Zeroize for Folder {
     fn zeroize(&mut self) {
         self.id.zeroize();
         self.name.zeroize();
     }
 }
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Folder {}
 
 impl Zeroize for VaultEntry {
     fn zeroize(&mut self) {
@@ -2500,12 +2644,28 @@ impl Zeroize for VaultEntry {
     }
 }
 
+impl Drop for VaultEntry {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for VaultEntry {}
+
 impl Zeroize for LegacyField {
     fn zeroize(&mut self) {
         self.label.zeroize();
         self.value.zeroize();
     }
 }
+
+impl Drop for LegacyField {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for LegacyField {}
 
 #[cfg(test)]
 mod tests {

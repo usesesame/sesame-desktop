@@ -69,8 +69,8 @@ macro_rules! impl_record_commands {
             let session = session.as_mut().ok_or($save_unlock_msg)?;
             let payload = session.open_payload()?;
             let mut next_payload = payload.clone();
-            if let Some(previous) = next_payload.take_active_item(&item_id) {
-                let crate::vault::types::TaggedItem::$Variant(existing) = previous else {
+            if let Some(mut previous) = next_payload.take_active_item(&item_id) {
+                let crate::vault::types::TaggedItem::$Variant(existing) = &mut previous else {
                     return Err("That item id belongs to a different kind of saved item.".into());
                 };
                 item.created_at = existing.created_at;
@@ -80,14 +80,15 @@ macro_rules! impl_record_commands {
                 item.last_used_at = existing.last_used_at;
                 $(
                     let extra_carry: fn(&mut $Item, &$Item) = $extra_carry;
-                    extra_carry(&mut item, &existing);
+                    extra_carry(&mut item, existing);
                 )?
                 crate::vault::history::capture_history(
                     &mut next_payload,
-                    crate::vault::types::TaggedItem::$Variant(existing),
+                    crate::vault::types::TaggedItem::$Variant(std::mem::take(existing)),
                 );
             }
-            next_payload.insert_active_item(crate::vault::types::TaggedItem::$Variant(item))?;
+            next_payload
+                .insert_active_item(&mut crate::vault::types::TaggedItem::$Variant(item))?;
             crate::vault::storage::commit_payload_change(session, next_payload)?;
             state.advance_session_epoch();
             Ok($SaveResult {
@@ -112,14 +113,13 @@ macro_rules! impl_record_commands {
             let session = session.as_mut().ok_or($delete_unlock_msg)?;
             let payload = session.open_payload()?;
             let mut next_payload = payload.clone();
-            let item = match next_payload.take_active_item(id) {
-                Some(crate::vault::types::TaggedItem::$Variant(item)) => item,
-                Some(_) => {
-                    return Err("That item id belongs to a different kind of saved item.".into())
-                }
-                None => return Err(format!("That saved {} no longer exists.", $missing_noun)),
-            };
-            crate::vault::trash::trash_item(&mut next_payload, crate::vault::types::TaggedItem::$Variant(item));
+            let tagged = next_payload
+                .take_active_item(id)
+                .ok_or_else(|| format!("That saved {} no longer exists.", $missing_noun))?;
+            if !matches!(&tagged, crate::vault::types::TaggedItem::$Variant(_)) {
+                return Err("That item id belongs to a different kind of saved item.".into());
+            }
+            crate::vault::trash::trash_item(&mut next_payload, tagged);
             crate::vault::storage::commit_payload_change(session, next_payload)?;
             state.advance_session_epoch();
             Ok($DeleteResult {

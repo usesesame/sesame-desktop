@@ -10,6 +10,7 @@
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
+  import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import ViewHeader from './ViewHeader.svelte'
 
   export let theme: Theme = 'auto'
@@ -37,6 +38,12 @@
   export let onUpdateQuickAccessShortcut: (accelerator: string) => void
   export let onSetTheme: (value: Theme) => void
   export let onSetSiteIconsEnabled: (enabled: boolean) => void
+  export let siteIconsWorking = false
+  export let siteIconsPresenceRequired = false
+  export let siteIconsPresencePassword = ''
+  export let errorMessage = ''
+  export let onConfirmSiteIconsPresence: () => void
+  export let onCancelSiteIconsPresence: () => void
   export let websiteIconCacheWorking = false
   export let websiteIconCacheEntryCount = 0
   export let websiteIconCacheIconCount = 0
@@ -194,7 +201,7 @@
             </article>
             <article>
               <div class="setting-copy"><strong>Website icons</strong><p>Download icons only as they come into view, then reuse Sesame's local copy for up to 30 days. The first request still reveals the saved domain to that site. {websiteIconCacheLabel}</p></div>
-              <div class="website-icon-actions"><button type="button" class="text-button" disabled={websiteIconCacheWorking || websiteIconCacheEntryCount === 0} on:click={onClearWebsiteIconCache}>Clear cache</button><button type="button" class="switch" class:active={siteIconsEnabled} role="switch" aria-checked={siteIconsEnabled} aria-label="Website icons" on:click={() => onSetSiteIconsEnabled(!siteIconsEnabled)}><span></span></button></div>
+              <div class="website-icon-actions"><button type="button" class="text-button" disabled={websiteIconCacheWorking || websiteIconCacheEntryCount === 0} on:click={onClearWebsiteIconCache}>Clear cache</button><button type="button" class="switch" class:active={siteIconsEnabled} role="switch" aria-checked={siteIconsEnabled} aria-label="Website icons" disabled={siteIconsWorking} on:click={() => onSetSiteIconsEnabled(!siteIconsEnabled)}><span></span></button></div>
             </article>
           </div>
         </section>
@@ -390,3 +397,7 @@
     {/key}
   </div>
 </section>
+
+{#if siteIconsPresenceRequired}
+  <PasswordPresenceModal intent="enable-icons" bind:presenceSecret={siteIconsPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmSiteIconsPresence} onCancel={onCancelSiteIconsPresence} />
+{/if}

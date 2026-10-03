@@ -17,7 +17,7 @@ beforeEach(() => {
 
 function selection(compatibility: BackupCompatibility) {
   return {
-    source: '/tmp/fictional-backup.sesame',
+    token: 'fictional-backup-token',
     fileName: 'fictional-backup.sesame',
     formatVersion: compatibility === 'current' ? 10 : 8,
     compatibility,
@@ -40,6 +40,7 @@ function renderDrill(overrides: Record<string, unknown> = {}) {
     onChoose: vi.fn(),
     onVerify: vi.fn(),
     onRestore: vi.fn(),
+    onConfirmPresence: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   })
@@ -111,4 +112,18 @@ test('a working verification marks the dialog busy', async () => {
   renderDrill({ selection: selection('current'), working: true })
   await Promise.resolve()
   expect(screen.getByRole('dialog').getAttribute('aria-busy')).toBe('true')
+})
+
+test('a presence requirement asks for the current master password before restoring', async () => {
+  renderDrill({
+    selection: selection('current'),
+    verification: verification('current'),
+    presenceRequired: true,
+    presencePassword: 'fictional master password 01',
+  })
+  await Promise.resolve()
+  expect(screen.getByLabelText('Your current master password')).toBeTruthy()
+  expect(screen.getByText('Sesame confirms it is replacing the vault you have open.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Confirm and restore' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Restore verified backup' })).toBeNull()
 })

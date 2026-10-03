@@ -1,0 +1,65 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v6",
+  "protocolVersion": 6,
+  "compatibility": {
+    "minimumHostProtocolVersion": 6,
+    "currentHostProtocolVersion": 6,
+    "minimumExtensionProtocolVersion": 6,
+    "currentExtensionProtocolVersion": 6
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "credentialFieldBytes": 4096,
+    "titleBytes": 512,
+    "approvalSeconds": 30
+  },
+  "requestTypes": [
+    "capabilities"
+  ],
+  "responseTypes": [
+    "capabilities",
+    "error"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
+    "origin": "Identity and save requests carry one normalized page origin. The extension and desktop recheck it before release or write.",
+    "tabIdentity": "Not transmitted to the native host. The extension binds the operation to the active tab and window and rechecks both before a page write.",
+    "documentToken": "Not transmitted to the native host. The extension creates a single-document token during prepare and requires it again during fill or clear.",
+    "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json",
+  "messageVersions": {
+    "capabilities": 6,
+    "activate": 1,
+    "identity": 1,
+    "save": 1,
+    "card": 2,
+    "totp": 4,
+    "fill": 5
+  }
+}

@@ -43,3 +43,11 @@ test('a copy check names the copy and never offers to show the password', async 
   expect(screen.getByRole('button', { name: 'Copy password' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Show password' })).toBeNull()
 })
+
+test('an enable check names the setting and never offers to show a password', async () => {
+  render(PasswordPresenceModal, { intent: 'enable-icons', presenceSecret: 'x', errorMessage: '', onCancel: vi.fn(), onConfirm: vi.fn() })
+  await Promise.resolve()
+  expect(screen.getByRole('heading', { name: 'Turn on website icons' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Turn on' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show password' })).toBeNull()
+})

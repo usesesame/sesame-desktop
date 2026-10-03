@@ -13,8 +13,6 @@
     "core:window:allow-toggle-maximize",
     "core:webview:deny-internal-toggle-devtools",
     "clipboard-manager:allow-write-text",
-    "dialog:allow-save",
-    "dialog:allow-open",
     "vault-lifecycle",
     "vault-read",
     "vault-edit",

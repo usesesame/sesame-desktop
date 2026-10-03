@@ -29,7 +29,7 @@ fn identity_response(
         };
         let Some(session) = session.as_ref() else {
             diagnostics::record_browser_host_registration(app, "identity_locked");
-            return BrowserResponse::identity_unavailable(&request.request_id, "locked");
+            return BrowserResponse::identity_unavailable(&request.request_id, "noMatch");
         };
         let payload = match session.open_payload() {
             Ok(payload) => payload,

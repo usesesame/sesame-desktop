@@ -38,7 +38,7 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
     const current = browserFill.value().request
     if (current?.approvalId === request.approvalId) return
     if (current) void resolveBrowserFillRequest(current.approvalId, null)
-    browserFill.patch({ request, selectedId: request.candidates.length === 1 ? request.candidates[0].id : '', remember: false, working: false })
+    browserFill.patch({ request, selectedId: request.candidates.length === 1 ? request.candidates[0].id : '', working: false })
   }
 
   async function syncPending() {
@@ -67,25 +67,20 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
     }, browserFill.value().request ? 500 : 3_000)
   }
 
-  async function resolve(loginId: string | null, remember = false) {
+  async function resolve(loginId: string | null) {
     const current = browserFill.value()
     const request = current.request
     if (!request || current.working) return
     browserFill.patch({ working: true })
     try {
-      await resolveBrowserFillRequest(request.approvalId, loginId, remember)
+      await resolveBrowserFillRequest(request.approvalId, loginId)
       if (loginId) {
-        feedback.showNotice(
-          'Login approved',
-          remember
-            ? `Filled one login for ${request.hostname}. This login fills there without asking for the next 15 minutes.`
-            : `Filled one login for ${request.hostname}.`,
-        )
+        feedback.showNotice('Login approved', `Filled one login for ${request.hostname}.`)
       }
     } catch (error) {
       if (loginId) feedback.setError(error)
     } finally {
-      if (browserFill.value().request?.approvalId === request.approvalId) browserFill.patch({ request: null, selectedId: '', remember: false })
+      if (browserFill.value().request?.approvalId === request.approvalId) browserFill.patch({ request: null, selectedId: '' })
       browserFill.patch({ working: false })
     }
   }
