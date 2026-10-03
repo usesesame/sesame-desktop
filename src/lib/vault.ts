@@ -567,9 +567,9 @@ export async function unlockVault(request: MasterPasswordRequest, alreadyUnlocke
   return invoke<VaultSnapshot>(alreadyUnlocked ? 'get_vault_snapshot' : 'unlock_vault', alreadyUnlocked ? undefined : { request })
 }
 
-export async function changeMasterPassword(currentPassword: string, newPassword: string): Promise<ChangeMasterPasswordResult> {
+export async function changeMasterPassword(currentPassword: string | null, recoveryKit: string, newPassword: string): Promise<ChangeMasterPasswordResult> {
   if (previewMode) return { recoveryKit: 'F9K4P-7XQ2M-T6V8C-H3R5W-J8L2N' }
-  return invoke<ChangeMasterPasswordResult>('change_master_password', { request: { currentPassword, newPassword } })
+  return invoke<ChangeMasterPasswordResult>('change_master_password', { request: { currentPassword, recoveryKit, newPassword } })
 }
 
 export async function setNativeAutoLockMinutes(minutes: number): Promise<void> {

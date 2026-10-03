@@ -13,7 +13,10 @@ pub struct MasterPasswordRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeMasterPasswordRequest {
-    pub current_password: String,
+    #[serde(default)]
+    pub current_password: Option<String>,
+    #[serde(default)]
+    pub recovery_kit: Option<String>,
     pub new_password: String,
 }
 
