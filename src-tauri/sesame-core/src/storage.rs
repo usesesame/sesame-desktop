@@ -257,12 +257,17 @@ pub fn complete_recovery_setup_for_session(
     Ok(())
 }
 
+pub struct MasterPasswordRotation {
+    pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
+}
+
 /// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
 pub fn rotate_master_password_for_session(
     session: &mut UnlockedVault,
     current_password: &str,
     new_password: &str,
-) -> VaultResult<String> {
+) -> VaultResult<MasterPasswordRotation> {
     if new_password.chars().count() < 12 {
         return Err("Use a new master password with at least 12 characters.".into());
     }
@@ -314,7 +319,14 @@ pub fn rotate_master_password_for_session(
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
-    Ok(recovery_kit_for_display)
+    let backups_remaining = match crate::backup::prune_vault_backups(&session.path) {
+        Ok(outcome) => Some(outcome.remaining),
+        Err(_) => None,
+    };
+    Ok(MasterPasswordRotation {
+        recovery_kit: recovery_kit_for_display,
+        backups_remaining,
+    })
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
@@ -335,7 +347,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
         protected_pepper,
         key_wrap,
     });
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -344,7 +356,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
 
 pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.pin_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);
     }
@@ -354,7 +366,7 @@ pub fn remove_pin_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
 /// The old KSP key is deleted only after the file no longer references it.
 pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> VaultResult<()> {
     let previous = session.hello_wrap.replace(wrap);
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }
@@ -367,7 +379,7 @@ pub fn set_hello_for_session(session: &mut UnlockedVault, wrap: HelloWrap) -> Va
 /// KSP key deleted only after the vault remains usable by password or kit.
 pub fn remove_hello_for_session(session: &mut UnlockedVault) -> VaultResult<()> {
     let previous = session.hello_wrap.take();
-    if let Err(error) = persist_session(session) {
+    if let Err(error) = persist_session_without_previous(session) {
         session.hello_wrap = previous;
         return Err(error);
     }
@@ -840,7 +852,7 @@ pub fn merged_duplicate_payload(
     if merged.recovery_not_applicable {
         merged.backup_codes.clear();
     }
-    merged.backup_codes = unique_backup_codes(merged.backup_codes);
+    merged.backup_codes = unique_backup_codes(std::mem::take(&mut merged.backup_codes));
     merged.updated_at = unix_timestamp();
     merged.revision = merged.revision.saturating_add(1);
 
@@ -937,12 +949,11 @@ mod tests {
         let password = "fictional master password";
         let mut session = unlocked_at(path.clone(), password);
         let mut payload = session.open_payload().expect("opened payload").clone();
-        payload.entries.push(VaultEntry {
-            id: "fictional-login".to_string(),
-            title: "Northwind".to_string(),
-            password: "fictional-secret".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "fictional-login".to_string();
+        entry.title = "Northwind".to_string();
+        entry.password = "fictional-secret".to_string();
+        payload.entries.push(entry);
 
         commit_payload_change(&mut session, payload).expect("persisted session");
 
@@ -968,12 +979,10 @@ mod tests {
             id: "f1".to_string(),
             name: "Work".to_string(),
         });
-        let item = VaultEntry {
-            id: "one".to_string(),
-            title: "Example".to_string(),
-            folder_id: Some("f1".to_string()),
-            ..VaultEntry::default()
-        };
+        let mut item = VaultEntry::default();
+        item.id = "one".to_string();
+        item.title = "Example".to_string();
+        item.folder_id = Some("f1".to_string());
         payload.trash.push(TrashedItem {
             item: TaggedItem::Login(item.clone()),
             deleted_at: 1,
@@ -1022,17 +1031,15 @@ mod tests {
         use crate::types::Card;
 
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            title: "Northwind".to_string(),
-            tags: vec!["Work".to_string()],
-            ..VaultEntry::default()
-        });
-        payload.cards.push(Card {
-            id: "card-a".to_string(),
-            title: "Travel card".to_string(),
-            ..Card::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        entry.title = "Northwind".to_string();
+        entry.tags = vec!["Work".to_string()];
+        payload.entries.push(entry);
+        let mut card = Card::default();
+        card.id = "card-a".to_string();
+        card.title = "Travel card".to_string();
+        payload.cards.push(card);
         let ids: HashSet<String> = ["login-a".to_string(), "card-a".to_string()]
             .into_iter()
             .collect();
@@ -1050,10 +1057,9 @@ mod tests {
     #[test]
     fn added_tags_are_rejected_when_empty_overlong_or_for_missing_items() {
         let mut payload = VaultPayload::default();
-        payload.entries.push(VaultEntry {
-            id: "login-a".to_string(),
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = "login-a".to_string();
+        payload.entries.push(entry);
         let ids: HashSet<String> = ["login-a".to_string()].into_iter().collect();
 
         assert!(payload_with_added_item_tag(&payload, &ids, "   ").is_err());
@@ -1073,9 +1079,10 @@ mod tests {
         let mut session = unlocked_at(path.clone(), old_password);
         persist_session(&mut session).expect("initial persisted session");
 
-        let recovery_kit =
-            rotate_master_password_for_session(&mut session, old_password, new_password)
-                .expect("rotated password");
+        let rotation = rotate_master_password_for_session(&mut session, old_password, new_password)
+            .expect("rotated password");
+        let recovery_kit = rotation.recovery_kit;
+        assert_eq!(rotation.backups_remaining, Some(0));
 
         let bytes = fs::read(&path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
@@ -1083,6 +1090,56 @@ mod tests {
         assert!(open_vault_with_password(&file, new_password).is_ok());
         assert!(open_vault_with_recovery_kit(&file, &recovery_kit).is_ok());
         assert!(!path.with_extension("sesame.prev").exists());
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_removes_backups_that_open_with_the_old_password() {
+        let directory = test_path("record-rotation-backups");
+        let path = directory.join("vault.sesame");
+        let old_password = "fictional old password";
+        let new_password = "fictional new password";
+        let mut session = unlocked_at(path.clone(), old_password);
+        persist_session(&mut session).expect("initial persisted session");
+
+        let old_copy = fs::read(&path).expect("vault bytes");
+        let old_file: VaultFile = serde_json::from_slice(&old_copy).expect("vault file");
+        assert!(open_vault_with_password(&old_file, old_password).is_ok());
+
+        let backup_dir = directory.join("backups");
+        fs::create_dir_all(&backup_dir).expect("backup folder");
+        fs::write(backup_dir.join("sesame-backup-fictional.sesame"), &old_copy)
+            .expect("backup copy");
+        fs::write(
+            backup_dir.join("sesame-before-import-fictional.sesame"),
+            &old_copy,
+        )
+        .expect("revision copy");
+
+        let rotation = rotate_master_password_for_session(&mut session, old_password, new_password)
+            .expect("rotated password");
+
+        assert_eq!(rotation.backups_remaining, Some(0));
+        assert_eq!(fs::read_dir(&backup_dir).expect("backup folder").count(), 0);
+        fs::remove_dir_all(directory).expect("removed test directory");
+    }
+
+    #[test]
+    fn password_rotation_succeeds_without_a_backup_folder() {
+        let directory = test_path("record-rotation-no-backups");
+        let path = directory.join("vault.sesame");
+        let mut session = unlocked_at(path.clone(), "fictional old password");
+        persist_session(&mut session).expect("initial persisted session");
+        assert!(!directory.join("backups").exists());
+
+        let rotation = rotate_master_password_for_session(
+            &mut session,
+            "fictional old password",
+            "fictional new password",
+        )
+        .expect("rotated password");
+        assert_eq!(rotation.backups_remaining, Some(0));
+
         fs::remove_dir_all(directory).expect("removed test directory");
     }
 }

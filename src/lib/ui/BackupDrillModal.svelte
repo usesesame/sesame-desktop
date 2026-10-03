@@ -9,10 +9,13 @@
   export let verification: BackupVerification | null = null
   export let working = false
   export let restoring = false
+  export let presenceRequired = false
+  export let presencePassword = ''
   export let error = ''
   export let onChoose: () => void
   export let onVerify: () => void
   export let onRestore: () => void
+  export let onConfirmPresence: () => void
   export let onClose: () => void
 
   let secretInput: HTMLInputElement
@@ -73,7 +76,18 @@
       <div><strong>This backup opened successfully.</strong><p><b>{verification.vaultName}</b> · {verification.entryCount} {verification.entryCount === 1 ? 'login' : 'logins'} · {verifiedCopy?.label}</p></div>
     </div>
     <div class="drill-restore-note"><strong>Verification is enough for a routine check.</strong><p>{restoreNote}</p></div>
+    {#if presenceRequired}
+      <label class="drill-secret">Your current master password<input name="backup-drill-presence" type="password" bind:value={presencePassword} autocomplete="current-password" spellcheck="false" disabled={restoring} /></label>
+      <p class="drill-privacy"><Icon name="shield" size={14} /> Sesame confirms it is replacing the vault you have open.</p>
+    {/if}
     {#if error}<p class="field-error" role="alert">{error}</p>{/if}
-    <div class="confirm-actions"><button type="button" class="secondary-button" disabled={restoring} on:click={onClose}>Done</button><button type="button" class="danger-button" disabled={restoring} on:click={onRestore}>{restoring ? 'Restoring…' : 'Restore verified backup'}</button></div>
+    <div class="confirm-actions">
+      <button type="button" class="secondary-button" disabled={restoring} on:click={onClose}>Done</button>
+      {#if presenceRequired}
+        <button type="button" class="danger-button" disabled={restoring || !presencePassword} on:click={onConfirmPresence}>{restoring ? 'Restoring…' : 'Confirm and restore'}</button>
+      {:else}
+        <button type="button" class="danger-button" disabled={restoring} on:click={onRestore}>{restoring ? 'Restoring…' : 'Restore verified backup'}</button>
+      {/if}
+    </div>
   {/if}
 </ModalShell>

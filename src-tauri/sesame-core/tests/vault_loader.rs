@@ -189,6 +189,34 @@ fn envelope_failures_are_bounded_and_do_not_become_wrong_password() {
 }
 
 #[test]
+fn format_probing_keeps_the_documented_outcomes() {
+    assert_eq!(
+        VaultLoader::probe_format(&vec![b' '; MAX_VAULT_FILE_BYTES as usize + 1]),
+        Err(LoadFailure::SizeLimit)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":10}"#),
+        Ok(10)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":10,"future":{"deep":[1,2,3]}}"#),
+        Ok(10)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"formatVersion":256}"#),
+        Err(LoadFailure::InvalidStructure)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(br#"{"other":1}"#),
+        Err(LoadFailure::InvalidStructure)
+    );
+    assert_eq!(
+        VaultLoader::probe_format(b"{"),
+        Err(LoadFailure::InvalidStructure)
+    );
+}
+
+#[test]
 fn named_password_path_does_not_accept_a_recovery_kit() {
     let manifest: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/compatibility/manifest.json"))

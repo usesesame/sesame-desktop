@@ -456,7 +456,7 @@ where
                 ));
             }
         };
-        if !supported_protocol_version(request.version) {
+        if !supported_protocol_version(&request.message_type, request.version) {
             write_message(
                 output,
                 &BrowserResponse::error_for(&request, "Unsupported protocol version."),
@@ -503,7 +503,7 @@ fn desktop_response(request: &BrowserRequest) -> BrowserResponse {
 
 fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
     match request.message_type.as_str() {
-        "capabilities" => BrowserResponse::capabilities(&request.request_id, false, true),
+        "capabilities" => BrowserResponse::capabilities(&request.request_id, false),
         "activate" => BrowserResponse::activated(&request.request_id, launch_desktop_app()),
         "identity" => {
             BrowserResponse::identity_unavailable(&request.request_id, "desktopUnavailable")
@@ -684,15 +684,20 @@ mod boundary_tests {
     use super::*;
 
     fn request(message_type: &str) -> BrowserRequest {
-        let card = message_type == "card";
+        let version = match message_type {
+            "fill" => crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION,
+            "card" => crate::browser_protocol::CARD_PROTOCOL_VERSION,
+            "totp" => crate::browser_protocol::TOTP_PROTOCOL_VERSION,
+            _ => crate::browser_protocol::PROTOCOL_VERSION,
+        };
         BrowserRequest {
-            version: if card { 2 } else { 1 },
+            version,
             message_type: message_type.to_string(),
             request_id: "request-1".to_string(),
             origin: Some("https://example.test".to_string()),
             fields: if message_type == "identity" {
                 Some("email".to_string())
-            } else if card {
+            } else if message_type == "card" {
                 Some("number".to_string())
             } else {
                 None
@@ -711,6 +716,7 @@ mod boundary_tests {
             ("save", "save-unavailable"),
             ("fill", "fill-unavailable"),
             ("card", "card-unavailable"),
+            ("totp", "totp-unavailable"),
         ] {
             let request = request(message_type);
             assert!(request.validate(), "{message_type} request validates");
@@ -749,19 +755,13 @@ mod boundary_tests {
     }
 
     #[test]
-    fn a_version_three_fill_survives_the_host_relay() {
+    fn a_version_three_fill_is_refused_by_the_host_relay() {
         let request = v3_fill_request();
         let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
         let mut output = Vec::new();
-        let response_count = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
-            BrowserResponse::fill_with_match_kind(
-                request,
-                "person@example.test".to_string(),
-                "fictional-example-value".to_string(),
-                "wwwAlias",
-            )
-        })
-        .expect("the relay serves the request");
+        let response_count =
+            serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                .expect("the host answers an unsupported version");
 
         assert_eq!(response_count, 1);
         let response = decode_frame(&output);
@@ -769,21 +769,11 @@ mod boundary_tests {
             response.version,
             crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
         );
-        assert_eq!(response.match_kind.as_deref(), Some("wwwAlias"));
-    }
-
-    #[test]
-    fn the_desktop_unavailable_fallback_binds_version_three() {
-        let request = v3_fill_request();
-        assert!(request.validate());
-        let response = unavailable_without_desktop(&request);
-        assert_eq!(response.message_type, "fill-unavailable");
-        assert_eq!(response.reason.as_deref(), Some("desktopUnavailable"));
+        assert_eq!(response.message_type, "error");
         assert_eq!(
-            response.version,
-            crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
+            response.message.as_deref(),
+            Some("Unsupported protocol version.")
         );
-        assert!(response.validate_for(&request));
     }
 
     fn v4_totp_request() -> BrowserRequest {
@@ -919,7 +909,7 @@ mod boundary_tests {
             assert_eq!(response.message_type, "error");
             assert_eq!(
                 response.message.as_deref(),
-                Some("Invalid browser request.")
+                Some("Unsupported protocol version.")
             );
         }
     }
@@ -958,13 +948,27 @@ mod boundary_tests {
         let mut output = Vec::new();
         let response_count =
             serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
-                .expect("the host answers an invalid request");
+                .expect("the host answers an unsupported version");
         assert_eq!(response_count, 1);
         let response = decode_frame(&output);
         assert_eq!(
             response.version,
             crate::browser_protocol::FILL_MATCH_PROTOCOL_VERSION
         );
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Unsupported protocol version.")
+        );
+
+        let malformed = br#"{"version":1,"type":"save","requestId":"save-1-invalid","origin":"https://example.test","kind":"new"}"#;
+        let input = frame(malformed);
+        let mut output = Vec::new();
+        let response_count =
+            serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                .expect("the host answers an invalid request");
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(response.version, crate::browser_protocol::PROTOCOL_VERSION);
         assert_eq!(
             response.message.as_deref(),
             Some("Invalid browser request.")

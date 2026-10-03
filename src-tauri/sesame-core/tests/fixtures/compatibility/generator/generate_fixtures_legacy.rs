@@ -24,66 +24,62 @@ fn out_dir() -> PathBuf {
 }
 
 fn login_alpha() -> VaultEntry {
-    VaultEntry {
-        id: "login-alpha".to_string(),
-        title: "Kaffeehaus Müllerstraße".to_string(),
-        url: "https://login.example/mueller".to_string(),
-        urls: vec!["https://alt.example/mueller".to_string()],
-        tags: vec!["fiction".to_string()],
-        username: "frida@example.test".to_string(),
-        email: "frida@example.test".to_string(),
-        password: "fictional-login-secret-01".to_string(),
-        folder_id: Some("folder-arcs".to_string()),
-        favourite: true,
-        last_used_at: Some(BASE + 500),
-        totp: Some(
-            "otpauth://totp/Fictional:frida?secret=JBSWY3DPEHPK3PXP&issuer=FictionalCo".to_string(),
-        ),
-        backup_codes: vec!["FICTION-1111".to_string(), "FICTION-2222".to_string()],
-        recovery_email: Some("help@example.test".to_string()),
-        recovery_not_applicable: false,
-        notes: Some("Fictional login note".to_string()),
-        created_at: BASE,
-        updated_at: BASE + 100,
-        password_updated_at: BASE + 90,
-        revision: 3,
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = "login-alpha".to_string();
+    entry.title = "Kaffeehaus Müllerstraße".to_string();
+    entry.url = "https://login.example/mueller".to_string();
+    entry.urls = vec!["https://alt.example/mueller".to_string()];
+    entry.tags = vec!["fiction".to_string()];
+    entry.username = "frida@example.test".to_string();
+    entry.email = "frida@example.test".to_string();
+    entry.password = "fictional-login-secret-01".to_string();
+    entry.folder_id = Some("folder-arcs".to_string());
+    entry.favourite = true;
+    entry.last_used_at = Some(BASE + 500);
+    entry.totp = Some(
+        "otpauth://totp/Fictional:frida?secret=JBSWY3DPEHPK3PXP&issuer=FictionalCo".to_string(),
+    );
+    entry.backup_codes = vec!["FICTION-1111".to_string(), "FICTION-2222".to_string()];
+    entry.recovery_email = Some("help@example.test".to_string());
+    entry.recovery_not_applicable = false;
+    entry.notes = Some("Fictional login note".to_string());
+    entry.created_at = BASE;
+    entry.updated_at = BASE + 100;
+    entry.password_updated_at = BASE + 90;
+    entry.revision = 3;
+    entry
 }
 
 fn login_empty() -> VaultEntry {
-    VaultEntry {
-        id: "login-empty".to_string(),
-        title: "Empty optionals".to_string(),
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = "login-empty".to_string();
+    entry.title = "Empty optionals".to_string();
+    entry
 }
 
 fn login_trashed() -> VaultEntry {
-    VaultEntry {
-        id: "login-trashed".to_string(),
-        title: "Trashed login".to_string(),
-        username: "old@example.test".to_string(),
-        password: "fictional-trashed-secret".to_string(),
-        created_at: BASE + 10,
-        updated_at: BASE + 20,
-        password_updated_at: BASE + 20,
-        revision: 2,
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = "login-trashed".to_string();
+    entry.title = "Trashed login".to_string();
+    entry.username = "old@example.test".to_string();
+    entry.password = "fictional-trashed-secret".to_string();
+    entry.created_at = BASE + 10;
+    entry.updated_at = BASE + 20;
+    entry.password_updated_at = BASE + 20;
+    entry.revision = 2;
+    entry
 }
 
 fn login_historical() -> VaultEntry {
-    VaultEntry {
-        id: "login-alpha".to_string(),
-        title: "Kaffeehaus Müllerstraße".to_string(),
-        password: "fictional-old-secret".to_string(),
-        created_at: BASE,
-        updated_at: BASE + 50,
-        password_updated_at: BASE + 50,
-        revision: 2,
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = "login-alpha".to_string();
+    entry.title = "Kaffeehaus Müllerstraße".to_string();
+    entry.password = "fictional-old-secret".to_string();
+    entry.created_at = BASE;
+    entry.updated_at = BASE + 50;
+    entry.password_updated_at = BASE + 50;
+    entry.revision = 2;
+    entry
 }
 
 fn fictional_payload(vault_id: Option<String>) -> VaultPayload {
@@ -100,104 +96,112 @@ fn fictional_payload(vault_id: Option<String>) -> VaultPayload {
             },
         ],
         entries: vec![login_alpha(), login_empty()],
-        identities: vec![Identity {
-            id: "identity-alpha".to_string(),
-            label: "Frida Fictional".to_string(),
-            full_name: "Frida Fictional".to_string(),
-            email: "frida@example.test".to_string(),
-            phone: "+1 555 0100".to_string(),
-            address_line1: "12 Fictional Lane".to_string(),
-            city: "Springfield".to_string(),
-            postal_code: "10001".to_string(),
-            country: "Fictionland".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 30,
-            revision: 1,
-            ..Identity::default()
+        identities: vec![{
+            let mut identity = Identity::default();
+            identity.id = "identity-alpha".to_string();
+            identity.label = "Frida Fictional".to_string();
+            identity.full_name = "Frida Fictional".to_string();
+            identity.email = "frida@example.test".to_string();
+            identity.phone = "+1 555 0100".to_string();
+            identity.address_line1 = "12 Fictional Lane".to_string();
+            identity.city = "Springfield".to_string();
+            identity.postal_code = "10001".to_string();
+            identity.country = "Fictionland".to_string();
+            identity.created_at = BASE;
+            identity.updated_at = BASE + 30;
+            identity.revision = 1;
+            identity
         }],
-        secure_notes: vec![SecureNote {
-            id: "note-alpha".to_string(),
-            title: "Fictional note – café notes".to_string(),
-            content: "Fictional note content with unicode ✓".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..SecureNote::default()
+        secure_notes: vec![{
+            let mut note = SecureNote::default();
+            note.id = "note-alpha".to_string();
+            note.title = "Fictional note – café notes".to_string();
+            note.content = "Fictional note content with unicode ✓".to_string();
+            note.created_at = BASE;
+            note.updated_at = BASE + 40;
+            note.revision = 1;
+            note
         }],
-        cards: vec![Card {
-            id: "card-alpha".to_string(),
-            title: "Fictional card".to_string(),
-            cardholder_name: "Frida Fictional".to_string(),
-            number: "1234 5678 9012 3456".to_string(),
-            expiry_month: "12".to_string(),
-            expiry_year: "2030".to_string(),
-            security_code: "123".to_string(),
-            brand: "Fictioncard".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..Card::default()
+        cards: vec![{
+            let mut card = Card::default();
+            card.id = "card-alpha".to_string();
+            card.title = "Fictional card".to_string();
+            card.cardholder_name = "Frida Fictional".to_string();
+            card.number = "1234 5678 9012 3456".to_string();
+            card.expiry_month = "12".to_string();
+            card.expiry_year = "2030".to_string();
+            card.security_code = "123".to_string();
+            card.brand = "Fictioncard".to_string();
+            card.created_at = BASE;
+            card.updated_at = BASE + 40;
+            card.revision = 1;
+            card
         }],
-        wifi_networks: vec![WifiNetwork {
-            id: "wifi-alpha".to_string(),
-            title: "Fictional guest network".to_string(),
-            ssid: "FictionalGuest".to_string(),
-            password: "fictional-wifi-pass".to_string(),
-            security_type: "wpa2".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..WifiNetwork::default()
+        wifi_networks: vec![{
+            let mut network = WifiNetwork::default();
+            network.id = "wifi-alpha".to_string();
+            network.title = "Fictional guest network".to_string();
+            network.ssid = "FictionalGuest".to_string();
+            network.password = "fictional-wifi-pass".to_string();
+            network.security_type = "wpa2".to_string();
+            network.created_at = BASE;
+            network.updated_at = BASE + 40;
+            network.revision = 1;
+            network
         }],
-        ssh_keys: vec![SshKey {
-            id: "ssh-alpha".to_string(),
-            title: "Fictional key".to_string(),
-            key_type: "ed25519".to_string(),
-            private_key: "fictional-private-key-not-real".to_string(),
-            public_key:
+        ssh_keys: vec![{
+            let mut key = SshKey::default();
+            key.id = "ssh-alpha".to_string();
+            key.title = "Fictional key".to_string();
+            key.key_type = "ed25519".to_string();
+            key.private_key = "fictional-private-key-not-real".to_string();
+            key.public_key =
                 "ssh-ed25519 AAAAC3NzaC1lZDI1NTE1AAAAIFictionalPlaceholderNotARealKey fictional@example.test"
-                    .to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..SshKey::default()
+                    .to_string();
+            key.created_at = BASE;
+            key.updated_at = BASE + 40;
+            key.revision = 1;
+            key
         }],
-        software_licenses: vec![SoftwareLicense {
-            id: "license-alpha".to_string(),
-            title: "Fictional license".to_string(),
-            license_key: "FICTION-AAAA-BBBB-CCCC-DDDD".to_string(),
-            product_name: "Fictional Editor".to_string(),
-            purchased_from: "Fictional Store".to_string(),
-            purchase_date: "2026-01-02".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..SoftwareLicense::default()
+        software_licenses: vec![{
+            let mut license = SoftwareLicense::default();
+            license.id = "license-alpha".to_string();
+            license.title = "Fictional license".to_string();
+            license.license_key = "FICTION-AAAA-BBBB-CCCC-DDDD".to_string();
+            license.product_name = "Fictional Editor".to_string();
+            license.purchased_from = "Fictional Store".to_string();
+            license.purchase_date = "2026-01-02".to_string();
+            license.created_at = BASE;
+            license.updated_at = BASE + 40;
+            license.revision = 1;
+            license
         }],
-        documents: vec![DocumentMetadata {
-            id: "document-alpha".to_string(),
-            title: "Fictional document".to_string(),
-            document_type: "pdf".to_string(),
-            document_number: "DOC-FICTION-001".to_string(),
-            issuing_authority: "Fictional Authority".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..DocumentMetadata::default()
+        documents: vec![{
+            let mut document = DocumentMetadata::default();
+            document.id = "document-alpha".to_string();
+            document.title = "Fictional document".to_string();
+            document.document_type = "pdf".to_string();
+            document.document_number = "DOC-FICTION-001".to_string();
+            document.issuing_authority = "Fictional Authority".to_string();
+            document.created_at = BASE;
+            document.updated_at = BASE + 40;
+            document.revision = 1;
+            document
         }],
-        custom_records: vec![CustomRecord {
-            id: "custom-alpha".to_string(),
-            title: "Fictional record".to_string(),
-            fields: vec![CustomFieldEntry {
+        custom_records: vec![{
+            let mut record = CustomRecord::default();
+            record.id = "custom-alpha".to_string();
+            record.title = "Fictional record".to_string();
+            record.fields = vec![CustomFieldEntry {
                 label: "Server".to_string(),
                 value: "db.example.test".to_string(),
                 kind: "text".to_string(),
-            }],
-            notes: "Fictional custom record".to_string(),
-            created_at: BASE,
-            updated_at: BASE + 40,
-            revision: 1,
-            ..CustomRecord::default()
+            }];
+            record.notes = "Fictional custom record".to_string();
+            record.created_at = BASE;
+            record.updated_at = BASE + 40;
+            record.revision = 1;
+            record
         }],
         trash: vec![TrashedItem {
             item: TaggedItem::Login(login_trashed()),

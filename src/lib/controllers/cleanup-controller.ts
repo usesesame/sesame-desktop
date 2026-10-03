@@ -107,8 +107,8 @@ export function createCleanupController(options: CleanupControllerOptions) {
         feedback.showNotice(
           'Readable export created',
           fileNames.length > 1
-            ? `${fileNames.join(' and ')} contain unencrypted vault data.`
-            : `${fileNames[0]} contains unencrypted login data.`,
+            ? `${fileNames.join(' and ')} contain unencrypted vault data. Open them as data, because a spreadsheet can run a cell that starts with a formula character.`
+            : `${fileNames[0]} contains unencrypted login data. Open it as data, because a spreadsheet can run a cell that starts with a formula character.`,
         )
       }
       state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })

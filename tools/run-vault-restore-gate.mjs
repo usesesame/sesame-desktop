@@ -27,12 +27,18 @@ function parseArguments(argv) {
   return options
 }
 
+function refused(result, message) {
+  return { ok: result.ok === false, value: result.value, error: result.ok === false ? undefined : message }
+}
+
 async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   const steps = []
   const password = manifestEntry.secrets.masterPassword
+  const createdPassword = 'fictional validation password'
+  const vaultPath = path.join(root, 'vault.sesame')
 
   recordStep(steps, 'status.before', await bridge.call('get_vault_status', {}))
-  recordStep(steps, 'create_vault', await bridge.call('create_vault', { request: { masterPassword: 'fictional validation password' } }))
+  recordStep(steps, 'create_vault', await bridge.call('create_vault', { request: { masterPassword: createdPassword } }))
 
   const firstBackup = recordStep(steps, 'backup.before_restore', await bridge.call('create_backup', {}))
   if (firstBackup.ok) {
@@ -41,12 +47,66 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   }
 
   const beforeDigest = sha256(await readFile(fixture))
-  const restored = recordStep(steps, 'restore_backup', await bridge.call('restore_backup', { request: { source: fixture, secret: password } }))
-  const safetyName = restored.value?.safetyBackupName
-  recordStep(steps, 'safety_backup.exists', {
-    ok: Boolean(safetyName) && (await stat(path.join(root, 'backups', safetyName ?? '')).catch(() => null))?.isFile() === true,
-    safetyBackupName: safetyName,
+  const activeDigestBefore = sha256(await readFile(vaultPath))
+
+  recordStep(steps, 'lock.before_locked_refusal', await bridge.call('lock_vault', {}))
+  const issued = recordStep(steps, 'restore_backup.token_issued', await bridge.call('wdio_issue_file_choice', { path: fixture }))
+  const token = issued.value?.token
+  const lockedRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
+  const lockedRefusalMessage = String(lockedRefusal.error ?? '')
+  recordStep(steps, 'restore_backup.locked', {
+    ok: lockedRefusal.ok === false && lockedRefusalMessage.includes('Unlock your vault before restoring a backup.'),
+    error: lockedRefusalMessage || 'the restore while locked was not refused',
+    value: { refused: true },
   })
+  recordStep(steps, 'active_vault.unchanged_after_locked_refusal', {
+    ok: sha256(await readFile(vaultPath)) === activeDigestBefore,
+    error: 'the active vault file changed after the refused locked restore',
+  })
+  recordStep(steps, 'unlock.after_locked_refusal', await bridge.call('unlock_vault', { request: { masterPassword: createdPassword } }))
+
+  const presenceRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
+  const presenceRefusalMessage = String(presenceRefusal.error ?? '')
+  recordStep(steps, 'restore_backup.without_presence', {
+    ok: presenceRefusal.ok === false && presenceRefusalMessage.includes('presenceRequired'),
+    error: presenceRefusalMessage || 'the restore without a presence grant was not refused',
+    value: { refused: true },
+  })
+  recordStep(steps, 'active_vault.unchanged_after_presence_refusal', {
+    ok: sha256(await readFile(vaultPath)) === activeDigestBefore,
+    error: 'the active vault file changed after the refused presence restore',
+  })
+
+  recordStep(steps, 'grant_presence.active', await bridge.call('grant_presence', { secret: createdPassword }))
+  const foreignRefusal = await bridge.call('restore_backup', { request: { token, secret: password } })
+  const refusalMessage = String(foreignRefusal.error ?? '')
+  recordStep(steps, 'restore_backup.different_vault', {
+    ok: foreignRefusal.ok === false && refusalMessage.includes('belongs to a different vault'),
+    error: refusalMessage || 'the restore did not report a different-vault refusal',
+    value: { refused: true },
+  })
+  recordStep(steps, 'active_vault.unchanged_after_refusal', {
+    ok: sha256(await readFile(vaultPath)) === activeDigestBefore,
+    error: 'the active vault file changed after the refused restore',
+  })
+
+  recordStep(steps, 'delete_local_vault', await bridge.call('delete_local_vault', { masterPassword: createdPassword }))
+  recordStep(steps, 'delete_local_vault.removed', { ok: (await stat(vaultPath).catch(() => null)) === null })
+
+  recordStep(steps, 'restore_backup.wrong_password_refused', refused(
+    await bridge.call('restore_backup', { request: { token, secret: 'fictional wrong master password' } }),
+    'A wrong master password restored the vault.',
+  ))
+  const fresh = await bridge.call('restore_backup', { request: { token, secret: password } })
+  recordStep(steps, 'restore_backup.fresh', {
+    ok: fresh.ok === true && !fresh.value?.safetyBackupName,
+    error: fresh.error ?? 'the fresh restore named a safety backup',
+    value: { safetyBackupName: fresh.value?.safetyBackupName ?? null },
+  })
+  recordStep(steps, 'restore_backup.replay_refused', refused(
+    await bridge.call('restore_backup', { request: { token, secret: password } }),
+    'The spent restore token was accepted again.',
+  ))
   recordStep(steps, 'restore.source_unchanged', { ok: sha256(await readFile(fixture)) === beforeDigest })
 
   recordStep(steps, 'lock.before_unlock', await bridge.call('lock_vault', {}))
@@ -69,6 +129,15 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
         && fields.formatVersion === manifestEntry.formatVersion
         && fields.vaultName === manifestEntry.vault.name,
       value: { entryCount: fields.entryCount, formatVersion: fields.formatVersion, vaultName: fields.vaultName },
+    })
+
+    recordStep(steps, 'grant_presence.restored', await bridge.call('grant_presence', { secret: password }))
+    const sameVaultIssued = recordStep(steps, 'restore_backup.same_vault_token_issued', await bridge.call('wdio_issue_file_choice', { path: backupPath }))
+    const sameVault = recordStep(steps, 'restore_backup.same_vault', await bridge.call('restore_backup', { request: { token: sameVaultIssued.value?.token, secret: password } }))
+    const safetyName = sameVault.value?.safetyBackupName
+    recordStep(steps, 'safety_backup.same_vault', {
+      ok: Boolean(safetyName) && (await stat(path.join(root, 'backups', safetyName ?? '')).catch(() => null))?.isFile() === true,
+      safetyBackupName: safetyName,
     })
   }
   recordStep(steps, 'lock.restored', await bridge.call('lock_vault', {}))

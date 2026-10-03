@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::ensure_crypto_provider;
-use reqwest::Client;
+use reqwest::{redirect::Policy, Client};
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 use zeroize::{Zeroize, Zeroizing};
@@ -16,6 +16,8 @@ use crate::vault::VaultResult;
 
 const HIBP_RANGE_URL: &str = "https://api.pwnedpasswords.com/range/";
 const HIBP_TIMEOUT_SECS: u64 = 10;
+const HIBP_CONNECT_TIMEOUT_SECS: u64 = 4;
+const HIBP_MAX_BODY_BYTES: usize = 64 * 1024;
 pub const SHA1_PREFIX_CHARS: usize = 5;
 
 #[derive(Serialize, ts_rs::TS)]
@@ -111,16 +113,47 @@ impl RangeFetcher for HibpRangeFetcher {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RangeClientPolicy {
+    https_only: bool,
+    follow_redirects: bool,
+    connect_timeout_secs: u64,
+    timeout_secs: u64,
+    max_body_bytes: usize,
+}
+
+fn range_client_policy() -> RangeClientPolicy {
+    RangeClientPolicy {
+        https_only: true,
+        follow_redirects: false,
+        connect_timeout_secs: HIBP_CONNECT_TIMEOUT_SECS,
+        timeout_secs: HIBP_TIMEOUT_SECS,
+        max_body_bytes: HIBP_MAX_BODY_BYTES,
+    }
+}
+
 pub fn range_client() -> VaultResult<Client> {
     ensure_crypto_provider();
+    let policy = range_client_policy();
     Client::builder()
-        .timeout(Duration::from_secs(HIBP_TIMEOUT_SECS))
+        .https_only(policy.https_only)
+        .redirect(if policy.follow_redirects {
+            Policy::limited(1)
+        } else {
+            Policy::none()
+        })
+        .connect_timeout(Duration::from_secs(policy.connect_timeout_secs))
+        .timeout(Duration::from_secs(policy.timeout_secs))
         .build()
         .map_err(|_| "Sesame could not prepare the breach check request.".to_string())
 }
 
+fn body_exceeds_limit(current: usize, chunk: usize, limit: usize) -> bool {
+    current.saturating_add(chunk) > limit
+}
+
 pub async fn fetch_range(client: &Client, prefix: &str) -> VaultResult<String> {
-    let response = client
+    let mut response = client
         .get(format!("{HIBP_RANGE_URL}{prefix}"))
         .header("Add-Padding", "true")
         .send()
@@ -129,9 +162,19 @@ pub async fn fetch_range(client: &Client, prefix: &str) -> VaultResult<String> {
     if !response.status().is_success() {
         return Err("Sesame could not reach the breach-check service. Try again.".to_string());
     }
-    response
-        .text()
+    let limit = range_client_policy().max_body_bytes;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
+        .map_err(|_| "Sesame could not read the breach-check response.".to_string())?
+    {
+        if body_exceeds_limit(bytes.len(), chunk.len(), limit) {
+            return Err("Sesame could not read the breach-check response.".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes)
         .map_err(|_| "Sesame could not read the breach-check response.".to_string())
 }
 
@@ -445,5 +488,49 @@ mod tests {
 
         assert_eq!(fetcher.seen.lock().expect("seen lock").len(), 1);
         assert_eq!(outcome.checks.len(), 2);
+    }
+
+    #[test]
+    fn the_range_client_uses_the_hardened_settings() {
+        let policy = range_client_policy();
+        assert!(policy.https_only);
+        assert!(!policy.follow_redirects);
+        assert_eq!(policy.max_body_bytes, 64 * 1024);
+        assert!(policy.timeout_secs > 0);
+        assert!(policy.connect_timeout_secs > 0);
+        assert!(policy.connect_timeout_secs <= policy.timeout_secs);
+    }
+
+    #[test]
+    fn the_range_client_refuses_a_plain_http_endpoint() {
+        let client = range_client().expect("range client");
+        let error =
+            tauri::async_runtime::block_on(client.get("http://127.0.0.1:1/range/ABCDE").send())
+                .expect_err("plain http refused");
+        assert!(error.is_builder());
+    }
+
+    #[test]
+    fn an_oversized_range_body_is_refused() {
+        assert!(!body_exceeds_limit(
+            0,
+            HIBP_MAX_BODY_BYTES,
+            HIBP_MAX_BODY_BYTES
+        ));
+        assert!(body_exceeds_limit(
+            0,
+            HIBP_MAX_BODY_BYTES + 1,
+            HIBP_MAX_BODY_BYTES
+        ));
+        assert!(body_exceeds_limit(
+            HIBP_MAX_BODY_BYTES - 1,
+            2,
+            HIBP_MAX_BODY_BYTES
+        ));
+        assert!(!body_exceeds_limit(
+            HIBP_MAX_BODY_BYTES - 1,
+            1,
+            HIBP_MAX_BODY_BYTES
+        ));
     }
 }

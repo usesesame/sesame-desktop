@@ -18,14 +18,13 @@ const PASSWORD_B: &str = "fictional master password beta";
 const CANARY_PASSWORD: &str = "fictional-secret-canary";
 
 fn login(id: &str) -> VaultEntry {
-    VaultEntry {
-        id: id.to_string(),
-        title: "Northwind".to_string(),
-        username: "casey".to_string(),
-        password: CANARY_PASSWORD.to_string(),
-        url: "https://northwind.test".to_string(),
-        ..VaultEntry::default()
-    }
+    let mut entry = VaultEntry::default();
+    entry.id = id.to_string();
+    entry.title = "Northwind".to_string();
+    entry.username = "casey".to_string();
+    entry.password = CANARY_PASSWORD.to_string();
+    entry.url = "https://northwind.test".to_string();
+    entry
 }
 
 fn complete_vault(password: &str, name: &str) -> (VaultFile, [u8; 32], String) {
@@ -96,10 +95,8 @@ fn the_setup_flag_is_bound_into_the_payload_label() {
     claimed_pending.setup_complete = false;
     assert!(open_vault_with_key(&claimed_pending, key).is_err());
 
-    let pending_payload = VaultPayload {
-        vault_name: "Vault A".to_string(),
-        ..VaultPayload::default()
-    };
+    let mut pending_payload = VaultPayload::default();
+    pending_payload.vault_name = "Vault A".to_string();
     let mut honestly_pending = file.clone();
     honestly_pending.setup_complete = false;
     honestly_pending.payload = encrypt_bytes(

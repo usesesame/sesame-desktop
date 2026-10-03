@@ -7,6 +7,7 @@ pub(crate) mod browser_pipe;
 pub(crate) mod capabilities;
 pub(crate) mod clipboard;
 pub(crate) mod crash_protection;
+pub(crate) mod desktop_settings;
 pub(crate) mod desktop_shell;
 pub(crate) mod dll_search;
 pub(crate) mod external_url;

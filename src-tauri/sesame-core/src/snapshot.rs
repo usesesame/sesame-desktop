@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use totp_rs::{Algorithm as TotpAlgorithm, Builder as TotpBuilder, Secret, Totp};
 use zeroize::Zeroize;
 
@@ -49,6 +50,7 @@ pub fn snapshot_for(payload: &VaultPayload) -> VaultSnapshot {
         items.push(item_summary_for(payload, item));
     }
     active_items.zeroize();
+    drop(password_counts);
     entries.sort_by_key(|entry| entry.title.to_lowercase());
     items.sort_by_key(|item| item.title.to_lowercase());
     let mut trash = crate::trash::trash_summaries(payload);
@@ -177,6 +179,7 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
         }
     }
 
+    drop(passwords);
     SecuritySummary {
         good,
         needs_attention: duplicate_candidates
@@ -476,14 +479,36 @@ pub fn entry_contents_match(left: &VaultEntry, right: &VaultEntry) -> bool {
         && left.notes == right.notes
 }
 
-pub fn password_counts(payload: &VaultPayload) -> HashMap<String, usize> {
-    let mut passwords = HashMap::new();
-    for entry in &payload.entries {
-        if !entry.password.is_empty() {
-            *passwords.entry(entry.password.clone()).or_insert(0) += 1;
+pub struct PasswordCounts(HashMap<String, usize>);
+
+impl Deref for PasswordCounts {
+    type Target = HashMap<String, usize>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for PasswordCounts {
+    fn drop(&mut self) {
+        for (mut password, _) in self.0.drain() {
+            password.zeroize();
         }
     }
-    passwords
+}
+
+pub fn password_counts(payload: &VaultPayload) -> PasswordCounts {
+    let mut passwords: HashMap<String, usize> = HashMap::new();
+    for entry in &payload.entries {
+        if !entry.password.is_empty() {
+            if let Some(count) = passwords.get_mut(entry.password.as_str()) {
+                *count += 1;
+            } else {
+                passwords.insert(entry.password.clone(), 1);
+            }
+        }
+    }
+    PasswordCounts(passwords)
 }
 
 pub fn issue_kinds_for(

@@ -107,6 +107,12 @@ impl AuthenticatedPayload {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct FormatProbe {
+    #[serde(rename = "formatVersion")]
+    format_version: u8,
+}
+
 pub struct VaultLoader;
 
 impl VaultLoader {
@@ -158,13 +164,9 @@ impl VaultLoader {
         if bytes.len() as u64 > MAX_VAULT_FILE_BYTES {
             return Err(LoadFailure::SizeLimit);
         }
-        let value: serde_json::Value =
+        let probe: FormatProbe =
             serde_json::from_slice(bytes).map_err(|_| LoadFailure::InvalidStructure)?;
-        value
-            .get("formatVersion")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|format| u8::try_from(format).ok())
-            .ok_or(LoadFailure::InvalidStructure)
+        Ok(probe.format_version)
     }
 
     pub fn compatibility(format: u8) -> BackupCompatibility {

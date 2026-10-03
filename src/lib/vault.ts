@@ -1,9 +1,8 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { open, save } from '@tauri-apps/plugin-dialog'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -832,28 +831,14 @@ export async function refreshTotp(id: string): Promise<TotpRefresh> {
   return invoke<TotpRefresh>('refresh_totp', { id })
 }
 
-function importFileFilter(source: ImportSource): { name: string; extensions: string[] } {
-  if (source === 'otpauth-txt') return { name: 'Authenticator export', extensions: ['txt'] }
-  if (source === 'bitwarden-json' || source === 'aegis-json' || source === '2fas-json') {
-    return { name: 'JSON export', extensions: ['json'] }
-  }
-  return { name: 'CSV export', extensions: ['csv'] }
-}
-
-// The export is parsed and held in Rust; its contents never enter the webview.
-export async function chooseImportFile(source: ImportSource): Promise<string | null> {
-  if (previewMode) return 'preview-export.csv'
-  const chosen = await open({
-    multiple: false,
-    directory: false,
-    filters: [importFileFilter(source)],
-  })
-  return typeof chosen === 'string' ? chosen : null
+export async function chooseImportFile(source: ImportSource): Promise<ChosenFile | null> {
+  if (previewMode) return { token: 'preview-import-token', fileName: 'preview-export.csv' }
+  return invoke<ChosenFile | null>('choose_import_file', { source })
 }
 
 const emptyFidelityCounts = { imported: 0, transformed: 0, legacy: 0, malformed: 0, intentionallyOmitted: 0 }
 
-export async function previewImportFile(path: string, source: ImportSource): Promise<ImportPreviewResult> {
+export async function previewImportFile(token: string, source: ImportSource): Promise<ImportPreviewResult> {
   if (previewMode) {
     return {
       importId: 'preview-import',
@@ -863,7 +848,7 @@ export async function previewImportFile(path: string, source: ImportSource): Pro
       },
     }
   }
-  return invoke<ImportPreviewResult>('preview_import', { path, source })
+  return invoke<ImportPreviewResult>('preview_import', { token, source })
 }
 
 export async function commitImport(importId: string, skipExactDuplicates: boolean): Promise<ImportResult> {
@@ -1240,22 +1225,16 @@ export async function createBackup(): Promise<string> {
 
 export async function exportBackup(): Promise<string | null> {
   if (previewMode) return 'sesame-backup-preview.sesame'
-  const destination = await save({
-    defaultPath: `sesame-backup-${new Date().toISOString().slice(0, 10)}.sesame`,
-    filters: [{ name: 'Sesame encrypted backup', extensions: ['sesame'] }],
-  })
-  if (!destination) return null
-  return invoke<string>('export_backup', { destination })
+  const chosen = await invoke<ChosenFile | null>('choose_backup_export_destination')
+  if (!chosen) return null
+  return invoke<string>('export_backup', { token: chosen.token })
 }
 
 export async function exportVaultCsv(): Promise<string[] | null> {
   if (previewMode) return ['sesame-vault-export-preview.csv']
-  const destination = await save({
-    defaultPath: `sesame-vault-export-${new Date().toISOString().slice(0, 10)}.csv`,
-    filters: [{ name: 'Sesame readable export', extensions: ['csv'] }],
-  })
-  if (!destination) return null
-  return invoke<string[]>('export_vault_csv', { destination })
+  const chosen = await invoke<ChosenFile | null>('choose_csv_export_destination')
+  if (!chosen) return null
+  return invoke<string[]>('export_vault_csv', { token: chosen.token })
 }
 
 export async function deleteLocalVault(masterPassword: string): Promise<void> {
@@ -1268,31 +1247,27 @@ export async function deleteLocalVault(masterPassword: string): Promise<void> {
 
 export async function chooseBackupForRestore(): Promise<BackupSelection | null> {
   if (previewMode) {
-    return { source: 'preview.sesame', fileName: 'preview.sesame', formatVersion: 3, compatibility: 'upgrade', setupComplete: true }
+    return { token: 'preview-backup-token', fileName: 'preview.sesame', formatVersion: 3, compatibility: 'upgrade', setupComplete: true }
   }
-  const source = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: 'Sesame encrypted backup', extensions: ['sesame'] }],
-  })
-  if (!source) return null
-  const inspection = await invoke<BackupInspection>('inspect_backup', { source })
-  return { source, ...inspection }
+  const chosen = await invoke<ChosenFile | null>('choose_backup_for_restore')
+  if (!chosen) return null
+  const inspection = await invoke<BackupInspection>('inspect_backup', { token: chosen.token })
+  return { token: chosen.token, ...inspection }
 }
 
 // The backup must open with its own secret before it can replace the active vault.
-export async function restoreBackup(source: string, secret: string): Promise<RestoreBackupResult> {
+export async function restoreBackup(token: string, secret: string): Promise<RestoreBackupResult> {
   if (previewMode) {
     const hadVault = previewUnlocked
     previewUnlocked = false
-    return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false }
+    return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false, restoredRevision: previewSnapshot.revision, replacedRevision: hadVault ? previewSnapshot.revision : undefined }
   }
-  return invoke<RestoreBackupResult>('restore_backup', { request: { source, secret } })
+  return invoke<RestoreBackupResult>('restore_backup', { request: { token, secret } })
 }
 
-export async function verifyBackup(source: string, secret: string): Promise<BackupVerification> {
+export async function verifyBackup(token: string, secret: string): Promise<BackupVerification> {
   if (previewMode) return { fileName: 'preview.sesame', formatVersion: 3, compatibility: 'upgrade', vaultName: previewSnapshot.vaultName, entryCount: previewSnapshot.entries.length, vaultId: 'preview-vault', revision: 1 }
-  return invoke<BackupVerification>('verify_backup', { request: { source, secret } })
+  return invoke<BackupVerification>('verify_backup', { request: { token, secret } })
 }
 
 export async function getRecoveryHealth(): Promise<RecoveryHealth> {
@@ -1326,22 +1301,16 @@ export async function revealLoginSecret(id: string): Promise<string> {
 
 export async function exportRecoveryKit(kit: string): Promise<string | null> {
   if (previewMode) return 'sesame-recovery-kit-preview.txt'
-  const destination = await save({
-    defaultPath: `sesame-recovery-kit-${new Date().toISOString().slice(0, 10)}.txt`,
-    filters: [{ name: 'Text file', extensions: ['txt'] }],
-  })
-  if (!destination) return null
-  return invoke<string>('export_recovery_kit', { destination, kit })
+  const chosen = await invoke<ChosenFile | null>('choose_recovery_kit_destination')
+  if (!chosen) return null
+  return invoke<string>('export_recovery_kit', { token: chosen.token, kit })
 }
 
 export async function exportDiagnostics(): Promise<string | null> {
   if (previewMode) return null
-  const destination = await save({
-    defaultPath: `sesame-diagnostics-${new Date().toISOString().slice(0, 10)}.jsonl`,
-    filters: [{ name: 'Sesame diagnostic log', extensions: ['jsonl'] }],
-  })
-  if (!destination) return null
-  return invoke<string>('export_diagnostics', { destination })
+  const chosen = await invoke<ChosenFile | null>('choose_diagnostics_destination')
+  if (!chosen) return null
+  return invoke<string>('export_diagnostics', { token: chosen.token })
 }
 
 export async function clearDiagnostics(): Promise<void> {
@@ -1352,6 +1321,16 @@ export async function clearDiagnostics(): Promise<void> {
 export async function getWebsiteIcon(site: string): Promise<string | null> {
   if (previewMode) return null
   return invoke<string | null>('get_website_icon', { site })
+}
+
+export async function getWebsiteIconsEnabled(): Promise<boolean | null> {
+  if (previewMode) return null
+  return invoke<boolean | null>('get_website_icons_enabled')
+}
+
+export async function setWebsiteIconsEnabled(enabled: boolean): Promise<void> {
+  if (previewMode) return
+  await invoke('set_website_icons_enabled', { enabled })
 }
 
 export async function clearWebsiteIconCache(): Promise<void> {
@@ -1410,9 +1389,9 @@ export async function repairBrowserIntegration(): Promise<BrowserIntegrationStat
   return invoke<BrowserIntegrationStatus>('repair_browser_integration')
 }
 
-export async function resolveBrowserFill(approvalId: string, loginId: string | null, remember = false): Promise<void> {
+export async function resolveBrowserFill(approvalId: string, loginId: string | null): Promise<void> {
   if (previewMode) return
-  await invoke('resolve_browser_fill', { approvalId, loginId, remember })
+  await invoke('resolve_browser_fill', { approvalId, loginId })
 }
 
 export async function getPendingBrowserFill(): Promise<BrowserFillRequest | null> {
@@ -1475,10 +1454,7 @@ export async function copyToClipboard(value: string): Promise<void> {
   }
   // The copy runs in Rust so the value crosses once and carries the secret hint
   // that keeps clipboard managers from filing it in their history.
-  const epoch = await invoke<number>('copy_secret', { value })
-  window.setTimeout(() => {
-    void invoke('clear_clipboard_if_unchanged', { epoch }).catch(() => {})
-  }, clipboardClearMs)
+  await invoke<number>('copy_secret', { value, clearAfterMs: clipboardClearMs })
 }
 
 export async function openWebsite(url: string, purpose: 'savedLogin' | 'support' = 'savedLogin'): Promise<void> {

@@ -203,7 +203,7 @@ pub fn restore_version(
     history_id: &str,
 ) -> VaultResult<(VaultPayload, String)> {
     let mut next = payload.clone();
-    let entry = next
+    let mut entry = next
         .history
         .iter()
         .find(|entry| entry.id == history_id)
@@ -213,8 +213,8 @@ pub fn restore_version(
     let now = unix_timestamp();
 
     let previous = next.take_active_item(&restored_id).ok_or(NOT_ACTIVE)?;
-    let restored = entry.item.restored_over(previous.clone(), now)?;
-    next.insert_active_item(restored)?;
+    let mut restored = entry.item.restored_over(&previous, now)?;
+    next.insert_active_item(&mut restored)?;
     capture_history_for_operation(&mut next, previous, HistoryOperation::Restore);
     Ok((next, restored_id))
 }
@@ -225,26 +225,24 @@ mod change_tests {
     use crate::types::{Card, VaultEntry};
 
     fn login(password: &str, username: &str) -> TaggedItem {
-        TaggedItem::Login(VaultEntry {
-            id: "one".to_string(),
-            title: "Example".to_string(),
-            password: password.to_string(),
-            username: username.to_string(),
-            ..VaultEntry::default()
-        })
+        let mut entry = VaultEntry::default();
+        entry.id = "one".to_string();
+        entry.title = "Example".to_string();
+        entry.password = password.to_string();
+        entry.username = username.to_string();
+        TaggedItem::Login(entry)
     }
 
     #[test]
     fn document_history_keeps_no_attachment_bytes_and_restore_keeps_live_ones() {
         use crate::types::{Attachment, DocumentMetadata};
 
-        fn document(attachments: Vec<Attachment>) -> TaggedItem {
-            TaggedItem::Document(DocumentMetadata {
-                id: "doc".to_string(),
-                title: "Passport".to_string(),
-                attachments,
-                ..DocumentMetadata::default()
-            })
+        fn document(attachments: Vec<Attachment>) -> DocumentMetadata {
+            let mut document = DocumentMetadata::default();
+            document.id = "doc".to_string();
+            document.title = "Passport".to_string();
+            document.attachments = attachments;
+            document
         }
 
         let attachment = Attachment {
@@ -255,13 +253,11 @@ mod change_tests {
             data: vec![1, 2, 3],
         };
         let mut payload = VaultPayload::default();
-        payload
-            .documents
-            .push(match document(vec![attachment.clone()]) {
-                TaggedItem::Document(document) => document,
-                _ => unreachable!(),
-            });
-        capture_history(&mut payload, document(vec![attachment]));
+        payload.documents.push(document(vec![attachment.clone()]));
+        capture_history(
+            &mut payload,
+            TaggedItem::Document(document(vec![attachment])),
+        );
         let stored = match &payload.history[0].item {
             TaggedItem::Document(document) => document,
             _ => panic!("expected a document history entry"),
@@ -299,35 +295,29 @@ mod change_tests {
     /// Timestamps and revision counters move on every save and are not edits.
     #[test]
     fn bookkeeping_fields_are_not_reported_as_edits() {
-        let before = TaggedItem::Login(VaultEntry {
-            id: "one".to_string(),
-            revision: 1,
-            updated_at: 100,
-            password_updated_at: 100,
-            ..VaultEntry::default()
-        });
-        let after = TaggedItem::Login(VaultEntry {
-            id: "one".to_string(),
-            revision: 9,
-            updated_at: 999,
-            password_updated_at: 999,
-            ..VaultEntry::default()
-        });
+        fn login_at(revision: u32, updated_at: u64) -> TaggedItem {
+            let mut entry = VaultEntry::default();
+            entry.id = "one".to_string();
+            entry.revision = revision;
+            entry.updated_at = updated_at;
+            entry.password_updated_at = updated_at;
+            TaggedItem::Login(entry)
+        }
+        let before = login_at(1, 100);
+        let after = login_at(9, 999);
         assert!(changed_fields(&before, &after).is_empty());
     }
 
     #[test]
     fn field_names_read_as_words_rather_than_keys() {
-        let before = TaggedItem::Card(Card {
-            id: "c".to_string(),
-            security_code: "123".to_string(),
-            ..Card::default()
-        });
-        let after = TaggedItem::Card(Card {
-            id: "c".to_string(),
-            security_code: "456".to_string(),
-            ..Card::default()
-        });
+        fn card(security_code: &str) -> TaggedItem {
+            let mut card = Card::default();
+            card.id = "c".to_string();
+            card.security_code = security_code.to_string();
+            TaggedItem::Card(card)
+        }
+        let before = card("123");
+        let after = card("456");
         assert_eq!(
             changed_fields(&before, &after),
             vec!["security code".to_string()]

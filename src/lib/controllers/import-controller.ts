@@ -1,5 +1,5 @@
 import type { AppStores } from '../stores/app-stores'
-import type { ImportSource } from '../types'
+import type { ChosenFile, ImportSource } from '../types'
 import {
   cancelImport,
   chooseImportFile,
@@ -57,19 +57,19 @@ export function createImportController({ stores, feedback, modal, refreshDiagnos
     async chooseFile() {
       feedback.clearError()
       const source = imports.value().source
-      let path: string | null
+      let chosen: ChosenFile | null
       try {
-        path = await chooseImportFile(source)
+        chosen = await chooseImportFile(source)
       } catch (error) {
         feedback.setError(error)
         return
       }
-      if (!path) return
+      if (!chosen) return
 
       imports.patch({ importing: true })
       try {
-        const { importId, preview } = await previewImportFile(path, source)
-        imports.patch({ importId, fileName: path.split(/[\\/]/).pop() ?? path, preview })
+        const { importId, preview } = await previewImportFile(chosen.token, source)
+        imports.patch({ importId, fileName: chosen.fileName, preview })
       } catch (error) {
         void recordDiagnostic('import_preview', 'invalid_file')
         void refreshDiagnostics()

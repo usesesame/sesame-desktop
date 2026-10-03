@@ -225,19 +225,17 @@ mod tests {
     };
 
     fn login(id: &str) -> VaultEntry {
-        VaultEntry {
-            id: id.to_string(),
-            title: "Example".to_string(),
-            ..VaultEntry::default()
-        }
+        let mut entry = VaultEntry::default();
+        entry.id = id.to_string();
+        entry.title = "Example".to_string();
+        entry
     }
 
     fn card(id: &str) -> Card {
-        Card {
-            id: id.to_string(),
-            title: "Example".to_string(),
-            ..Card::default()
-        }
+        let mut card = Card::default();
+        card.id = id.to_string();
+        card.title = "Example".to_string();
+        card
     }
 
     #[test]

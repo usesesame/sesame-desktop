@@ -23,17 +23,16 @@ impl TestVault {
             UnlockedVault::from_opened(path.clone(), &opened).expect("unlocked vault");
         session.setup_complete = true;
         let mut payload = session.open_payload().expect("opened payload").clone();
-        payload.entries.push(VaultEntry {
-            id: id.to_string(),
-            title: "Northwind".to_string(),
-            url: url.to_string(),
-            username: "fictional-user".to_string(),
-            password: "fictional-stored-secret".to_string(),
-            updated_at: 41,
-            password_updated_at: 42,
-            revision: 7,
-            ..VaultEntry::default()
-        });
+        let mut entry = VaultEntry::default();
+        entry.id = id.to_string();
+        entry.title = "Northwind".to_string();
+        entry.url = url.to_string();
+        entry.username = "fictional-user".to_string();
+        entry.password = "fictional-stored-secret".to_string();
+        entry.updated_at = 41;
+        entry.password_updated_at = 42;
+        entry.revision = 7;
+        payload.entries.push(entry);
         commit_payload_change(&mut session, payload).expect("seeded payload");
         let state = VaultState::default();
         *state.session.lock().expect("session lock") = Some(session);

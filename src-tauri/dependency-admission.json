@@ -32,12 +32,6 @@
       "reason": "In use before this gate was adopted."
     },
     {
-      "name": "@tauri-apps/plugin-dialog",
-      "version": "2.7",
-      "source": "npm",
-      "reason": "In use before this gate was adopted."
-    },
-    {
       "name": "@testing-library/svelte",
       "version": "5.4",
       "source": "npm",
