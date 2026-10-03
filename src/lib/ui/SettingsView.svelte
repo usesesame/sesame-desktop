@@ -8,10 +8,12 @@
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
   import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
-  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
+  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
+  import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
+  import { recoveryRequestPending } from '../recovery-replacement'
   import ViewHeader from './ViewHeader.svelte'
 
   export let theme: Theme = 'auto'
@@ -28,6 +30,18 @@
   export let helloWorking = false
   export let onToggleHello: () => void
   export let onChangeMasterPassword: () => void
+  export let recoveryReplacement: RecoveryReplacementStatus | null = null
+  export let recoveryWorking = false
+  export let recoveryPresenceIntent: 'request-kit' | 'issue-kit' | null = null
+  export let recoveryPresencePassword = ''
+  export let issuedRecoveryKit = ''
+  export let issuedRecoveryConfirmed = false
+  export let onRequestRecoveryKit: () => void = () => {}
+  export let onIssueRecoveryKit: () => void = () => {}
+  export let onCancelRecoveryRequest: () => void = () => {}
+  export let onConfirmRecoveryPresence: () => void = () => {}
+  export let onCancelRecoveryPresence: () => void = () => {}
+  export let onFinishIssuedRecoveryKit: () => void = () => {}
   export let keepInTray = true
   export let trayWorking = false
   export let onToggleTray: () => void
@@ -84,9 +98,15 @@
     { id: 'connections', label: 'Connections', icon: 'globe' },
     { id: 'data', label: 'Data', icon: 'shield' },
   ]
-  let tab: TabId = 'general'
+  export let tab: TabId = 'general'
   const tabButtons: HTMLButtonElement[] = []
   let recordingShortcut = false
+
+  function formatMoment(seconds: number | undefined): string {
+    return seconds === undefined ? '' : new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  }
+
+  $: recoveryRequested = recoveryRequestPending(recoveryReplacement)
 
   function formatAccelerator(value: string): string {
     return value.split('+').join(' + ')
@@ -283,6 +303,18 @@
               <div class="setting-copy"><strong>Master password</strong><p>Replace your master password and get a fresh recovery kit.</p></div>
               <button type="button" class="secondary-button settings-manage" on:click={onChangeMasterPassword}>Change</button>
             </article>
+            <article>
+              {#if recoveryRequested && recoveryReplacement?.ready}
+                <div class="setting-copy"><strong>Recovery kit</strong><p>The new recovery kit you requested on {formatMoment(recoveryReplacement.requestedAt)} is ready. Getting it replaces your current kit.</p></div>
+                <div class="diagnostic-actions"><button type="button" class="text-button" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button><button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onIssueRecoveryKit}>Get new kit</button></div>
+              {:else if recoveryRequested}
+                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame checks the time with usesesame.app and github.com before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
+                <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button>
+              {:else}
+                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with usesesame.app and github.com, not this computer's clock.</p></div>
+                <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onRequestRecoveryKit}>Request new kit</button>
+              {/if}
+            </article>
           </div>
         </section>
       </div>
@@ -399,6 +431,12 @@
   </div>
 </section>
 
+{#if recoveryPresenceIntent}
+  <PasswordPresenceModal intent={recoveryPresenceIntent} bind:presenceSecret={recoveryPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmRecoveryPresence} onCancel={onCancelRecoveryPresence} />
+{/if}
+{#if issuedRecoveryKit}
+  <IssuedRecoveryKitModal recoveryKit={issuedRecoveryKit} bind:confirmed={issuedRecoveryConfirmed} onDone={onFinishIssuedRecoveryKit} />
+{/if}
 {#if siteIconsPresenceRequired}
   <PasswordPresenceModal intent="enable-icons" bind:presenceSecret={siteIconsPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmSiteIconsPresence} onCancel={onCancelSiteIconsPresence} />
 {/if}

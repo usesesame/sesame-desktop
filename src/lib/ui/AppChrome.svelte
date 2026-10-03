@@ -6,6 +6,8 @@
   export let idleWarningSeconds: number | null = null
   export let onStayUnlocked: () => void = () => {}
   export let preview = false
+  export let recoveryRequestPending = false
+  export let onReviewRecoveryRequest: () => void = () => {}
   /// Sync status text; undefined in every build where Sync is disabled.
   export let syncStatusLabel: string | undefined = undefined
 
@@ -21,6 +23,13 @@
   </div>
   <div class="chrome-drag-space" data-tauri-drag-region></div>
   <!-- Only real input dismisses: the button defers the lock, no command behind it. See src-tauri/src/session_guard.rs. -->
+  {#if recoveryRequestPending}
+    <div class="idle-warning" role="alert">
+      <span>New recovery kit requested</span>
+      <button type="button" on:click={onReviewRecoveryRequest}>Review</button>
+    </div>
+    <div class="chrome-drag-space" data-tauri-drag-region></div>
+  {/if}
   {#if idleWarningSeconds !== null}
     <div class="idle-warning" role="alert">
       <span>Locking in {idleWarningSeconds}s</span>

@@ -20,9 +20,13 @@ import {
   storeTheme,
 } from '../preferences'
 import type { AppStores } from '../stores/app-stores'
-import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
+import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
 import {
+  cancelRecoveryReplacement,
   changeMasterPassword,
+  completeRecoveryReplacement,
+  getRecoveryReplacementStatus,
+  requestRecoveryReplacement,
 	checkDesktopUpdate,
   clearDiagnostics,
   disableWindowsHello,
@@ -101,7 +105,16 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     websiteIconCacheWorking: false,
     websiteIconCache: emptyWebsiteIconCache,
     changeMasterPasswordOpen: false,
+    settingsTab: 'general' as 'general' | 'security' | 'connections' | 'data',
+    recoveryReplacement: null as RecoveryReplacementStatus | null,
+    recoveryPresenceIntent: null as 'request-kit' | 'issue-kit' | null,
+    recoveryPresencePassword: '',
+    recoveryWorking: false,
+    issuedRecoveryKit: '',
+    issuedRecoveryConfirmed: false,
+    changeMasterPasswordStep: 'verify' as 'verify' | 'details',
     currentMasterPassword: '',
+    currentRecoveryKit: '',
     newMasterPassword: '',
     confirmNewMasterPassword: '',
     newRecoveryKit: '',
@@ -209,7 +222,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   function clearMasterPasswordState() {
     state.patch({
-      changeMasterPasswordOpen: false, currentMasterPassword: '', newMasterPassword: '',
+      changeMasterPasswordOpen: false, changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
       confirmNewMasterPassword: '', newRecoveryKit: '', newBackupsRemaining: null, newRecoveryConfirmed: false, changingMasterPassword: false,
     })
   }
@@ -496,22 +509,117 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       clearMasterPasswordState()
       feedback.clearError()
     },
-    async saveChangedMasterPassword() {
+    async verifyCurrentMasterPassword() {
       const current = state.value()
-      if (current.changingMasterPassword) return
-      if (current.newMasterPassword.length < 12) return feedback.setErrorMessage('Use a new master password with at least 12 characters.')
-      if (current.newMasterPassword !== current.confirmNewMasterPassword) return feedback.setErrorMessage('Those new passwords do not match.')
+      if (current.changingMasterPassword || !current.currentMasterPassword) return
       state.patch({ changingMasterPassword: true })
       feedback.clearError()
       try {
-        const result = await changeMasterPassword(current.currentMasterPassword, current.newMasterPassword)
-        vault.patch({ status: await getVaultStatus() })
-        state.patch({ currentMasterPassword: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit, newBackupsRemaining: result.backupsRemaining ?? null })
+        await grantPresence(current.currentMasterPassword)
+        state.patch({ changeMasterPasswordStep: 'details' })
       } catch (error) {
         feedback.setError(error)
       } finally {
         state.patch({ changingMasterPassword: false })
       }
+    },
+    useRecoveryKitForMasterPasswordChange() {
+      if (state.value().changingMasterPassword) return
+      feedback.clearError()
+      state.patch({ currentMasterPassword: '', changeMasterPasswordStep: 'details' })
+    },
+    backToMasterPasswordCheck() {
+      if (state.value().changingMasterPassword) return
+      feedback.clearError()
+      state.patch({ currentMasterPassword: '', currentRecoveryKit: '', changeMasterPasswordStep: 'verify' })
+    },
+    async saveChangedMasterPassword() {
+      const current = state.value()
+      if (current.changingMasterPassword) return
+      if (!current.currentRecoveryKit.trim()) return feedback.setErrorMessage('Enter your recovery kit to change the master password.')
+      if (current.newMasterPassword.length < 12) return feedback.setErrorMessage('Use a new master password with at least 12 characters.')
+      if (current.newMasterPassword !== current.confirmNewMasterPassword) return feedback.setErrorMessage('Those new passwords do not match.')
+      state.patch({ changingMasterPassword: true })
+      feedback.clearError()
+      try {
+        const result = await changeMasterPassword(current.currentMasterPassword || null, current.currentRecoveryKit.trim().toUpperCase(), current.newMasterPassword)
+        vault.patch({ status: await getVaultStatus() })
+        state.patch({ currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '', confirmNewMasterPassword: '', newRecoveryKit: result.recoveryKit, newBackupsRemaining: result.backupsRemaining ?? null, recoveryReplacement: null })
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ changingMasterPassword: false })
+      }
+    },
+    async loadRecoveryReplacement() {
+      try {
+        state.patch({ recoveryReplacement: await getRecoveryReplacementStatus() })
+      } catch {
+        state.patch({ recoveryReplacement: null })
+      }
+    },
+    openRecoveryKitSettings() {
+      state.patch({ settingsTab: 'security' })
+    },
+    requestNewRecoveryKitFromChange() {
+      if (state.value().changingMasterPassword) return
+      modal.close('change-master-password')
+      clearMasterPasswordState()
+      feedback.clearError()
+      state.patch({ settingsTab: 'security', recoveryPresenceIntent: 'request-kit', recoveryPresencePassword: '' })
+    },
+    startRecoveryKitRequest() {
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: 'request-kit', recoveryPresencePassword: '' })
+    },
+    startRecoveryKitIssue() {
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '' })
+    },
+    cancelRecoveryPresence() {
+      if (state.value().recoveryWorking) return
+      feedback.clearError()
+      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+    },
+    async confirmRecoveryPresence() {
+      const current = state.value()
+      if (current.recoveryWorking || !current.recoveryPresenceIntent || !current.recoveryPresencePassword) return
+      state.patch({ recoveryWorking: true })
+      feedback.clearError()
+      try {
+        await grantPresence(current.recoveryPresencePassword)
+        if (current.recoveryPresenceIntent === 'request-kit') {
+          const status = await requestRecoveryReplacement()
+          state.patch({ recoveryReplacement: status, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+          feedback.showNotice('New recovery kit requested', 'It will be ready in 72 hours. Sesame shows a warning until then.')
+        } else {
+          const kit = await completeRecoveryReplacement()
+          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false, timeConfirmed: true }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+        }
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ recoveryWorking: false })
+      }
+    },
+    async cancelRecoveryKitRequest() {
+      if (state.value().recoveryWorking) return
+      state.patch({ recoveryWorking: true })
+      feedback.clearError()
+      try {
+        await cancelRecoveryReplacement()
+        state.patch({ recoveryReplacement: { ready: false, timeConfirmed: true } })
+        feedback.showNotice('Recovery kit request cancelled', 'Your current recovery kit still works.')
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ recoveryWorking: false })
+      }
+    },
+    finishIssuedRecoveryKit() {
+      if (!state.value().issuedRecoveryConfirmed) return
+      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false })
+      feedback.showNotice('New recovery kit saved', 'Your old recovery kit no longer opens this vault.')
     },
     finishMasterPasswordChange() {
       if (!state.value().newRecoveryConfirmed) return
@@ -593,9 +701,11 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       state.patch({
         pinSetupValue: '', pinSetupConfirm: '', pinWorking: false, helloWorking: false,
         siteIconsWorking: false, siteIconsPresenceRequired: false, siteIconsPresencePassword: '',
-        currentMasterPassword: '', newMasterPassword: '',
+        changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
         confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false,
         changingMasterPassword: false,
+        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryWorking: false,
+        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, recoveryReplacement: null,
       })
     },
   }

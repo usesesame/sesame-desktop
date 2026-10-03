@@ -6,7 +6,11 @@ import { createModalController } from './modal-controller'
 import { createSettingsController } from './settings-controller'
 
 const vaultApi = vi.hoisted(() => ({
+  cancelRecoveryReplacement: vi.fn(),
   changeMasterPassword: vi.fn(),
+  completeRecoveryReplacement: vi.fn(),
+  getRecoveryReplacementStatus: vi.fn(),
+  requestRecoveryReplacement: vi.fn(),
   checkDesktopUpdate: vi.fn(),
   clearDiagnostics: vi.fn(),
   clearWebsiteIconCache: vi.fn(),
@@ -158,5 +162,134 @@ describe('website icon opt-in on startup', () => {
     await vi.waitFor(() => expect(stores.settings.value().siteIconsEnabled).toBe(true))
     expect(localStorage.getItem('sesame-site-icons')).toBe('enabled')
     expect(vaultApi.setWebsiteIconsEnabled).not.toHaveBeenCalled()
+  })
+})
+
+describe('master password change', () => {
+  const KIT = 'F9K4P-7XQ2M-T6V8C-H3R5W-J8L2N'
+
+  function openChange() {
+    const h = harness()
+    h.controller.openChangeMasterPassword()
+    return h
+  }
+
+  it('checks the current password before it asks for the recovery kit', async () => {
+    const { controller, feedback } = openChange()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    controller.state.patch({ currentMasterPassword: 'fictional current password' })
+
+    await controller.verifyCurrentMasterPassword()
+
+    expect(vaultApi.grantPresence).toHaveBeenCalledWith('fictional current password')
+    expect(controller.state.value().changeMasterPasswordStep).toBe('details')
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+
+  it('stays on the first step when the current password is wrong', async () => {
+    const { controller, feedback } = openChange()
+    vaultApi.grantPresence.mockRejectedValue(new Error('That master password is not correct.'))
+    controller.state.patch({ currentMasterPassword: 'fictional wrong password' })
+
+    await controller.verifyCurrentMasterPassword()
+
+    expect(controller.state.value().changeMasterPasswordStep).toBe('verify')
+    expect(feedback.state.value().errorMessage).toContain('not correct')
+  })
+
+  it('sends the current password and the recovery kit with the new password', async () => {
+    const { controller } = openChange()
+    vaultApi.changeMasterPassword.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB', backupsRemaining: 0 })
+    vaultApi.getVaultStatus.mockResolvedValue({})
+    controller.state.patch({ changeMasterPasswordStep: 'details', currentMasterPassword: 'fictional current password', currentRecoveryKit: ` ${KIT.toLowerCase()} `, newMasterPassword: 'fictional new password', confirmNewMasterPassword: 'fictional new password' })
+
+    await controller.saveChangedMasterPassword()
+
+    expect(vaultApi.changeMasterPassword).toHaveBeenCalledWith('fictional current password', KIT, 'fictional new password')
+    expect(controller.state.value().currentRecoveryKit).toBe('')
+    expect(controller.state.value().newRecoveryKit).toBe('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+  })
+
+  it('resets a forgotten password with the recovery kit alone', async () => {
+    const { controller } = openChange()
+    vaultApi.changeMasterPassword.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB', backupsRemaining: 0 })
+    vaultApi.getVaultStatus.mockResolvedValue({})
+    controller.useRecoveryKitForMasterPasswordChange()
+    expect(controller.state.value().changeMasterPasswordStep).toBe('details')
+    controller.state.patch({ currentRecoveryKit: KIT, newMasterPassword: 'fictional new password', confirmNewMasterPassword: 'fictional new password' })
+
+    await controller.saveChangedMasterPassword()
+
+    expect(vaultApi.grantPresence).not.toHaveBeenCalled()
+    expect(vaultApi.changeMasterPassword).toHaveBeenCalledWith(null, KIT, 'fictional new password')
+  })
+
+  it('does not send a change without the recovery kit', async () => {
+    const { controller, feedback } = openChange()
+    controller.state.patch({ changeMasterPasswordStep: 'details', currentMasterPassword: 'fictional current password', currentRecoveryKit: '   ', newMasterPassword: 'fictional new password', confirmNewMasterPassword: 'fictional new password' })
+
+    await controller.saveChangedMasterPassword()
+
+    expect(vaultApi.changeMasterPassword).not.toHaveBeenCalled()
+    expect(feedback.state.value().errorMessage).toContain('recovery kit')
+  })
+})
+
+describe('recovery kit replacement', () => {
+  it('requests a new kit only after the master password is confirmed', async () => {
+    const { controller } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.requestRecoveryReplacement.mockResolvedValue({ requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false, timeConfirmed: true })
+    controller.startRecoveryKitRequest()
+    controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(vaultApi.grantPresence).toHaveBeenCalledWith('fictional master password')
+    expect(vaultApi.requestRecoveryReplacement).toHaveBeenCalledTimes(1)
+    expect(controller.state.value().recoveryReplacement?.requestedAt).toBe(1_700_000_000)
+    expect(controller.state.value().recoveryPresenceIntent).toBeNull()
+    expect(controller.state.value().recoveryPresencePassword).toBe('')
+  })
+
+  it('does not request a kit when the master password is wrong', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.grantPresence.mockRejectedValue(new Error('That master password is not correct.'))
+    controller.startRecoveryKitRequest()
+    controller.state.patch({ recoveryPresencePassword: 'fictional wrong password' })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(vaultApi.requestRecoveryReplacement).not.toHaveBeenCalled()
+    expect(controller.state.value().recoveryPresenceIntent).toBe('request-kit')
+    expect(feedback.state.value().errorMessage).toContain('not correct')
+  })
+
+  it('shows the issued kit and clears it only after it is saved', async () => {
+    const { controller } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.completeRecoveryReplacement.mockResolvedValue('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+    controller.startRecoveryKitIssue()
+    controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
+
+    await controller.confirmRecoveryPresence()
+    expect(controller.state.value().issuedRecoveryKit).toBe('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+
+    controller.finishIssuedRecoveryKit()
+    expect(controller.state.value().issuedRecoveryKit).toBe('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+    controller.state.patch({ issuedRecoveryConfirmed: true })
+    controller.finishIssuedRecoveryKit()
+    expect(controller.state.value().issuedRecoveryKit).toBe('')
+  })
+
+  it('cancels a pending request without a password', async () => {
+    const { controller } = harness()
+    vaultApi.cancelRecoveryReplacement.mockResolvedValue(undefined)
+    controller.state.patch({ recoveryReplacement: { requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false, timeConfirmed: true } })
+
+    await controller.cancelRecoveryKitRequest()
+
+    expect(vaultApi.grantPresence).not.toHaveBeenCalled()
+    expect(controller.state.value().recoveryReplacement?.requestedAt).toBeUndefined()
   })
 })

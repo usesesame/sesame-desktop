@@ -820,6 +820,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .change-master-password-modal form label { display: grid; gap: 7px; color: var(--text); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .change-master-password-modal form input { width: 100%; border: 1px solid var(--field-border); border-radius: var(--radius-sm); padding: 12px 14px; color: var(--text); background: var(--field-bg); }
 .change-master-password-modal form input:focus-visible { box-shadow: var(--field-ring); outline: none; }
+.change-master-password-modal .change-password-forgot { justify-self: start; }
 
 .browser-fill-backdrop { z-index: 120; }
 .browser-fill-modal { width: min(100%, 540px); }
@@ -1024,6 +1025,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-view article .setting-copy { flex: 1; min-width: 0; }
 .setting-copy { min-width: 0; }
 .settings-manage { min-height: 34px; padding: 0 var(--space-4); }
+.setting-copy p.recovery-request-warning { color: var(--warn-text); }
 .diagnostic-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 /* Rows that reveal a panel below themselves: the panel is a full-width flex line
    of its own, so the copy column keeps its width instead of being crushed. */
