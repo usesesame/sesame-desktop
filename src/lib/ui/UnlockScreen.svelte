@@ -21,8 +21,7 @@
   let pinField: HTMLInputElement
   let masterPasswordInput: HTMLInputElement
 
-  $: pinCellCount = Math.min(MAX_PIN_DIGITS, Math.max(MIN_PIN_DIGITS, unlockPin.length + 1))
-  $: pinCells = Array.from({ length: pinCellCount }, (_, index) => unlockPin[index] ?? '')
+  $: pinDots = Array.from({ length: Math.max(MIN_PIN_DIGITS, unlockPin.length) }, (_, index) => index < unlockPin.length)
   $: pinReady = unlockPin.length >= MIN_PIN_DIGITS
 
   function onPinInput(event: Event) {
@@ -86,7 +85,7 @@
 
     {#if showPin}
       <form novalidate on:submit|preventDefault={submitPin}>
-        <div class="pin-field">
+        <div class="pin-field" class:rejected={Boolean(errorMessage)}>
           <input
             bind:this={pinField}
             class="pin-entry"
@@ -102,9 +101,9 @@
             aria-describedby={errorMessage ? 'unlock-error' : undefined}
             on:input={onPinInput}
           />
-          {#each pinCells as digit, index (index)}
-            <span class="pin-cell" class:filled={digit !== ''} class:next={index === unlockPin.length} aria-hidden="true"></span>
-          {/each}
+          <span class="pin-dots" aria-hidden="true">
+            {#each pinDots as filled, index (index)}<span class="pin-dot" class:filled></span>{/each}
+          </span>
         </div>
         {#if errorMessage}
           <p id="unlock-error" class="form-error" role="alert">{errorMessage}</p>

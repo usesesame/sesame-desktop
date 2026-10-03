@@ -31,8 +31,8 @@ function renderPinUnlock() {
   const rendered = render(UnlockScreen, { props: { status, onUnlockWithPin, onUnlockWithHello: vi.fn(), onSubmitMasterPassword: vi.fn() } } as never)
   const field = rendered.container.querySelector('.pin-entry') as HTMLInputElement
   const submit = screen.getByRole('button', { name: 'Unlock vault' }) as HTMLButtonElement
-  const cells = () => rendered.container.querySelectorAll('.pin-cell').length
-  return { rendered, field, submit, cells, onUnlockWithPin }
+  const dots = () => rendered.container.querySelectorAll('.pin-dot').length
+  return { rendered, field, submit, dots, onUnlockWithPin }
 }
 
 test('six digits do not unlock on their own, and the button submits them', async () => {
@@ -50,16 +50,23 @@ test('six digits do not unlock on their own, and the button submits them', async
   expect(onUnlockWithPin).toHaveBeenCalledTimes(1)
 })
 
-test('a longer PIN grows the cells and stops at twelve digits', async () => {
-  const { field, cells, onUnlockWithPin } = renderPinUnlock()
-  expect(cells()).toBe(6)
+test('the field shows six dots and adds one per digit up to twelve', async () => {
+  const { field, dots, rendered, onUnlockWithPin } = renderPinUnlock()
+  const filled = () => rendered.container.querySelectorAll('.pin-dot.filled').length
+  expect(dots()).toBe(6)
+  expect(filled()).toBe(0)
+
+  await fireEvent.input(field, { target: { value: '472' } })
+  expect(dots()).toBe(6)
+  expect(filled()).toBe(3)
 
   await fireEvent.input(field, { target: { value: '4729138' } })
-  expect(cells()).toBe(8)
+  expect(dots()).toBe(7)
+  expect(filled()).toBe(7)
 
   await fireEvent.input(field, { target: { value: '47 2913850261999' } })
   expect(field.value).toBe('472913850261')
-  expect(cells()).toBe(12)
+  expect(dots()).toBe(12)
 
   await fireEvent.submit(field.form as HTMLFormElement)
   expect(onUnlockWithPin).toHaveBeenCalledTimes(1)
