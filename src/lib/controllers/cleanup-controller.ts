@@ -258,6 +258,11 @@ export function createCleanupController(options: CleanupControllerOptions) {
     showCards() {
       selection.patch({ categoryFilter: 'card', securityFilter: null, collectionFilter: null, searchQuery: '', activeView: 'vault' })
     },
+    async openLogin(id: string) {
+      if (!(vault.value().snapshot?.entries ?? []).some((entry) => entry.id === id)) return
+      selection.patch({ categoryFilter: 'login', securityFilter: null, collectionFilter: null, searchQuery: '', activeView: 'vault' })
+      await options.selectEntry(id)
+    },
     async startBreachScan() {
       if (state.value().breachScan?.phase === 'running') return
       state.patch({ breachScanError: '', breachScan: { phase: 'running', checked: 0, total: 0, results: [] } })
