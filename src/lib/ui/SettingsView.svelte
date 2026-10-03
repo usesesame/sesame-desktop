@@ -7,6 +7,7 @@
   import { appVersion, SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
+  import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
@@ -259,7 +260,7 @@
             {/if}
             {#if $platformCapabilities.pinUnlock}
             <article>
-              <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a six-digit PIN on this device. Your master password or recovery kit remains available.</p></div>
+              <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a PIN of {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits on this device. Your master password or recovery kit remains available.</p></div>
               <button type="button" class="switch" class:active={pinUnlockAvailable} role="switch" aria-checked={pinUnlockAvailable} aria-label="Unlock with PIN" disabled={pinWorking} on:click={onTogglePin}><span></span></button>
             </article>
             {/if}

@@ -57,6 +57,28 @@ pub fn analyse_password_value(password: &str) -> PasswordAnalysis {
     PasswordAnalysis { score, issues }
 }
 
+pub const MIN_MASTER_PASSWORD_CHARACTERS: usize = 12;
+pub const MIN_MASTER_PASSWORD_SCORE: u8 = 3;
+
+pub fn check_new_master_password(password: &str) -> crate::VaultResult<()> {
+    if password.chars().count() < MIN_MASTER_PASSWORD_CHARACTERS {
+        return Err(format!(
+            "Use a master password with at least {MIN_MASTER_PASSWORD_CHARACTERS} characters."
+        ));
+    }
+    let analysis = analyse_password_value(password);
+    if analysis.has("common-password")
+        || analysis.has("compromised-pattern")
+        || is_repeated_unit(password)
+    {
+        return Err("That master password follows a pattern attackers try first. Choose another one, or use a generated passphrase.".into());
+    }
+    if analysis.score < MIN_MASTER_PASSWORD_SCORE {
+        return Err("That master password is too easy to guess. Use 16 or more characters, or a generated passphrase.".into());
+    }
+    Ok(())
+}
+
 pub fn analyse_password(entry: &VaultEntry, reused: bool) -> PasswordAnalysis {
     let password = entry.password.as_str();
     let common = is_common_password(password);
@@ -205,6 +227,17 @@ fn has_compromised_pattern(entry: &VaultEntry) -> bool {
     account_tokens(entry)
         .into_iter()
         .any(|token| token.len() >= 4 && password.contains(&token))
+}
+
+fn is_repeated_unit(value: &str) -> bool {
+    let characters: Vec<char> = value.to_lowercase().chars().collect();
+    let length = characters.len();
+    (1..=length / 2).any(|unit| {
+        length % unit == 0
+            && characters
+                .chunks(unit)
+                .all(|chunk| chunk == &characters[..unit])
+    })
 }
 
 fn has_repeated_run(value: &str, minimum: usize) -> bool {

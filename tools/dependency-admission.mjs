@@ -316,7 +316,7 @@ function main() {
     ]
     if (problems.length > 0) {
       process.stderr.write(`Dependency admission failed:\n${problems.map((line) => `  ${line}`).join('\n')}\n`)
-      process.stderr.write('Every locked package must come from crates.io or registry.npmjs.org, carry a checksum or integrity hash, and every direct dependency must be recorded in src-tauri/dependency-admission.json with a reason. New dependencies need owner approval first.\n')
+      process.stderr.write('Every locked package must come from crates.io or registry.npmjs.org, carry a checksum or integrity hash, and every direct dependency must be recorded in src-tauri/dependency-admission.json with a reason. New dependencies need review before they are added.\n')
       process.exitCode = 1
       return
     }

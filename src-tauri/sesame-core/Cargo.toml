@@ -42,6 +42,7 @@ sha1 = "0.11"
 sha2 = "0.11"
 minisign-verify = "0.2.5"
 totp-rs = { version = "6", features = ["otpauth", "zeroize"] }
+unicode-normalization = "0.1"
 url = "2.5"
 zeroize = "1.8"
 x25519-dalek = { version = "3", features = ["static_secrets"] }

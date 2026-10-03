@@ -134,7 +134,7 @@
     {
       "name": "idna",
       "version": "1",
-      "reason": "Decodes punycode host labels for the FILL-03 lookalike comparison; psl reads only ASCII and does not decode. Already in the lock through url. Owner approved 2026-09-27."
+      "reason": "Decodes punycode host labels for the lookalike host comparison; psl reads only ASCII and does not decode. Already in the lock through url."
     },
     {
       "name": "jsdom",
@@ -155,7 +155,7 @@
     {
       "name": "psl",
       "version": "2",
-      "reason": "Compile-time public suffix list for registrable domain comparison in the FILL-03 lookalike check. Owner approved 2026-09-27."
+      "reason": "Compile-time public suffix list for registrable domain comparison in the lookalike host check."
     },
     {
       "name": "rand",
@@ -280,7 +280,12 @@
     {
       "name": "unicode-security",
       "version": "0.1",
-      "reason": "UTS #39 confusable skeletons and mixed-script detection for the FILL-03 lookalike check. Owner approved 2026-09-27."
+      "reason": "UTS #39 confusable skeletons and mixed-script detection for the lookalike host check."
+    },
+    {
+      "name": "unicode-normalization",
+      "version": "0.1",
+      "reason": "NFC normalization of master passwords per RFC 8265, so the same password typed in another Unicode form still unlocks. Already in the shipped build through unicode-security."
     },
     {
       "name": "url",

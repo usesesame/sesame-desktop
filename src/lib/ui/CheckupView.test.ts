@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
 import { afterEach, expect, test, vi } from 'vitest'
-import type { BreachScanReport, SecuritySummary, VaultSnapshot } from '../types'
+import type { BreachScanReport, SecuritySummary, VaultEntry, VaultSnapshot } from '../types'
 import CheckupView from './CheckupView.svelte'
 
 afterEach(() => {
@@ -57,6 +57,7 @@ function checkupProps(overrides: Record<string, unknown> = {}) {
     onShowCards: vi.fn(),
     onStartBreachScan: vi.fn(),
     onCancelBreachScan: vi.fn(),
+    onOpenLogin: vi.fn(),
     ...overrides,
   }
 }
@@ -75,17 +76,21 @@ function finishedScan(results: BreachScanReport['results']): BreachScanReport {
   return { phase: 'finished', checked: results.length, total: results.length, results }
 }
 
-test('the header count is singular for one account and plural for many', async () => {
-  const { rendered } = renderCheckup({ snapshot: snapshot({ good: 1 }) })
+test('the header counts good logins out of all logins, singular for one login', async () => {
+  const one = [savedLogin('login-a', 'Northwind', 'northwind.example')]
+  const { rendered } = renderCheckup({ snapshot: snapshotWith(one, { good: 1 }) })
   await Promise.resolve()
   const aside = rendered.container.querySelector('.view-header-aside') as HTMLElement
-  expect(aside.querySelector('strong')?.textContent).toBe('1')
-  expect(aside.querySelector('span')?.textContent).toBe('account ready')
+  expect(aside.querySelector('strong')?.textContent).toBe('1 of 1')
+  expect(aside.querySelector('span')?.textContent).toBe('login in good shape')
+  expect(aside.classList.contains('none')).toBe(false)
 
-  await rendered.rerender({ ...checkupProps({ snapshot: snapshot({ good: 4 }) }) } as never)
+  const four = ['a', 'b', 'c', 'd'].map((key) => savedLogin(`login-${key}`, `Fictional ${key}`, `${key}.example`))
+  await rendered.rerender({ ...checkupProps({ snapshot: snapshotWith(four, { good: 0 }) }) } as never)
   const pluralAside = rendered.container.querySelector('.view-header-aside') as HTMLElement
-  expect(pluralAside.querySelector('strong')?.textContent).toBe('4')
-  expect(pluralAside.querySelector('span')?.textContent).toBe('accounts ready')
+  expect(pluralAside.querySelector('strong')?.textContent).toBe('0 of 4')
+  expect(pluralAside.querySelector('span')?.textContent).toBe('logins in good shape')
+  expect(pluralAside.classList.contains('none')).toBe(true)
 })
 
 test('categories with findings come first and zero-count categories sit in the No issues group', async () => {
@@ -248,4 +253,86 @@ test('a failed start keeps the error and offers a retry', async () => {
 
   await fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(props.onStartBreachScan).toHaveBeenCalledTimes(1)
+})
+
+function savedLogin(id: string, title: string, site: string): VaultEntry {
+  return {
+    id,
+    title,
+    site,
+    initials: title.slice(0, 1).toUpperCase(),
+    folder: '',
+    favourite: false,
+    passwordScore: 1,
+    passwordIssues: [],
+    securityLevel: 'needs-work',
+    issueKinds: [],
+    tags: [],
+    updatedAt: 1,
+  }
+}
+
+function snapshotWith(entries: VaultEntry[], overrides: Partial<SecuritySummary> = {}): VaultSnapshot {
+  return { ...snapshot(overrides), entries }
+}
+
+test('a breached login opens from the breach check and shows its site', async () => {
+  const { props } = renderCheckup({
+    snapshot: snapshotWith([savedLogin('login-a', 'Northwind', 'northwind.example'), savedLogin('login-b', 'Contoso', 'contoso.example')]),
+    breachScan: finishedScan([
+      { id: 'login-a', verdict: 'breached', count: 4 },
+      { id: 'login-b', verdict: 'safe', count: 0 },
+    ]),
+  })
+  await Promise.resolve()
+
+  const row = screen.getByRole('button', { name: /Northwind/ })
+  expect(row.textContent).toContain('northwind.example')
+  expect(screen.queryByRole('button', { name: /Contoso/ })).toBeNull()
+  await fireEvent.click(row)
+  expect(props.onOpenLogin).toHaveBeenCalledWith('login-a')
+})
+
+test('more than five breached logins collapse behind a show-all control', async () => {
+  const logins = Array.from({ length: 7 }, (_, index) => savedLogin(`login-${index}`, `Fictional ${index}`, `site-${index}.example`))
+  const { rendered } = renderCheckup({
+    snapshot: snapshotWith(logins),
+    breachScan: finishedScan(logins.map((login) => ({ id: login.id, verdict: 'breached' as const, count: 1 }))),
+  })
+  await Promise.resolve()
+  const panel = rendered.container.querySelector('.breach-check') as HTMLElement
+
+  expect(panel.querySelectorAll('.breach-check-list li')).toHaveLength(5)
+  const toggle = screen.getByRole('button', { name: 'Show all 7' })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  await fireEvent.click(toggle)
+  expect(panel.querySelectorAll('.breach-check-list li')).toHaveLength(7)
+  expect(screen.getByRole('button', { name: 'Show fewer' }).getAttribute('aria-expanded')).toBe('true')
+})
+
+test('a breached login deleted since the scan cannot be opened', async () => {
+  const { props } = renderCheckup({
+    snapshot: snapshotWith([]),
+    breachScan: finishedScan([{ id: 'login-gone', verdict: 'breached', count: 2 }]),
+  })
+  await Promise.resolve()
+
+  const row = screen.getByRole('button', { name: /Deleted login/ }) as HTMLButtonElement
+  expect(row.disabled).toBe(true)
+  await fireEvent.click(row)
+  expect(props.onOpenLogin).not.toHaveBeenCalled()
+})
+
+test('a login on a site that offers 2FA opens from the finding', async () => {
+  const { props } = renderCheckup({
+    snapshot: snapshotWith([savedLogin('login-a', 'Northwind', 'northwind.example')], {
+      twoFactorSites: 3,
+      twoFactorLogins: [{ id: 'login-a', title: 'Northwind', site: 'northwind.example' }],
+    }),
+  })
+  await Promise.resolve()
+
+  await fireEvent.click(screen.getByRole('button', { name: /Northwind/ }))
+  expect(props.onOpenLogin).toHaveBeenCalledWith('login-a')
+  expect(screen.getByText('and 2 more')).toBeTruthy()
 })

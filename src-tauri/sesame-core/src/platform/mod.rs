@@ -1,6 +1,6 @@
 //! Device protection ties vault material to one device, and the file helpers
 //! keep the vault private. Each operating system module owns its own
-//! mechanics, including wallet start-up, so callers only ever see the three
+//! mechanics, including wallet start-up, so callers only ever see the four
 //! protection functions.
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -9,12 +9,16 @@ use crate::VaultResult;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{device_protection_available, protect_for_device, unprotect_for_device};
+pub use windows::{
+    device_protection_available, ensure_device_protection, protect_for_device, unprotect_for_device,
+};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{device_protection_available, protect_for_device, unprotect_for_device};
+pub use linux::{
+    device_protection_available, ensure_device_protection, protect_for_device, unprotect_for_device,
+};
 
 mod fs;
 pub use fs::{
@@ -25,6 +29,11 @@ pub use fs::{
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn device_protection_available() -> bool {
     false
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn ensure_device_protection() -> VaultResult<()> {
+    Err("Device protection is not available on this operating system.".into())
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]

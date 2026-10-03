@@ -112,3 +112,16 @@ Stated plainly so a report does not spend effort on a known position:
   a bug.
 - Sync is not enabled. Preview-only desktop code is gated by the
   `sync-preview` Cargo feature, which shipping builds do not enable.
+- Sesame cannot protect an unlocked vault from software that controls your
+  computer. Malware running as you, or as an administrator, can read the
+  app's memory, drive its window, record your keystrokes, or capture the
+  screen while a secret is shown.
+- Malware that controls your browser profile can act as the extension. The
+  approval prompt in the Sesame window is the last check before a fill.
+- Changing the master password cannot reach copies made before the change:
+  exported backups, readable exports, operating system backups, cloud-synced
+  folders, and data left on an SSD.
+- Anyone who can write to the vault folder can put back an older vault file.
+  Sesame does not yet detect that rollback.
+- A master password or recovery kit that someone else learns opens any copy
+  of your vault file. Keep the recovery kit offline.

@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::vault::{bytes_match, decrypt_bytes, derive_key, UnlockedVault, VaultResult, WRAP_AAD};
+use crate::vault::crypto::unwrap_with_password;
+use crate::vault::{bytes_match, UnlockedVault, VaultResult, WRAP_AAD};
 
 pub const PRESENCE_TTL: Duration = Duration::from_secs(120);
 pub const PRESENCE_REQUIRED: &str = "presenceRequired";
@@ -90,9 +91,8 @@ impl ReleasePresence {
 }
 
 fn verify_master_password(session: &UnlockedVault, secret: &str) -> VaultResult<()> {
-    let wrapping_key = Zeroizing::new(derive_key(secret, &session.kdf)?);
-    let mut candidate = decrypt_bytes(&wrapping_key, &session.key_wrap, WRAP_AAD)
-        .map_err(|_| "That master password does not open this vault.".to_string())?;
+    let mut candidate = unwrap_with_password(secret, &session.kdf, &session.key_wrap, WRAP_AAD)?
+        .ok_or("That master password does not open this vault.")?;
     let matched = session.expose_vault_key(|key| Ok(bytes_match(&candidate, key)))?;
     candidate.zeroize();
     if matched {
