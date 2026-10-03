@@ -17,6 +17,7 @@
   import { createTotpFillController } from './lib/controllers/totp-fill-controller'
   import { createBrowserSaveController } from './lib/controllers/browser-save-controller'
   import { createSettingsController } from './lib/controllers/settings-controller'
+  import { recoveryRequestPending } from './lib/recovery-replacement'
   import { createBackupController } from './lib/controllers/backup-controller'
   import { createCleanupController } from './lib/controllers/cleanup-controller'
   import { createUnlockController } from './lib/controllers/unlock-controller'
@@ -523,7 +524,7 @@
   <meta name="description" content="Local-first password and recovery vault." />
 </svelte:head>
 
-<AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} recoveryRequestPending={$vault.status.unlocked && $settingsState.recoveryReplacement?.requestedAt !== undefined} onReviewRecoveryRequest={() => { settingsController.openRecoveryKitSettings(); navigate('settings') }} />
+<AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} recoveryRequestPending={$vault.status.unlocked && recoveryRequestPending($settingsState.recoveryReplacement)} onReviewRecoveryRequest={() => { settingsController.openRecoveryKitSettings(); navigate('settings') }} />
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
   <main class="loading-screen state-panel" aria-live="polite">

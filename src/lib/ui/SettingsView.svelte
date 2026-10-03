@@ -13,6 +13,7 @@
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
+  import { recoveryRequestPending } from '../recovery-replacement'
   import ViewHeader from './ViewHeader.svelte'
 
   export let theme: Theme = 'auto'
@@ -105,7 +106,7 @@
     return seconds === undefined ? '' : new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
   }
 
-  $: recoveryRequested = recoveryReplacement?.requestedAt !== undefined
+  $: recoveryRequested = recoveryRequestPending(recoveryReplacement)
 
   function formatAccelerator(value: string): string {
     return value.split('+').join(' + ')

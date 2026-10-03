@@ -29,7 +29,9 @@ struct StoredRequest {
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryReplacementStatus {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub requested_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub available_at: Option<u64>,
     pub ready: bool,
     pub time_confirmed: bool,
@@ -169,4 +171,18 @@ pub async fn complete_recovery_replacement(
 
 pub(crate) fn discard_recovery_replacement(app: &AppHandle) {
     let _ = remove_request(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_request_serializes_without_a_request_time() {
+        let json = serde_json::to_value(RecoveryReplacementStatus::default()).expect("status json");
+        assert_eq!(
+            json,
+            serde_json::json!({ "ready": false, "timeConfirmed": false })
+        );
+    }
 }
