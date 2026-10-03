@@ -594,7 +594,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
           feedback.showNotice('New recovery kit requested', 'It will be ready in 72 hours. Sesame shows a warning until then.')
         } else {
           const kit = await completeRecoveryReplacement()
-          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false, timeConfirmed: true }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
         }
       } catch (error) {
         feedback.setError(error)
@@ -608,7 +608,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       feedback.clearError()
       try {
         await cancelRecoveryReplacement()
-        state.patch({ recoveryReplacement: { ready: false } })
+        state.patch({ recoveryReplacement: { ready: false, timeConfirmed: true } })
         feedback.showNotice('Recovery kit request cancelled', 'Your current recovery kit still works.')
       } catch (error) {
         feedback.setError(error)

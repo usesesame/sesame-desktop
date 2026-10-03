@@ -573,14 +573,14 @@ export async function changeMasterPassword(currentPassword: string | null, recov
 }
 
 export async function getRecoveryReplacementStatus(): Promise<RecoveryReplacementStatus> {
-  if (previewMode) return { ready: false }
+  if (previewMode) return { ready: false, timeConfirmed: true }
   return invoke<RecoveryReplacementStatus>('get_recovery_replacement_status')
 }
 
 export async function requestRecoveryReplacement(): Promise<RecoveryReplacementStatus> {
   if (previewMode) {
     const requestedAt = Math.floor(Date.now() / 1000)
-    return { requestedAt, availableAt: requestedAt + 72 * 60 * 60, ready: false }
+    return { requestedAt, availableAt: requestedAt + 72 * 60 * 60, ready: false, timeConfirmed: true }
   }
   return invoke<RecoveryReplacementStatus>('request_recovery_replacement')
 }

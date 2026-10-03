@@ -28,7 +28,7 @@
     },
     'request-kit': {
       heading: 'Request a new recovery kit',
-      description: 'Enter your master password. The new kit is ready in 72 hours, and Sesame shows a warning on every unlock until then so a request you did not make can be cancelled.',
+      description: 'Enter your master password. The new kit is ready in 72 hours, measured with usesesame.app and github.com rather than this computer\'s clock. Sesame shows a warning on every unlock until then so a request you did not make can be cancelled.',
       action: 'Request kit',
     },
     'issue-kit': {

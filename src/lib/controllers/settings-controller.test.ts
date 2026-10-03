@@ -239,7 +239,7 @@ describe('recovery kit replacement', () => {
   it('requests a new kit only after the master password is confirmed', async () => {
     const { controller } = harness()
     vaultApi.grantPresence.mockResolvedValue(undefined)
-    vaultApi.requestRecoveryReplacement.mockResolvedValue({ requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false })
+    vaultApi.requestRecoveryReplacement.mockResolvedValue({ requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false, timeConfirmed: true })
     controller.startRecoveryKitRequest()
     controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
 
@@ -285,7 +285,7 @@ describe('recovery kit replacement', () => {
   it('cancels a pending request without a password', async () => {
     const { controller } = harness()
     vaultApi.cancelRecoveryReplacement.mockResolvedValue(undefined)
-    controller.state.patch({ recoveryReplacement: { requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false } })
+    controller.state.patch({ recoveryReplacement: { requestedAt: 1_700_000_000, availableAt: 1_700_259_200, ready: false, timeConfirmed: true } })
 
     await controller.cancelRecoveryKitRequest()
 

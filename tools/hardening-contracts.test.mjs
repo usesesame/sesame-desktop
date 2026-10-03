@@ -768,3 +768,10 @@ test('the C ABI exports only the intended sesame_core symbols', () => {
     'sesame_core_open_vault',
   ])
 })
+
+test('the recovery kit wait reads server time, never the local clock', () => {
+  const source = readFileSync(join(root, 'src-tauri', 'src', 'commands', 'recovery_replacement.rs'), 'utf8')
+  assert.match(source, /trusted_time\(\)\.await\?\.latest/, 'a recovery kit request must record the later server time')
+  assert.match(source, /trusted_time\(\)\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
+  assert.doesNotMatch(source, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+})
