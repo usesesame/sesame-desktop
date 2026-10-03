@@ -25,9 +25,9 @@ function Invoke-Installer {
   param([string]$Path, [string[]]$Arguments)
   $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
   $null = $process.Handle
-  if (-not $process.WaitForExit(600000)) {
+  if (-not $process.WaitForExit(300000)) {
     $process.Kill()
-    throw "$Path $Arguments did not finish within 10 minutes."
+    throw "$Path $Arguments did not finish within 5 minutes."
   }
   return $process.ExitCode
 }
@@ -89,12 +89,22 @@ public static class Decoy {
 Add-Type -TypeDefinition $decoySource -OutputAssembly (Join-Path $untrustedDirectory 'uninstall.exe') -OutputType ConsoleApplication
 Set-Content -LiteralPath (Join-Path $untrustedDirectory $mainBinary) -Value 'fictional old binary'
 Set-Content -LiteralPath (Join-Path $untrustedDirectory 'keep.txt') -Value 'fictional user file'
-New-Item -Path $uninstallKey -Force | Out-Null
-Set-ItemProperty -LiteralPath $uninstallKey -Name 'DisplayVersion' -Value $version
-Set-ItemProperty -LiteralPath $uninstallKey -Name 'UninstallString' -Value "`"$untrustedDirectory\uninstall.exe`""
-New-Item -Path $locationKey -Force | Out-Null
-Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $untrustedDirectory
 
+function Set-OldRecord {
+  param([string]$Directory)
+  if (Test-Path -LiteralPath (Join-Path $expectedDirectory 'uninstall.exe')) {
+    $code = Invoke-Installer (Join-Path $expectedDirectory 'uninstall.exe') @('/S', "_?=$expectedDirectory")
+    Assert-True ($code -eq 0) "the current install uninstalls before the next case, got $code"
+  }
+  Remove-Item -LiteralPath $expectedDirectory -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -Path $uninstallKey -Force | Out-Null
+  Set-ItemProperty -LiteralPath $uninstallKey -Name 'DisplayVersion' -Value $version
+  Set-ItemProperty -LiteralPath $uninstallKey -Name 'UninstallString' -Value "`"$Directory\uninstall.exe`""
+  New-Item -Path $locationKey -Force | Out-Null
+  Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $Directory
+}
+
+Set-OldRecord $untrustedDirectory
 $code = Invoke-Installer $installer @('/P')
 Assert-True ($code -eq 0) "the passive reinstall exits 0, got $code"
 Assert-True (-not (Test-Path -LiteralPath $decoyMarker)) 'the old uninstaller outside Program Files never runs'
@@ -107,21 +117,21 @@ Write-Host 'Reinstall over an old install inside Program Files'
 $trustedOldDirectory = Join-Path $env:ProgramFiles 'SesameOldInstall'
 New-Item -ItemType Directory -Path $trustedOldDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $untrustedDirectory 'uninstall.exe') -Destination (Join-Path $trustedOldDirectory 'uninstall.exe')
-Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $trustedOldDirectory
+Set-OldRecord $trustedOldDirectory
 $code = Invoke-Installer $installer @('/P')
 Assert-True ($code -eq 0) "the passive reinstall over a Program Files install exits 0, got $code"
 Assert-True (Test-Path -LiteralPath $decoyMarker) 'the old uninstaller inside Program Files runs'
 Assert-True (-not (Test-Path -LiteralPath $trustedOldDirectory)) 'the old Program Files directory is removed after its uninstaller succeeds'
+Assert-True (Test-Path -LiteralPath (Join-Path $expectedDirectory $mainBinary)) "$mainBinary is installed in Program Files"
 Remove-Item -LiteralPath $decoyMarker -Force
 
 Write-Host 'Reinstall over a recorded traversal path'
-$traversal = Join-Path $env:ProgramFiles "..\$(Split-Path -Leaf $untrustedDirectory)"
-Set-ItemProperty -LiteralPath $locationKey -Name '(default)' -Value $traversal
+Set-OldRecord (Join-Path $env:ProgramFiles "..\$(Split-Path -Leaf $untrustedDirectory)")
 $code = Invoke-Installer $installer @('/P')
 Assert-True ($code -eq 0) "the passive reinstall over a traversal path exits 0, got $code"
 Assert-True (-not (Test-Path -LiteralPath $decoyMarker)) 'a traversal path into Program Files does not run the old uninstaller'
 Assert-True (Test-Path -LiteralPath (Join-Path $untrustedDirectory 'uninstall.exe')) 'the old uninstaller behind the traversal path is left in place'
-Assert-True (Test-Path -LiteralPath (Join-Path $expectedDirectory $mainBinary)) "$mainBinary is still installed in Program Files"
+Assert-True (Test-Path -LiteralPath (Join-Path $expectedDirectory $mainBinary)) "$mainBinary is installed in Program Files"
 
 $code = Invoke-Installer (Join-Path $expectedDirectory 'uninstall.exe') @('/S', "_?=$expectedDirectory")
 Assert-True ($code -eq 0) "the final uninstall exits 0, got $code"
