@@ -714,6 +714,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .view-header-aside { display: flex; align-items: baseline; gap: var(--space-2); color: var(--accent-link); text-align: right; }
 .view-header-aside strong { font-size: var(--type-3); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; line-height: 1.3; }
 .view-header-aside span { color: var(--text-muted); font-size: var(--type-2); line-height: 1.3; }
+.view-header-aside.none { color: var(--text-muted); }
 .findings-list { margin-top: var(--space-4); padding: 0; border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); overflow: hidden; }
 .findings-list .finding-row:last-child { border-bottom: 0; }
 .finding-row {
@@ -754,11 +755,20 @@ button.no-totp:hover { filter: brightness(.97); }
 .clear-list .finding-row:last-child { border-bottom: 0; }
 .finding-row.danger { color: var(--danger); }
 .finding-row.danger .finding-icon { color: var(--danger); }
-.finding-logins { display: grid; gap: 2px; margin: 0; border-bottom: 1px solid var(--border-soft); padding: 0 var(--space-3) var(--space-3) 46px; list-style: none; }
-.finding-logins li { display: flex; gap: var(--space-2); color: var(--text-muted); font-size: var(--type-2); }
-.finding-logins strong { color: var(--text-2); font-weight: var(--weight-medium); }
-.finding-logins span { color: var(--text-faint); }
-.finding-logins-more { color: var(--text-faint); }
+.finding-chevron-space { width: 18px; }
+.checkup-logins { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.finding-logins { border-bottom: 1px solid var(--border-soft); padding: var(--space-1) var(--space-3) var(--space-4) calc(var(--space-3) * 2 + 15px - var(--space-3)); }
+.checkup-login { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); border: 0; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); color: var(--text); background: transparent; text-align: left; transition: background-color .15s ease; }
+.checkup-login:hover:not(:disabled) { background: var(--control-hover); }
+.checkup-login:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.checkup-login:disabled { cursor: default; opacity: .6; }
+.checkup-login > svg { color: var(--text-faint); transition: color .15s ease, transform .18s var(--ease-out); }
+.checkup-login:hover:not(:disabled) > svg { color: var(--accent-link); transform: translateX(2px); }
+.checkup-login-avatar { width: 28px; height: 28px; font-size: var(--type-1); }
+.checkup-login-text { display: grid; min-width: 0; gap: 1px; }
+.checkup-login-text strong { overflow: hidden; color: var(--text); font-size: var(--type-2); font-weight: var(--weight-bold); text-overflow: ellipsis; white-space: nowrap; }
+.checkup-login-text small { overflow: hidden; color: var(--text-faint); font-size: var(--type-1); text-overflow: ellipsis; white-space: nowrap; }
+.checkup-logins-more { padding: var(--space-2) var(--space-3) 0; color: var(--text-faint); font-size: var(--type-2); }
 .breach-check { display: grid; gap: var(--space-3); margin-top: var(--space-4); border-radius: var(--radius-xl); padding: var(--space-4); background: var(--surface); box-shadow: var(--shadow-raised); }
 .breach-check-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); }
 .breach-check-head h3 { margin: 0; color: var(--text); font-size: var(--type-3); font-weight: var(--weight-bold); }
@@ -768,7 +778,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .breach-check-icon.found { color: var(--danger); background: var(--danger-tint); }
 .breach-check-bar { height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-inset); }
 .breach-check-bar span { display: block; height: 100%; background: var(--accent); }
-.breach-check-list { display: grid; gap: 2px; margin: 0; padding-left: 18px; color: var(--text-muted); font-size: var(--type-2); }
+.breach-check-list { margin-inline: calc(var(--space-3) * -1); }
+.breach-check-more { justify-self: start; }
 .breach-check-error { margin: 0; color: var(--danger); font-size: var(--type-2); }
 .breach-check > button { justify-self: start; }
 

@@ -672,6 +672,8 @@
         breachScanError={$cleanupState.breachScanError}
         onStartBreachScan={() => void cleanupController.startBreachScan()}
         onCancelBreachScan={() => void cleanupController.cancelBreachScan()}
+        onOpenLogin={(id) => void cleanupController.openLogin(id)}
+        siteIconsEnabled={$settings.siteIconsEnabled}
       />
     {:else if $selection.activeView === 'authenticator'}
       <AuthenticatorView onOpenImport={importController.open} reloadToken={authenticatorReloadToken} />
