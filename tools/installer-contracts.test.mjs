@@ -266,3 +266,18 @@ test('the installer never launches an executable through an unquoted path', () =
     )
   }
 })
+
+test('Windows CI builds the installer and runs its install lifecycle', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const windows = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  desktop-linux:'))
+  assert.match(windows, /npx tauri build --bundles nsis --config \$config -- --locked/)
+  assert.match(windows, /createUpdaterArtifacts":false/)
+  assert.match(windows, /\.\/tools\/test-windows-installer\.ps1 -InstallerPath/)
+
+  const lifecycle = read('tools', 'test-windows-installer.ps1')
+  for (const step of [/Invoke-Installer \$installer @\('\/S'\)/, /Invoke-Installer \$installer @\('\/P'\)/, /'\/S', "_\?=\$expectedDirectory"/]) {
+    assert.match(lifecycle, step)
+  }
+  assert.match(lifecycle, /the old uninstaller outside Program Files never runs/)
+  assert.match(lifecycle, /a file the installer did not place is kept/)
+})

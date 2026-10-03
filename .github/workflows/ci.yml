@@ -116,10 +116,21 @@ jobs:
       - name: Run the desktop checks
         run: npm run desktop:ci
 
-      # Catches a production build that only breaks under release settings,
-      # before a human runs it. No bundle, so there is nothing to sign here.
-      - name: Build the desktop binary
-        run: npm run tauri -- build --no-bundle -- --locked
+      # Catches a production build or installer template that only breaks
+      # under release settings. Unsigned, with no updater artifacts.
+      - name: Build the unsigned Windows installer
+        shell: pwsh
+        run: |
+          $config = Join-Path $env:RUNNER_TEMP 'ci-updater-off.json'
+          Set-Content -LiteralPath $config -Value '{"bundle":{"createUpdaterArtifacts":false}}' -Encoding ascii -NoNewline
+          npx tauri build --bundles nsis --config $config -- --locked
+
+      - name: Install, reinstall and uninstall the Windows installer
+        shell: powershell
+        run: |
+          $installers = @(Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
+          ./tools/test-windows-installer.ps1 -InstallerPath $installers[0].FullName
 
   desktop-linux:
     needs: [lint, typecheck]
