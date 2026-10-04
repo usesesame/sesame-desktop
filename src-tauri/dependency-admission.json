@@ -149,8 +149,8 @@
     },
     {
       "name": "minisign-verify",
-      "version": "0.2.5",
-      "reason": "In use before this gate was adopted."
+      "version": "0.3",
+      "reason": "Verifies updater signatures. 0.3.0 replaces unsafe byte copies with safe slice copies and keeps the same API."
     },
     {
       "name": "psl",
