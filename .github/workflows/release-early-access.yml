@@ -199,7 +199,7 @@ jobs:
       - name: Verify the vendored glib tree
         shell: pwsh
         run: |
-          $env:Path = "$env:Path;$env:ProgramFiles\Git\usr\bin"
+          $env:Path = "$env:ProgramFiles\Git\usr\bin;$env:Path"
           node tools/verify-glib-vendor.mjs
 
       - name: Generate the reviewed dependency evidence
