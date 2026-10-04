@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const run = promisify(execFile)
 
-export const verifiedCliVersion = '2.11.4'
+export const verifiedCliVersion = '2.11.5'
 
 export const pinnedBundleTools = {
   x86_64: [
