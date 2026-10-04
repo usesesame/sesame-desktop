@@ -157,6 +157,13 @@ test('release build outputs reach the signing jobs as data, never as script text
   assert.match(publish, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*release-handoff\s*$/m, 'publish merges the candidate files into the handoff directory')
 })
 
+test('the Linux workflow passes plain manifest filenames to the handoff tools', () => {
+  const body = read('.github', 'workflows', 'release-linux-early-access.yml')
+  const calls = body.split('\n').filter((line) => /tools\/(verify-linux-handoff|verify-linux-release-evidence|create-linux-release-candidate|create-linux-sigstore-evidence)\.mjs\s+release-handoff/.test(line))
+  assert.ok(calls.length >= 1, 'the workflow must call a handoff tool on one line')
+  for (const line of calls) assert.match(line, /"\$\(basename /, `a handoff tool needs a bare filename: ${line.trim()}`)
+})
+
 test('every job a workflow depends on exists in that workflow', () => {
   for (const workflow of workflows) {
     const body = read(workflow)

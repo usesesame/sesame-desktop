@@ -211,7 +211,7 @@ jobs:
           path: release-handoff
 
       - name: Re-hash every downloaded package against the frozen manifest
-        run: node tools/verify-linux-handoff.mjs release-handoff "$(ls release-handoff/*.release.json)"
+        run: node tools/verify-linux-handoff.mjs release-handoff "$(basename "$(ls release-handoff/*.release.json)")"
 
       - name: Install the pinned Sigstore client
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2, Cosign v3.0.6
