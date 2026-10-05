@@ -504,6 +504,9 @@ jobs:
     env:
       SESAME_RELEASE_VISIBILITY: draft
     steps:
+      - name: Record when this job started
+        run: echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -589,9 +592,14 @@ jobs:
           MANIFEST: ${{ needs.sign-and-attest.outputs.manifest }}
         shell: bash
         run: |
-          draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          read -r draft published_at < <(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,publishedAt --jq '[.isDraft, .publishedAt] | @tsv')
           if [ "$draft" != "true" ]; then
-            echo "The release is published; the unsigned installer must stay an unpublished draft until Authenticode signing and approval." >&2
+            if [[ "$published_at" < "$JOB_STARTED_AT" ]]; then
+              echo "Release $GITHUB_REF_NAME was published at $published_at, before this job started at $JOB_STARTED_AT, so this job did not publish it."
+              echo "Release $GITHUB_REF_NAME was already published by a maintainer. This job added files to it and did not publish it." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "This job published the release; the unsigned installer must stay an unpublished draft until Authenticode signing and approval." >&2
             exit 1
           fi
           installer=$(jq -r '.artifact.filename' "release-handoff/$MANIFEST")

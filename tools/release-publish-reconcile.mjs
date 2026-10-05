@@ -131,6 +131,26 @@ export function assertCandidateMatchesAssets(candidate, assets, { repository, ta
   return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256, bytes: installer.bytes })
 }
 
+export const RELEASE_LIST_JQ = '.[] | {id, tag_name, draft, body, assets: [.assets[] | {name, size}]} | tojson'
+
+export function parseReleaseList(stdout) {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line))
+}
+
+export function selectReleaseForTag(releases, tag) {
+  const matches = releases.filter((release) => release.tag_name === tag)
+  if (matches.length === 0) return null
+  if (matches.length > 1) {
+    const ids = matches.map((release) => `${release.id}${release.draft ? ' (draft)' : ''}`).join(', ')
+    throw new Error(`More than one release exists for ${tag}: ${ids}. Delete the extra release deliberately; nothing was changed.`)
+  }
+  return matches[0]
+}
+
 export function planReleasePublication({ release, expectedAssets, setDigest, foreignAssets = [], visibility = RELEASE_VISIBILITY_DRAFT }) {
   if (!release) {
     return {
