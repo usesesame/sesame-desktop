@@ -15,8 +15,10 @@ import {
   interpretCandidateSubmission,
   latestReceiptBindsInstaller,
   linuxLaneAssetPatterns,
+  parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
+  selectReleaseForTag,
   windowsLaneAssetPatterns,
 } from './release-publish-reconcile.mjs'
 
@@ -448,5 +450,35 @@ test('public evidence must match its handoff copy byte for byte', async () => {
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('a release lookup sees a draft and returns nothing when the tag has no release', () => {
+  const draft = { id: 11, tag_name: tag, draft: true, assets: [] }
+  const other = { id: 12, tag_name: 'v9.9.9', draft: false, assets: [] }
+  assert.equal(selectReleaseForTag([other, draft], tag), draft)
+  assert.equal(selectReleaseForTag([other], tag), null)
+  assert.equal(selectReleaseForTag([], tag), null)
+})
+
+test('a release lookup stops when two releases share the tag and changes nothing', () => {
+  const releases = [
+    { id: 21, tag_name: tag, draft: true, assets: [] },
+    { id: 22, tag_name: tag, draft: false, assets: [] },
+  ]
+  assert.throws(() => selectReleaseForTag(releases, tag), /More than one release exists for v1\.2\.3: 21 \(draft\), 22\. .*nothing was changed/)
+})
+
+test('the release list parser reads one compact object per line and ignores blank lines', () => {
+  const lines = [JSON.stringify({ id: 1, tag_name: 'a' }), '', JSON.stringify({ id: 2, tag_name: 'b' }), '']
+  assert.deepEqual(parseReleaseList(lines.join('\n')).map((release) => release.id), [1, 2])
+  assert.throws(() => parseReleaseList('not json'))
+})
+
+test('both publish tools look releases up through the list that includes drafts', async () => {
+  for (const file of ['reconcile-github-release.mjs', 'publish-linux-release.mjs']) {
+    const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8')
+    assert.match(source, /selectReleaseForTag\(parseReleaseList\(stdout\), tag\)/, `${file} must select from the full list`)
+    assert.doesNotMatch(source, /releases\/tags\//, `${file} must not use the lookup that hides drafts`)
   }
 })

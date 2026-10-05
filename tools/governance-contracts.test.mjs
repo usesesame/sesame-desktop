@@ -164,6 +164,23 @@ test('the Linux workflow passes plain manifest filenames to the handoff tools', 
   for (const line of calls) assert.match(line, /"\$\(basename /, `a handoff tool needs a bare filename: ${line.trim()}`)
 })
 
+test('a release a maintainer already published does not fail the stays-unpublished check', () => {
+  const cases = [
+    ['release-linux-early-access.yml', '\n  publish:\n', 'Prove the release stays unpublished'],
+    ['release-early-access.yml', '\n  publish-candidate:\n', 'Prove the release stays unpublished until signing'],
+  ]
+  for (const [file, jobStart, stepName] of cases) {
+    const body = read('.github', 'workflows', file)
+    const job = body.slice(body.indexOf(jobStart))
+    assert.match(job, /name: Record when this job started\n\s+run: echo "JOB_STARTED_AT=\$\(date -u [^\n]*>> "\$GITHUB_ENV"/, `${file} must record the job start before it publishes`)
+    const step = job.slice(job.indexOf(`name: ${stepName}`))
+    const block = step.slice(0, step.indexOf('\n      - name:', 10))
+    assert.match(block, /--json isDraft,publishedAt/, `${file} must read when the release was published`)
+    assert.match(block, /"\$published_at" < "\$JOB_STARTED_AT"\s*\]\]; then[\s\S]*?exit 0/, `${file} must pass when the release was published before this job started`)
+    assert.match(block, /This job published the release[^\n]*>&2\n\s+exit 1/, `${file} must still fail when this job published the release`)
+  }
+})
+
 test('every job a workflow depends on exists in that workflow', () => {
   for (const workflow of workflows) {
     const body = read(workflow)
