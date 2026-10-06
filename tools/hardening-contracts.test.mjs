@@ -116,17 +116,6 @@ test('release Linux builds scrub WebKit inspection variables before the Tauri bu
   assert.ok(run >= 0 && preparation > run && builder > preparation)
 })
 
-test('desktop updates are reported only for the systems the updater accepts', () => {
-  const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
-  const capabilities = read('src-tauri', 'src', 'adapters', 'platform', 'capabilities.rs')
-
-  const accepted = [...updater.match(/fn updater_platform_for\(os: &str\)[^{]*\{\s*match os \{([\s\S]*?)\n {4}\}/)[1].matchAll(/"([a-z]+)"\s*=>\s*Ok/g)].map((match) => match[1])
-  const reported = [...capabilities.match(/fn desktop_updates_for\(os: &str\) -> bool \{([\s\S]*?)\n\}/)[1].matchAll(/"([a-z]+)"/g)].map((match) => match[1])
-
-  assert.ok(accepted.length > 0, 'the updater platform check was not found')
-  assert.deepEqual([...new Set(reported)].sort(), [...new Set(accepted)].sort())
-})
-
 test('each desktop webview gets only the Tauri permissions its imports need', () => {
   const main = JSON.parse(read('src-tauri', 'capabilities', 'default.json'))
   const quick = JSON.parse(read('src-tauri', 'capabilities', 'quick-access.json'))

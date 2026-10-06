@@ -55,6 +55,21 @@ mod tests {
     }
 
     #[test]
+    fn the_update_flag_agrees_with_the_updater_platform_check() {
+        for os in OPERATING_SYSTEMS {
+            assert_eq!(
+                desktop_updates_for(os),
+                crate::commands::updater::updater_platform_for(os).is_ok(),
+                "{os:?}"
+            );
+        }
+        assert_eq!(
+            get_platform_capabilities().desktop_updates,
+            crate::commands::updater::updater_platform_for(std::env::consts::OS).is_ok()
+        );
+    }
+
+    #[test]
     fn the_reported_flag_follows_the_running_system() {
         assert_eq!(
             get_platform_capabilities().desktop_updates,
