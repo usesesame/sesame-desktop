@@ -276,6 +276,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
         }))
+        .plugin(adapters::platform::navigation_guard::plugin())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![desktop_shell::MINIMIZED_LAUNCH_ARG]),
