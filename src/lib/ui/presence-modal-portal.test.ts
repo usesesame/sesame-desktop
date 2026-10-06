@@ -51,3 +51,19 @@ test('an enable check names the setting and never offers to show a password', as
   expect(screen.getByRole('button', { name: 'Turn on' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Show password' })).toBeNull()
 })
+
+test('the new kit check offers to delete local backups and says the old kit still opens older ones', async () => {
+  const rendered = render(PasswordPresenceModal, { intent: 'issue-kit', presenceSecret: 'x', errorMessage: '', onCancel: vi.fn(), onConfirm: vi.fn() })
+  await Promise.resolve()
+  expect(screen.getByRole('heading', { name: 'Get your new recovery kit' })).toBeTruthy()
+  expect(screen.getByText(/Backups made before today still open with the old kit/)).toBeTruthy()
+  const box = screen.getByRole('checkbox', { name: /delete the backup copies/i }) as HTMLInputElement
+  expect(box.checked).toBe(false)
+  rendered.unmount()
+})
+
+test('only the new kit check offers to delete local backups', async () => {
+  render(PasswordPresenceModal, { intent: 'request-kit', presenceSecret: 'x', errorMessage: '', onCancel: vi.fn(), onConfirm: vi.fn() })
+  await Promise.resolve()
+  expect(screen.queryByRole('checkbox')).toBeNull()
+})

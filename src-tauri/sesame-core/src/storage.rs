@@ -319,38 +319,40 @@ pub fn recovery_replacement_ready(requested_at: u64, now: u64) -> bool {
     now >= requested_at && now - requested_at >= RECOVERY_REPLACEMENT_DELAY_SECS
 }
 
+pub struct VaultKeyRotation {
+    pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
+}
+
+fn prune_local_backups(session: &UnlockedVault) -> Option<usize> {
+    crate::backup::prune_vault_backups(&session.path)
+        .ok()
+        .map(|outcome| outcome.remaining)
+}
+
 pub fn replace_recovery_kit_for_session(
     session: &mut UnlockedVault,
+    master_password: &str,
     requested_at: u64,
     now: u64,
-) -> VaultResult<String> {
+    prune_backups: bool,
+) -> VaultResult<VaultKeyRotation> {
     if !session.setup_complete {
         return Err("Finish recovery setup before replacing the recovery kit.".into());
     }
     if !recovery_replacement_ready(requested_at, now) {
         return Err("The new recovery kit is not ready yet.".into());
     }
+    verify_current_password(session, master_password)?;
 
-    let recovery_kit = Zeroizing::new(generate_recovery_kit());
-    let recovery_kit_for_display = recovery_kit.to_string();
-    let recovery_kdf = default_kdf_params();
-    let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
-    let recovery_wrap = session
-        .expose_vault_key(|key| encrypt_bytes(&recovery_wrapping_key, key, RECOVERY_WRAP_AAD))?;
-
-    let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
-    let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
-    if let Err(error) = persist_session_without_previous(session) {
-        session.recovery_kdf = previous_kdf;
-        session.recovery_wrap = previous_wrap;
-        return Err(error);
-    }
-    Ok(recovery_kit_for_display)
-}
-
-pub struct MasterPasswordRotation {
-    pub recovery_kit: String,
-    pub backups_remaining: Option<usize>,
+    let recovery_kit = rotate_vault_key(session, master_password)?;
+    let backups_remaining = prune_backups
+        .then(|| prune_local_backups(session))
+        .flatten();
+    Ok(VaultKeyRotation {
+        recovery_kit,
+        backups_remaining,
+    })
 }
 
 /// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
@@ -358,7 +360,7 @@ pub fn rotate_master_password_for_session(
     session: &mut UnlockedVault,
     credentials: RotationCredentials<'_>,
     new_password: &str,
-) -> VaultResult<MasterPasswordRotation> {
+) -> VaultResult<VaultKeyRotation> {
     crate::password_analysis::check_new_master_password(new_password)?;
 
     let current_password = credentials
@@ -380,11 +382,19 @@ pub fn rotate_master_password_for_session(
         verify_current_password(session, current_password)?;
     }
 
+    let recovery_kit = rotate_vault_key(session, new_password)?;
+    Ok(VaultKeyRotation {
+        recovery_kit,
+        backups_remaining: prune_local_backups(session),
+    })
+}
+
+fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<String> {
     let mut new_vault_key = Zeroizing::new([0_u8; 32]);
     fill_random(&mut *new_vault_key);
 
     let new_kdf = default_kdf_params();
-    let new_wrapping_key = Zeroizing::new(derive_key(new_password, &new_kdf)?);
+    let new_wrapping_key = Zeroizing::new(derive_key(password, &new_kdf)?);
     let new_key_wrap = encrypt_bytes(&new_wrapping_key, &*new_vault_key, WRAP_AAD)?;
 
     let mut recovery_kit = generate_recovery_kit();
@@ -417,14 +427,7 @@ pub fn rotate_master_password_for_session(
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
-    let backups_remaining = match crate::backup::prune_vault_backups(&session.path) {
-        Ok(outcome) => Some(outcome.remaining),
-        Err(_) => None,
-    };
-    Ok(MasterPasswordRotation {
-        recovery_kit: recovery_kit_for_display,
-        backups_remaining,
-    })
+    Ok(recovery_kit_for_display)
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
@@ -1463,20 +1466,31 @@ mod tests {
         let requested_at = 1_700_000_000;
         let ready_at = requested_at + RECOVERY_REPLACEMENT_DELAY_SECS;
 
-        assert!(
-            replace_recovery_kit_for_session(&mut session, requested_at, ready_at - 1).is_err()
-        );
-        assert!(
-            replace_recovery_kit_for_session(&mut session, requested_at, requested_at - 1).is_err()
-        );
+        assert!(replace_recovery_kit_for_session(
+            &mut session,
+            password,
+            requested_at,
+            ready_at - 1,
+            false
+        )
+        .is_err());
+        assert!(replace_recovery_kit_for_session(
+            &mut session,
+            password,
+            requested_at,
+            requested_at - 1,
+            false
+        )
+        .is_err());
         assert_eq!(fs::read(&path).expect("vault bytes"), before);
 
-        let new_kit = replace_recovery_kit_for_session(&mut session, requested_at, ready_at)
-            .expect("replaced kit");
+        let replacement =
+            replace_recovery_kit_for_session(&mut session, password, requested_at, ready_at, false)
+                .expect("replaced kit");
         let file: VaultFile =
             serde_json::from_slice(&fs::read(&path).expect("vault bytes")).expect("vault file");
         assert!(open_vault_with_password(&file, password).is_ok());
-        assert!(open_vault_with_recovery_kit(&file, &new_kit).is_ok());
+        assert!(open_vault_with_recovery_kit(&file, &replacement.recovery_kit).is_ok());
         assert!(open_vault_with_recovery_kit(&file, &old_kit).is_err());
         assert!(!path.with_extension("sesame.prev").exists());
         fs::remove_dir_all(directory).expect("removed test directory");

@@ -7,6 +7,7 @@
   export let presenceSecret = ''
   export let intent: PresenceIntent = 'reveal'
   export let errorMessage = ''
+  export let pruneBackups = false
   export let onCancel: () => void
   export let onConfirm: () => void
 
@@ -33,7 +34,7 @@
     },
     'issue-kit': {
       heading: 'Get your new recovery kit',
-      description: 'Enter your master password. The new kit replaces your current one, and the old kit stops opening this vault.',
+      description: 'Enter your master password. Sesame gives the vault a new encryption key and a new kit. Your master password stays the same. The old kit stops opening this vault, and PIN and Windows Hello unlock turn off until you set them up again. Backups made before today still open with the old kit.',
       action: 'Get kit',
     },
   }
@@ -64,6 +65,9 @@
       aria-invalid={Boolean(errorMessage)}
       aria-describedby={errorMessage ? 'presence-error' : undefined}
     />
+    {#if intent === 'issue-kit'}
+      <label class="recovery-confirm"><input name="prune-backups" type="checkbox" bind:checked={pruneBackups} /> <span>Also delete the backup copies Sesame saved in this vault folder.</span></label>
+    {/if}
     {#if errorMessage}<p id="presence-error" class="form-error" role="alert">{errorMessage}</p>{/if}
     <div class="confirm-actions">
       <button type="button" class="secondary-button" on:click={onCancel}>Cancel</button>
