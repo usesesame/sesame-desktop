@@ -37,6 +37,7 @@ import {
   getAutostartEnabled,
   getBrowserIntegrationStatus,
 	getDiagnosticStatus,
+  getScreenCaptureAllowed,
   getServiceConnectionStatus,
   getVaultStatus,
   getWebsiteIconCacheStatus,
@@ -53,6 +54,7 @@ import {
   setClipboardClearSeconds as setVaultClipboardClearSeconds,
   setNativeAutoLockMinutes,
   setQuickAccessShortcut,
+  setScreenCaptureAllowed,
   setTrayEnabled,
   setUnlockPin,
   setWebsiteIconsEnabled,
@@ -99,6 +101,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     quickAccessShortcutWorking: false,
     autostartEnabled: false,
     autostartWorking: false,
+    screenCaptureAllowed: false,
+    screenCaptureWorking: false,
     siteIconsWorking: false,
     siteIconsPresenceRequired: false,
     siteIconsPresencePassword: '',
@@ -173,6 +177,10 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   async function refreshAutostartStatus() {
     try { state.patch({ autostartEnabled: await getAutostartEnabled() }) } catch { /* leave the last known state on screen */ }
+  }
+
+  async function refreshScreenCaptureSetting() {
+    try { state.patch({ screenCaptureAllowed: await getScreenCaptureAllowed() }) } catch { /* the window keeps hiding from capture */ }
   }
 
   async function refreshServiceConnection() {
@@ -286,6 +294,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
+      void refreshScreenCaptureSetting()
       let listenersDisposed = false
       let stopUpdateProgress = () => {}
       void onDesktopUpdateProgress((progress) => state.patch({ updateProgress: progress }))
@@ -480,6 +489,21 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
     },
     refreshAutostartStatus,
+    async toggleScreenCapture() {
+      if (state.value().screenCaptureWorking) return
+      const next = !state.value().screenCaptureAllowed
+      state.patch({ screenCaptureWorking: true })
+      feedback.clearError()
+      try {
+        await setScreenCaptureAllowed(next)
+        state.patch({ screenCaptureAllowed: next })
+        feedback.showNotice(next ? 'Screen capture allowed' : 'Screen capture blocked', next ? 'Screenshots, screen sharing and Windows Recall can now show Sesame. Turn this off after your support session.' : 'Windows will keep Sesame out of screenshots, screen sharing and Recall.')
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ screenCaptureWorking: false })
+      }
+    },
     async toggleAutostart() {
       if (state.value().autostartWorking) return
       const next = !state.value().autostartEnabled

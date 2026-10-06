@@ -12,6 +12,10 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use crate::adapters::platform::webview_policy::{
+    display_affinity, DisplayAffinity, WEBVIEW2_BROWSER_ARGUMENTS,
+};
+use crate::desktop_settings;
 use crate::vault::VaultState;
 
 /// Boot-time launches stay in the tray instead of popping the window open.
@@ -263,11 +267,47 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .resizable(true)
         .decorations(false)
         .visible(false)
+        .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
         .build()
         .ok()?;
     harden_release_webview(&window);
     Some(window)
 }
+
+pub(crate) fn apply_capture_policy(app: &AppHandle) {
+    for label in ["main", "quick-access"] {
+        if let Some(window) = app.get_webview_window(label) {
+            apply_display_affinity(&window);
+        }
+    }
+}
+
+fn apply_display_affinity(window: &WebviewWindow) {
+    let capture_allowed = desktop_settings::settings_path(window.app_handle())
+        .is_ok_and(|path| desktop_settings::screen_capture_allowed_at(&path));
+    set_display_affinity(window, display_affinity(capture_allowed));
+}
+
+#[cfg(all(windows, not(debug_assertions)))]
+fn set_display_affinity(window: &WebviewWindow, affinity: DisplayAffinity) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let value = match affinity {
+        DisplayAffinity::ExcludeFromCapture => WDA_EXCLUDEFROMCAPTURE,
+        DisplayAffinity::Unrestricted => WDA_NONE,
+    };
+    unsafe {
+        SetWindowDisplayAffinity(hwnd.0 as _, value);
+    }
+}
+
+#[cfg(any(not(windows), debug_assertions))]
+fn set_display_affinity(_window: &WebviewWindow, _affinity: DisplayAffinity) {}
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn harden_release_webview(window: &WebviewWindow) {
@@ -284,6 +324,7 @@ fn harden_release_webview(window: &WebviewWindow) {
             let _ = settings.SetAreDevToolsEnabled(false);
         }
     });
+    apply_display_affinity(window);
 }
 
 #[cfg(any(not(windows), debug_assertions))]

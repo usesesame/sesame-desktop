@@ -12,3 +12,4 @@ pub(crate) mod desktop_shell;
 pub(crate) mod dll_search;
 pub(crate) mod external_url;
 pub(crate) mod session_guard;
+pub(crate) mod webview_policy;

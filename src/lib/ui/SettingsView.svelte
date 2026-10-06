@@ -48,6 +48,9 @@
   export let autostartEnabled = false
   export let autostartWorking = false
   export let onToggleAutostart: () => void
+  export let screenCaptureAllowed = false
+  export let screenCaptureWorking = false
+  export let onToggleScreenCapture: () => void = () => {}
   export let quickAccessShortcut = 'Ctrl+Alt+S'
   export let quickAccessShortcutWorking = false
   export let onUpdateQuickAccessShortcut: (accelerator: string) => void
@@ -288,6 +291,12 @@
             <article>
               <div class="setting-copy"><strong>Unlock with Windows Hello</strong><p>Use this device's Windows Hello gesture. Your master password or recovery kit remains available, and Sesame never receives your biometric data.</p></div>
               <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
+            </article>
+            {/if}
+            {#if $platformCapabilities.os === 'windows'}
+            <article>
+              <div class="setting-copy"><strong>Allow screen capture</strong><p>Sesame asks Windows to keep its windows out of screenshots, screen sharing and Recall. Turn this on only while someone helps you in a support session.</p></div>
+              <button type="button" class="switch" class:active={screenCaptureAllowed} role="switch" aria-checked={screenCaptureAllowed} aria-label="Allow screen capture" disabled={screenCaptureWorking} on:click={onToggleScreenCapture}><span></span></button>
             </article>
             {/if}
             <article>

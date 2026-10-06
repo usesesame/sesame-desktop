@@ -14,6 +14,7 @@ const MAX_SETTINGS_BYTES: u64 = 16 * 1024;
 #[serde(rename_all = "camelCase", default)]
 pub struct DesktopSettings {
     pub website_icons_enabled: bool,
+    pub screen_capture_allowed: bool,
 }
 
 pub fn settings_path(app: &AppHandle) -> VaultResult<PathBuf> {
@@ -48,6 +49,16 @@ pub fn website_icons_enabled_at(path: &Path) -> bool {
     read_settings_at(path).is_some_and(|settings| settings.website_icons_enabled)
 }
 
+pub fn screen_capture_allowed_at(path: &Path) -> bool {
+    read_settings_at(path).is_some_and(|settings| settings.screen_capture_allowed)
+}
+
+pub fn set_screen_capture_allowed_at(path: &Path, allowed: bool) -> VaultResult<()> {
+    let mut settings = read_settings_at(path).unwrap_or_default();
+    settings.screen_capture_allowed = allowed;
+    write_settings_at(path, &settings)
+}
+
 pub fn require_website_icons_enabled(path: &Path) -> VaultResult<()> {
     if website_icons_enabled_at(path) {
         Ok(())
@@ -59,6 +70,18 @@ pub fn require_website_icons_enabled(path: &Path) -> VaultResult<()> {
 #[tauri::command]
 pub fn get_website_icons_enabled(app: AppHandle) -> VaultResult<Option<bool>> {
     Ok(read_settings_at(&settings_path(&app)?).map(|settings| settings.website_icons_enabled))
+}
+
+#[tauri::command]
+pub fn get_screen_capture_allowed(app: AppHandle) -> VaultResult<bool> {
+    Ok(screen_capture_allowed_at(&settings_path(&app)?))
+}
+
+#[tauri::command]
+pub fn set_screen_capture_allowed(app: AppHandle, allowed: bool) -> VaultResult<()> {
+    set_screen_capture_allowed_at(&settings_path(&app)?, allowed)?;
+    crate::desktop_shell::apply_capture_policy(&app);
+    Ok(())
 }
 
 pub fn set_website_icons_enabled_at(
@@ -129,6 +152,7 @@ mod tests {
             &path,
             &DesktopSettings {
                 website_icons_enabled: true,
+                ..DesktopSettings::default()
             },
         )
         .expect("enable setting");
@@ -138,6 +162,7 @@ mod tests {
             &path,
             &DesktopSettings {
                 website_icons_enabled: false,
+                ..DesktopSettings::default()
             },
         )
         .expect("disable setting");
@@ -183,6 +208,7 @@ mod tests {
             &path,
             &DesktopSettings {
                 website_icons_enabled: true,
+                ..DesktopSettings::default()
             },
         )
         .expect("enable setting");
@@ -194,6 +220,67 @@ mod tests {
         )
         .is_ok());
         assert!(!website_icons_enabled_at(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn screen_capture_stays_blocked_without_a_settings_file() {
+        let path = test_path("capture-missing");
+        assert!(!screen_capture_allowed_at(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn a_settings_file_from_an_earlier_release_keeps_screen_capture_blocked() {
+        let path = test_path("capture-earlier-release");
+        fs::write(&path, br#"{"websiteIconsEnabled":true}"#).expect("write settings");
+        assert!(website_icons_enabled_at(&path));
+        assert!(!screen_capture_allowed_at(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn the_screen_capture_choice_survives_a_round_trip_and_keeps_other_settings() {
+        let path = test_path("capture-round-trip");
+        write_settings_at(
+            &path,
+            &DesktopSettings {
+                website_icons_enabled: true,
+                ..DesktopSettings::default()
+            },
+        )
+        .expect("enable icons");
+        set_screen_capture_allowed_at(&path, true).expect("allow capture");
+        assert!(screen_capture_allowed_at(&path));
+        assert!(website_icons_enabled_at(&path));
+        set_screen_capture_allowed_at(&path, false).expect("block capture");
+        assert!(!screen_capture_allowed_at(&path));
+        assert!(website_icons_enabled_at(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn turning_website_icons_off_keeps_the_screen_capture_choice() {
+        let path = test_path("capture-icons-off");
+        set_screen_capture_allowed_at(&path, true).expect("allow capture");
+        assert!(set_website_icons_enabled_at(
+            &path,
+            false,
+            &VaultState::default(),
+            &ReleasePresence::default()
+        )
+        .is_ok());
+        assert!(screen_capture_allowed_at(&path));
+        let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn unreadable_or_oversized_settings_keep_screen_capture_blocked() {
+        let path = test_path("capture-unreadable");
+        fs::write(&path, b"not a settings file").expect("write settings");
+        assert!(!screen_capture_allowed_at(&path));
+        fs::write(&path, vec![b' '; (MAX_SETTINGS_BYTES + 1) as usize]).expect("write settings");
+        assert!(!screen_capture_allowed_at(&path));
         let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
     }
 

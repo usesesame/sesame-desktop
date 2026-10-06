@@ -177,8 +177,8 @@
 
   <div class="editor-fields">
     <label>Login name<input name="login-title" bind:this={nameInput} bind:value={loginDraft.title} required maxlength="160" placeholder="e.g. GitHub…" autocomplete="off" /></label>
-    <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} bind:value={loginDraft.url} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="url" spellcheck="false" /></label>
-    <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" spellcheck="false"></textarea></label>
+    <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} bind:value={loginDraft.url} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="off" spellcheck="false" /></label>
+    <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" autocomplete="off" spellcheck="false"></textarea></label>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
     <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
       <SelectMenu
@@ -189,14 +189,14 @@
       />
     </label>
     <div class="editor-two-column">
-      <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="username" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
-      <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="email" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
+      <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
+      <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="off" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
       <datalist id="username-suggestions">{#each usernameSuggestions as value (value)}<option {value}></option>{/each}</datalist>
       <datalist id="email-suggestions">{#each emailSuggestions as value (value)}<option {value}></option>{/each}</datalist>
     </div>
     <label>Password
       <span class="password-field">
-        <input name="login-password" value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="new-password" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
+        <input name="login-password" value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="off" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
         <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={(!passwordDisplay && !loginDraft.password && !loginDraft.id) || passwordRevealWorking} on:click={togglePasswordVisibility}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
         <button type="button" class="icon-button" aria-label="Generate a password" title="Generate a password" on:click={generatePassword}><Icon name="refresh" size={15} /></button>
         <button type="button" class="icon-button" aria-label="Password options" title="Password options" aria-expanded={generatorOpen} on:click={() => (generatorOpen = !generatorOpen)}><Icon name="settings" size={15} /></button>
@@ -233,15 +233,15 @@
       <div><h3>Account recovery</h3><p>Keep only the options this site actually offers.</p></div>
       <label class="recovery-applicability"><input name="login-recovery-not-applicable" type="checkbox" bind:checked={loginDraft.recoveryNotApplicable} /><span><strong>This site has no separate recovery options</strong><small>Use this when there are no backup codes, recovery email, or recovery phone.</small></span></label>
       {#if !loginDraft.recoveryNotApplicable}
-        <label>Backup codes<textarea name="login-backup-codes" value={loginDraft.backupCodes.join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, backupCodes: event.currentTarget.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) })} placeholder="One code per line…" spellcheck="false"></textarea></label>
+        <label>Backup codes<textarea name="login-backup-codes" value={loginDraft.backupCodes.join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, backupCodes: event.currentTarget.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) })} placeholder="One code per line…" autocomplete="off" spellcheck="false"></textarea></label>
         <div class="editor-two-column">
-          <label>Recovery email <span class="field-hint">Optional</span><input name="login-recovery-email" type="email" bind:value={loginDraft.recoveryEmail} autocomplete="email" spellcheck="false" /></label>
-          <label>Recovery phone <span class="field-hint">Optional</span><input name="login-recovery-phone" type="tel" bind:value={loginDraft.recoveryPhone} autocomplete="tel" /></label>
+          <label>Recovery email <span class="field-hint">Optional</span><input name="login-recovery-email" type="email" bind:value={loginDraft.recoveryEmail} autocomplete="off" spellcheck="false" /></label>
+          <label>Recovery phone <span class="field-hint">Optional</span><input name="login-recovery-phone" type="tel" bind:value={loginDraft.recoveryPhone} autocomplete="off" /></label>
         </div>
       {/if}
     </section>
 
-    <label>Notes<textarea name="login-notes" bind:value={loginDraft.notes} maxlength="20000" placeholder="Anything useful to remember about this account…"></textarea></label>
+    <label>Notes<textarea name="login-notes" bind:value={loginDraft.notes} maxlength="20000" placeholder="Anything useful to remember about this account…" autocomplete="off"></textarea></label>
   </div>
 
   {#if confirmingDiscard}

@@ -22,6 +22,7 @@ const vaultApi = vi.hoisted(() => ({
   getAutostartEnabled: vi.fn(),
   getBrowserIntegrationStatus: vi.fn(),
   getDiagnosticStatus: vi.fn(),
+  getScreenCaptureAllowed: vi.fn(),
   getServiceConnectionStatus: vi.fn(),
   getVaultStatus: vi.fn(),
   getWebsiteIconCacheStatus: vi.fn(),
@@ -36,6 +37,7 @@ const vaultApi = vi.hoisted(() => ({
   setClipboardClearSeconds: vi.fn(),
   setNativeAutoLockMinutes: vi.fn(),
   setQuickAccessShortcut: vi.fn(),
+  setScreenCaptureAllowed: vi.fn(),
   setTrayEnabled: vi.fn(),
   setUnlockPin: vi.fn(),
   setWebsiteIconsEnabled: vi.fn(),
@@ -72,6 +74,7 @@ beforeEach(() => {
   vaultApi.getBrowserIntegrationStatus.mockResolvedValue({ ready: true })
   vaultApi.getAutostartEnabled.mockResolvedValue(false)
   vaultApi.getWebsiteIconsEnabled.mockResolvedValue(false)
+  vaultApi.getScreenCaptureAllowed.mockResolvedValue(false)
   vaultApi.onDesktopUpdateProgress.mockResolvedValue(() => {})
   vaultApi.recordDiagnostic.mockResolvedValue(undefined)
   vaultApi.setTrayEnabled.mockResolvedValue(undefined)
@@ -291,5 +294,73 @@ describe('recovery kit replacement', () => {
 
     expect(vaultApi.grantPresence).not.toHaveBeenCalled()
     expect(controller.state.value().recoveryReplacement?.requestedAt).toBeUndefined()
+  })
+})
+
+describe('screen capture setting', () => {
+  it('starts blocked and reads the stored choice from the desktop app', async () => {
+    const { controller } = harness()
+    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+
+    vaultApi.getScreenCaptureAllowed.mockResolvedValue(true)
+    const stop = controller.start()
+    await vi.waitFor(() => expect(controller.state.value().screenCaptureAllowed).toBe(true))
+    stop()
+  })
+
+  it('stays blocked when the stored choice cannot be read', async () => {
+    const { controller } = harness()
+    vaultApi.getScreenCaptureAllowed.mockRejectedValue(new Error('unavailable'))
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+
+    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+    stop()
+  })
+
+  it('allows capture only after the desktop app accepts the change', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+
+    await controller.toggleScreenCapture()
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenCalledWith(true)
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: true, screenCaptureWorking: false })
+    expect(feedback.state.value().notice?.title).toBe('Screen capture allowed')
+  })
+
+  it('blocks capture again on the next toggle', async () => {
+    const { controller } = harness()
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+    await controller.toggleScreenCapture()
+
+    await controller.toggleScreenCapture()
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenLastCalledWith(false)
+    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+  })
+
+  it('keeps capture blocked and shows the error when the desktop app refuses', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.setScreenCaptureAllowed.mockRejectedValue(new Error('Sesame could not save the desktop setting.'))
+
+    await controller.toggleScreenCapture()
+
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: false, screenCaptureWorking: false })
+    expect(feedback.state.value().errorMessage).toBe('Sesame could not save the desktop setting.')
+  })
+
+  it('ignores a second toggle while the first is still running', async () => {
+    const { controller } = harness()
+    let finish: () => void = () => {}
+    vaultApi.setScreenCaptureAllowed.mockReturnValue(new Promise<void>((resolve) => { finish = resolve }))
+
+    const first = controller.toggleScreenCapture()
+    await controller.toggleScreenCapture()
+    finish()
+    await first
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenCalledTimes(1)
   })
 })
