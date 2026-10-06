@@ -245,21 +245,26 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
 
 pub fn merge_comparison_for(group: &[&VaultEntry]) -> MergeComparison {
     let field = |name: &str, label: &str, secret: bool, read: &dyn Fn(&VaultEntry) -> String| {
-        let options: Vec<MergeFieldOption> = group
+        let values: Vec<String> = group.iter().map(|entry| read(entry)).collect();
+        let differs = values.iter().any(|value| Some(value) != values.first());
+        let options = group
             .iter()
-            .map(|entry| {
-                let value = read(entry);
+            .zip(values)
+            .map(|(entry, mut value)| {
+                let present = !value.is_empty();
+                let value = if secret {
+                    value.zeroize();
+                    None
+                } else {
+                    Some(value)
+                };
                 MergeFieldOption {
                     entry_id: entry.id.clone(),
-                    present: !value.is_empty(),
+                    present,
                     value,
                 }
             })
             .collect();
-        let first = options.first().map(|option| option.value.clone());
-        let differs = options
-            .iter()
-            .any(|option| Some(&option.value) != first.as_ref());
         MergeField {
             field: name.to_string(),
             label: label.to_string(),
