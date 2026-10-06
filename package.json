@@ -14,6 +14,7 @@
     "desktop:vault:gate": "node tools/vault-compatibility-gate.mjs verify",
     "desktop:vault:restore": "node tools/run-vault-restore-gate.mjs",
     "desktop:linux:package:gate": "node tools/linux-installed-package-gate.mjs",
+    "desktop:linux:webview:check": "node tools/linux-webview-sandbox-check.mjs",
     "desktop:dependency:admission": "node ./tools/dependency-admission.mjs",
     "desktop:host:stage": "node tools/stage-browser-host.mjs",
     "desktop:sites:refresh": "node tools/refresh-two-factor-sites.mjs",
