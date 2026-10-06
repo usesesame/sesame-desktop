@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 use sesame_core::loader::{Credential, VaultLoader};
-use sesame_core::VAULT_FORMAT_VERSION;
+use sesame_core::{encrypt_bytes, payload_aad_for_file, VAULT_FORMAT_VERSION};
 use sha2::{Digest, Sha256};
 
 const PUBLISHED_RELEASES: [&str; 5] = ["v0.1.0", "v0.1.1", "v0.2.0", "v0.2.1", "v0.2.2"];
@@ -407,4 +407,73 @@ fn fixture_v0_2_1_opens_and_matches_its_recorded_evidence() {
 #[test]
 fn fixture_v0_2_2_opens_and_matches_its_recorded_evidence() {
     open_fixture("v0.2.2");
+}
+
+const PADDED_PAYLOAD_BYTES: usize = 24 * 1024;
+
+fn reseal_with_padding(file: &sesame_core::VaultFile, password: &str) -> Vec<u8> {
+    let key = VaultLoader::unwrap_key(file, Credential::MasterPassword(password))
+        .expect("unwrapped vault key");
+    let authenticated =
+        VaultLoader::authenticate(file, Credential::VaultKey(&key)).expect("authenticated payload");
+    let mut padded = authenticated.bytes().to_vec();
+    assert!(padded.len() < PADDED_PAYLOAD_BYTES);
+    padded.resize(PADDED_PAYLOAD_BYTES, b' ');
+    let aad = payload_aad_for_file(file.format_version, file.setup_complete).expect("payload aad");
+    let mut resealed = file.clone();
+    resealed.payload = encrypt_bytes(&key, &padded, aad).expect("resealed payload");
+    serde_json::to_vec(&resealed).expect("resealed file")
+}
+
+#[test]
+fn every_fixture_opens_after_its_payload_is_padded_with_spaces() {
+    for tag in PUBLISHED_RELEASES {
+        let entry = fixture_entry(tag);
+        let bytes = fs::read(corpus_dir().join(entry["fileName"].as_str().expect("file name")))
+            .expect("fixture bytes");
+        let password = entry["secrets"]["masterPassword"]
+            .as_str()
+            .expect("password");
+        let recovery_kit = entry["secrets"]["recoveryKit"]
+            .as_str()
+            .expect("recovery kit");
+        let file = VaultLoader::parse(&bytes).expect("fixture envelope");
+        let original =
+            VaultLoader::open(&file, Credential::MasterPassword(password)).expect("opened fixture");
+
+        let padded_bytes = reseal_with_padding(&file, password);
+        assert_ne!(padded_bytes, bytes);
+        for credential in [
+            Credential::MasterPassword(password),
+            Credential::RecoveryKit(recovery_kit),
+        ] {
+            let opened = VaultLoader::load(&padded_bytes, credential)
+                .unwrap_or_else(|error| panic!("{tag} padded fixture did not open: {error:?}"));
+            assert_eq!(opened.payload.vault_id, original.payload.vault_id, "{tag}");
+            assert_eq!(opened.payload.revision, original.payload.revision, "{tag}");
+            assert_eq!(
+                counts_of(&opened.payload),
+                counts_of(&original.payload),
+                "{tag}"
+            );
+            assert_eq!(
+                all_stable_ids(&opened.payload),
+                all_stable_ids(&original.payload),
+                "{tag}"
+            );
+            assert_eq!(
+                opened.migration.payload_changed,
+                original.migration.payload_changed
+            );
+            assert_eq!(
+                opened.migration.envelope_changed,
+                original.migration.envelope_changed
+            );
+        }
+        let padded_file = VaultLoader::parse(&padded_bytes).expect("padded envelope");
+        let authenticated =
+            VaultLoader::authenticate(&padded_file, Credential::MasterPassword(password))
+                .expect("authenticated padded payload");
+        assert_eq!(authenticated.bytes().len(), PADDED_PAYLOAD_BYTES);
+    }
 }
