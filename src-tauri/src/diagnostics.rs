@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
-    fs::{self, OpenOptions},
+    fs,
     hash::{Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::app_identity::APP_IDENTIFIER;
+use crate::vault::{
+    platform::{create_private_dir, open_private_append, open_private_file, replace_file},
+    random_id,
+};
 
 const DIAGNOSTIC_FILE: &str = "sesame-diagnostics.jsonl";
 const MAX_DIAGNOSTIC_BYTES: u64 = 1024 * 1024;
@@ -254,6 +258,7 @@ pub fn record(app: &AppHandle, input: DiagnosticInput) -> DiagnosticResult<()> {
 
 pub fn status(app: &AppHandle) -> DiagnosticResult<DiagnosticStatus> {
     let path = diagnostic_path(app)?;
+    ensure_not_link(&path)?;
     let metadata = fs::metadata(&path).ok();
     let content = fs::read_to_string(&path).unwrap_or_default();
     let (event_count, error_count, by_operation, by_code, recent) = summarise(&content);
@@ -345,6 +350,7 @@ fn summarise(
 }
 
 fn prune_stale_at(path: &Path, now: u64) -> DiagnosticResult<()> {
+    ensure_not_link(path)?;
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -374,11 +380,13 @@ fn prune_stale_at(path: &Path, now: u64) -> DiagnosticResult<()> {
             Err(_) => Err("Sesame could not clear the local diagnostic log.".into()),
         };
     }
-    fs::write(path, kept).map_err(|_| "Sesame could not tidy its local diagnostic log.".to_string())
+    rewrite_log(path, &kept)
+        .map_err(|_| "Sesame could not tidy its local diagnostic log.".to_string())
 }
 
 pub fn export(app: &AppHandle, destination: &Path) -> DiagnosticResult<String> {
     let source = diagnostic_path(app)?;
+    ensure_not_link(&source)?;
     if !source.is_file() {
         return Err("There is no local diagnostic log to export yet.".into());
     }
@@ -408,9 +416,39 @@ fn diagnostic_path(app: &AppHandle) -> DiagnosticResult<PathBuf> {
         .path()
         .app_log_dir()
         .map_err(|_| "Sesame could not open its local diagnostic folder.".to_string())?;
-    fs::create_dir_all(&directory)
-        .map_err(|_| "Sesame could not create its local diagnostic folder.".to_string())?;
+    prepare_directory(&directory)?;
     Ok(directory.join(DIAGNOSTIC_FILE))
+}
+
+fn prepare_directory(directory: &Path) -> DiagnosticResult<()> {
+    create_private_dir(directory)
+        .map_err(|_| "Sesame could not create its local diagnostic folder.".to_string())
+}
+
+fn ensure_not_link(path: &Path) -> DiagnosticResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(
+            "Sesame found a link where its local diagnostic log belongs and did not use it.".into(),
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn rewrite_log(path: &Path, content: &str) -> DiagnosticResult<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| "Sesame could not find its local diagnostic folder.".to_string())?;
+    let temporary = directory.join(format!(".{DIAGNOSTIC_FILE}.{}.tmp", random_id()));
+    let written = open_private_file(&temporary).and_then(|mut file| {
+        file.write_all(content.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "Sesame could not write its local diagnostic log.".to_string())
+    });
+    let replaced = written.and_then(|_| replace_file(&temporary, path));
+    if replaced.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    replaced
 }
 
 fn append_event(path: &Path, operation: &str, code: &str) -> DiagnosticResult<()> {
@@ -423,6 +461,7 @@ fn append_event_with_site(
     code: &str,
     crash_site: Option<u64>,
 ) -> DiagnosticResult<()> {
+    ensure_not_link(path)?;
     if fs::metadata(path)
         .map(|metadata| metadata.len())
         .unwrap_or(0)
@@ -438,7 +477,7 @@ fn append_event_with_site(
                 .iter()
                 .map(|line| format!("{line}\n"))
                 .collect();
-            fs::write(path, tail)
+            rewrite_log(path, &tail)
                 .map_err(|_| "Sesame could not rotate its local diagnostic log.".to_string())?;
         }
     }
@@ -454,10 +493,7 @@ fn append_event_with_site(
     };
     let line = serde_json::to_string(&event)
         .map_err(|_| "Sesame could not prepare a diagnostic event.".to_string())?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
+    let mut file = open_private_append(path)
         .map_err(|_| "Sesame could not write its local diagnostic log.".to_string())?;
     writeln!(file, "{line}")
         .map_err(|_| "Sesame could not write its local diagnostic log.".to_string())
@@ -594,4 +630,141 @@ fn allowed_browser_host_code(value: &str) -> bool {
             | "totp_connection_closed"
             | "totp_vault_changed"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_directory(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("sesame-diagnostics-{name}-{}", random_id()));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn log_line(index: usize) -> String {
+        format!(
+            "{{\"timestamp\":{index},\"version\":\"0.0.0\",\"platform\":\"linux\",\"session\":\"fictional\",\"operation\":\"app\",\"code\":\"started\",\"level\":\"info\"}}\n"
+        )
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_log_folder_and_file_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_directory("modes");
+        let folder = root.join("logs");
+        prepare_directory(&folder).unwrap();
+        let log = folder.join(DIAGNOSTIC_FILE);
+        append_event(&log, "app", "started").unwrap();
+
+        assert_eq!(mode_of(&folder), 0o700);
+        assert_eq!(mode_of(&log), 0o600);
+
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+        prepare_directory(&folder).unwrap();
+        append_event(&log, "app", "started").unwrap();
+
+        assert_eq!(mode_of(&folder), 0o700);
+        assert_eq!(mode_of(&log), 0o600);
+        assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_symlink_at_the_log_path_is_refused_everywhere() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_directory("symlink");
+        let canary = root.join("canary.txt");
+        fs::write(&canary, "fictional canary\n").unwrap();
+        let log = root.join(DIAGNOSTIC_FILE);
+        symlink(&canary, &log).unwrap();
+
+        assert!(append_event(&log, "app", "started").is_err());
+        assert!(prune_stale_at(&log, u64::MAX).is_err());
+        assert!(ensure_not_link(&log).is_err());
+
+        assert_eq!(fs::read_to_string(&canary).unwrap(), "fictional canary\n");
+        assert!(fs::symlink_metadata(&log).unwrap().file_type().is_symlink());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rotation_replaces_a_planted_symlink_instead_of_writing_through_it() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_directory("rotate-link");
+        let canary = root.join("canary.txt");
+        fs::write(&canary, "fictional canary\n").unwrap();
+        let log = root.join(DIAGNOSTIC_FILE);
+        symlink(&canary, &log).unwrap();
+
+        rewrite_log(&log, "kept line\n").unwrap();
+
+        assert_eq!(fs::read_to_string(&canary).unwrap(), "fictional canary\n");
+        let metadata = fs::symlink_metadata(&log).unwrap();
+        assert!(metadata.file_type().is_file());
+        assert_eq!(mode_of(&log), 0o600);
+        assert_eq!(fs::read_to_string(&log).unwrap(), "kept line\n");
+        let leftovers: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rotation_keeps_the_newest_half_in_a_private_file() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let root = test_directory("rotate");
+        let log = root.join(DIAGNOSTIC_FILE);
+        let lines = (MAX_DIAGNOSTIC_BYTES as usize / log_line(0).len()) + 10;
+        let content: String = (0..lines).map(log_line).collect();
+        fs::write(&log, &content).unwrap();
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+        let before = fs::metadata(&log).unwrap().ino();
+
+        append_event(&log, "app", "started").unwrap();
+
+        let rotated = fs::read_to_string(&log).unwrap();
+        assert_ne!(fs::metadata(&log).unwrap().ino(), before);
+        assert_eq!(mode_of(&log), 0o600);
+        assert_eq!(rotated.lines().count(), lines - lines / 2 + 1);
+        assert!(rotated.starts_with(&log_line(lines / 2)));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pruning_rewrites_through_a_private_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = test_directory("prune");
+        let log = root.join(DIAGNOSTIC_FILE);
+        let failure = "{\"timestamp\":1,\"version\":\"0.0.0\",\"platform\":\"linux\",\"session\":\"fictional\",\"operation\":\"vault_open\",\"code\":\"failed\",\"level\":\"error\"}\n";
+        fs::write(&log, format!("{failure}{}", log_line(2))).unwrap();
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+
+        prune_stale_at(&log, 10 * 24 * 60 * 60).unwrap();
+
+        assert_eq!(fs::read_to_string(&log).unwrap(), failure);
+        assert_eq!(mode_of(&log), 0o600);
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

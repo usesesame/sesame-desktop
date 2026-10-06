@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use sesame_core::api::{create_vault, open_vault_with_password};
 use sesame_core::loader::VaultLoader;
-use sesame_core::platform::{open_private_file, securely_delete};
+use sesame_core::platform::{open_private_append, open_private_file, securely_delete};
 use sesame_core::storage::{commit_payload_change, persist_session};
 use sesame_core::{random_id, UnlockedVault};
 
@@ -117,6 +117,93 @@ fn private_file_creation_refuses_an_existing_path() {
         fs::read(&canary_path).expect("canary after"),
         b"fictional canary protected"
     );
+    fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn private_append_creates_a_0600_file_and_keeps_earlier_lines() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = test_directory("append-create");
+    let log_path = directory.join("events.jsonl");
+
+    writeln!(open_private_append(&log_path).expect("first open"), "first").expect("first line");
+    writeln!(
+        open_private_append(&log_path).expect("second open"),
+        "second"
+    )
+    .expect("second line");
+
+    let mode = fs::metadata(&log_path)
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    assert_eq!(fs::read(&log_path).expect("content"), b"first\nsecond\n");
+    fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn private_append_tightens_a_file_that_was_created_with_wider_modes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = test_directory("append-tighten");
+    let log_path = directory.join("events.jsonl");
+    fs::write(&log_path, b"fictional earlier line\n").expect("existing log");
+    fs::set_permissions(&log_path, fs::Permissions::from_mode(0o644)).expect("wide mode");
+
+    open_private_append(&log_path).expect("open");
+
+    let mode = fs::metadata(&log_path)
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn private_append_refuses_a_symlink_and_leaves_its_target_alone() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let directory = test_directory("append-symlink");
+    let canary_path = directory.join("canary.txt");
+    fs::write(&canary_path, b"fictional canary protected\n").expect("canary");
+    fs::set_permissions(&canary_path, fs::Permissions::from_mode(0o644)).expect("canary mode");
+    let link_path = directory.join("events.jsonl");
+    symlink(&canary_path, &link_path).expect("planted symlink");
+
+    assert!(open_private_append(&link_path).is_err());
+
+    assert_eq!(
+        fs::read(&canary_path).expect("canary after"),
+        b"fictional canary protected\n"
+    );
+    let mode = fs::metadata(&canary_path)
+        .expect("metadata")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o644);
+    fs::remove_dir_all(&directory).expect("cleanup");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn private_append_refuses_a_dangling_symlink_without_creating_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let directory = test_directory("append-dangling");
+    let missing_path = directory.join("created-through-link.txt");
+    let link_path = directory.join("events.jsonl");
+    symlink(&missing_path, &link_path).expect("planted symlink");
+
+    assert!(open_private_append(&link_path).is_err());
+
+    assert!(!missing_path.exists());
     fs::remove_dir_all(&directory).expect("cleanup");
 }
 

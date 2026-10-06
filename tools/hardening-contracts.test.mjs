@@ -84,6 +84,49 @@ test('shipping webviews do not expose embedded Edge inspection surfaces', () => 
   }
 })
 
+test('release Linux builds scrub WebKit inspection variables before the Tauri builder starts', () => {
+  const rust = read('src-tauri', 'src', 'lib.rs')
+  const module = read('src-tauri', 'src', 'adapters', 'platform', 'webview_environment.rs')
+  const platform = read('src-tauri', 'src', 'adapters', 'platform', 'mod.rs').replace(/\s+/g, '').replace(/,\)/g, ')')
+
+  const release = /#\[cfg\(all\(target_os = "linux", not\(debug_assertions\), not\(feature = "wdio"\)\)\)\]\s*fn prepare_release_webview_environment\(\) \{\s*adapters::platform::webview_environment::remove_inspection_variables\(\);/
+  assert.match(rust, release, 'the Linux release preparation does not call the scrub')
+  assert.match(platform, /cfg\(any\(test,all\(target_os="linux",not\(debug_assertions\),not\(feature="wdio"\)\)\)\)\]pub\(crate\)modwebview_environment;/)
+  for (const variable of [
+    'TAURI_WEBVIEW_AUTOMATION',
+    'WEBKIT_INSPECTOR_SERVER',
+    'WEBKIT_INSPECTOR_HTTP_SERVER',
+    'WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS',
+    'WEBKIT_ENABLE_DEBUG_PERMISSIONS_IN_SANDBOX',
+    'WEBKIT_INJECTED_BUNDLE_PATH',
+  ]) {
+    assert.match(module, new RegExp(`"${variable}"`), `${variable} is not scrubbed`)
+  }
+  assert.match(module, /BLOCKED_PREFIXES[^=]*=\s*\["JSC_"\]/)
+  for (const workaround of ['WEBKIT_DISABLE_DMABUF_RENDERER', 'WEBKIT_DISABLE_COMPOSITING_MODE']) {
+    assert.doesNotMatch(
+      module.slice(0, module.indexOf('#[cfg(test)]')),
+      new RegExp(workaround),
+      `${workaround} is a rendering workaround and must stay available`,
+    )
+  }
+  const run = rust.indexOf('pub fn run()')
+  const preparation = rust.indexOf('prepare_release_webview_environment();', run)
+  const builder = rust.indexOf('tauri::Builder::default()', run)
+  assert.ok(run >= 0 && preparation > run && builder > preparation)
+})
+
+test('desktop updates are reported only for the systems the updater accepts', () => {
+  const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
+  const capabilities = read('src-tauri', 'src', 'adapters', 'platform', 'capabilities.rs')
+
+  const accepted = [...updater.match(/fn updater_platform_for\(os: &str\)[^{]*\{\s*match os \{([\s\S]*?)\n {4}\}/)[1].matchAll(/"([a-z]+)"\s*=>\s*Ok/g)].map((match) => match[1])
+  const reported = [...capabilities.match(/fn desktop_updates_for\(os: &str\) -> bool \{([\s\S]*?)\n\}/)[1].matchAll(/"([a-z]+)"/g)].map((match) => match[1])
+
+  assert.ok(accepted.length > 0, 'the updater platform check was not found')
+  assert.deepEqual([...new Set(reported)].sort(), [...new Set(accepted)].sort())
+})
+
 test('each desktop webview gets only the Tauri permissions its imports need', () => {
   const main = JSON.parse(read('src-tauri', 'capabilities', 'default.json'))
   const quick = JSON.parse(read('src-tauri', 'capabilities', 'quick-access.json'))

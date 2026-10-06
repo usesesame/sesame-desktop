@@ -260,7 +260,15 @@ fn prepare_release_webview_environment() {
     }
 }
 
-#[cfg(any(not(windows), debug_assertions))]
+#[cfg(all(target_os = "linux", not(debug_assertions), not(feature = "wdio")))]
+fn prepare_release_webview_environment() {
+    adapters::platform::webview_environment::remove_inspection_variables();
+}
+
+#[cfg(not(any(
+    all(windows, not(debug_assertions)),
+    all(target_os = "linux", not(debug_assertions), not(feature = "wdio"))
+)))]
 fn prepare_release_webview_environment() {}
 
 pub fn run() {

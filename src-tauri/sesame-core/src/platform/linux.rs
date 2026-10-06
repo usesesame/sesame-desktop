@@ -21,6 +21,7 @@ const DEVICE_KEY_HEADER: &[u8] = b"sesame:linux-device-key:v1\0";
 const DEVICE_KEY_AAD: &[u8] = b"sesame:linux-device-protection:v1";
 const DEVICE_KEY_CHANGED: &str = "The Sesame device key in your system wallet has changed since this was saved. This happens when the wallet is reset or a different wallet app is running. Unlock with your master password or recovery kit, then set your PIN again in Settings.";
 
+const SECRET_TOOL_STDOUT_LIMIT: usize = 4096;
 const SECRET_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const SECRET_SERVICE_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -39,25 +40,34 @@ pub fn device_protection_available() -> bool {
     secret_tool_path().is_some()
 }
 
+struct ToolOutput {
+    status: std::process::ExitStatus,
+    stdout: zeroize::Zeroizing<Vec<u8>>,
+    stderr: Vec<u8>,
+}
+
 fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: std::time::Duration,
-) -> VaultResult<std::process::Output> {
+) -> VaultResult<ToolOutput> {
     use std::io::Read;
 
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = Vec::new();
+                let mut stdout =
+                    zeroize::Zeroizing::new(Vec::with_capacity(SECRET_TOOL_STDOUT_LIMIT));
                 let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
+                if let Some(pipe) = child.stdout.take() {
+                    let _ = pipe
+                        .take(SECRET_TOOL_STDOUT_LIMIT as u64)
+                        .read_to_end(&mut stdout);
                 }
                 if let Some(mut pipe) = child.stderr.take() {
                     let _ = pipe.read_to_end(&mut stderr);
                 }
-                return Ok(std::process::Output {
+                return Ok(ToolOutput {
                     status,
                     stdout,
                     stderr,
@@ -78,7 +88,7 @@ fn wait_with_timeout(
 fn run_linux_device_key_lookup(
     secret_tool: &Path,
     timeout: std::time::Duration,
-) -> VaultResult<std::process::Output> {
+) -> VaultResult<ToolOutput> {
     use std::process::Stdio;
 
     let child = std::process::Command::new(secret_tool)
@@ -138,18 +148,18 @@ fn start_wallet_daemon_in(directories: &[&str], desktop: &str) -> Option<&'stati
     None
 }
 
-fn device_key_lookup_settled(output: &std::process::Output) -> bool {
+fn device_key_lookup_settled(output: &ToolOutput) -> bool {
     output.status.success() || output.stderr.iter().all(u8::is_ascii_whitespace)
 }
 
-fn lookup_linux_device_key(secret_tool: &Path) -> VaultResult<std::process::Output> {
+fn lookup_linux_device_key(secret_tool: &Path) -> VaultResult<ToolOutput> {
     lookup_linux_device_key_within(secret_tool, SECRET_SERVICE_TOTAL_TIMEOUT)
 }
 
 fn lookup_linux_device_key_within(
     secret_tool: &Path,
     budget: std::time::Duration,
-) -> VaultResult<std::process::Output> {
+) -> VaultResult<ToolOutput> {
     lookup_linux_device_key_within_using(
         budget,
         |timeout| run_linux_device_key_lookup(secret_tool, timeout),
@@ -161,9 +171,9 @@ fn lookup_linux_device_key_within_using<F, R>(
     budget: std::time::Duration,
     mut lookup: F,
     remediate: R,
-) -> VaultResult<std::process::Output>
+) -> VaultResult<ToolOutput>
 where
-    F: FnMut(std::time::Duration) -> VaultResult<std::process::Output>,
+    F: FnMut(std::time::Duration) -> VaultResult<ToolOutput>,
     R: FnOnce(),
 {
     let deadline = std::time::Instant::now() + budget;
@@ -208,13 +218,17 @@ fn read_linux_device_key(secret_tool: &Path) -> VaultResult<Option<zeroize::Zero
     let mut decoded = URL_SAFE_NO_PAD
         .decode(encoded)
         .map_err(|_| "The Sesame device key in the Linux credential store is invalid.")?;
-    let key: Result<[u8; 32], _> = decoded.as_slice().try_into();
+    let mut key = zeroize::Zeroizing::new([0_u8; 32]);
+    let fits = decoded.len() == key.len();
+    if fits {
+        key.copy_from_slice(&decoded);
+    }
     use zeroize::Zeroize;
     decoded.zeroize();
-    let key = key.map_err(|_| {
-        "The Sesame device key in the Linux credential store is invalid.".to_string()
-    })?;
-    Ok(Some(zeroize::Zeroizing::new(key)))
+    if !fits {
+        return Err("The Sesame device key in the Linux credential store is invalid.".into());
+    }
+    Ok(Some(key))
 }
 
 fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
@@ -381,7 +395,7 @@ mod tests {
             .map_err(|_| "could not spawn printf".to_string())?;
         let output = wait_with_timeout(child, std::time::Duration::from_secs(5))?;
         assert!(output.status.success());
-        assert_eq!(output.stdout, b"hello");
+        assert_eq!(output.stdout.as_slice(), b"hello");
         Ok(())
     }
 
@@ -481,16 +495,16 @@ mod tests {
     fn a_settled_lookup_is_one_that_succeeded_or_failed_quietly() {
         use std::os::unix::process::ExitStatusExt;
 
-        let settled = std::process::Output {
+        let settled = ToolOutput {
             status: std::process::ExitStatus::from_raw(256),
-            stdout: Vec::new(),
+            stdout: zeroize::Zeroizing::new(Vec::new()),
             stderr: b"  \n".to_vec(),
         };
         assert!(device_key_lookup_settled(&settled));
 
-        let unsettled = std::process::Output {
+        let unsettled = ToolOutput {
             status: std::process::ExitStatus::from_raw(256),
-            stdout: Vec::new(),
+            stdout: zeroize::Zeroizing::new(Vec::new()),
             stderr: b"The name is not activatable".to_vec(),
         };
         assert!(!device_key_lookup_settled(&unsettled));
@@ -508,9 +522,9 @@ mod tests {
             |timeout| {
                 calls += 1;
                 if calls == 1 {
-                    return Ok(std::process::Output {
+                    return Ok(ToolOutput {
                         status: std::process::ExitStatus::from_raw(256),
-                        stdout: Vec::new(),
+                        stdout: zeroize::Zeroizing::new(Vec::new()),
                         stderr: b"not activatable".to_vec(),
                     });
                 }
@@ -525,6 +539,84 @@ mod tests {
         assert!(!output.status.success());
         assert!(elapsed >= budget);
         assert!(elapsed < budget + std::time::Duration::from_secs(10));
+        Ok(())
+    }
+
+    fn fake_secret_tool(name: &str, script: &str) -> VaultResult<PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory =
+            std::env::temp_dir().join(format!("sesame-fake-tool-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory)
+            .map_err(|_| "could not create the fake tool directory".to_string())?;
+        let binary = directory.join("secret-tool");
+        fs::write(&binary, format!("#!/bin/sh\n{script}\n"))
+            .map_err(|_| "could not write the fake tool".to_string())?;
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
+            .map_err(|_| "could not mark the fake tool executable".to_string())?;
+        Ok(binary)
+    }
+
+    #[test]
+    fn a_stored_device_key_is_read_from_the_tool_output() -> VaultResult<()> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        let expected: [u8; 32] = std::array::from_fn(|index| index as u8);
+        let binary = fake_secret_tool(
+            "stored",
+            &format!("printf '%s\\n' '{}'", URL_SAFE_NO_PAD.encode(expected)),
+        )?;
+
+        let key = read_linux_device_key(&binary)?;
+
+        assert_eq!(key.as_deref(), Some(&expected));
+        if let Some(directory) = binary.parent() {
+            let _ = fs::remove_dir_all(directory);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_device_key_is_none_and_a_wrong_length_key_is_refused() -> VaultResult<()> {
+        let missing = fake_secret_tool("missing", "exit 1")?;
+        assert_eq!(read_linux_device_key(&missing)?, None);
+
+        let short = fake_secret_tool("short", "printf 'AAAA'")?;
+        assert!(read_linux_device_key(&short).is_err());
+        for binary in [missing, short] {
+            if let Some(directory) = binary.parent() {
+                let _ = fs::remove_dir_all(directory);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tool_output_is_read_into_one_bounded_buffer_that_never_regrows() -> VaultResult<()> {
+        use std::process::{Command, Stdio};
+
+        let child = Command::new("sh")
+            .args(["-c", "head -c 20000 /dev/zero | tr '\\0' A"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| "could not spawn sh".to_string())?;
+        let output = wait_with_timeout(child, std::time::Duration::from_secs(5))?;
+
+        assert_eq!(output.stdout.len(), SECRET_TOOL_STDOUT_LIMIT);
+        assert_eq!(output.stdout.capacity(), SECRET_TOOL_STDOUT_LIMIT);
+        Ok(())
+    }
+
+    #[test]
+    fn an_oversized_tool_reply_is_not_accepted_as_a_device_key() -> VaultResult<()> {
+        let binary = fake_secret_tool("oversized", "head -c 20000 /dev/zero | tr '\\0' A")?;
+
+        assert!(read_linux_device_key(&binary).is_err());
+        if let Some(directory) = binary.parent() {
+            let _ = fs::remove_dir_all(directory);
+        }
         Ok(())
     }
 

@@ -83,6 +83,34 @@ pub fn open_private_file(path: &Path) -> VaultResult<std::fs::File> {
         .map_err(|_| "Sesame could not prepare the file.".to_string())
 }
 
+pub fn open_private_append(path: &Path) -> VaultResult<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+        #[cfg(target_os = "linux")]
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| "Sesame could not prepare the file.".to_string())?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "Sesame could not prepare the file.".to_string())?;
+    if !metadata.is_file() {
+        return Err("Sesame could not prepare the file.".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|_| "Sesame could not protect the file.".to_string())?;
+    }
+    Ok(file)
+}
+
 /// A temp file in the destination folder plus a rename, so a planted link is
 /// replaced rather than followed.
 pub fn copy_private_file(source: &Path, destination: &Path) -> VaultResult<()> {
