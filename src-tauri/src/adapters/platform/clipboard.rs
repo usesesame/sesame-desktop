@@ -77,15 +77,42 @@ impl ClipboardBackend for SystemClipboard {
     }
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SecretExclusion {
+    Monitoring,
+    History,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn secret_exclusion_for(os: &str) -> SecretExclusion {
+    if os == "windows" {
+        SecretExclusion::Monitoring
+    } else {
+        SecretExclusion::History
+    }
+}
+
+#[cfg(windows)]
+fn with_exclusion(set: arboard::Set<'_>, exclusion: SecretExclusion) -> arboard::Set<'_> {
+    use arboard::SetExtWindows;
+    match exclusion {
+        SecretExclusion::Monitoring => set.exclude_from_monitoring(),
+        SecretExclusion::History => set.exclude_from_history(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn with_exclusion(set: arboard::Set<'_>, _exclusion: SecretExclusion) -> arboard::Set<'_> {
+    use arboard::SetExtLinux;
+    set.exclude_from_history()
+}
+
 /// A clipboard manager that honours the secret hint keeps the value out of its
-/// history, so the timed clear is not undone by a copy the user cannot see.
+/// history, so the timed clear is not undone by a copy the user cannot see. On
+/// Windows the same marker also keeps the value out of Cloud Clipboard sync.
 #[cfg(any(windows, target_os = "linux"))]
 fn write_secret_text(state: &ClipboardGuard, value: &str) -> VaultResult<()> {
-    #[cfg(target_os = "linux")]
-    use arboard::SetExtLinux as SetExt;
-    #[cfg(windows)]
-    use arboard::SetExtWindows as SetExt;
-
     let mut held = state
         .clipboard
         .lock()
@@ -99,9 +126,7 @@ fn write_secret_text(state: &ClipboardGuard, value: &str) -> VaultResult<()> {
     let clipboard = held
         .as_mut()
         .ok_or_else(|| "Sesame could not reach the clipboard.".to_string())?;
-    clipboard
-        .set()
-        .exclude_from_history()
+    with_exclusion(clipboard.set(), secret_exclusion_for(std::env::consts::OS))
         .text(value)
         .map_err(|_| "Sesame could not copy to the clipboard.".to_string())
 }
@@ -632,5 +657,91 @@ mod tests {
     fn the_clear_delay_is_bounded() {
         assert_eq!(bounded_clear_after_ms(1_000), 1_000);
         assert_eq!(bounded_clear_after_ms(u64::MAX), MAX_CLIPBOARD_CLEAR_MS);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn the_exclusion_choice_follows_the_operating_system() {
+        assert_eq!(secret_exclusion_for("windows"), SecretExclusion::Monitoring);
+        assert_eq!(secret_exclusion_for("linux"), SecretExclusion::History);
+        assert_eq!(secret_exclusion_for("macos"), SecretExclusion::History);
+        assert_eq!(secret_exclusion_for(""), SecretExclusion::History);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn this_system_picks_the_exclusion_its_clipboard_supports() {
+        let expected = if cfg!(windows) {
+            SecretExclusion::Monitoring
+        } else {
+            SecretExclusion::History
+        };
+        assert_eq!(secret_exclusion_for(std::env::consts::OS), expected);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_clipboard_formats {
+    use super::*;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EnumClipboardFormats, GetClipboardFormatNameW, OpenClipboard,
+    };
+
+    const MONITORING_FORMAT: &str = "ExcludeClipboardContentFromMonitorProcessing";
+
+    fn registered_format_names() -> Vec<String> {
+        unsafe {
+            let mut opened = false;
+            for _ in 0..40 {
+                if OpenClipboard(std::ptr::null_mut()) != 0 {
+                    opened = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            assert!(opened, "the clipboard could not be opened for reading");
+            let mut names = Vec::new();
+            let mut format = 0;
+            loop {
+                format = EnumClipboardFormats(format);
+                if format == 0 {
+                    break;
+                }
+                let mut buffer = [0u16; 256];
+                let length =
+                    GetClipboardFormatNameW(format, buffer.as_mut_ptr(), buffer.len() as i32);
+                if length > 0 {
+                    names.push(String::from_utf16_lossy(&buffer[..length as usize]));
+                }
+            }
+            let _ = CloseClipboard();
+            names
+        }
+    }
+
+    #[test]
+    fn a_secret_copy_and_its_clear_both_carry_the_monitoring_exclusion() {
+        let guard = ClipboardGuard::default();
+
+        arm_secret(&guard, &SystemClipboard, "fictional-clipboard-secret").unwrap();
+
+        assert_eq!(
+            SystemClipboard.read(&guard).as_deref(),
+            Some("fictional-clipboard-secret")
+        );
+        assert!(registered_format_names()
+            .iter()
+            .any(|name| name == MONITORING_FORMAT));
+
+        assert_eq!(
+            clear_armed_text(&guard, None, &SystemClipboard).unwrap(),
+            ClearOutcome::Cleared
+        );
+
+        assert_eq!(SystemClipboard.read(&guard).unwrap_or_default(), "");
+        assert!(registered_format_names()
+            .iter()
+            .any(|name| name == MONITORING_FORMAT));
+        release(&guard);
     }
 }
