@@ -86,6 +86,6 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.3"
+    "@tauri-apps/plugin-clipboard-manager": "^2.4.0"
   }
 }
