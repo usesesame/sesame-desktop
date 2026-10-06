@@ -1,0 +1,16 @@
+{
+  "version": "1.2.3",
+  "url": "https://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe",
+  "notes": "Verification and release notes: https://downloads.example.test/v1.2.3/notes",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "url": "https://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe",
+      "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  },
+  "candidateReceipt": {
+    "payload": "sesame-release-candidate-v3\n1.2.3\nbeta\nwindows\nx86_64\nWindows 10,Windows 11\nhttps://downloads.example.test/v1.2.3/notes\nhttps://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe\nwindows/v1.2.3/Sesame_1.2.3_x64-setup.exe\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n42\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nfictional-updater-key\nearly_access\ntrue\nhttps://token.actions.githubusercontent.com\nhttps://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v1.2.3\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nHjcYzZk_48nHn7hGq9Gw0sDiWAbQga97v9z54Xvylsc\nfalse\n\n\n",
+    "signingKeyId": "fictional-candidate-key",
+    "signature": "BhfPK9ceyYmfoj7s6Liuj2X1NqFQ7ShJuDbc20R9NMevucdLfMCNqwJQqE9hxArw6GN3U5tspq0yyxzBpAheDQ"
+  }
+}
