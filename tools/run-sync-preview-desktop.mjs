@@ -29,7 +29,7 @@ if (!existsSync(cli)) {
   console.error('The Tauri CLI is not installed. Run `npm ci` first.')
   process.exit(1)
 }
-const app = spawn(process.execPath, [cli, 'dev', '--features', 'sync-preview'], {
+const app = spawn(process.execPath, [cli, 'dev', '--features', 'sync-preview', '--config', 'src-tauri/tauri.sync-preview.conf.json'], {
   cwd: root,
   env: environment,
   stdio: 'inherit',
