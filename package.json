@@ -70,7 +70,7 @@
     "@testing-library/svelte": "^5.4.2",
     "@testing-library/user-event": "^14.6.7",
     "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitest/coverage-v8": "^5.0.1",
     "eslint": "^10.11.0",
