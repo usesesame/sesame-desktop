@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use rand::Rng;
+use rand::{Rng, TryRng};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,6 +41,12 @@ pub fn random_id() -> String {
 
 pub fn fill_random(bytes: &mut [u8]) {
     rand::rng().fill_bytes(bytes)
+}
+
+pub fn fill_secret(bytes: &mut [u8]) -> VaultResult<()> {
+    rand::rngs::SysRng
+        .try_fill_bytes(bytes)
+        .map_err(|_| "Sesame could not read the system random source.".to_string())
 }
 
 pub fn unix_timestamp() -> u64 {
@@ -120,11 +126,11 @@ pub fn split_backup_codes(value: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn generate_recovery_kit() -> String {
+pub fn generate_recovery_kit() -> VaultResult<String> {
     const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut bytes = [0_u8; 25];
-    fill_random(&mut bytes);
-    bytes
+    fill_secret(&mut bytes)?;
+    Ok(bytes
         .iter()
         .enumerate()
         .fold(String::with_capacity(29), |mut kit, (index, byte)| {
@@ -133,7 +139,7 @@ pub fn generate_recovery_kit() -> String {
             }
             kit.push(ALPHABET[(byte & 31) as usize] as char);
             kit
-        })
+        }))
 }
 
 pub fn record_value(
@@ -168,4 +174,30 @@ pub fn backup_file_name(path: &std::path::Path) -> VaultResult<String> {
         .and_then(|name| name.to_str())
         .map(str::to_string)
         .ok_or("Sesame could not read the backup file name.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_system_random_helper_fills_each_buffer() {
+        let mut first = [0_u8; 32];
+        let mut second = [0_u8; 32];
+        fill_secret(&mut first).expect("first fill");
+        fill_secret(&mut second).expect("second fill");
+        assert_ne!(first, second);
+        assert!(first.iter().any(|byte| *byte != 0));
+        assert!(second.iter().any(|byte| *byte != 0));
+    }
+
+    #[test]
+    fn a_recovery_kit_is_issued_in_groups_of_five() {
+        let kit = generate_recovery_kit().expect("kit");
+        assert_eq!(kit.len(), 29);
+        assert!(kit
+            .chars()
+            .all(|character| character == '-' || character.is_ascii_alphanumeric()));
+        assert_eq!(kit.matches('-').count(), 4);
+    }
 }

@@ -12,7 +12,7 @@ use crate::types::{
     CipherBlob, Folder, HistoryEntry, ItemPreview, TaggedItem, TrashedItem, VaultPayload,
     VaultSnapshot,
 };
-use crate::util::{fill_random, unix_timestamp};
+use crate::util::{fill_secret, unix_timestamp};
 use crate::VaultResult;
 
 const RECORD_AAD_PREFIX: &[u8] = b"sesame:memory-record:v1";
@@ -105,7 +105,7 @@ impl Drop for OpenedItem {
 impl VaultRecordStore {
     pub(crate) fn from_payload(payload: &VaultPayload) -> VaultResult<Self> {
         let mut key = Zeroizing::new([0_u8; 32]);
-        fill_random(&mut *key);
+        fill_secret(&mut *key)?;
         Self::from_payload_with_key(key, payload)
     }
 
@@ -271,7 +271,7 @@ impl VaultRecordStore {
     #[cfg(test)]
     fn replace_payload(&mut self, payload: &VaultPayload) -> VaultResult<()> {
         let mut replacement_key = Zeroizing::new([0_u8; 32]);
-        fill_random(&mut *replacement_key);
+        fill_secret(&mut *replacement_key)?;
         let replacement = Self::from_payload_with_key(replacement_key, payload)?;
         *self = replacement;
         Ok(())
