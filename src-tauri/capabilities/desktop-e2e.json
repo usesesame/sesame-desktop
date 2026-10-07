@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-e2e-capability",
+  "description": "The desktop test bridge for the main window. Only the test build enables it.",
+  "windows": ["main"],
+  "permissions": ["desktop-e2e"]
+}
