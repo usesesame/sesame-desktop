@@ -90,7 +90,16 @@ jobs:
             patchelf \
             xdg-utils \
             rpm \
+            bubblewrap \
+            xdg-dbus-proxy \
             xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
 
       - run: npm ci
 
@@ -131,8 +140,12 @@ jobs:
 
       # Bundled libwayland-client and libwayland-cursor break WebKit's EGL
       # display creation on hosts with a newer Wayland stack, so the shipped
-      # AppImage must resolve them from the host.
-      - name: Strip the host-provided Wayland libraries from the AppImage
+      # AppImage must resolve them from the host. The bundled WebKit also
+      # carries build-relative tool paths for bwrap and xdg-dbus-proxy, so
+      # the tool points those at the system locations, and the AppRun hook
+      # adds the bundled usr directory to LD_LIBRARY_PATH so WebKit's sandbox
+      # binds the relative helper paths into the namespace.
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"
 
       - name: Prove the shipped deb installs, launches, and unregisters

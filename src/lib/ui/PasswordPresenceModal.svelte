@@ -2,7 +2,7 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
-  type PresenceIntent = 'reveal' | 'copy' | 'enable-icons' | 'request-kit' | 'issue-kit'
+  type PresenceIntent = 'reveal' | 'copy' | 'autotype' | 'enable-icons' | 'request-kit' | 'issue-kit'
 
   export let presenceSecret = ''
   export let intent: PresenceIntent = 'reveal'
@@ -20,6 +20,11 @@
       heading: 'Copy this password',
       description: 'Sesame asks for your master password again before it copies a saved password. The password stays hidden.',
       action: 'Copy password',
+    },
+    autotype: {
+      heading: 'Type this login',
+      description: 'Sesame asks for your master password again before it types a saved login into another window. Typing starts after a short countdown so you can switch to the field.',
+      action: 'Start typing',
     },
     'enable-icons': {
       heading: 'Turn on website icons',

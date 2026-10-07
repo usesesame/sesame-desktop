@@ -20,6 +20,14 @@ pub fn grant_presence(
     presence.grant_with_password(session, epoch, &secret)
 }
 
+#[tauri::command]
+pub fn check_release_presence(
+    state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
+) -> VaultResult<()> {
+    require_release_presence(&state, &presence)
+}
+
 pub(crate) fn require_release_presence(
     state: &VaultState,
     presence: &ReleasePresence,
