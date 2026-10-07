@@ -148,3 +148,9 @@ good-faith report that turns out to be out of scope is not held against you.
   packages do not set this. The setting is kept because the WebKitGTK Wayland
   backend crashed in earlier testing, and it has not been retested on a Wayland
   session.
+- The process hardening in Sesame makes the main process non-dumpable and
+  refuses to run it with a tracer attached. Linux resets that setting on exec,
+  so the WebKit web process that renders decrypted records runs without it.
+  Where the system permits a same-user process to attach to that web process,
+  that process can read displayed secrets. This waits on the renderer
+  isolation work.
