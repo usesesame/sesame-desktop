@@ -130,7 +130,6 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'core:window:allow-start-dragging',
     'core:window:allow-toggle-maximize',
     'core:webview:deny-internal-toggle-devtools',
-    'clipboard-manager:allow-write-text',
     'vault-lifecycle',
     'vault-read',
     'vault-edit',
@@ -144,15 +143,12 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'desktop-settings',
     'website-icons',
     'clipboard-guard',
-    'sync-preview',
-    'desktop-e2e',
   ])
   assert.deepEqual(quick.permissions, [
     'core:event:allow-listen',
     'core:event:allow-unlisten',
     'core:window:allow-hide',
     'core:webview:deny-internal-toggle-devtools',
-    'clipboard-manager:allow-write-text',
     'quick-access',
   ])
   for (const capability of [main, quick]) {
@@ -806,4 +802,244 @@ test('the recovery kit wait reads server time, never the local clock', () => {
   assert.match(source, /trusted_time\(\)\.await\?\.latest/, 'a recovery kit request must record the later server time')
   assert.match(source, /trusted_time\(\)\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
   assert.doesNotMatch(source, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+})
+
+const FEATURE_GATED_PERMISSIONS = ['sync-preview', 'desktop-e2e']
+
+function applicationPermissions() {
+  const permissions = new Map()
+  const source = read('src-tauri', 'permissions', 'desktop.toml')
+  for (const block of source.split('[[permission]]').slice(1)) {
+    const identifier = block.match(/identifier = "([a-z0-9-]+)"/)?.[1]
+    const list = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
+    assert.ok(identifier, 'an application permission has no identifier')
+    permissions.set(identifier, [...list.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]))
+  }
+  return permissions
+}
+
+function commandNames(block) {
+  return [...block.matchAll(/(?:[a-z0-9_]+::)+([a-z0-9_]+),/g)].map((match) => match[1])
+}
+
+function shippingRegisteredCommands() {
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const shared = lib.match(/macro_rules! sesame_invoke_handler \{[\s\S]*?tauri::generate_handler!\[([\s\S]*?)\$\(\$extra,\)\*/)
+  assert.ok(shared, 'the shared invoke handler list is no longer a single macro this test can read')
+  return new Set(commandNames(shared[1]))
+}
+
+function featureRegisteredCommands(feature) {
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const arms = [...lib.matchAll(new RegExp(`#\\[cfg\\(all\\(feature = "wdio"[^\\]]*\\)\\)\\]\\s*macro_rules! sesame_wdio_handler \\{([\\s\\S]*?)\\n\\}`, 'g'))]
+  const sync = lib.match(/#\[cfg\(feature = "sync-preview"\)\]\s*macro_rules! sesame_handler \{([\s\S]*?)\n\}/)
+  assert.ok(sync && arms.length === 2, 'the feature gated handler arms moved')
+  return new Set(feature === 'sync-preview' ? commandNames(sync[1]) : commandNames(arms.map((arm) => arm[1]).join('\n')).filter((name) => !name.startsWith('sync_')))
+}
+
+function capabilityFiles() {
+  const directory = join(root, 'src-tauri', 'capabilities')
+  return new Map(readdirSync(directory).map((name) => {
+    const capability = JSON.parse(readFileSync(join(directory, name), 'utf8'))
+    return [capability.identifier, { ...capability, name }]
+  }))
+}
+
+function configuredCapabilities(name) {
+  return JSON.parse(read('src-tauri', name)).app.security.capabilities
+}
+
+test('every command a shipping capability permits is registered in the shipping handler', () => {
+  const permissions = applicationPermissions()
+  const registered = shippingRegisteredCommands()
+  const capabilities = capabilityFiles()
+  const shipping = configuredCapabilities('tauri.conf.json')
+  assert.deepEqual(shipping, ['main-capability', 'quick-access-capability'])
+
+  for (const identifier of shipping) {
+    const capability = capabilities.get(identifier)
+    assert.ok(capability, `${identifier} has no capability file`)
+    for (const permission of capability.permissions) {
+      assert.ok(
+        !FEATURE_GATED_PERMISSIONS.includes(permission),
+        `${identifier} names the feature gated ${permission} permission`,
+      )
+      if (!permissions.has(permission)) continue
+      for (const command of permissions.get(permission)) {
+        assert.ok(registered.has(command), `${identifier} permits ${command} through ${permission}, but the shipping handler does not register it`)
+      }
+    }
+  }
+})
+
+test('a permission whose commands are not all shipping commands is feature gated', () => {
+  const permissions = applicationPermissions()
+  const registered = shippingRegisteredCommands()
+  const unregistered = [...permissions]
+    .filter(([, commands]) => commands.some((command) => !registered.has(command)))
+    .map(([identifier]) => identifier)
+  assert.deepEqual(unregistered.sort(), [...FEATURE_GATED_PERMISSIONS].sort())
+  for (const identifier of FEATURE_GATED_PERMISSIONS) {
+    assert.ok(
+      permissions.get(identifier).every((command) => !registered.has(command)),
+      `${identifier} mixes shipping and feature gated commands`,
+    )
+  }
+})
+
+test('the feature gated permissions name only commands their own build registers', () => {
+  const permissions = applicationPermissions()
+  for (const [permission, feature] of [['sync-preview', 'sync-preview'], ['desktop-e2e', 'wdio']]) {
+    const registered = featureRegisteredCommands(feature === 'wdio' ? 'wdio' : feature)
+    assert.deepEqual(
+      permissions.get(permission).filter((command) => !registered.has(command)),
+      [],
+      `${permission} permits a command the ${feature} build does not register`,
+    )
+  }
+})
+
+test('the feature gated capabilities exist only in the builds that compile their commands', () => {
+  const capabilities = capabilityFiles()
+  const shipped = new Set(configuredCapabilities('tauri.conf.json'))
+  assert.deepEqual(capabilities.get('sync-preview-capability')?.permissions, ['sync-preview'])
+  assert.deepEqual(capabilities.get('desktop-e2e-capability')?.permissions, ['desktop-e2e'])
+  for (const identifier of ['sync-preview-capability', 'desktop-e2e-capability']) {
+    assert.ok(!shipped.has(identifier), `the shipping configuration enables ${identifier}`)
+    assert.deepEqual(capabilities.get(identifier).windows, ['main'])
+  }
+  assert.deepEqual([...capabilities.keys()].sort(), [
+    'desktop-e2e-capability',
+    'main-capability',
+    'quick-access-capability',
+    'sync-preview-capability',
+  ])
+  assert.deepEqual(configuredCapabilities('tauri.wdio.conf.json'), ['main-capability', 'desktop-e2e-capability'])
+  assert.deepEqual(
+    configuredCapabilities('tauri.sync-preview.conf.json'),
+    ['main-capability', 'quick-access-capability', 'sync-preview-capability'],
+  )
+  const runner = read('tools', 'run-sync-preview-desktop.mjs')
+  assert.match(runner, /'--features', 'sync-preview', '--config', 'src-tauri\/tauri\.sync-preview\.conf\.json'/)
+  const wdioCommands = [
+    ...read('.github', 'workflows', 'ci.yml').matchAll(/tauri build --features wdio[^\n]*/g),
+    ...read('.github', 'workflows', 'release-early-access.yml').matchAll(/tauri build --features wdio[^\n]*/g),
+    ...read('.github', 'workflows', 'release-linux-early-access.yml').matchAll(/tauri build --features wdio[^\n]*/g),
+  ]
+  assert.ok(wdioCommands.length >= 3)
+  for (const command of wdioCommands) assert.match(command[0], /--config src-tauri\/tauri\.wdio\.conf\.json/)
+})
+
+test('the generated capability manifest matches the capability files', () => {
+  const generated = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+  const capabilities = capabilityFiles()
+  for (const [identifier, capability] of Object.entries(generated)) {
+    assert.deepEqual(capability.permissions, capabilities.get(identifier)?.permissions, `${identifier} drifted from its capability file`)
+  }
+  assert.ok(generated['main-capability'] && generated['quick-access-capability'])
+})
+
+test('no webview holds a clipboard plugin permission or the clipboard plugin client', () => {
+  const capabilities = capabilityFiles()
+  for (const capability of capabilities.values()) {
+    assert.ok(
+      !capability.permissions.some((permission) => String(permission).startsWith('clipboard-manager:')),
+      `${capability.identifier} grants a clipboard plugin permission`,
+    )
+  }
+  const packageJson = JSON.parse(read('package.json'))
+  assert.ok(!packageJson.dependencies['@tauri-apps/plugin-clipboard-manager'], 'the renderer regained the clipboard plugin client')
+  assert.ok(!JSON.parse(read('package-lock.json')).packages['node_modules/@tauri-apps/plugin-clipboard-manager'])
+  for (const path of filesMatching(/\.(ts|svelte)$/, join(root, 'src'))) {
+    assert.doesNotMatch(readFileSync(path, 'utf8'), /@tauri-apps\/plugin-clipboard-manager/, `${relative(root, path)} imports the clipboard plugin`)
+  }
+  const arboardCopy = read('src-tauri', 'src', 'adapters', 'platform', 'clipboard.rs')
+  assert.doesNotMatch(arboardCopy, /tauri_plugin_clipboard_manager/)
+})
+
+function parseContentSecurityPolicy(policy) {
+  const directives = new Map()
+  for (const part of policy.split(';').map((entry) => entry.trim()).filter(Boolean)) {
+    const [name, ...sources] = part.split(/\s+/)
+    assert.ok(!directives.has(name), `the policy repeats ${name}`)
+    directives.set(name, sources)
+  }
+  return directives
+}
+
+test('the content security policy closes every embedding and worker route', () => {
+  const security = JSON.parse(read('src-tauri', 'tauri.conf.json')).app.security
+  const production = parseContentSecurityPolicy(security.csp)
+  const development = parseContentSecurityPolicy(security.devCsp)
+  const wdio = parseContentSecurityPolicy(JSON.parse(read('src-tauri', 'tauri.wdio.conf.json')).app.security.csp)
+  const closed = ['frame-src', 'worker-src', 'media-src', 'manifest-src', 'frame-ancestors', 'object-src']
+  for (const policy of [production, development, wdio]) {
+    for (const directive of closed) assert.deepEqual(policy.get(directive), ["'none'"], `${directive} is not 'none'`)
+    assert.deepEqual(policy.get('default-src'), ["'self'"])
+    assert.deepEqual(policy.get('base-uri'), ["'self'"])
+    assert.deepEqual(policy.get('form-action'), ["'self'"])
+  }
+  assert.deepEqual(production.get('script-src'), ["'self'"])
+  assert.deepEqual(production.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost'])
+  assert.deepEqual(production.get('img-src'), ["'self'", 'data:', 'asset:', 'http://asset.localhost'])
+  assert.deepEqual(wdio.get('script-src'), ["'self'"])
+  assert.deepEqual(wdio.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost', 'http://127.0.0.1:*'])
+  assert.deepEqual(development.get('script-src'), ["'self'", "'unsafe-inline'", "'unsafe-eval'"])
+  assert.deepEqual(development.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost', 'http://localhost:5173', 'ws://localhost:5173'])
+})
+
+test('the shipping style policy has no inline allowance', () => {
+  const security = JSON.parse(read('src-tauri', 'tauri.conf.json')).app.security
+  const production = parseContentSecurityPolicy(security.csp)
+  const wdio = parseContentSecurityPolicy(JSON.parse(read('src-tauri', 'tauri.wdio.conf.json')).app.security.csp)
+  assert.deepEqual(production.get('style-src'), ["'self'"])
+  assert.deepEqual(wdio.get('style-src'), ["'self'"])
+  assert.ok(!production.has('style-src-attr') && !production.has('style-src-elem'))
+  for (const policy of [production, wdio]) {
+    for (const [directive, sources] of policy) {
+      assert.ok(!sources.includes("'unsafe-inline'") && !sources.includes("'unsafe-eval'"), `${directive} allows inline or eval`)
+    }
+  }
+  const html = [read('index.html'), read('quick-access.html')].join('\n')
+  assert.doesNotMatch(html, /<style[\s>]|\sstyle\s*=/, 'an entry page carries inline style the policy now blocks')
+})
+
+test('every webview navigation goes through the app origin guard', () => {
+  const guard = read('src-tauri', 'src', 'adapters', 'platform', 'navigation_guard.rs').split('#[cfg(test)]')[0]
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const platform = read('src-tauri', 'src', 'adapters', 'platform', 'mod.rs')
+  assert.match(platform, /pub\(crate\) mod navigation_guard;/)
+  const single = lib.indexOf('tauri_plugin_single_instance::init')
+  const registration = lib.indexOf('.plugin(adapters::platform::navigation_guard::plugin())')
+  const builder = Math.max(
+    lib.indexOf('.build(tauri::generate_context!())'),
+    lib.indexOf('.build(context)'),
+  )
+  assert.ok(single >= 0 && registration > single && builder > registration, 'the guard is not registered on the application builder')
+  assert.match(guard, /\.on_navigation\(\|webview, url\|/)
+  assert.match(guard, /if windows \{\s*\("http", "tauri\.localhost"\)\s*\} else \{\s*\("tauri", "localhost"\)\s*\}/)
+  assert.match(guard, /has_origin\(url, scheme, host, None\)/)
+  assert.match(guard, /url\.username\(\)\.is_empty\(\)/)
+  assert.match(guard, /url\.password\(\)\.is_none\(\)/)
+  assert.match(guard, /if cfg!\(debug_assertions\) \{\s*webview\.config\(\)\.build\.dev_url\.as_ref\(\)\s*\} else \{\s*None\s*\}/)
+  assert.match(guard, /is_app_url\(url, cfg!\(windows\), development_url\)/)
+  assert.doesNotMatch(guard, /"https"|file:|localhost:\d|5173|"\*"|starts_with|contains\(/)
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  assert.equal(config.build.devUrl, 'http://localhost:5173')
+  assert.equal(config.app.windows.find((window) => window.label === 'quick-access').url, 'quick-access.html')
+  assert.ok(!config.app.windows.some((window) => window.useHttpsScheme || /^[a-z]+:/.test(window.url ?? '')), 'a configured window leaves the app origin')
+})
+
+test('no webview may open a new window and the rebuilt main window denies it explicitly', () => {
+  for (const path of filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))) {
+    const source = readFileSync(path, 'utf8')
+    const handlers = [...source.matchAll(/\.on_new_window\(([\s\S]*?)\)\s*(?:\.|;)/g)]
+    for (const handler of handlers) {
+      assert.match(handler[1], /NewWindowResponse::Deny/, `${relative(root, path)} lets a webview open a window`)
+      assert.doesNotMatch(handler[1], /NewWindowResponse::(Allow|Create)/)
+    }
+  }
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  assert.match(shell, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/)
+  assert.equal([...shell.matchAll(/WebviewWindowBuilder::new/g)].length, 1)
 })
