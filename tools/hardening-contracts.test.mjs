@@ -979,7 +979,10 @@ test('every webview navigation goes through the app origin guard', () => {
   assert.match(platform, /pub\(crate\) mod navigation_guard;/)
   const single = lib.indexOf('tauri_plugin_single_instance::init')
   const registration = lib.indexOf('.plugin(adapters::platform::navigation_guard::plugin())')
-  const builder = lib.indexOf('.build(tauri::generate_context!())')
+  const builder = Math.max(
+    lib.indexOf('.build(tauri::generate_context!())'),
+    lib.indexOf('.build(context)'),
+  )
   assert.ok(single >= 0 && registration > single && builder > registration, 'the guard is not registered on the application builder')
   assert.match(guard, /\.on_navigation\(\|webview, url\|/)
   assert.match(guard, /if windows \{\s*\("http", "tauri\.localhost"\)\s*\} else \{\s*\("tauri", "localhost"\)\s*\}/)
