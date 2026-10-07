@@ -274,6 +274,14 @@ pub fn run() {
         std::process::exit(1);
     }
     prepare_release_webview_environment();
+    #[cfg(target_os = "linux")]
+    let sandbox = adapters::platform::webview_sandbox::prepare();
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    if let Err(unavailable) = sandbox {
+        adapters::platform::webview_sandbox::refuse(context, unavailable);
+        return;
+    }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
@@ -347,7 +355,7 @@ pub fn run() {
     let builder = builder.invoke_handler(sesame_handler!());
 
     builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Sesame desktop application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {

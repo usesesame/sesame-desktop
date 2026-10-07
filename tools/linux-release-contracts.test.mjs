@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createPrivateKey, createPublicKey, randomBytes, verify } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -9,7 +9,7 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
-import { planStrippedLibraries } from './strip-appimage-host-libs.mjs'
+import { addHelperAlias, appRunHookWithLibraryPath, patchSandboxPaths, planStrippedLibraries, webkitHelperAlias } from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -216,4 +216,72 @@ test('the Linux release lane strips the AppImage before the gates bind its bytes
   assert.ok(strip >= 0, 'the lane does not strip the host-provided Wayland libraries from the AppImage')
   assert.ok(strip < workflow.indexOf('linux-shipped-package-gate.mjs'), 'the lane must strip the AppImage before the package gates run')
   assert.ok(strip < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the lane must strip the AppImage before the manifest freezes its bytes')
+})
+
+test('the Linux release lane prepares the web view sandbox before its package gates', async () => {
+  const workflow = await readFile(path.join(process.cwd(), '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  const build = workflow.slice(workflow.indexOf('\n  build-and-test:\n'), workflow.indexOf('\n  sign-and-attest:\n'))
+  const userns = build.indexOf('apparmor_restrict_unprivileged_userns')
+  assert.match(build, /\n\s+bubblewrap \\\n\s+xdg-dbus-proxy \\\n/, 'the lane does not install bubblewrap and xdg-dbus-proxy')
+  assert.ok(userns >= 0, 'the lane does not allow unprivileged user namespaces')
+  assert.ok(userns < build.indexOf('linux-shipped-package-gate.mjs'), 'the lane must allow user namespaces before the package gates run')
+})
+
+test('the AppImage patch points the WebKit sandbox tools and system directories at the system paths', () => {
+  const contents = Buffer.from('a ././/bin/bwrap b ././/bin/xdg-dbus-proxy c ././/lib d ././/lib64 e ././/lib/x86_64-linux-gnu f ././/share g ././/local/share h')
+  const result = patchSandboxPaths(contents)
+  assert.equal(result.replaced, 7)
+  assert.equal(result.contents.length, contents.length)
+  assert.ok(!result.contents.includes('././/'))
+  for (const system of ['/usr/bin/bwrap', '/usr/bin/xdg-dbus-proxy', '/usr/lib ', '/usr/lib64 ', '/usr/lib/x86_64-linux-gnu ', '/usr/share ', '/usr/local/share ']) {
+    assert.ok(result.contents.includes(system), system)
+  }
+  assert.equal(patchSandboxPaths(result.contents).replaced, 0)
+})
+
+test('the AppImage patch keeps the WebKit helper directory relative under its own name', () => {
+  const helpers = '././/lib/x86_64-linux-gnu/webkit2gtk-4.1'
+  const contents = Buffer.from(`a ${helpers} b ${helpers}/injected-bundle/ c ././/lib/x86_64-linux-gnu d`)
+  const result = patchSandboxPaths(contents)
+  const patched = result.contents.toString()
+  assert.equal(result.contents.length, contents.length)
+  assert.ok(patched.includes(`./${webkitHelperAlias}/lib/x86_64-linux-gnu/webkit2gtk-4.1 `))
+  assert.ok(patched.includes(`./${webkitHelperAlias}/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle/`))
+  assert.ok(patched.includes(' /usr/lib/x86_64-linux-gnu d'))
+  assert.ok(!patched.includes('././/'))
+})
+
+test('the AppImage gets a helper alias that points at its usr directory once', async () => {
+  const tree = await mkdtemp(path.join(tmpdir(), 'alias-test-'))
+  try {
+    await mkdir(path.join(tree, 'usr', 'lib', 'x86_64-linux-gnu'), { recursive: true })
+    assert.equal(await addHelperAlias(tree), true)
+    assert.equal(await addHelperAlias(tree), false)
+    assert.equal(await readlink(path.join(tree, 'usr', webkitHelperAlias)), '.')
+    assert.equal(
+      await realpath(path.join(tree, 'usr', webkitHelperAlias, 'lib', 'x86_64-linux-gnu')),
+      await realpath(path.join(tree, 'usr', 'lib', 'x86_64-linux-gnu')),
+    )
+  } finally {
+    await rm(tree, { recursive: true, force: true })
+  }
+})
+
+test('the sandbox path patch refuses a replacement with a different length', () => {
+  assert.throws(() => patchSandboxPaths(Buffer.from('abc'), [['abc', 'abcd']]), /byte length/)
+})
+
+test('the AppRun hook gains the bundled usr library path once', () => {
+  const hook = '#!/bin/sh\nexport APPDIR="${APPDIR:-$(dirname "$0")}"\n'
+  const patched = appRunHookWithLibraryPath(hook)
+  assert.ok(patched.includes('export LD_LIBRARY_PATH="$APPDIR/usr${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'))
+  assert.ok(patched.startsWith(hook))
+  assert.equal(appRunHookWithLibraryPath(patched), null)
+})
+
+test('the Linux CI patches the AppImage before the AppImage gate binds it', async () => {
+  const workflow = await readFile(path.join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8')
+  const patch = workflow.indexOf('strip-appimage-host-libs.mjs')
+  assert.ok(patch >= 0, 'the desktop-linux job does not patch the AppImage sandbox paths')
+  assert.ok(patch < workflow.indexOf('--format appimage'), 'the job must patch the AppImage before its gate runs')
 })
