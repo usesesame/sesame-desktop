@@ -90,7 +90,16 @@ jobs:
             patchelf \
             xdg-utils \
             rpm \
+            bubblewrap \
+            xdg-dbus-proxy \
             xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
 
       - run: npm ci
 

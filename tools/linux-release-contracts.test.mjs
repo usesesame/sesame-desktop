@@ -218,6 +218,15 @@ test('the Linux release lane strips the AppImage before the gates bind its bytes
   assert.ok(strip < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the lane must strip the AppImage before the manifest freezes its bytes')
 })
 
+test('the Linux release lane prepares the web view sandbox before its package gates', async () => {
+  const workflow = await readFile(path.join(process.cwd(), '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  const build = workflow.slice(workflow.indexOf('\n  build-and-test:\n'), workflow.indexOf('\n  sign-and-attest:\n'))
+  const userns = build.indexOf('apparmor_restrict_unprivileged_userns')
+  assert.match(build, /\n\s+bubblewrap \\\n\s+xdg-dbus-proxy \\\n/, 'the lane does not install bubblewrap and xdg-dbus-proxy')
+  assert.ok(userns >= 0, 'the lane does not allow unprivileged user namespaces')
+  assert.ok(userns < build.indexOf('linux-shipped-package-gate.mjs'), 'the lane must allow user namespaces before the package gates run')
+})
+
 test('the AppImage patch points the WebKit sandbox tools at the system paths', () => {
   const contents = Buffer.from('prefix ././/bin/bwrap middle ././/bin/xdg-dbus-proxy suffix')
   const result = patchSandboxPaths(contents)
