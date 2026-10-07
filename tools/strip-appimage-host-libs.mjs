@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -15,9 +15,11 @@ export function planStrippedLibraries(fileNames) {
   return fileNames.filter((name) => hostProvidedLibraryPatterns.some((pattern) => pattern.test(name)))
 }
 
+export const webkitHelperAlias = '_s'
+
 export const sandboxPathReplacements = [
-  ['././/bin/bwrap', '/usr/bin/bwrap'],
-  ['././/bin/xdg-dbus-proxy', '/usr/bin/xdg-dbus-proxy'],
+  ['././/lib/x86_64-linux-gnu/webkit2gtk-4.1', `./${webkitHelperAlias}/lib/x86_64-linux-gnu/webkit2gtk-4.1`],
+  ['././/', '/usr/'],
 ]
 
 export function patchSandboxPaths(contents, replacements = sandboxPathReplacements) {
@@ -37,6 +39,13 @@ export function patchSandboxPaths(contents, replacements = sandboxPathReplacemen
     }
   }
   return { contents: buffer, replaced }
+}
+
+export async function addHelperAlias(tree) {
+  const alias = path.join(tree, 'usr', webkitHelperAlias)
+  if (await lstat(alias).catch(() => null)) return false
+  await symlink('.', alias)
+  return true
 }
 
 export function appRunHookWithLibraryPath(hook) {
@@ -85,6 +94,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
       await writeFile(file, result.contents)
       patched += result.replaced
     }
+    if (patched > 0) await addHelperAlias(tree)
     const hookPath = path.join(tree, 'apprun-hooks', 'linuxdeploy-plugin-gtk.sh')
     let hookPatched = false
     try {
