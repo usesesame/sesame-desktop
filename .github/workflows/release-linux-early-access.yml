@@ -109,6 +109,9 @@ jobs:
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
+      - name: Audit the SBOM against OSV advisories
+        run: npm run supply-chain:sbom:audit
+
       - name: Verify the vendored glib tree
         run: node tools/verify-glib-vendor.mjs
 
