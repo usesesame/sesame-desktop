@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -104,7 +104,10 @@ where
 
 fn bind_exclusive(path: &Path) -> io::Result<UnixListener> {
     if let Some(directory) = path.parent() {
-        fs::create_dir_all(directory)?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(SOCKET_DIRECTORY_MODE)
+            .create(directory)?;
         fs::set_permissions(directory, fs::Permissions::from_mode(SOCKET_DIRECTORY_MODE))?;
     }
     match UnixListener::bind(path) {
@@ -322,5 +325,49 @@ mod tests {
         fs::write(&socket, []).ok();
 
         assert!(bind_exclusive(&socket).is_ok());
+    }
+
+    struct UmaskGuard(libc::mode_t);
+
+    impl UmaskGuard {
+        fn permissive() -> Self {
+            // SAFETY: umask reads and writes a process attribute and touches no memory.
+            Self(unsafe { libc::umask(0) })
+        }
+    }
+
+    impl Drop for UmaskGuard {
+        fn drop(&mut self) {
+            // SAFETY: restores the mode returned by the matching umask call.
+            unsafe {
+                libc::umask(self.0);
+            }
+        }
+    }
+
+    fn mode_of(path: &Path) -> u32 {
+        fs::metadata(path)
+            .expect("metadata for a created path")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    fn a_permissive_umask_leaves_the_socket_directory_and_socket_private() {
+        let root =
+            std::env::temp_dir().join(format!("sesame-pipe-test-{}-modes", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let socket = root.join(".cache").join("sesame").join("browser.sock");
+        let this = std::env::current_exe().expect("this test binary");
+        let umask = UmaskGuard::permissive();
+        serve_in_background(&socket, this.clone());
+        let response = request_at(&socket, &this, b"round trip").expect("a served response");
+        assert_eq!(response.as_slice(), b"round trip");
+        drop(umask);
+
+        assert_eq!(mode_of(&root.join(".cache")), 0o700);
+        assert_eq!(mode_of(socket.parent().expect("a socket directory")), 0o700);
+        assert_eq!(mode_of(&socket), 0o600);
     }
 }
