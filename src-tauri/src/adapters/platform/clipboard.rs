@@ -720,6 +720,7 @@ mod windows_clipboard_formats {
     }
 
     #[test]
+    #[ignore = "writes to the user clipboard"]
     fn a_secret_copy_and_its_clear_both_carry_the_monitoring_exclusion() {
         let guard = ClipboardGuard::default();
 
