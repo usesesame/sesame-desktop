@@ -110,11 +110,37 @@ fn first_line(child: &mut std::process::Child) -> String {
         .collect()
 }
 
+fn append_library_path(current: &str, usr: &str) -> Option<String> {
+    if current.split(':').any(|part| part == usr) {
+        return None;
+    }
+    if current.is_empty() {
+        Some(usr.to_string())
+    } else {
+        Some(format!("{usr}:{current}"))
+    }
+}
+
+fn appimage_usr_directory() -> Option<String> {
+    let appdir = std::env::var("APPDIR").ok()?;
+    if !appdir.starts_with('/') {
+        return None;
+    }
+    Some(format!("{appdir}/usr"))
+}
+
 fn configure_process_environment() {
     configure_environment(
         |name| std::env::remove_var(name),
         |name, value| std::env::set_var(name, value),
     );
+    let Some(usr) = appimage_usr_directory() else {
+        return;
+    };
+    let current = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+    if let Some(joined) = append_library_path(&current, &usr) {
+        std::env::set_var("LD_LIBRARY_PATH", joined);
+    }
 }
 
 pub(crate) fn prepare() -> Result<(), SandboxUnavailable> {
@@ -205,6 +231,22 @@ mod tests {
         .into_iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect()
+    }
+
+    #[test]
+    fn the_appimage_usr_directory_joins_the_library_path_once() {
+        assert_eq!(
+            append_library_path("", "/tmp/x/usr"),
+            Some("/tmp/x/usr".to_string())
+        );
+        assert_eq!(
+            append_library_path("/app/lib", "/tmp/x/usr"),
+            Some("/tmp/x/usr:/app/lib".to_string())
+        );
+        assert_eq!(
+            append_library_path("/app/lib:/tmp/x/usr", "/tmp/x/usr"),
+            None
+        );
     }
 
     #[test]

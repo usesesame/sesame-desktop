@@ -218,7 +218,7 @@ test('the Linux release lane strips the AppImage before the gates bind its bytes
   assert.ok(strip < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the lane must strip the AppImage before the manifest freezes its bytes')
 })
 
-test('the AppImage patch points the WebKit sandbox paths at the system tools', () => {
+test('the AppImage patch points the WebKit sandbox tools at the system paths', () => {
   const contents = Buffer.from('prefix ././/bin/bwrap middle ././/bin/xdg-dbus-proxy suffix')
   const result = patchSandboxPaths(contents)
   assert.equal(result.replaced, 2)
