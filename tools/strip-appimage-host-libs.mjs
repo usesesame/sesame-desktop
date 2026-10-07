@@ -41,7 +41,7 @@ export function patchSandboxPaths(contents, replacements = sandboxPathReplacemen
 
 export function appRunHookWithLibraryPath(hook) {
   if (hook.includes('LD_LIBRARY_PATH="$APPDIR/usr')) return null
-  return `${hook.replace(/\n$/, '')}\nexport LD_LIBRARY_PATH="$APPDIR/usr\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"\n`
+  return `${hook.replace(/\n$/, '')}\nexport LD_LIBRARY_PATH="$APPDIR/usr\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n`
 }
 
 function parseSquashfsSuperblock(summary) {
