@@ -131,8 +131,10 @@ jobs:
 
       # Bundled libwayland-client and libwayland-cursor break WebKit's EGL
       # display creation on hosts with a newer Wayland stack, so the shipped
-      # AppImage must resolve them from the host.
-      - name: Strip the host-provided Wayland libraries from the AppImage
+      # AppImage must resolve them from the host. The bundled WebKit also
+      # carries build-relative sandbox paths, so the tool points its bwrap
+      # and xdg-dbus-proxy lookups at the system locations.
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"
 
       - name: Prove the shipped deb installs, launches, and unregisters

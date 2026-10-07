@@ -15,6 +15,30 @@ export function planStrippedLibraries(fileNames) {
   return fileNames.filter((name) => hostProvidedLibraryPatterns.some((pattern) => pattern.test(name)))
 }
 
+export const sandboxPathReplacements = [
+  ['././/bin/bwrap', '/usr/bin/bwrap'],
+  ['././/bin/xdg-dbus-proxy', '/usr/bin/xdg-dbus-proxy'],
+]
+
+export function patchSandboxPaths(contents, replacements = sandboxPathReplacements) {
+  const buffer = Buffer.from(contents)
+  let replaced = 0
+  for (const [from, to] of replacements) {
+    const source = Buffer.from(from)
+    const target = Buffer.from(to)
+    if (source.length !== target.length) {
+      throw new Error(`The replacement for ${from} changes the byte length.`)
+    }
+    let index = buffer.indexOf(source)
+    while (index !== -1) {
+      target.copy(buffer, index)
+      replaced += 1
+      index = buffer.indexOf(source, index + source.length)
+    }
+  }
+  return { contents: buffer, replaced }
+}
+
 function parseSquashfsSuperblock(summary) {
   const compression = summary.match(/Compression (zstd|xz|gzip|lz4|bzip2|lzo)/)
   const blockSize = summary.match(/Block size (\d+)/)
@@ -47,8 +71,17 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const libDirectory = path.join(tree, 'usr', 'lib')
     const libNames = await readdir(libDirectory)
     const planned = planStrippedLibraries(libNames)
-    if (planned.length === 0) {
-      return { appImage, stripped: [], unchanged: true }
+    let patched = 0
+    for (const entry of await readdir(libDirectory, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.startsWith('libwebkit2gtk-4.1.so.0')) continue
+      const file = path.join(entry.parentPath, entry.name)
+      const result = patchSandboxPaths(await readFile(file))
+      if (result.replaced === 0) continue
+      await writeFile(file, result.contents)
+      patched += result.replaced
+    }
+    if (planned.length === 0 && patched === 0) {
+      return { appImage, stripped: [], patched: 0, unchanged: true }
     }
     for (const name of planned) {
       await rm(path.join(libDirectory, name), { force: true })
@@ -81,7 +114,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     await chmod(replacement, 0o755)
     await rename(replacement, appImage)
     const size = await stat(appImage)
-    return { appImage, stripped: planned, unchanged: false, bytes: size.size }
+    return { appImage, stripped: planned, patched, unchanged: false, bytes: size.size }
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
@@ -95,10 +128,13 @@ async function main() {
   for (const input of inputs) {
     const result = await stripAppImageHostLibraries(input)
     if (result.unchanged) {
-      console.log(`${result.appImage}: no host-provided Wayland libraries are bundled; left unchanged.`)
+      console.log(`${result.appImage}: no host-provided Wayland libraries or sandbox paths needed changes; left unchanged.`)
       continue
     }
-    console.log(`${result.appImage}: removed bundled ${result.stripped.join(', ')} (${result.bytes} bytes).`)
+    const changes = []
+    if (result.stripped.length > 0) changes.push(`removed bundled ${result.stripped.join(', ')}`)
+    if (result.patched > 0) changes.push(`patched ${result.patched} sandbox path${result.patched === 1 ? '' : 's'}`)
+    console.log(`${result.appImage}: ${changes.join(' and ')} (${result.bytes} bytes).`)
   }
 }
 

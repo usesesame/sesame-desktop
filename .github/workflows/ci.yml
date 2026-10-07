@@ -217,6 +217,9 @@ jobs:
           --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
           -- --locked
 
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
+        run: node tools/strip-appimage-host-libs.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \

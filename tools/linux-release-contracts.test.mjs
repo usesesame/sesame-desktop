@@ -9,7 +9,7 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
-import { planStrippedLibraries } from './strip-appimage-host-libs.mjs'
+import { patchSandboxPaths, planStrippedLibraries } from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -216,4 +216,27 @@ test('the Linux release lane strips the AppImage before the gates bind its bytes
   assert.ok(strip >= 0, 'the lane does not strip the host-provided Wayland libraries from the AppImage')
   assert.ok(strip < workflow.indexOf('linux-shipped-package-gate.mjs'), 'the lane must strip the AppImage before the package gates run')
   assert.ok(strip < workflow.indexOf('prepare-linux-release-evidence.mjs'), 'the lane must strip the AppImage before the manifest freezes its bytes')
+})
+
+test('the AppImage patch points the WebKit sandbox paths at the system tools', () => {
+  const contents = Buffer.from('prefix ././/bin/bwrap middle ././/bin/xdg-dbus-proxy suffix')
+  const result = patchSandboxPaths(contents)
+  assert.equal(result.replaced, 2)
+  assert.equal(result.contents.length, contents.length)
+  assert.ok(result.contents.includes('/usr/bin/bwrap'))
+  assert.ok(result.contents.includes('/usr/bin/xdg-dbus-proxy'))
+  assert.ok(!result.contents.includes('././/bin/bwrap'))
+  assert.ok(!result.contents.includes('././/bin/xdg-dbus-proxy'))
+  assert.equal(patchSandboxPaths(result.contents).replaced, 0)
+})
+
+test('the sandbox path patch refuses a replacement with a different length', () => {
+  assert.throws(() => patchSandboxPaths(Buffer.from('abc'), [['abc', 'abcd']]), /byte length/)
+})
+
+test('the Linux CI patches the AppImage before the AppImage gate binds it', async () => {
+  const workflow = await readFile(path.join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8')
+  const patch = workflow.indexOf('strip-appimage-host-libs.mjs')
+  assert.ok(patch >= 0, 'the desktop-linux job does not patch the AppImage sandbox paths')
+  assert.ok(patch < workflow.indexOf('--format appimage'), 'the job must patch the AppImage before its gate runs')
 })
