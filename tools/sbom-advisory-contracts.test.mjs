@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { auditSbom, auditSboms, collectAdvisories, collectSbomAdvisories, defaultSbomPath } from './audit-sbom.mjs'
+import {
+  auditSbom,
+  auditSboms,
+  collectAdvisories,
+  collectSbomAdvisories,
+  defaultSbomPath,
+  loadAllowlist,
+} from './audit-sbom.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const component = (name, version, purl) => ({ type: 'library', name, version, purl })
@@ -143,4 +151,85 @@ test('a clean locked SBOM and a clean AppImage inventory pass the combined audit
   assert.equal(report.vulnerable.length, 0)
   assert.equal(report.queried, 2)
   assert.equal(report.skipped, 1)
+})
+
+const systemdSource = () => [
+  {
+    label: 'appimage.cdx.json',
+    bom: {
+      components: [
+        component('systemd', '255.4-1ubuntu8.17', 'pkg:deb/ubuntu/systemd@255.4-1ubuntu8.17'),
+      ],
+    },
+  },
+]
+
+const systemdRule = () => [
+  {
+    id: 'UBUNTU-CVE-2026-40228',
+    package: 'systemd',
+    reason: 'The journald daemon is not bundled and noble has no fix.',
+    reviewed: '2026-10-07',
+  },
+]
+
+test('an allowlisted advisory passes and is reported', async () => {
+  const report = await auditSboms(systemdSource(), {
+    query: async () => [{ id: 'UBUNTU-CVE-2026-40228' }],
+    allowlist: systemdRule(),
+  })
+  assert.equal(report.vulnerable.length, 0)
+  assert.equal(report.allowed.length, 1)
+  assert.equal(report.allowed[0].name, 'systemd')
+  assert.deepEqual(report.unused, [])
+})
+
+test('an allowlist entry for another package does not suppress the advisory', async () => {
+  const rule = systemdRule()
+  rule[0].package = 'another-package'
+  await assert.rejects(
+    auditSboms(systemdSource(), { query: async () => [{ id: 'UBUNTU-CVE-2026-40228' }], allowlist: rule }),
+    /systemd@255\.4-1ubuntu8\.17: UBUNTU-CVE-2026-40228/,
+  )
+})
+
+test('one unlisted advisory in a component still fails the audit', async () => {
+  await assert.rejects(
+    auditSboms(systemdSource(), {
+      query: async () => [{ id: 'UBUNTU-CVE-2026-40228' }, { id: 'UBUNTU-CVE-other' }],
+      allowlist: systemdRule(),
+    }),
+    /UBUNTU-CVE-other/,
+  )
+})
+
+test('an unused allowlist entry is reported', async () => {
+  const sources = [
+    {
+      label: 'locked.cdx.json',
+      bom: { components: [component('fictional-clean', '1.0.0', 'pkg:npm/fictional-clean@1.0.0')] },
+    },
+  ]
+  const report = await auditSboms(sources, { query: async () => [], allowlist: systemdRule() })
+  assert.equal(report.unused.length, 1)
+  assert.equal(report.unused[0].id === 'UBUNTU-CVE-2026-40228', true)
+})
+
+test('an allowlist entry without a reason is rejected', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'sesame-allowlist-'))
+  const file = path.join(directory, 'allowlist.json')
+  writeFileSync(file, JSON.stringify({ entries: [{ id: 'X', package: 'y', reviewed: '2026-10-07' }] }))
+  try {
+    assert.throws(() => loadAllowlist(file), /reason/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the shipped allowlist names the systemd advisory with a reason and a review date', () => {
+  const entry = loadAllowlist().find((rule) => rule.id === 'UBUNTU-CVE-2026-40228')
+  assert.ok(entry, 'the systemd advisory entry is gone from the allowlist')
+  assert.equal(entry.package, 'systemd')
+  assert.ok(entry.reason.length > 20, 'the entry needs a reason a reviewer can check')
+  assert.match(entry.reviewed, /^\d{4}-\d{2}-\d{2}$/)
 })

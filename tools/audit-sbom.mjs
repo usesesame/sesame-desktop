@@ -14,6 +14,23 @@ export const defaultSbomPath = (base = root) => {
   return path.join(directory, `sesame-${version}.cdx.json`)
 }
 
+export const allowlistPath = path.join(root, 'tools', 'sbom-advisory-allowlist.json')
+
+export const loadAllowlist = (file = allowlistPath) => {
+  const parsed = JSON.parse(readFileSync(file, 'utf8'))
+  const entries = Array.isArray(parsed.entries) ? parsed.entries : []
+  for (const entry of entries) {
+    for (const field of ['id', 'package', 'reason', 'reviewed']) {
+      if (typeof entry[field] !== 'string' || entry[field].length === 0) {
+        throw new Error(
+          `Every allowlist entry needs an id, a package, a reason and a reviewed date: ${JSON.stringify(entry)}`,
+        )
+      }
+    }
+  }
+  return entries
+}
+
 export const queryOsv = async (purl) => {
   const response = await fetch(osvEndpoint, {
     method: 'POST',
@@ -84,7 +101,7 @@ export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8
   }
 }
 
-export const collectSbomAdvisories = async (sources, { query = queryOsv, concurrency = 8 } = {}) => {
+export const collectSbomAdvisories = async (sources, { query = queryOsv, concurrency = 8, allowlist = [] } = {}) => {
   const entries = []
   const summaries = []
   for (const [index, source] of sources.entries()) {
@@ -116,10 +133,17 @@ export const collectSbomAdvisories = async (sources, { query = queryOsv, concurr
       byEcosystem[type] = (byEcosystem[type] ?? 0) + count
     }
   }
+  const allowedByRule = (entry) =>
+    entry.ids.length > 0 &&
+    entry.ids.every((id) => allowlist.some((rule) => rule.id === id && rule.package === entry.name))
+  const allowed = vulnerable.filter(allowedByRule)
+  const fatal = vulnerable.filter((entry) => !allowedByRule(entry))
+  const usedRules = new Set(allowed.flatMap((entry) => entry.ids.map((id) => `${entry.name}|${id}`)))
+  const unused = allowlist.filter((rule) => !usedRules.has(`${rule.package}|${rule.id}`))
   return {
     sources: summaries.map((summary, index) => ({
       ...summary,
-      vulnerable: vulnerable
+      vulnerable: fatal
         .filter((entry) => entry.sourceIndex === index)
         .map(publicAdvisory),
     })),
@@ -127,7 +151,9 @@ export const collectSbomAdvisories = async (sources, { query = queryOsv, concurr
     queried: summaries.reduce((sum, summary) => sum + summary.queried, 0),
     skipped: summaries.reduce((sum, summary) => sum + summary.skipped, 0),
     byEcosystem,
-    vulnerable: vulnerable.map(publicAdvisory),
+    vulnerable: fatal.map(publicAdvisory),
+    allowed: allowed.map(publicAdvisory),
+    unused,
   }
 }
 
@@ -144,8 +170,8 @@ export const auditSbom = async (bom, options) => {
   return report
 }
 
-export const auditSboms = async (sources, options) => {
-  const report = await collectSbomAdvisories(sources, options)
+export const auditSboms = async (sources, options = {}) => {
+  const report = await collectSbomAdvisories(sources, { allowlist: loadAllowlist(), ...options })
   if (report.vulnerable.length > 0) {
     const lines = report.vulnerable.map(
       (component) =>
@@ -177,7 +203,7 @@ const main = async () => {
     const resolved = path.resolve(sbomPath)
     sources.push({ label: resolved, bom: JSON.parse(await readFile(resolved, 'utf8')) })
   }
-  const report = await collectSbomAdvisories(sources)
+  const report = await collectSbomAdvisories(sources, { allowlist: loadAllowlist() })
   for (const source of report.sources) {
     process.stdout.write(`Audited ${source.label}\n`)
     process.stdout.write(
@@ -189,6 +215,16 @@ const main = async () => {
       `Combined: queried ${report.queried} of ${report.total} components against OSV (${report.skipped} without a purl; ${formatEcosystems(report.byEcosystem)}).\n`,
     )
   }
+  for (const component of report.allowed) {
+    process.stdout.write(
+      `Allowed by review: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+    )
+  }
+  for (const rule of report.unused) {
+    process.stdout.write(
+      `Unused allowlist entry: ${rule.id} for ${rule.package}, remove it or say why it stays.\n`,
+    )
+  }
   if (report.vulnerable.length > 0) {
     for (const component of report.vulnerable) {
       process.stdout.write(`${component.name}@${component.version}: ${component.ids.join(', ')}\n`)
@@ -196,7 +232,9 @@ const main = async () => {
     process.exitCode = 1
     return
   }
-  process.stdout.write('No OSV advisories found.\n')
+  process.stdout.write(
+    report.allowed.length > 0 ? 'No unallowed OSV advisories found.\n' : 'No OSV advisories found.\n',
+  )
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
