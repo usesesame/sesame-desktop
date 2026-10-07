@@ -3,8 +3,9 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
@@ -40,13 +41,12 @@ fn request_at(
 ) -> io::Result<Zeroizing<Vec<u8>>> {
     validate_payload_size(payload)?;
     let mut stream = UnixStream::connect(path)?;
-    stream.set_read_timeout(Some(RESPONSE_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
 
     verify_peer(&stream, expected_server)?;
 
     write_frame(&mut stream, payload)?;
-    read_frame(&mut stream).map(Zeroizing::new)
+    read_frame(&mut stream, Instant::now() + RESPONSE_TIMEOUT).map(Zeroizing::new)
 }
 
 pub fn serve_forever<F>(expected_client: &Path, handler: F) -> io::Result<()>
@@ -90,10 +90,13 @@ where
         let Ok(peer) = verify_peer(&stream, &expected_client) else {
             continue;
         };
-        let Ok(request) = read_frame(&mut stream) else {
+        let Ok(request) = read_frame(&mut stream, Instant::now() + IO_TIMEOUT) else {
             continue;
         };
-        let response = handler(request, &peer);
+        let response = match catch_unwind(AssertUnwindSafe(|| handler(request, &peer))) {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
         if validate_payload_size(&response).is_err() {
             continue;
         }
@@ -215,9 +218,9 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> io::Result<()> {
     stream.flush()
 }
 
-fn read_frame(stream: &mut UnixStream) -> io::Result<Vec<u8>> {
+fn read_frame(stream: &mut UnixStream, deadline: Instant) -> io::Result<Vec<u8>> {
     let mut header = [0_u8; 4];
-    stream.read_exact(&mut header)?;
+    read_exact_until(stream, &mut header, deadline)?;
     let size = u32::from_le_bytes(header) as usize;
     if size == 0 || size > MAX_PIPE_MESSAGE_BYTES {
         return Err(io::Error::new(
@@ -226,8 +229,38 @@ fn read_frame(stream: &mut UnixStream) -> io::Result<Vec<u8>> {
         ));
     }
     let mut payload = vec![0_u8; size];
-    stream.read_exact(&mut payload)?;
+    read_exact_until(stream, &mut payload, deadline)?;
     Ok(payload)
+}
+
+fn read_exact_until(
+    stream: &mut UnixStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                ErrorKind::TimedOut,
+                "browser pipe frame deadline exceeded",
+            ));
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        match stream.read(&mut buffer[filled..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "browser pipe closed",
+                ));
+            }
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -369,5 +402,73 @@ mod tests {
         assert_eq!(mode_of(&root.join(".cache")), 0o700);
         assert_eq!(mode_of(socket.parent().expect("a socket directory")), 0o700);
         assert_eq!(mode_of(&socket), 0o600);
+    }
+
+    #[test]
+    fn a_dribbled_frame_is_dropped_at_the_frame_deadline() {
+        let socket = scratch_socket("dribble");
+        let this = std::env::current_exe().expect("this test binary");
+        serve_in_background(&socket, this);
+
+        let mut stream = UnixStream::connect(&socket).expect("a connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .expect("a read timeout");
+        let mut writer = stream.try_clone().expect("a cloned stream");
+        let started = Instant::now();
+        let dribble = std::thread::spawn(move || {
+            let mut frame = Vec::from(8_u32.to_le_bytes());
+            frame.extend_from_slice(&[7_u8; 8]);
+            for byte in frame {
+                if writer.write_all(&[byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        });
+
+        let mut buffer = [0_u8; 32];
+        let read = stream.read(&mut buffer);
+        let elapsed = started.elapsed();
+        dribble.join().expect("the dribbling writer");
+
+        let dropped = match read {
+            Ok(0) => true,
+            Err(error) => error.kind() == ErrorKind::ConnectionReset,
+            Ok(_) => false,
+        };
+        assert!(dropped, "the broker did not drop the dribbled frame");
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "the broker held the dribbled frame for {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_panicking_handler_does_not_end_the_loop() {
+        let socket = scratch_socket("panic");
+        let this = std::env::current_exe().expect("this test binary");
+        let served = socket.clone();
+        let client = this.clone();
+        std::thread::spawn(move || {
+            let panicked = std::sync::atomic::AtomicBool::new(false);
+            let _ = serve_at(&served, &client, move |request, _peer| {
+                if !panicked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    panic!("fictional handler panic");
+                }
+                Zeroizing::new(request)
+            });
+        });
+        for _ in 0..200 {
+            if socket.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(request_at(&socket, &this, b"first").is_err());
+        let second =
+            request_at(&socket, &this, b"second").expect("the broker survives a handler panic");
+        assert_eq!(second.as_slice(), b"second");
     }
 }
