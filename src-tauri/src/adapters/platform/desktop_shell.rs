@@ -6,6 +6,7 @@ use std::sync::{
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::NewWindowResponse,
     App, AppHandle, LogicalSize, Manager, PhysicalSize, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
@@ -268,6 +269,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .decorations(false)
         .visible(false)
         .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
+        .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
     harden_release_webview(&window);
