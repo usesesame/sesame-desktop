@@ -237,14 +237,6 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: linux-appimage-failure
-          path: linux-appimage-shipped-evidence
-          if-no-files-found: ignore
-          retention-days: 7
-
       # The shipped binary has no test bridge, so the package that installs
       # here is the test-featured build. It exercises the real deb layout,
       # dpkg install, launch, vault operations, restart, and removal.
