@@ -133,8 +133,8 @@ jobs:
       # display creation on hosts with a newer Wayland stack, so the shipped
       # AppImage must resolve them from the host. The bundled WebKit also
       # carries build-relative tool paths for bwrap and xdg-dbus-proxy, so
-      # the tool points those at the system locations. The app itself adds
-      # its bundled usr directory to LD_LIBRARY_PATH so WebKit's sandbox
+      # the tool points those at the system locations, and the AppRun hook
+      # adds the bundled usr directory to LD_LIBRARY_PATH so WebKit's sandbox
       # binds the relative helper paths into the namespace.
       - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"

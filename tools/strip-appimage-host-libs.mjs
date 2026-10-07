@@ -39,6 +39,11 @@ export function patchSandboxPaths(contents, replacements = sandboxPathReplacemen
   return { contents: buffer, replaced }
 }
 
+export function appRunHookWithLibraryPath(hook) {
+  if (hook.includes('LD_LIBRARY_PATH="$APPDIR/usr')) return null
+  return `${hook.replace(/\n$/, '')}\nexport LD_LIBRARY_PATH="$APPDIR/usr\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"\n`
+}
+
 function parseSquashfsSuperblock(summary) {
   const compression = summary.match(/Compression (zstd|xz|gzip|lz4|bzip2|lzo)/)
   const blockSize = summary.match(/Block size (\d+)/)
@@ -80,8 +85,19 @@ export async function stripAppImageHostLibraries(appImagePath) {
       await writeFile(file, result.contents)
       patched += result.replaced
     }
-    if (planned.length === 0 && patched === 0) {
-      return { appImage, stripped: [], patched: 0, unchanged: true }
+    const hookPath = path.join(tree, 'apprun-hooks', 'linuxdeploy-plugin-gtk.sh')
+    let hookPatched = false
+    try {
+      const patchedHook = appRunHookWithLibraryPath(await readFile(hookPath, 'utf8'))
+      if (patchedHook) {
+        await writeFile(hookPath, patchedHook)
+        hookPatched = true
+      }
+    } catch {
+      hookPatched = false
+    }
+    if (planned.length === 0 && patched === 0 && !hookPatched) {
+      return { appImage, stripped: [], patched: 0, hookPatched: false, unchanged: true }
     }
     for (const name of planned) {
       await rm(path.join(libDirectory, name), { force: true })
@@ -114,7 +130,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     await chmod(replacement, 0o755)
     await rename(replacement, appImage)
     const size = await stat(appImage)
-    return { appImage, stripped: planned, patched, unchanged: false, bytes: size.size }
+    return { appImage, stripped: planned, patched, hookPatched, unchanged: false, bytes: size.size }
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
@@ -134,6 +150,7 @@ async function main() {
     const changes = []
     if (result.stripped.length > 0) changes.push(`removed bundled ${result.stripped.join(', ')}`)
     if (result.patched > 0) changes.push(`patched ${result.patched} sandbox path${result.patched === 1 ? '' : 's'}`)
+    if (result.hookPatched) changes.push('patched the AppRun library path')
     console.log(`${result.appImage}: ${changes.join(' and ')} (${result.bytes} bytes).`)
   }
 }

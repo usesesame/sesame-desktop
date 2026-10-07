@@ -9,7 +9,7 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
-import { patchSandboxPaths, planStrippedLibraries } from './strip-appimage-host-libs.mjs'
+import { appRunHookWithLibraryPath, patchSandboxPaths, planStrippedLibraries } from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -232,6 +232,14 @@ test('the AppImage patch points the WebKit sandbox tools at the system paths', (
 
 test('the sandbox path patch refuses a replacement with a different length', () => {
   assert.throws(() => patchSandboxPaths(Buffer.from('abc'), [['abc', 'abcd']]), /byte length/)
+})
+
+test('the AppRun hook gains the bundled usr library path once', () => {
+  const hook = '#!/bin/sh\nexport APPDIR="${APPDIR:-$(dirname "$0")}"\n'
+  const patched = appRunHookWithLibraryPath(hook)
+  assert.ok(patched.includes('export LD_LIBRARY_PATH="$APPDIR/usr${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'))
+  assert.ok(patched.startsWith(hook))
+  assert.equal(appRunHookWithLibraryPath(patched), null)
 })
 
 test('the Linux CI patches the AppImage before the AppImage gate binds it', async () => {
