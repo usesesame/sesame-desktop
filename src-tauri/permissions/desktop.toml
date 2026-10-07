@@ -20,6 +20,7 @@ commands.allow = [
   "disable_windows_hello",
   "unlock_with_windows_hello",
   "grant_presence",
+  "check_release_presence",
   "set_auto_lock_minutes",
   "lock_vault",
   "get_recovery_health",
@@ -161,6 +162,7 @@ description = "Browser-helper status, repair, and approval lifecycle for the mai
 commands.allow = [
   "get_browser_integration_status",
   "repair_browser_integration",
+  "get_browser_approval_wait",
   "get_pending_browser_fill",
   "resolve_browser_fill",
   "get_pending_browser_save",

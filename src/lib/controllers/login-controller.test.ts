@@ -11,6 +11,7 @@ const vaultApi = vi.hoisted(() => ({
   autoType: vi.fn(),
   bulkAssignFolder: vi.fn(),
   checkPasswordBreach: vi.fn(),
+  checkReleasePresence: vi.fn(),
   copyToClipboard: vi.fn(),
   createFolder: vi.fn(),
   deleteFolder: vi.fn(),
@@ -353,5 +354,52 @@ describe('bulk item actions', () => {
 
     expect(deleted).toEqual([['login-a', 'login-b']])
     expect(vaultApi.addItemsTag).not.toHaveBeenCalled()
+  })
+})
+
+describe('auto-type', () => {
+  it('asks for the master password before the countdown and types after it', async () => {
+    vi.useFakeTimers()
+    vaultApi.checkReleasePresence.mockRejectedValueOnce(new Error('presenceRequired'))
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.autoType.mockResolvedValue(undefined)
+    const { controller } = harness()
+
+    await controller.startAutoType()
+
+    expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: true, passwordPresenceIntent: 'autotype', autoTypeCountdown: 0 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(vaultApi.autoType).not.toHaveBeenCalled()
+
+    controller.state.patch({ passwordPresenceSecret: 'fictional master password' })
+    await controller.confirmPasswordPresence()
+    expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: false, autoTypeCountdown: 3 })
+    expect(vaultApi.autoType).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(vaultApi.autoType).toHaveBeenCalledWith('login-a')
+  })
+
+  it('starts the countdown at once while presence is still granted', async () => {
+    vi.useFakeTimers()
+    vaultApi.checkReleasePresence.mockResolvedValue(undefined)
+    const { controller } = harness()
+
+    await controller.startAutoType()
+
+    expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: false, autoTypeCountdown: 3 })
+    controller.cancelAutoType()
+  })
+
+  it('never types after a cancelled master password check', async () => {
+    vi.useFakeTimers()
+    vaultApi.checkReleasePresence.mockRejectedValueOnce(new Error('presenceRequired'))
+    const { controller } = harness()
+
+    await controller.startAutoType()
+    controller.cancelPasswordPresence()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(vaultApi.autoType).not.toHaveBeenCalled()
   })
 })
