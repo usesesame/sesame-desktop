@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
-import { auditSbom, collectAdvisories, defaultSbomPath } from './audit-sbom.mjs'
+import { auditSbom, auditSboms, collectAdvisories, collectSbomAdvisories, defaultSbomPath } from './audit-sbom.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const component = (name, version, purl) => ({ type: 'library', name, version, purl })
@@ -95,4 +95,52 @@ test('the default SBOM path matches the file create-sbom writes', () => {
   } finally {
     if (previous !== undefined) process.env.SESAME_SBOM_OUTPUT_DIR = previous
   }
+})
+
+test('the audit covers every SBOM passed to it and labels findings by source', async () => {
+  const sources = [
+    {
+      label: 'locked.cdx.json',
+      bom: { components: [component('fictional-clean', '1.0.0', 'pkg:npm/fictional-clean@1.0.0')] },
+    },
+    {
+      label: 'appimage.cdx.json',
+      bom: { components: [component('fictional-bundled', '2.0.0', 'pkg:deb/ubuntu/fictional-bundled@2.0.0')] },
+    },
+  ]
+  const query = async (purl) => (purl.includes('fictional-bundled') ? [{ id: 'UBUNTU-CVE-fictional-0001' }] : [])
+  const report = await collectSbomAdvisories(sources, { query })
+  assert.equal(report.total, 2)
+  assert.equal(report.queried, 2)
+  assert.equal(report.skipped, 0)
+  assert.deepEqual(report.byEcosystem, { npm: 1, deb: 1 })
+  assert.equal(report.vulnerable.length, 1)
+  assert.equal(report.vulnerable[0].label, 'appimage.cdx.json')
+  assert.equal(report.sources[1].vulnerable.length, 1)
+  await assert.rejects(
+    auditSboms(sources, { query }),
+    /appimage\.cdx\.json: fictional-bundled@2\.0\.0: UBUNTU-CVE-fictional-0001/,
+  )
+})
+
+test('a clean locked SBOM and a clean AppImage inventory pass the combined audit', async () => {
+  const sources = [
+    {
+      label: 'locked.cdx.json',
+      bom: { components: [component('fictional-clean', '1.0.0', 'pkg:npm/fictional-clean@1.0.0')] },
+    },
+    {
+      label: 'appimage.cdx.json',
+      bom: {
+        components: [
+          component('fictional-bundled', '2.0.0', 'pkg:deb/ubuntu/fictional-bundled@2.0.0'),
+          component('fictional-unpurl', '2.0.0', undefined),
+        ],
+      },
+    },
+  ]
+  const report = await auditSboms(sources, { query: async () => [] })
+  assert.equal(report.vulnerable.length, 0)
+  assert.equal(report.queried, 2)
+  assert.equal(report.skipped, 1)
 })

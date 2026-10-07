@@ -109,9 +109,6 @@ jobs:
       - name: Generate the reviewed dependency evidence
         run: npm run supply-chain:sbom
 
-      - name: Audit the SBOM against OSV advisories
-        run: npm run supply-chain:sbom:audit
-
       - name: Verify the vendored glib tree
         run: node tools/verify-glib-vendor.mjs
 
@@ -158,6 +155,20 @@ jobs:
             --format appimage \
             --package "$(ls release-packages/*.AppImage)" \
             --out linux-appimage-shipped-evidence
+
+      - name: Inventory the bundled AppImage libraries
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm run supply-chain:sbom:appimage -- \
+            --appimage "$(ls release-packages/*.AppImage)" \
+            --out "release-evidence/sesame-$version-appimage.cdx.json"
+
+      - name: Audit the locked SBOM and the AppImage inventory against OSV advisories
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm run supply-chain:sbom:audit -- \
+            --sbom "release-evidence/sesame-$version.cdx.json" \
+            --sbom "release-evidence/sesame-$version-appimage.cdx.json"
 
       # The shipped binary has no test bridge, so vault behavior is proven on
       # the test-featured package through the same installed-package layout.
