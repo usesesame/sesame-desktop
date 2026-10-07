@@ -1,4 +1,4 @@
-use argon2::{Algorithm, Argon2, Params, Version};
+use argon2::{Algorithm, Argon2, Block, Params, Version};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -73,11 +73,28 @@ fn derive_key_from_exact(password: &str, params: &KdfParams) -> VaultResult<[u8;
         Some(32),
     )
     .map_err(|_| "The vault KDF settings are invalid.".to_string())?;
+    let block_count = config.block_count();
+    let mut memory: Vec<Block> = Vec::new();
+    memory
+        .try_reserve_exact(block_count)
+        .map_err(|_| "Sesame could not derive a local vault key.".to_string())?;
+    memory.resize(block_count, Block::new());
+    let mut memory = Zeroizing::new(memory);
+    derive_key_with_memory(password, &salt, config, &mut memory)
+}
+
+fn derive_key_with_memory(
+    password: &str,
+    salt: &[u8],
+    config: Params,
+    memory: &mut [Block],
+) -> VaultResult<[u8; 32]> {
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, config);
     let mut output = [0_u8; 32];
-    argon2
-        .hash_password_into(password.as_bytes(), &salt, &mut output)
-        .map_err(|_| "Sesame could not derive a local vault key.".to_string())?;
+    let result =
+        argon2.hash_password_into_with_memory(password.as_bytes(), salt, &mut output, &mut *memory);
+    memory.iter_mut().zeroize();
+    result.map_err(|_| "Sesame could not derive a local vault key.".to_string())?;
     Ok(output)
 }
 
@@ -329,6 +346,52 @@ mod tests {
         let wrap = wrap_with_exact(COMPOSED, &params, &[8_u8; 32]);
         params.memory_kib = 0;
         assert!(unwrap_with_password(COMPOSED, &params, &wrap, WRAP_AAD).is_err());
+    }
+
+    fn owned_kdf_params() -> KdfParams {
+        KdfParams {
+            algorithm: "argon2id".into(),
+            salt: URL_SAFE_NO_PAD.encode([0x2a_u8; 16]),
+            memory_kib: MIN_KDF_MEMORY_KIB,
+            iterations: MIN_KDF_ITERATIONS,
+            parallelism: 4,
+        }
+    }
+
+    #[test]
+    fn the_owned_argon2_memory_is_zero_after_a_derivation() {
+        let params = owned_kdf_params();
+        let config = Params::new(
+            params.memory_kib,
+            params.iterations,
+            params.parallelism,
+            Some(32),
+        )
+        .expect("config");
+        let salt = URL_SAFE_NO_PAD.decode(&params.salt).expect("salt");
+        let mut memory = vec![Block::new(); config.block_count()];
+        let key = derive_key_with_memory(
+            "fictional owned memory password",
+            &salt,
+            config,
+            &mut memory,
+        )
+        .expect("derivation");
+        assert!(key.iter().any(|byte| *byte != 0));
+        assert!(memory
+            .iter()
+            .all(|block| block.as_ref().iter().all(|word| *word == 0)));
+    }
+
+    #[test]
+    fn the_derivation_matches_a_known_answer_vector() {
+        let params = owned_kdf_params();
+        let key =
+            derive_key_from_exact("fictional known-answer password", &params).expect("derivation");
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(key),
+            "aQEr0BRFnwIEgxLdH4-j6mzsP0QXTJHhwc5-p2Fx7iQ"
+        );
     }
 
     #[test]
