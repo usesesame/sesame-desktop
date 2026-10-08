@@ -386,10 +386,20 @@ mod tests {
     use super::*;
     use crate::vault::{random_id, VaultEntry};
     use sesame_core::api::create_vault;
-    use std::time::Instant;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
 
-    const LATENCY_VAULT_ITEMS: usize = 5_000;
-    const LATENCY_RUNS: usize = 5;
+    const LATENCY_FULL_VARIABLE: &str = "SESAME_SEARCH_LATENCY_FULL";
+    const LATENCY_DEFAULT_SIZES: [usize; 1] = [5_000];
+    const LATENCY_DEFAULT_RUNS: usize = 5;
+    const LATENCY_FULL_SIZES: [usize; 4] = [100, 1_000, 5_000, 10_000];
+    const LATENCY_FULL_RUNS: usize = 20;
+    const LOCK_SEARCHES: usize = 10;
+    const LOCK_SEARCH_GAP: Duration = Duration::from_millis(2);
+    const LOCK_PROBE_GAP: Duration = Duration::from_micros(500);
 
     fn login() -> TaggedItem {
         let mut entry = VaultEntry::default();
@@ -691,6 +701,114 @@ mod tests {
         assert!(secret.is_empty());
     }
 
+    fn mixed_session() -> UnlockedVault {
+        use crate::vault::{Identity, SecureNote};
+
+        let (mut opened, _) =
+            create_vault("fictional master password", "Fictional vault").expect("created vault");
+        for (id, title, username) in [
+            ("login-07", "Northwind portal", "casey"),
+            ("login-03", "Northwind portal", "casey"),
+            ("login-05", "Portal northwind", ""),
+            ("login-01", "Contoso", "northwind"),
+            ("login-02", "Fabrikam", ""),
+            ("login-04", "Northwnd archive", "robin"),
+        ] {
+            let mut entry = VaultEntry::default();
+            entry.id = id.to_string();
+            entry.title = title.to_string();
+            entry.username = username.to_string();
+            entry.password = "fictional-secret-canary".to_string();
+            opened.payload.entries.push(entry);
+        }
+        let mut identity = Identity::default();
+        identity.id = "identity-02".to_string();
+        identity.full_name = "Casey Northwind".to_string();
+        opened.payload.identities.push(identity);
+        let mut note = SecureNote::default();
+        note.id = "note-01".to_string();
+        note.title = "Northwind".to_string();
+        note.content = "fictional note body".to_string();
+        opened.payload.secure_notes.push(note);
+        let path = std::env::temp_dir().join(format!("sesame-search-{}", random_id()));
+        UnlockedVault::from_opened(path, &opened).expect("unlocked vault")
+    }
+
+    fn scan_ids(session: &UnlockedVault, query: &str) -> Vec<String> {
+        let payload = session.open_payload().expect("opened payload");
+        let items: Vec<TaggedItem> = payload
+            .entries
+            .iter()
+            .cloned()
+            .map(TaggedItem::Login)
+            .chain(payload.identities.iter().cloned().map(TaggedItem::Identity))
+            .chain(
+                payload
+                    .secure_notes
+                    .iter()
+                    .cloned()
+                    .map(TaggedItem::SecureNote),
+            )
+            .collect();
+        let tokens = query_tokens(query);
+        let matches = items
+            .iter()
+            .filter_map(|item| {
+                search_match_score(&payload.folders, item, &tokens).map(|score| SearchMatch {
+                    id: item.id().to_string(),
+                    score,
+                    title: item.metadata().item_title().to_lowercase(),
+                })
+            })
+            .collect();
+        ordered_match_ids(matches)
+    }
+
+    #[test]
+    fn search_results_match_a_scan_of_the_opened_payload_in_order() {
+        let session = mixed_session();
+
+        for query in [
+            "northwind",
+            "northwnd",
+            "casey",
+            "portal northwind",
+            "contoso",
+            "note body",
+            "fictional-secret-canary",
+            "missing",
+        ] {
+            let found = search_index(&session, &session.snapshot(), query).expect("search");
+            assert_eq!(found, scan_ids(&session, query), "query {query:?}");
+        }
+        assert_eq!(
+            search_index(&session, &session.snapshot(), "northwind").expect("search"),
+            [
+                "note-01",
+                "login-03",
+                "login-07",
+                "login-05",
+                "login-04",
+                "login-01",
+                "identity-02"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_with_a_snapshot_from_another_session_reports_the_missing_item() {
+        let session = mixed_session();
+        let (opened, _) =
+            create_vault("fictional master password", "Fictional vault").expect("created vault");
+        let path = std::env::temp_dir().join(format!("sesame-search-{}", random_id()));
+        let other = UnlockedVault::from_opened(path, &opened).expect("unlocked vault");
+
+        let error =
+            search_index(&other, &session.snapshot(), "northwind").expect_err("stale snapshot");
+
+        assert_eq!(error, "That saved item no longer exists.");
+    }
+
     fn latency_session(count: usize) -> UnlockedVault {
         let (mut opened, _) =
             create_vault("fictional master password", "Fictional vault").expect("created vault");
@@ -710,37 +828,111 @@ mod tests {
         UnlockedVault::from_opened(path, &opened).expect("unlocked vault")
     }
 
+    struct Latency {
+        hits: usize,
+        order_hash: u64,
+        min: Duration,
+        median: Duration,
+        p95: Duration,
+    }
+
+    fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
+        let rank = ((sorted.len() as f64) * fraction).ceil() as usize;
+        sorted[rank.clamp(1, sorted.len()) - 1]
+    }
+
+    fn order_hash(ids: &[String]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        ids.hash(&mut hasher);
+        hasher.finish()
+    }
+
     fn measure(
         session: &UnlockedVault,
         index: &VaultSnapshot,
         query: &str,
-    ) -> (usize, std::time::Duration, std::time::Duration) {
-        let mut durations = Vec::with_capacity(LATENCY_RUNS);
+        runs: usize,
+    ) -> Latency {
+        let mut durations = Vec::with_capacity(runs);
         let mut hits = 0;
-        for _ in 0..LATENCY_RUNS {
+        let mut hash = 0;
+        for _ in 0..runs {
             let started = Instant::now();
             let ids = search_index(session, index, query).expect("search");
             durations.push(started.elapsed());
             hits = ids.len();
+            hash = order_hash(&ids);
         }
         durations.sort();
-        (hits, durations[0], durations[LATENCY_RUNS / 2])
+        Latency {
+            hits,
+            order_hash: hash,
+            min: durations[0],
+            median: percentile(&durations, 0.5),
+            p95: percentile(&durations, 0.95),
+        }
+    }
+
+    fn lock_wait_during_search(session: UnlockedVault, query: &str) -> (Duration, Duration) {
+        let shared = Arc::new(Mutex::new(Some(session)));
+        let finished = Arc::new(AtomicBool::new(false));
+        let searcher = {
+            let shared = Arc::clone(&shared);
+            let finished = Arc::clone(&finished);
+            let query = query.to_string();
+            std::thread::spawn(move || {
+                for _ in 0..LOCK_SEARCHES {
+                    {
+                        let guard = shared.lock().expect("session lock");
+                        let session = guard.as_ref().expect("session");
+                        search_index(session, &session.snapshot(), &query).expect("search");
+                    }
+                    std::thread::sleep(LOCK_SEARCH_GAP);
+                }
+                finished.store(true, Ordering::SeqCst);
+            })
+        };
+        let mut waits = Vec::new();
+        while !finished.load(Ordering::SeqCst) {
+            std::thread::sleep(LOCK_PROBE_GAP);
+            let started = Instant::now();
+            drop(shared.lock().expect("session lock"));
+            waits.push(started.elapsed());
+        }
+        searcher.join().expect("searcher thread");
+        waits.sort();
+        (percentile(&waits, 0.95), waits[waits.len() - 1])
     }
 
     #[test]
-    fn search_latency_over_a_five_thousand_item_vault() {
-        let session = latency_session(LATENCY_VAULT_ITEMS);
-        let index = session.snapshot();
-        for (query, expected_hits) in [
-            ("northwind", Some(LATENCY_VAULT_ITEMS)),
-            ("casey.00999", Some(1)),
-            ("account 00420", None),
-            ("northwnd", None),
-        ] {
-            let (hits, min, median) = measure(&session, &index, query);
-            println!("search latency query={query:?} hits={hits} min={min:?} median={median:?}");
-            if let Some(expected) = expected_hits {
-                assert_eq!(hits, expected, "query {query:?}");
+    fn search_latency_across_vault_sizes() {
+        let full = std::env::var_os(LATENCY_FULL_VARIABLE).is_some();
+        let (sizes, runs) = if full {
+            (&LATENCY_FULL_SIZES[..], LATENCY_FULL_RUNS)
+        } else {
+            (&LATENCY_DEFAULT_SIZES[..], LATENCY_DEFAULT_RUNS)
+        };
+        for &count in sizes {
+            let session = latency_session(count);
+            let index = session.snapshot();
+            for (query, expected_hits) in [
+                ("northwind", Some(count)),
+                ("casey.00999", Some(usize::from(count > 999))),
+                ("account 00420", None),
+                ("northwnd", None),
+            ] {
+                let latency = measure(&session, &index, query, runs);
+                println!(
+                    "search latency records={count} query={query:?} hits={} order={:016x} min={:?} median={:?} p95={:?}",
+                    latency.hits, latency.order_hash, latency.min, latency.median, latency.p95
+                );
+                if let Some(expected) = expected_hits {
+                    assert_eq!(latency.hits, expected, "records {count} query {query:?}");
+                }
+            }
+            if full {
+                let (p95, max) = lock_wait_during_search(session, "northwind");
+                println!("search lock wait records={count} p95={p95:?} max={max:?}");
             }
         }
     }
