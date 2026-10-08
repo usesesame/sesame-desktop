@@ -345,7 +345,7 @@ export function createAppStores() {
     generator: createGeneratorStore(),
     passphrase: createPassphraseStore(),
     recentGenerations: createRecentGenerationsStore(),
-    imports: patchable<ImportStoreState>({ importing: false, source: 'bitwarden-csv', sourceMenuOpen: false, preview: null, importId: '', fileName: '', skipExactDuplicates: true }),
+    imports: patchable<ImportStoreState>({ importing: false, source: 'bitwarden-json', sourceMenuOpen: false, preview: null, importId: '', fileName: '', skipExactDuplicates: true }),
     browserFill: patchable<BrowserFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserIdentityFill: patchable<BrowserIdentityFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserCardFill: patchable<BrowserCardFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),

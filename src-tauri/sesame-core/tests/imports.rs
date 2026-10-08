@@ -485,7 +485,9 @@ fn aegis_time_based_codes_import_and_counter_based_ones_are_counted() {
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].title, "GitHub");
     assert_eq!(parsed.entries[0].username, "me@example.test");
-    assert_eq!(parsed.fidelity.logins.intentionally_omitted, 1);
+    assert_eq!(parsed.intentionally_omitted_items, 1);
+    assert_eq!(parsed.fidelity.unsupported_items.intentionally_omitted, 1);
+    assert_eq!(parsed.fidelity.logins.intentionally_omitted, 0);
 }
 
 const TWOFAS_JSON: &str = r#"{
