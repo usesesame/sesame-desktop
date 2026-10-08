@@ -1127,6 +1127,17 @@ button.no-totp:hover { filter: brightness(.97); }
 .file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .file-picker span { font-size: var(--type-2); font-weight: var(--weight-bold); }
 .file-picker small { margin-top: 6px; color: var(--text-muted); font-size: var(--type-2); }
+.import-source-note { margin: 0; color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-regular); line-height: 1.5; }
+.import-source-switch { justify-self: start; }
+.import-accounting { display: grid; gap: var(--space-3); }
+.import-accounting h3 { margin: 0; color: var(--text); font-size: var(--type-3); font-weight: var(--weight-bold); }
+.import-accounting ul { margin: 0; padding: 0; list-style: none; }
+.import-accounting li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-3); border-bottom: 1px solid var(--border-soft); padding: var(--space-2) 0; color: var(--text); font-size: var(--type-3); }
+.import-accounting li ul { grid-column: 1 / -1; padding-left: var(--space-4); }
+.import-accounting li li { border-bottom: 0; padding: var(--space-1) 0; color: var(--text-muted); font-size: var(--type-2); }
+.import-accounting-count { font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; }
+.import-accounting-total { color: var(--text-muted); }
+.import-accounting-keep { margin: 0; border-left: 2px solid var(--warn-text); padding: var(--space-1) 0 var(--space-1) var(--space-3); color: var(--text); font-size: var(--type-3); line-height: 1.5; }
 .import-preview { display: grid; gap: var(--space-4); margin-top: var(--space-5); border-top: 1px solid var(--border-soft); padding-top: var(--space-5); }
 .import-preview-head { display: flex; align-items: flex-start; gap: var(--space-3); }
 .import-preview-head > span { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: var(--radius-sm); color: var(--ok-text); background: var(--ok-bg); }

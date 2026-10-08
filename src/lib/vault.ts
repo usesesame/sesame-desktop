@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -863,12 +863,23 @@ const emptyFidelityCounts = { imported: 0, transformed: 0, legacy: 0, malformed:
 
 export async function previewImportFile(token: string, source: ImportSource): Promise<ImportPreviewResult> {
   if (previewMode) {
+    const authenticator = source === 'otpauth-txt' || source === 'aegis-json' || source === '2fas-json'
+    const accounting: ImportAccounting = authenticator
+      ? { supplied: 6, accepted: 2, retained: 0, unsupported: 2, malformed: 2, reasons: [{ reason: 'counterBasedCode', count: 1 }, { reason: 'steamCode', count: 1 }, { reason: 'unknownAlgorithm', count: 1 }, { reason: 'unusableCode', count: 1 }] }
+      : { supplied: 4, accepted: 3, retained: 0, unsupported: 1, malformed: 0, reasons: [{ reason: 'unsupportedItemType', count: 1 }] }
     return {
       importId: 'preview-import',
-      preview: {
-        totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 1, passkeysNotImported: 2, intentionallyOmittedItems: 0,
-        fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts, imported: 2 }, passkeys: { ...emptyFidelityCounts, intentionallyOmitted: 2 }, unsupportedItems: { ...emptyFidelityCounts } },
-      },
+      preview: authenticator
+        ? {
+            totalEntries: 2, exactDuplicates: 0, accountConflicts: 0, duplicateEntries: 0, missingUrls: 2, invalidUrls: 0, noTotp: 0, invalidTotp: 0, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 0, passkeysNotImported: 0, intentionallyOmittedItems: 2,
+            accounting,
+            fidelity: { logins: { ...emptyFidelityCounts, imported: 4 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts }, passkeys: { ...emptyFidelityCounts }, unsupportedItems: { ...emptyFidelityCounts, intentionallyOmitted: 2 } },
+          }
+        : {
+            totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 1, passkeysNotImported: 2, intentionallyOmittedItems: 1,
+            accounting,
+            fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts, imported: 2 }, passkeys: { ...emptyFidelityCounts, intentionallyOmitted: 2 }, unsupportedItems: { ...emptyFidelityCounts, intentionallyOmitted: 1 } },
+          },
     }
   }
   return invoke<ImportPreviewResult>('preview_import', { token, source })

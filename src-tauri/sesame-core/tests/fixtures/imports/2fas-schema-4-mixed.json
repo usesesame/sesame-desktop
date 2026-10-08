@@ -1,0 +1,129 @@
+{
+  "services": [
+    {
+      "name": "Žalias paštas",
+      "secret": "krsx g5ct mvrx ezlu",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "marta@žalias.test",
+        "account": "marta@žalias.test",
+        "issuer": "Žalias paštas",
+        "digits": 6,
+        "period": 30,
+        "algorithm": "SHA1",
+        "counter": 0,
+        "tokenType": "TOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 0
+      }
+    },
+    {
+      "name": "例えバンク",
+      "secret": "MFRGGZDFMZTWQ2LK",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "雪@例え.test",
+        "account": "雪@例え.test",
+        "issuer": "例えバンク",
+        "digits": 8,
+        "period": 60,
+        "algorithm": "SHA512",
+        "counter": 0,
+        "tokenType": "TOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 1
+      }
+    },
+    {
+      "name": "Žemės bankas",
+      "secret": "GEZDGNBVGY3TQOJQ",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "ūkininkas",
+        "account": "ūkininkas",
+        "issuer": "Žemės bankas",
+        "digits": 6,
+        "algorithm": "SHA1",
+        "counter": 7,
+        "tokenType": "HOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 2
+      }
+    },
+    {
+      "name": "Steam",
+      "secret": "NBSWY3DPFQQHO33S",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "žaidėjas",
+        "account": "žaidėjas",
+        "issuer": "Steam",
+        "digits": 5,
+        "period": 30,
+        "algorithm": "SHA1",
+        "counter": 0,
+        "tokenType": "STEAM",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 3
+      }
+    },
+    {
+      "name": "Naïve Café",
+      "secret": "MZXW6YTBOI4TQOJQ",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "odd@example.test",
+        "account": "odd@example.test",
+        "issuer": "Naïve Café",
+        "digits": 6,
+        "period": 30,
+        "algorithm": "SHA384",
+        "counter": 0,
+        "tokenType": "TOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 4
+      }
+    },
+    {
+      "name": "Tuščias",
+      "secret": "!!",
+      "updatedAt": 1700000000000,
+      "type": "Other",
+      "otp": {
+        "label": "empty@example.test",
+        "account": "empty@example.test",
+        "issuer": "Tuščias",
+        "digits": 6,
+        "period": 30,
+        "algorithm": "SHA1",
+        "counter": 0,
+        "tokenType": "TOTP",
+        "source": "Manual"
+      },
+      "order": {
+        "position": 5
+      }
+    }
+  ],
+  "groups": [],
+  "updatedAt": 1700000000000,
+  "schemaVersion": 4,
+  "appVersionCode": 0,
+  "appVersionName": "fictional",
+  "appOrigin": "android"
+}

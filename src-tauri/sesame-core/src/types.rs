@@ -512,7 +512,96 @@ pub struct ImportPreview {
     /// Passkeys are readable in the export but Sesame cannot store them yet.
     pub passkeys_not_imported: usize,
     pub intentionally_omitted_items: usize,
+    pub accounting: ImportAccounting,
     pub fidelity: ImportFidelity,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportItemReason {
+    CounterBasedCode,
+    SteamCode,
+    UnsupportedCodeType,
+    TransferLink,
+    UnsupportedItemType,
+    UnsupportedAlgorithm,
+    UnknownAlgorithm,
+    UnusableCode,
+    MissingCredentials,
+    UnreadableRow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportItemOutcome {
+    Unsupported,
+    Malformed,
+}
+
+impl ImportItemReason {
+    pub fn outcome(self) -> ImportItemOutcome {
+        match self {
+            Self::CounterBasedCode
+            | Self::SteamCode
+            | Self::UnsupportedCodeType
+            | Self::TransferLink
+            | Self::UnsupportedItemType
+            | Self::UnsupportedAlgorithm => ImportItemOutcome::Unsupported,
+            Self::UnknownAlgorithm
+            | Self::UnusableCode
+            | Self::MissingCredentials
+            | Self::UnreadableRow => ImportItemOutcome::Malformed,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReasonCount {
+    pub reason: ImportItemReason,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, optional_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportAccounting {
+    pub supplied: usize,
+    pub accepted: usize,
+    pub retained: usize,
+    pub unsupported: usize,
+    pub malformed: usize,
+    pub reasons: Vec<ImportReasonCount>,
+}
+
+impl ImportAccounting {
+    pub fn omit(&mut self, reason: ImportItemReason) {
+        self.supplied += 1;
+        match reason.outcome() {
+            ImportItemOutcome::Unsupported => self.unsupported += 1,
+            ImportItemOutcome::Malformed => self.malformed += 1,
+        }
+        match self.reasons.iter_mut().find(|known| known.reason == reason) {
+            Some(known) => known.count += 1,
+            None => self.reasons.push(ImportReasonCount { reason, count: 1 }),
+        }
+    }
+
+    pub fn record_stored(&mut self, accepted: usize, retained: usize) {
+        self.supplied += accepted + retained;
+        self.accepted += accepted;
+        self.retained += retained;
+    }
+
+    pub fn omitted(&self) -> usize {
+        self.unsupported + self.malformed
+    }
+
+    pub fn is_balanced(&self) -> bool {
+        self.supplied == self.accepted + self.retained + self.unsupported + self.malformed
+            && self.omitted() == self.reasons.iter().map(|known| known.count).sum::<usize>()
+    }
 }
 
 /// Dispositions mirror the import fidelity report.

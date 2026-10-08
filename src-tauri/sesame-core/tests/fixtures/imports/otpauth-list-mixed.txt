@@ -1,0 +1,7 @@
+otpauth://totp/%C5%BDalias%20pa%C5%A1tas:marta%40%C5%BEalias.test?secret=KRSXG5CTMVRXEZLU&issuer=%C5%BDalias%20pa%C5%A1tas&digits=6&period=30
+# a note that is not a link
+otpauth://hotp/%C5%BDem%C4%97s%20bankas:%C5%ABkininkas?secret=GEZDGNBVGY3TQOJQ&issuer=%C5%BDem%C4%97s%20bankas&counter=7
+otpauth://totp/Steam:%C5%BEaid%C4%97jas?secret=NBSWY3DPFQQHO33S&issuer=Steam&digits=5&period=30&encoder=steam
+otpauth-migration://offline?data=ZmljdGlvbmFsLXRyYW5zZmVyLWRhdGE%3D
+otpauth://totp/Tu%C5%A1%C4%8Dias:empty%40example.test?secret=!!&issuer=Tu%C5%A1%C4%8Dias
+otpauth://totp/%E4%BE%8B%E3%81%88%E3%83%90%E3%83%B3%E3%82%AF:%E9%9B%AA%40%E4%BE%8B%E3%81%88.test?secret=MFRGGZDFMZTWQ2LK&issuer=%E4%BE%8B%E3%81%88%E3%83%90%E3%83%B3%E3%82%AF&digits=8&period=60&algorithm=SHA256

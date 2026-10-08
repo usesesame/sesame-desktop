@@ -131,6 +131,7 @@ pub struct ParsedImport {
     pub passkeys_not_imported: usize,
     /// Aggregate-only: disclosure must not release import content to the webview.
     pub intentionally_omitted_items: usize,
+    pub accounting: ImportAccounting,
     /// Field-level disposition counts; see the import fidelity report.
     pub fidelity: ImportFidelity,
 }
@@ -141,73 +142,73 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
     }
     let mut parsed = match source {
         "bitwarden-csv" => {
-            let (entries, logins, omitted) = import_bitwarden_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, omitted)
+            let (entries, logins, omissions) = import_bitwarden_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "bitwarden-json" => import_bitwarden_json_entries(content)?,
         "otpauth-txt" => {
-            let (entries, logins) = import_otpauth_list_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_otpauth_list_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "aegis-json" => {
-            let (entries, logins) = import_aegis_json_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_aegis_json_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "2fas-json" => {
-            let (entries, logins) = import_2fas_json_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_2fas_json_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "lastpass-csv" => {
-            let (entries, logins) = import_lastpass_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_lastpass_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "dashlane-csv" => {
-            let (entries, logins) = import_dashlane_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_dashlane_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "onepassword-csv" => {
-            let (entries, logins) = import_onepassword_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_onepassword_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "keepass-csv" => {
-            let (entries, logins) = import_keepass_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_keepass_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "chrome-csv" => {
-            let (entries, logins) = import_browser_csv_entries(content, "Chrome")?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_browser_csv_entries(content, "Chrome")?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "edge-csv" => {
-            let (entries, logins) = import_browser_csv_entries(content, "Edge")?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_browser_csv_entries(content, "Edge")?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "brave-csv" => {
-            let (entries, logins) = import_browser_csv_entries(content, "Brave")?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_browser_csv_entries(content, "Brave")?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "google-csv" => {
-            let (entries, logins) = import_browser_csv_entries(content, "Google")?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_browser_csv_entries(content, "Google")?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "apple-csv" => {
-            let (entries, logins) = import_apple_passwords_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_apple_passwords_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "firefox-csv" => {
-            let (entries, logins) = import_firefox_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, 0)
+            let (entries, logins, omissions) = import_firefox_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "proton-pass-csv" => {
-            let (entries, logins, omitted) = import_proton_pass_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, omitted)
+            let (entries, logins, omissions) = import_proton_pass_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "keeper-csv" => {
-            let (entries, logins, omitted) = import_keeper_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, omitted)
+            let (entries, logins, omissions) = import_keeper_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         "nordpass-csv" => {
-            let (entries, logins, omitted) = import_nordpass_csv_entries(content)?;
-            login_only_parsed_import(entries, logins, omitted)
+            let (entries, logins, omissions) = import_nordpass_csv_entries(content)?;
+            login_only_parsed_import(entries, logins, omissions)
         }
         _ => return Err("Choose a supported import type before selecting a file.".into()),
     };
@@ -229,26 +230,69 @@ pub fn parse_import_entries(content: &str, source: &str) -> VaultResult<ParsedIm
     for entry in &mut parsed.entries {
         entry.import_source = Some(source.to_string());
     }
+    let mut accounting = std::mem::take(&mut parsed.accounting);
+    record_stored_items(&mut accounting, &parsed);
+    parsed.accounting = accounting;
+    parsed.intentionally_omitted_items = parsed.accounting.unsupported;
     Ok(parsed)
+}
+
+fn record_stored_items(accounting: &mut ImportAccounting, parsed: &ParsedImport) {
+    let with_legacy = parsed
+        .entries
+        .iter()
+        .filter(|entry| !entry.legacy_fields.is_empty())
+        .count()
+        + parsed
+            .secure_notes
+            .iter()
+            .filter(|note| !note.legacy_fields.is_empty())
+            .count()
+        + parsed
+            .cards
+            .iter()
+            .filter(|card| !card.legacy_fields.is_empty())
+            .count()
+        + parsed
+            .identities
+            .iter()
+            .filter(|identity| !identity.legacy_fields.is_empty())
+            .count();
+    let stored = parsed.entries.len()
+        + parsed.secure_notes.len()
+        + parsed.cards.len()
+        + parsed.identities.len()
+        + parsed.ssh_keys.len();
+    accounting.record_stored(stored - with_legacy, with_legacy);
+}
+
+fn record_has_content(record: &csv::StringRecord) -> bool {
+    record.iter().any(|value| !value.trim().is_empty())
+}
+
+fn record_row_without_credentials(omissions: &mut ImportAccounting, record: &csv::StringRecord) {
+    if record_has_content(record) {
+        omissions.omit(ImportItemReason::MissingCredentials);
+    }
 }
 
 fn login_only_parsed_import(
     entries: Vec<VaultEntry>,
     logins: FidelityCounts,
-    intentionally_omitted: usize,
+    omissions: ImportAccounting,
 ) -> ParsedImport {
     let mut fidelity = ImportFidelity {
         logins,
         ..ImportFidelity::default()
     };
-    for _ in 0..intentionally_omitted {
+    for _ in 0..omissions.unsupported {
         fidelity
             .unsupported_items
             .record(FieldDisposition::IntentionallyOmitted);
     }
     ParsedImport {
         entries,
-        intentionally_omitted_items: intentionally_omitted,
+        accounting: omissions,
         fidelity,
         ..ParsedImport::default()
     }
@@ -256,30 +300,43 @@ fn login_only_parsed_import(
 
 pub fn import_bitwarden_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
-    let mut intentionally_omitted = 0;
+    let mut omissions = ImportAccounting::default();
     for row in reader.deserialize::<BitwardenCsvEntry>() {
         let row = row.map_err(|_| {
             "Sesame could not read that Bitwarden CSV. Export it again and try once more."
                 .to_string()
         })?;
         if !row.item_type.is_empty() && !row.item_type.eq_ignore_ascii_case("login") {
-            intentionally_omitted += 1;
+            omissions.omit(ImportItemReason::UnsupportedItemType);
             continue;
         }
         if row.name.is_empty() && row.login_username.is_empty() && row.login_password.is_empty() {
+            if [&row.login_uri, &row.notes, &row.login_totp]
+                .iter()
+                .any(|value| !value.trim().is_empty())
+            {
+                omissions.omit(ImportItemReason::MissingCredentials);
+            }
             continue;
         }
         let folder = normalise_folder(&row.folder)?;
+        let addresses = row
+            .login_uri
+            .lines()
+            .map(str::trim)
+            .filter(|address| !address.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         let mut entry = imported_entry(
             row.name,
-            row.login_uri,
+            addresses.first().cloned().unwrap_or_default(),
             row.login_username,
             row.login_password,
             non_empty(row.login_totp),
@@ -290,10 +347,24 @@ pub fn import_bitwarden_csv_entries(
             &mut fidelity,
         )?;
         entry.folder = folder;
+        if addresses.len() > 1 {
+            entry.urls = usable_unique_urls(addresses.into_iter())?;
+        }
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity, intentionally_omitted))
+    Ok((imported, fidelity, omissions))
+}
+
+fn usable_unique_urls(addresses: impl Iterator<Item = String>) -> VaultResult<Vec<String>> {
+    let mut urls: Vec<String> = Vec::new();
+    for address in addresses {
+        let url = normalise_url(&clean_import_field("website address", address)?);
+        if usable_web_url(&url) && !urls.iter().any(|saved| saved == &url) {
+            urls.push(url);
+        }
+    }
+    Ok(urls)
 }
 
 pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport> {
@@ -313,7 +384,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
     let mut ssh_keys = Vec::new();
     let mut imported_count = 0;
     let mut passkeys_not_imported = 0;
-    let mut intentionally_omitted_items = 0;
+    let mut omissions = ImportAccounting::default();
     let mut fidelity = ImportFidelity::default();
     for item in export.items {
         // Bitwarden item types: 1 login, 2 note, 3 card, 4 identity, 5 SSH key; anything past 5 is counted as omitted.
@@ -346,7 +417,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
                 continue;
             }
             Some(other) if other != 1 => {
-                intentionally_omitted_items += 1;
+                omissions.omit(ImportItemReason::UnsupportedItemType);
                 fidelity
                     .unsupported_items
                     .record(FieldDisposition::IntentionallyOmitted);
@@ -362,6 +433,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
             .unwrap_or_default();
         let attachment_count = item.attachments.len();
         let Some(mut login) = item.login else {
+            omissions.omit(ImportItemReason::UnreadableRow);
             continue;
         };
         login.username = clean_import_field("username", login.username)?;
@@ -384,6 +456,18 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         let item_name = clean_import_field("login name", item.name)?;
         let item_notes = clean_import_multiline_field("notes", item.notes)?;
         if item_name.is_empty() && login.username.is_empty() && login.password.is_empty() {
+            let has_other_content = !item_notes.trim().is_empty()
+                || !login.totp.trim().is_empty()
+                || login.uris.iter().any(|uri| !uri.uri.trim().is_empty())
+                || item.fields.iter().any(|field| {
+                    field
+                        .value
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty())
+                });
+            if has_other_content {
+                omissions.omit(ImportItemReason::MissingCredentials);
+            }
             continue;
         }
         let mut backup_codes = Vec::new();
@@ -448,7 +532,8 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         identities,
         ssh_keys,
         passkeys_not_imported,
-        intentionally_omitted_items,
+        intentionally_omitted_items: 0,
+        accounting: omissions,
         fidelity,
     })
 }
@@ -735,19 +820,23 @@ fn bitwarden_json_identity(
 
 pub fn import_lastpass_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
+    let mut omissions = ImportAccounting::default();
     for row in reader.deserialize::<LastPassCsvEntry>() {
         let row = row.map_err(|_| {
             "Sesame could not read that LastPass CSV. Export it again and try once more."
                 .to_string()
         })?;
         if row.name.is_empty() && row.username.is_empty() && row.password.is_empty() {
+            if !row.url.trim().is_empty() || !row.extra.trim().is_empty() {
+                omissions.omit(ImportItemReason::MissingCredentials);
+            }
             continue;
         }
         let folder = normalise_folder(&row.grouping)?;
@@ -767,12 +856,12 @@ pub fn import_lastpass_csv_entries(
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity))
+    Ok((imported, fidelity, omissions))
 }
 
 pub fn import_dashlane_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
@@ -789,6 +878,7 @@ pub fn import_dashlane_csv_entries(
         .collect::<HashMap<_, _>>();
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
+    let mut omissions = ImportAccounting::default();
     for record in reader.records() {
         let record = record.map_err(|_| {
             "Sesame could not read a Dashlane entry. Export it again and try once more.".to_string()
@@ -797,6 +887,7 @@ pub fn import_dashlane_csv_entries(
         let username = record_value(&record, &headers, &["username", "login", "email"]);
         let password = record_secret(&record, &headers, &["password"]);
         if title.is_empty() && username.is_empty() && password.is_empty() {
+            record_row_without_credentials(&mut omissions, &record);
             continue;
         }
         let url = record_value(&record, &headers, &["url", "website", "webaddress"]);
@@ -820,12 +911,12 @@ pub fn import_dashlane_csv_entries(
         )?);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity))
+    Ok((imported, fidelity, omissions))
 }
 
 pub fn import_onepassword_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     import_flexible_csv_entries(
         content,
         "1Password",
@@ -839,7 +930,9 @@ pub fn import_onepassword_csv_entries(
     )
 }
 
-pub fn import_keepass_csv_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+pub fn import_keepass_csv_entries(
+    content: &str,
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     import_flexible_csv_entries(
         content,
         "KeePass",
@@ -855,7 +948,7 @@ pub fn import_keepass_csv_entries(content: &str) -> VaultResult<(Vec<VaultEntry>
 
 pub fn import_apple_passwords_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     import_flexible_csv_entries(
         content,
         "Apple Passwords",
@@ -872,7 +965,7 @@ pub fn import_apple_passwords_csv_entries(
 pub fn import_browser_csv_entries(
     content: &str,
     browser: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     import_flexible_csv_entries(
         content,
         browser,
@@ -886,7 +979,9 @@ pub fn import_browser_csv_entries(
     )
 }
 
-pub fn import_firefox_csv_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+pub fn import_firefox_csv_entries(
+    content: &str,
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     import_flexible_csv_entries(
         content,
         "Firefox",
@@ -903,7 +998,7 @@ pub fn import_firefox_csv_entries(content: &str) -> VaultResult<(Vec<VaultEntry>
 /// Columns matched by name like Proton's own export builder; JSON-stringified non-login rows are omitted, not guessed at.
 pub fn import_proton_pass_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
@@ -938,7 +1033,7 @@ pub fn import_proton_pass_csv_entries(
     .collect();
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
-    let mut intentionally_omitted = 0;
+    let mut omissions = ImportAccounting::default();
     for record in reader.records() {
         let record = record.map_err(|_| {
             "Sesame could not read a Proton Pass entry. Export it again and try once more."
@@ -946,7 +1041,7 @@ pub fn import_proton_pass_csv_entries(
         })?;
         let item_type = record_value(&record, &headers, &["type"]).to_ascii_lowercase();
         if !item_type.is_empty() && item_type != "login" && item_type != "alias" {
-            intentionally_omitted += 1;
+            omissions.omit(ImportItemReason::UnsupportedItemType);
             continue;
         }
         let title = record_value(&record, &headers, &["name"]);
@@ -954,6 +1049,7 @@ pub fn import_proton_pass_csv_entries(
         let password = record_secret(&record, &headers, &["password"]);
         let email = record_value(&record, &headers, &["email"]);
         if title.is_empty() && username.is_empty() && password.is_empty() && email.is_empty() {
+            record_row_without_credentials(&mut omissions, &record);
             continue;
         }
         // Proton joins multiple URLs on one item as "url1, url2".
@@ -1025,13 +1121,13 @@ pub fn import_proton_pass_csv_entries(
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity, intentionally_omitted))
+    Ok((imported, fidelity, omissions))
 }
 
 /// No header row; `$oneTimeCode` becomes TOTP, `$type` marks omitted rows, everything else stays Legacy.
 pub fn import_keeper_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .has_headers(false)
@@ -1039,13 +1135,16 @@ pub fn import_keeper_csv_entries(
         .from_reader(content.as_bytes());
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
-    let mut intentionally_omitted = 0;
+    let mut omissions = ImportAccounting::default();
     let mut saw_a_row = false;
     for record in reader.records() {
         let record = record.map_err(|_| {
             "Sesame could not read that Keeper CSV. Export it again and try once more.".to_string()
         })?;
         if record.len() < 6 {
+            if record_has_content(&record) {
+                omissions.omit(ImportItemReason::UnreadableRow);
+            }
             continue;
         }
         saw_a_row = true;
@@ -1088,11 +1187,12 @@ pub fn import_keeper_csv_entries(
         }
         if let Some(record_type) = record_type {
             if !record_type.eq_ignore_ascii_case("login") {
-                intentionally_omitted += 1;
+                omissions.omit(ImportItemReason::UnsupportedItemType);
                 continue;
             }
         }
         if title.is_empty() && username.is_empty() && password.is_empty() {
+            record_row_without_credentials(&mut omissions, &record);
             continue;
         }
         let mut entry = imported_entry(
@@ -1115,13 +1215,13 @@ pub fn import_keeper_csv_entries(
     if !saw_a_row {
         return Err("That file does not look like a Keeper password export.".to_string());
     }
-    Ok((imported, fidelity, intentionally_omitted))
+    Ok((imported, fidelity, omissions))
 }
 
 /// No official schema; columns match by name, `custom_fields` with a one-time-code label becomes TOTP.
 pub fn import_nordpass_csv_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, usize)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
@@ -1154,7 +1254,7 @@ pub fn import_nordpass_csv_entries(
     .collect();
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
-    let mut intentionally_omitted = 0;
+    let mut omissions = ImportAccounting::default();
     for record in reader.records() {
         let record = record.map_err(|_| {
             "Sesame could not read a NordPass entry. Export it again and try once more.".to_string()
@@ -1163,15 +1263,26 @@ pub fn import_nordpass_csv_entries(
         let item_type = record_value(&record, &headers, &["type"]).to_ascii_lowercase();
         let username = record_value(&record, &headers, &["username"]);
         let password = record_secret(&record, &headers, &["password"]);
-        if title.is_empty() && item_type.is_empty() && username.is_empty() && password.is_empty() {
-            // Empty-folder placeholder row.
+        let placeholder_values = [
+            record_value(&record, &headers, &["url"]),
+            record_value(&record, &headers, &["additionalurls"]),
+            record_value(&record, &headers, &["note"]),
+            record_value(&record, &headers, &["customfields"]),
+        ];
+        if title.is_empty()
+            && item_type.is_empty()
+            && username.is_empty()
+            && password.is_empty()
+            && placeholder_values.iter().all(String::is_empty)
+        {
             continue;
         }
         if !item_type.is_empty() && item_type != "password" {
-            intentionally_omitted += 1;
+            omissions.omit(ImportItemReason::UnsupportedItemType);
             continue;
         }
         if title.is_empty() && username.is_empty() && password.is_empty() {
+            record_row_without_credentials(&mut omissions, &record);
             continue;
         }
         let mut entry = imported_entry(
@@ -1280,7 +1391,7 @@ pub fn import_nordpass_csv_entries(
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity, intentionally_omitted))
+    Ok((imported, fidelity, omissions))
 }
 
 pub fn import_flexible_csv_entries(
@@ -1293,7 +1404,7 @@ pub fn import_flexible_csv_entries(
     totp_names: &[&str],
     note_names: &[&str],
     tag_names: &[&str],
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .trim(csv::Trim::Headers)
@@ -1328,6 +1439,7 @@ pub fn import_flexible_csv_entries(
         .collect::<HashSet<_>>();
     let mut imported = Vec::new();
     let mut fidelity = FidelityCounts::default();
+    let mut omissions = ImportAccounting::default();
     for record in reader.records() {
         let record = record.map_err(|_| {
             format!("Sesame could not read a {product} entry. Export it again and try once more.")
@@ -1337,6 +1449,7 @@ pub fn import_flexible_csv_entries(
         let username = record_value(&record, &headers, username_names);
         let password = record_secret(&record, &headers, password_names);
         if title.is_empty() && username.is_empty() && password.is_empty() {
+            record_row_without_credentials(&mut omissions, &record);
             continue;
         }
         let mut entry = imported_entry(
@@ -1380,7 +1493,7 @@ pub fn import_flexible_csv_entries(
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
-    Ok((imported, fidelity))
+    Ok((imported, fidelity, omissions))
 }
 
 /// A 2FA code has no password, so these entries carry a title and a secret only.
@@ -1394,7 +1507,6 @@ fn totp_entry(
     let account = clean_import_field("account", account.to_string())?;
     let otpauth = bounded_import_field("2FA secret", otpauth)?;
     if totp_from_value(&otpauth).is_none() {
-        fidelity.record(FieldDisposition::Malformed);
         return Ok(None);
     }
     // A link may carry no label at all. The secret is the valuable part and the
@@ -1419,21 +1531,59 @@ fn totp_entry(
     )?))
 }
 
+fn unsupported_code_reason(kind: &str) -> ImportItemReason {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "hotp" => ImportItemReason::CounterBasedCode,
+        "steam" => ImportItemReason::SteamCode,
+        _ => ImportItemReason::UnsupportedCodeType,
+    }
+}
+
+fn unsupported_otpauth_reason(line: &str) -> Option<ImportItemReason> {
+    let after_scheme = line.trim_start_matches("otpauth://");
+    let kind = after_scheme.split(['/', '?']).next().unwrap_or("");
+    if !kind.eq_ignore_ascii_case("totp") {
+        return Some(unsupported_code_reason(kind));
+    }
+    let steam_encoder = line
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or("")
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .any(|(key, value)| {
+            key.eq_ignore_ascii_case("encoder") && value.eq_ignore_ascii_case("steam")
+        });
+    steam_encoder.then_some(ImportItemReason::SteamCode)
+}
+
 /// Aegis, Ente Auth and KeePassXC all export a plain list of otpauth links.
 pub fn import_otpauth_list_entries(
     content: &str,
-) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let mut fidelity = FidelityCounts::default();
+    let mut accounting = ImportAccounting::default();
     let mut entries = Vec::new();
     for line in content.lines() {
         let line = line.trim();
+        if line.starts_with("otpauth-migration://") {
+            accounting.omit(ImportItemReason::TransferLink);
+            continue;
+        }
         if line.is_empty() || !line.starts_with("otpauth://") {
             continue;
         }
+        if let Some(reason) = unsupported_otpauth_reason(line) {
+            accounting.omit(reason);
+            continue;
+        }
         let (issuer, account) = otpauth_labels(line);
-        if let Some(entry) = totp_entry(&issuer, &account, line.to_string(), &mut fidelity)? {
-            entries.push(entry);
-            check_import_item_count(entries.len())?;
+        match totp_entry(&issuer, &account, line.to_string(), &mut fidelity)? {
+            Some(entry) => {
+                entries.push(entry);
+                check_import_item_count(entries.len())?;
+            }
+            None => accounting.omit(ImportItemReason::UnusableCode),
         }
     }
     if entries.is_empty() {
@@ -1442,7 +1592,7 @@ pub fn import_otpauth_list_entries(
                 .into(),
         );
     }
-    Ok((entries, fidelity))
+    Ok((entries, fidelity, accounting))
 }
 
 /// Reads the issuer and account out of an otpauth link without a URL crate.
@@ -1506,6 +1656,13 @@ fn normalised_algorithm(value: &str) -> Option<&'static str> {
     }
 }
 
+fn algorithm_omission(value: &str) -> ImportItemReason {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "SHA224" | "SHA384" => ImportItemReason::UnsupportedAlgorithm,
+        _ => ImportItemReason::UnknownAlgorithm,
+    }
+}
+
 fn otpauth_url(
     issuer: &str,
     account: &str,
@@ -1545,21 +1702,23 @@ fn encode_component(value: &str) -> String {
     out
 }
 
-pub fn import_aegis_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+pub fn import_aegis_json_entries(
+    content: &str,
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let export: AegisExport = serde_json::from_str(content).map_err(|_| {
         "Sesame could not read that Aegis export. Export it again as an unencrypted JSON file."
             .to_string()
     })?;
     let mut fidelity = FidelityCounts::default();
+    let mut accounting = ImportAccounting::default();
     let mut entries = Vec::new();
     for item in export.db.entries {
-        // Aegis exports HOTP and Steam entries too, and Sesame stores time-based codes.
         if !item.entry_type.eq_ignore_ascii_case("totp") {
-            fidelity.record(FieldDisposition::IntentionallyOmitted);
+            accounting.omit(unsupported_code_reason(&item.entry_type));
             continue;
         }
         let Some(algorithm) = normalised_algorithm(&item.info.algo) else {
-            fidelity.record(FieldDisposition::Malformed);
+            accounting.omit(algorithm_omission(&item.info.algo));
             continue;
         };
         let url = otpauth_url(
@@ -1570,18 +1729,23 @@ pub fn import_aegis_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>,
             item.info.period.unwrap_or(30),
             algorithm,
         );
-        if let Some(entry) = totp_entry(&item.issuer, &item.name, url, &mut fidelity)? {
-            entries.push(entry);
-            check_import_item_count(entries.len())?;
+        match totp_entry(&item.issuer, &item.name, url, &mut fidelity)? {
+            Some(entry) => {
+                entries.push(entry);
+                check_import_item_count(entries.len())?;
+            }
+            None => accounting.omit(ImportItemReason::UnusableCode),
         }
     }
     if entries.is_empty() {
         return Err("That Aegis export has no time-based codes in it.".into());
     }
-    Ok((entries, fidelity))
+    Ok((entries, fidelity, accounting))
 }
 
-pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, FidelityCounts)> {
+pub fn import_2fas_json_entries(
+    content: &str,
+) -> VaultResult<(Vec<VaultEntry>, FidelityCounts, ImportAccounting)> {
     let export: TwoFasExport = serde_json::from_str(content).map_err(|_| {
         "Sesame could not read that 2FAS export. Export it again without a password.".to_string()
     })?;
@@ -1591,11 +1755,12 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
         );
     }
     let mut fidelity = FidelityCounts::default();
+    let mut accounting = ImportAccounting::default();
     let mut entries = Vec::new();
     for service in export.services {
         let otp = service.otp.unwrap_or_default();
         if !otp.token_type.is_empty() && !otp.token_type.eq_ignore_ascii_case("totp") {
-            fidelity.record(FieldDisposition::IntentionallyOmitted);
+            accounting.omit(unsupported_code_reason(&otp.token_type));
             continue;
         }
         let issuer = if otp.issuer.trim().is_empty() {
@@ -1604,7 +1769,7 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
             otp.issuer.clone()
         };
         let Some(algorithm) = normalised_algorithm(&otp.algorithm) else {
-            fidelity.record(FieldDisposition::Malformed);
+            accounting.omit(algorithm_omission(&otp.algorithm));
             continue;
         };
         let url = otpauth_url(
@@ -1615,15 +1780,18 @@ pub fn import_2fas_json_entries(content: &str) -> VaultResult<(Vec<VaultEntry>, 
             otp.period.unwrap_or(30),
             algorithm,
         );
-        if let Some(entry) = totp_entry(&issuer, &otp.account, url, &mut fidelity)? {
-            entries.push(entry);
-            check_import_item_count(entries.len())?;
+        match totp_entry(&issuer, &otp.account, url, &mut fidelity)? {
+            Some(entry) => {
+                entries.push(entry);
+                check_import_item_count(entries.len())?;
+            }
+            None => accounting.omit(ImportItemReason::UnusableCode),
         }
     }
     if entries.is_empty() {
         return Err("That 2FAS export has no time-based codes in it.".into());
     }
-    Ok((entries, fidelity))
+    Ok((entries, fidelity, accounting))
 }
 
 pub fn imported_entry(

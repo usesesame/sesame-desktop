@@ -4,6 +4,19 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## Unreleased
+
+### Import
+
+- The import preview counts every code or item in the file and says why each
+  one that was left out was not added, such as HOTP codes, Steam Guard codes,
+  unknown hash algorithms and rows with no name, username or password. It
+  tells you to keep your old authenticator or password manager until you have
+  moved those across.
+- Bitwarden CSV files keep every website address in a cell that lists several.
+  The import chooser now recommends Bitwarden JSON, which also keeps custom
+  fields, secure notes, cards, identities and SSH keys.
+
 ## 0.3.0
 
 ### Unlock
