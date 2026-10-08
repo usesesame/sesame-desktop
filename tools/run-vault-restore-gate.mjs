@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { architectureName, launchApp, openBridge, platformName, recordStep, sha256, stopApp, summarize } from './desktop-e2e-bridge.mjs'
-import { buildCompatibilityMatrix, loadFixtureManifest, repositoryRoot, RUN_SCHEMA } from './vault-compatibility-gate.mjs'
+import { buildCompatibilityMatrix, describeTestBuildIdentity, loadFixtureManifest, repositoryRoot, RUN_SCHEMA, TEST_BUILD_KIND } from './vault-compatibility-gate.mjs'
 
 const binaryPattern = /^[0-9a-f]{64}$/
 
@@ -206,7 +206,7 @@ export async function runVaultRestoreGate(options) {
   const { matrix, matrixDigest } = await buildCompatibilityMatrix(repo)
   const { manifest } = await loadFixtureManifest(repo)
   const fixtureIds = options.fixtures ?? matrix.publishedVersions.map((version) => version.fixtureId)
-  const version = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version
+  const identity = await describeTestBuildIdentity(repo)
   const platform = platformName()
   const architecture = architectureName()
   const workRoot = options.workRoot ? path.resolve(options.workRoot) : await mkdtemp(path.join(tmpdir(), 'sesame-vault-gate-'))
@@ -249,8 +249,8 @@ export async function runVaultRestoreGate(options) {
       schema: RUN_SCHEMA,
       platform,
       architecture,
-      version,
-      buildKind: 'tauri-wdio-test-build',
+      ...identity,
+      buildKind: TEST_BUILD_KIND,
       matrixDigest,
       fixtureManifestSha256: matrix.fixtureManifestSha256,
       fixtureId,

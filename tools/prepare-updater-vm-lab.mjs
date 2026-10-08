@@ -6,7 +6,7 @@ import {
   randomBytes,
   sign,
 } from 'node:crypto'
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
