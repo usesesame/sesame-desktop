@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, fileSha256, releaseIdentity } from './release-evidence-lib.mjs'
-import { assertRepositoryCompatibility, validateCompatibilityEvidence } from './vault-compatibility-gate.mjs'
+import { assertRepositoryCompatibility, loadReleaseCandidate, validateCompatibilityEvidence } from './vault-compatibility-gate.mjs'
 
 const [artifactInput, updaterSignatureInput, sbomInput, outputInput] = process.argv.slice(2)
 if (!artifactInput || !updaterSignatureInput || !sbomInput || !outputInput) {
@@ -41,7 +41,7 @@ const sbom = await describe('sbom')
 
 const { matrix, policy, matrixDigest } = await assertRepositoryCompatibility()
 const compatibilityEvidence = JSON.parse(await readFile(path.resolve(required('SESAME_VAULT_COMPATIBILITY_FILE')), 'utf8'))
-validateCompatibilityEvidence(compatibilityEvidence, { matrix, policy, matrixDigest })
+validateCompatibilityEvidence(compatibilityEvidence, { matrix, policy, matrixDigest, candidate: await loadReleaseCandidate() })
 const compatibilityFilename = 'vault-compatibility.json'
 const compatibilityPath = path.join(output, compatibilityFilename)
 await writeFile(compatibilityPath, `${JSON.stringify(compatibilityEvidence, null, 2)}\n`)

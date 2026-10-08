@@ -181,6 +181,9 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
       conflicts.push(`${asset.name} exists with sha256 ${current.sha256} instead of ${asset.sha256}.`)
     }
   }
+  if (release.isDraft !== true && visibility === RELEASE_VISIBILITY_DRAFT && upload.length > 0) {
+    conflicts.push(`The existing release is already public but draft visibility was requested, so ${upload.length} missing ${upload.length === 1 ? 'asset was' : 'assets were'} not planned for upload: ${upload.join(', ')}. Delete or unpublish the release deliberately, or request published visibility.`)
+  }
   for (const name of remote.keys()) {
     if (expectedAssets.some((asset) => asset.name === name)) continue
     if (foreignAssets.some((pattern) => pattern.test(name))) continue
@@ -202,7 +205,7 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
   }
   return {
     action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete',
-    upload,
+    upload: conflicts.length > 0 ? [] : upload,
     conflicts,
     anchor,
     draft: release.isDraft === true,

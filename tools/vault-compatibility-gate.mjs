@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { stableJSON } from './release-evidence-lib.mjs'
+import { RELEASE_WORKFLOW, releaseIdentity, stableJSON } from './release-evidence-lib.mjs'
 
 export const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const POLICY_PATH = 'tools/vault-compatibility-policy.json'
@@ -12,8 +12,31 @@ export const MATRIX_SCHEMA = 'sesame.vault-compatibility-matrix/1'
 export const RUN_SCHEMA = 'sesame.vault-compatibility-installed-run/1'
 export const EVIDENCE_SCHEMA = 'sesame.vault-compatibility-evidence/1'
 export const SUPPORTED_PLATFORMS = ['linux', 'windows']
+export const TEST_BUILD_KIND = 'tauri-wdio-test-build'
+export const TEST_BUILD_CONFIGURATION_FILES = [
+  'src-tauri/tauri.conf.json',
+  'src-tauri/tauri.wdio.conf.json',
+  'src-tauri/Cargo.toml',
+  'src-tauri/Cargo.lock',
+  'package-lock.json',
+]
 
 const sha256Pattern = /^[0-9a-f]{64}$/
+const commitPattern = /^[0-9a-f]{40}$/
+const runIdPattern = /^[0-9]{1,20}$/
+const architectures = ['x86_64', 'aarch64']
+const candidateFields = [
+  ['version', 'version'],
+  ['commit', 'commit'],
+  ['configurationSha256', 'build configuration'],
+  ['workflowIdentity', 'workflow'],
+  ['workflowRunId', 'workflow run'],
+]
+const platformBuildFields = [
+  ['architecture', 'architecture'],
+  ['buildKind', 'build kind'],
+  ['binarySha256', 'binary digest'],
+]
 const requiredRestoreSteps = [
   'create_vault',
   'restore_backup.locked',
@@ -62,6 +85,50 @@ export async function loadCompatibilityPolicy(root = repositoryRoot) {
   requireCondition(typeof decision.note === 'string' && decision.note.length > 0, 'The compatibility decision must carry a note.')
   requireCondition(typeof policy.rollback === 'string' && policy.rollback.length > 0, 'The compatibility policy must carry the rollback rule for a vault this release upgraded.')
   return policy
+}
+
+export async function computeTestBuildConfigurationDigest(root = repositoryRoot) {
+  const files = {}
+  for (const file of TEST_BUILD_CONFIGURATION_FILES) files[file] = sha256(await readFile(path.join(root, file)))
+  return sha256(stableJSON(files))
+}
+
+export async function describeTestBuildIdentity(root = repositoryRoot, environment = process.env) {
+  const workflowReference = environment.GITHUB_WORKFLOW_REF?.trim()
+  return {
+    version: JSON.parse(await readRepositoryFile(root, 'package.json')).version,
+    commit: environment.GITHUB_SHA?.trim() || null,
+    configurationSha256: await computeTestBuildConfigurationDigest(root),
+    workflowIdentity: workflowReference ? `https://github.com/${workflowReference}` : null,
+    workflowRunId: environment.GITHUB_RUN_ID?.trim() || null,
+  }
+}
+
+export function assertReleaseCandidate(candidate) {
+  requireCondition(typeof candidate?.version === 'string' && candidate.version.length > 0, 'The release candidate has no version.')
+  requireCondition(commitPattern.test(candidate.commit ?? ''), 'The release candidate has no source commit.')
+  requireCondition(sha256Pattern.test(candidate.configurationSha256 ?? ''), 'The release candidate has no build configuration digest.')
+  requireCondition(typeof candidate.workflowIdentity === 'string' && candidate.workflowIdentity.length > 0, 'The release candidate has no workflow identity.')
+  requireCondition(runIdPattern.test(candidate.workflowRunId ?? ''), 'The release candidate has no workflow run.')
+  return candidate
+}
+
+export async function loadReleaseCandidate(root = repositoryRoot, environment = process.env) {
+  const required = (name) => {
+    const value = environment[name]?.trim()
+    requireCondition(value, `${name} is required to bind the vault compatibility evidence to the release candidate.`)
+    return value
+  }
+  const identity = await describeTestBuildIdentity(root, {})
+  const repository = required('GITHUB_REPOSITORY')
+  const ref = required('GITHUB_REF')
+  requireCondition(ref === `refs/tags/v${identity.version}`, `The workflow ref ${ref} is not the tag for version ${identity.version}.`)
+  return assertReleaseCandidate({
+    ...identity,
+    commit: required('GITHUB_SHA'),
+    workflowIdentity: releaseIdentity(repository, RELEASE_WORKFLOW, ref),
+    workflowRunId: required('GITHUB_RUN_ID'),
+  })
 }
 
 export async function loadFixtureManifest(root = repositoryRoot) {
@@ -195,14 +262,18 @@ export function assertRetainedReaderLabels({ coreSource, matrix }) {
   return coreSource
 }
 
-export function assertInstalledRun(run, { matrix, policy, matrixDigest: expectedMatrixDigest }) {
+export function assertInstalledRun(run, { matrix, policy, matrixDigest: expectedMatrixDigest, candidate }) {
+  assertReleaseCandidate(candidate)
   requireCondition(run?.schema === RUN_SCHEMA, 'An installed-app run record has the wrong schema.')
   requireCondition(policy.platforms.includes(run.platform), `An installed-app run names an unapproved platform: ${run.platform}.`)
-  requireCondition(['x86_64', 'aarch64'].includes(run.architecture), `An installed-app run names an unknown architecture: ${run.architecture}.`)
+  requireCondition(architectures.includes(run.architecture), `An installed-app run names an unknown architecture: ${run.architecture}.`)
   requireCondition(run.matrixDigest === expectedMatrixDigest, 'An installed-app run does not match the current compatibility matrix.')
   requireCondition(run.fixtureManifestSha256 === matrix.fixtureManifestSha256, 'An installed-app run does not match the current fixture manifest.')
   requireCondition(sha256Pattern.test(run.binarySha256 ?? ''), 'An installed-app run does not record the tested binary digest.')
-  requireCondition(run.buildKind === 'tauri-wdio-test-build', 'The installed-app gate only counts a full app build with the test bridge.')
+  requireCondition(run.buildKind === TEST_BUILD_KIND, 'The installed-app gate only counts a full app build with the test bridge.')
+  for (const [field, label] of candidateFields) {
+    requireCondition(run[field] === candidate[field], `The ${run.platform} ${run.fixtureId} run records a different ${label} than the release candidate.`)
+  }
   requireCondition(run.result === 'passed' && run.skipped !== true, `The ${run.platform} ${run.fixtureId} installed-app run did not pass.`)
   const version = matrix.publishedVersions.find((entry) => entry.fixtureId === run.fixtureId)
   requireCondition(version, `An installed-app run names an unknown fixture: ${run.fixtureId}.`)
@@ -218,8 +289,19 @@ export function assertInstalledRun(run, { matrix, policy, matrixDigest: expected
   return run
 }
 
-export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, policy, matrixDigest: expectedMatrixDigest }) {
-  const verified = runs.map((run) => assertInstalledRun(run, { matrix, policy, matrixDigest: expectedMatrixDigest }))
+const fixtureBuild = (run) => ({
+  version: run.version,
+  commit: run.commit,
+  configurationSha256: run.configurationSha256,
+  workflowIdentity: run.workflowIdentity,
+  workflowRunId: run.workflowRunId,
+  architecture: run.architecture,
+  buildKind: run.buildKind,
+  binarySha256: run.binarySha256,
+})
+
+export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, policy, matrixDigest: expectedMatrixDigest, candidate }) {
+  const verified = runs.map((run) => assertInstalledRun(run, { matrix, policy, matrixDigest: expectedMatrixDigest, candidate }))
   const seen = new Set()
   for (const run of verified) {
     const key = `${run.platform}:${run.fixtureId}`
@@ -230,6 +312,12 @@ export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, polic
   for (const platform of policy.platforms) {
     const platformRuns = verified.filter((run) => run.platform === platform)
     requireCondition(platformRuns.length > 0, `The vault compatibility gate has no installed-app evidence for ${platform}.`)
+    for (const [field, label] of platformBuildFields) {
+      requireCondition(
+        platformRuns.every((run) => run[field] === platformRuns[0][field]),
+        `The ${platform} installed-app runs mix ${label} values. Every fixture must run against one test build.`,
+      )
+    }
     const fixtures = matrix.publishedVersions.map((version) => {
       const run = platformRuns.find((entry) => entry.fixtureId === version.fixtureId)
       requireCondition(run, `The ${platform} installed-app evidence is missing fixture ${version.fixtureId}.`)
@@ -238,6 +326,7 @@ export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, polic
         digestSha256: run.fixtureSha256,
         restoreSteps: run.phases.restore.passed,
         restartSteps: run.phases.restart.passed,
+        build: fixtureBuild(run),
         reportSha256: reportDigests[`${platform}:${run.fixtureId}`] ?? sha256(stableJSON(run)),
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
@@ -257,6 +346,7 @@ export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, polic
     schema: EVIDENCE_SCHEMA,
     matrixDigest: expectedMatrixDigest,
     fixtureManifestSha256: matrix.fixtureManifestSha256,
+    candidate: { ...candidate },
     minimumSupportedFormat: matrix.minimumSupportedFormat,
     currentFormat: matrix.currentFormat,
     platforms,
@@ -265,24 +355,36 @@ export function mergeInstalledEvidence({ runs, reportDigests = {}, matrix, polic
   }
 }
 
-export function validateCompatibilityEvidence(evidence, { matrix, policy, matrixDigest: expectedMatrixDigest }) {
+export function validateCompatibilityEvidence(evidence, { matrix, policy, matrixDigest: expectedMatrixDigest, candidate }) {
+  assertReleaseCandidate(candidate)
   requireCondition(evidence?.schema === EVIDENCE_SCHEMA, 'The vault compatibility evidence has the wrong schema.')
   requireCondition(evidence.result === 'passed', 'The vault compatibility evidence did not pass.')
   requireCondition(evidence.matrixDigest === expectedMatrixDigest, 'The vault compatibility evidence does not match the current matrix.')
   requireCondition(evidence.fixtureManifestSha256 === matrix.fixtureManifestSha256, 'The vault compatibility evidence does not match the current fixture manifest.')
   requireCondition(evidence.minimumSupportedFormat === policy.minimumSupportedFormat, 'The vault compatibility evidence does not match the recorded format decision.')
+  for (const [field, label] of candidateFields) {
+    requireCondition(evidence.candidate?.[field] === candidate[field], `The vault compatibility evidence records a different ${label} than the release candidate.`)
+  }
   const platforms = new Set((evidence.platforms ?? []).map((entry) => entry.platform))
+  requireCondition(platforms.size === (evidence.platforms ?? []).length, 'The vault compatibility evidence lists a platform more than once.')
   for (const platform of policy.platforms) {
     requireCondition(platforms.has(platform), `The vault compatibility evidence is missing ${platform}.`)
   }
   for (const entry of evidence.platforms ?? []) {
     requireCondition(entry.result === 'passed', `The ${entry.platform} vault compatibility evidence did not pass.`)
     requireCondition(sha256Pattern.test(entry.binarySha256 ?? ''), `The ${entry.platform} evidence does not record the tested binary digest.`)
+    requireCondition(architectures.includes(entry.architecture), `The ${entry.platform} evidence names an unknown architecture: ${entry.architecture}.`)
+    requireCondition(entry.buildKind === TEST_BUILD_KIND, `The ${entry.platform} evidence is not from a full app build with the test bridge.`)
+    requireCondition(entry.version === candidate.version, `The ${entry.platform} evidence records a different version than the release candidate.`)
     for (const version of matrix.publishedVersions) {
       const fixture = (entry.fixtures ?? []).find((item) => item.id === version.fixtureId)
       requireCondition(fixture, `The ${entry.platform} evidence is missing fixture ${version.fixtureId}.`)
       requireCondition(fixture.digestSha256 === version.fixtureDigestSha256, `The ${entry.platform} ${version.fixtureId} evidence does not match the fixture bytes.`)
       requireCondition(fixture.restoreSteps > 0 && fixture.restartSteps > 0, `The ${entry.platform} ${version.fixtureId} evidence records no passing phases.`)
+      const expectedBuild = { ...candidate, architecture: entry.architecture, buildKind: entry.buildKind, binarySha256: entry.binarySha256 }
+      for (const [field, label] of [...candidateFields, ...platformBuildFields]) {
+        requireCondition(fixture.build?.[field] === expectedBuild[field], `The ${entry.platform} ${version.fixtureId} evidence records a different ${label} than the rest of the ${entry.platform} build.`)
+      }
     }
   }
   return evidence
@@ -321,6 +423,7 @@ async function main(argv) {
     const runFiles = rest.slice(1)
     if (!file || runFiles.length === 0) throw new Error('Usage: node tools/vault-compatibility-gate.mjs merge <output-file> <run-file...>')
     const { matrix, policy, matrixDigest: digest } = await buildCompatibilityMatrix(repo)
+    const candidate = await loadReleaseCandidate(repo)
     const runs = []
     const reportDigests = {}
     for (const runFile of runFiles) {
@@ -329,8 +432,8 @@ async function main(argv) {
       runs.push(run)
       reportDigests[`${run.platform}:${run.fixtureId}`] = sha256(bytes)
     }
-    const evidence = mergeInstalledEvidence({ runs, reportDigests, matrix, policy, matrixDigest: digest })
-    validateCompatibilityEvidence(evidence, { matrix, policy, matrixDigest: digest })
+    const evidence = mergeInstalledEvidence({ runs, reportDigests, matrix, policy, matrixDigest: digest, candidate })
+    validateCompatibilityEvidence(evidence, { matrix, policy, matrixDigest: digest, candidate })
     await writeJSON(file, evidence)
     process.stdout.write(`Vault compatibility evidence passed for ${evidence.platforms.map((entry) => entry.platform).join(', ')}.\n`)
     return 0
