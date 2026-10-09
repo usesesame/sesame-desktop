@@ -2,15 +2,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+use zeroize::Zeroizing;
 
 use crate::adapters::network::trusted_time::trusted_time;
-use crate::commands::require_release_presence;
+use crate::commands::{require_release_presence, retire_unlock_methods_after_key_rotation};
 use crate::release::ReleasePresence;
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
 use crate::vault::storage::{
     atomic_replace, open_recovery_replacement_request, recovery_replacement_ready,
     replace_recovery_kit_for_session, seal_recovery_replacement_request, vault_path,
-    RECOVERY_REPLACEMENT_DELAY_SECS,
+    VaultKeyRotation, RECOVERY_REPLACEMENT_DELAY_SECS,
 };
 use crate::vault::types::CipherBlob;
 use crate::vault::util::read_file_with_limit;
@@ -35,6 +36,14 @@ pub struct RecoveryReplacementStatus {
     pub available_at: Option<u64>,
     pub ready: bool,
     pub time_confirmed: bool,
+}
+
+#[derive(Serialize, Debug, ts_rs::TS)]
+#[ts(export, optional_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryReplacementResult {
+    pub recovery_kit: String,
+    pub backups_remaining: Option<usize>,
 }
 
 fn request_path(app: &AppHandle) -> VaultResult<PathBuf> {
@@ -93,16 +102,23 @@ fn write_request(path: &Path, session: &UnlockedVault, requested_at: u64) -> Vau
     atomic_replace(path, &bytes)
 }
 
-fn complete_request(path: &Path, session: &mut UnlockedVault, now: u64) -> VaultResult<String> {
+fn complete_request(
+    path: &Path,
+    session: &mut UnlockedVault,
+    master_password: &str,
+    now: u64,
+    prune_backups: bool,
+) -> VaultResult<VaultKeyRotation> {
     let (stored, requested_at) =
         read_request(path, session)?.ok_or("There is no recovery kit request to complete.")?;
     if !session.setup_complete || !recovery_replacement_ready(requested_at, now) {
         return Err("The new recovery kit is not ready yet.".into());
     }
     remove_request(path)?;
-    replace_recovery_kit_for_session(session, requested_at, now).inspect_err(|_| {
-        let _ = atomic_replace(path, &stored);
-    })
+    replace_recovery_kit_for_session(session, master_password, requested_at, now, prune_backups)
+        .inspect_err(|_| {
+            let _ = atomic_replace(path, &stored);
+        })
 }
 
 fn pending_for_unlocked(app: &AppHandle, state: &VaultState) -> VaultResult<Option<u64>> {
@@ -177,16 +193,34 @@ pub async fn complete_recovery_replacement(
     app: AppHandle,
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
-) -> VaultResult<String> {
+    master_password: String,
+    prune_backups: bool,
+) -> VaultResult<RecoveryReplacementResult> {
+    let master_password = Zeroizing::new(master_password);
     require_release_presence(&state, &presence)?;
     pending_for_unlocked(&app, &state)?.ok_or("There is no recovery kit request to complete.")?;
     let now = trusted_time().await?.earliest;
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_mut().ok_or("Unlock your vault first.")?;
-    complete_request(&request_path(&app)?, session, now)
+    let rotation = {
+        let epoch = state.session_epoch();
+        let mut session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+        let session = session.as_mut().ok_or("Unlock your vault first.")?;
+        presence.grant_with_password(session, epoch, &master_password)?;
+        complete_request(
+            &request_path(&app)?,
+            session,
+            &master_password,
+            now,
+            prune_backups,
+        )?
+    };
+    retire_unlock_methods_after_key_rotation(&app, &state);
+    Ok(RecoveryReplacementResult {
+        recovery_kit: rotation.recovery_kit,
+        backups_remaining: rotation.backups_remaining,
+    })
 }
 
 pub(crate) fn discard_recovery_replacement(app: &AppHandle) {
@@ -203,6 +237,7 @@ mod tests {
     use crate::vault::types::VaultFile;
     use sesame_core::api::{create_vault, open_vault_with_recovery_kit};
 
+    const PASSWORD: &str = "fictional master password";
     const REQUESTED_AT: u64 = 1_800_000_000;
     const READY_AT: u64 = REQUESTED_AT + RECOVERY_REPLACEMENT_DELAY_SECS;
 
@@ -223,8 +258,7 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("sesame-recovery-request-{}", random_id()));
         std::fs::create_dir_all(directory.join("request")).expect("test directory");
-        let (opened, kit) =
-            create_vault("fictional master password", "Fictional vault").expect("created vault");
+        let (opened, kit) = create_vault(PASSWORD, "Fictional vault").expect("created vault");
         let mut session = UnlockedVault::from_opened(directory.join("vault.sesame"), &opened)
             .expect("unlocked vault");
         session.setup_complete = true;
@@ -248,18 +282,106 @@ mod tests {
     #[test]
     fn a_completed_request_cannot_be_completed_again() {
         let mut fixture = requested();
-        let kit = complete_request(&fixture.request, &mut fixture.session, READY_AT)
-            .expect("replaced kit");
+        let kit = complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT,
+            false,
+        )
+        .expect("replaced kit")
+        .recovery_kit;
         assert!(!fixture.request.exists());
-        assert!(complete_request(&fixture.request, &mut fixture.session, READY_AT + 60).is_err());
+        assert!(complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT + 60,
+            false
+        )
+        .is_err());
         assert!(kit_opens(&fixture, &kit));
         assert!(!kit_opens(&fixture, &fixture.kit));
     }
 
     #[test]
+    fn a_wrong_master_password_keeps_the_request_and_the_current_kit() {
+        let mut fixture = requested();
+        let before = std::fs::read(fixture.directory.join("vault.sesame")).expect("vault bytes");
+
+        let error = complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            "fictional wrong password",
+            READY_AT,
+            false,
+        )
+        .err()
+        .expect("refused");
+
+        assert!(error.contains("master password is not correct"), "{error}");
+        assert_eq!(
+            std::fs::read(fixture.directory.join("vault.sesame")).expect("vault bytes"),
+            before
+        );
+        assert!(kit_opens(&fixture, &fixture.kit));
+        assert_eq!(
+            pending_request(&fixture.request, &fixture.session),
+            Ok(Some(REQUESTED_AT))
+        );
+        assert!(complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT,
+            false
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_completed_request_prunes_local_backups_only_when_asked() {
+        let mut fixture = requested();
+        let backups = fixture.directory.join("backups");
+        std::fs::create_dir_all(&backups).expect("backup folder");
+        let old_copy = std::fs::read(fixture.directory.join("vault.sesame")).expect("vault bytes");
+        std::fs::write(backups.join("sesame-backup-fictional.sesame"), &old_copy).expect("backup");
+
+        let kept = complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT,
+            false,
+        )
+        .expect("replaced kit");
+        assert_eq!(kept.backups_remaining, None);
+        assert!(backups.join("sesame-backup-fictional.sesame").exists());
+
+        write_request(&fixture.request, &fixture.session, REQUESTED_AT).expect("second request");
+        let pruned = complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT,
+            true,
+        )
+        .expect("replaced kit again");
+        assert_eq!(pruned.backups_remaining, Some(0));
+        assert!(!backups.join("sesame-backup-fictional.sesame").exists());
+    }
+
+    #[test]
     fn an_early_completion_keeps_the_request() {
         let mut fixture = requested();
-        assert!(complete_request(&fixture.request, &mut fixture.session, READY_AT - 1).is_err());
+        assert!(complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT - 1,
+            false
+        )
+        .is_err());
         assert_eq!(
             pending_request(&fixture.request, &fixture.session),
             Ok(Some(REQUESTED_AT))
@@ -278,7 +400,13 @@ mod tests {
             .permissions();
         std::fs::set_permissions(&request_directory, std::fs::Permissions::from_mode(0o500))
             .expect("read-only directory");
-        let result = complete_request(&fixture.request, &mut fixture.session, READY_AT);
+        let result = complete_request(
+            &fixture.request,
+            &mut fixture.session,
+            PASSWORD,
+            READY_AT,
+            false,
+        );
         std::fs::set_permissions(&request_directory, readable).expect("restored directory");
         assert!(result.is_err());
         assert!(kit_opens(&fixture, &fixture.kit));

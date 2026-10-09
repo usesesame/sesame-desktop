@@ -432,6 +432,17 @@ pub(super) fn establish_pin_throttle_state(
     Ok(())
 }
 
+pub(crate) fn retire_unlock_methods_after_key_rotation(
+    app: &AppHandle,
+    state: &State<'_, VaultState>,
+) {
+    state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
+    discard_pin_throttle_state(app, state);
+    crate::commands::discard_recovery_replacement(app);
+    state.advance_session_epoch();
+}
+
 pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &State<'_, VaultState>) {
     if let Ok(mut guard) = state.pin_guard.lock() {
         guard.record_success();
@@ -488,11 +499,7 @@ pub fn change_master_password(
             },
             &new_password,
         )?;
-        state.cache_pin_unlock(false);
-        state.cache_hello_unlock(false);
-        discard_pin_throttle_state(&app, &state);
-        crate::commands::discard_recovery_replacement(&app);
-        state.advance_session_epoch();
+        retire_unlock_methods_after_key_rotation(&app, &state);
         Ok(ChangeMasterPasswordResult {
             recovery_kit: rotation.recovery_kit,
             backups_remaining: rotation.backups_remaining,
