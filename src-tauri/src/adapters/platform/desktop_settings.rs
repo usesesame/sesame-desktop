@@ -79,8 +79,29 @@ pub fn get_screen_capture_allowed(app: AppHandle) -> VaultResult<bool> {
 
 #[tauri::command]
 pub fn set_screen_capture_allowed(app: AppHandle, allowed: bool) -> VaultResult<()> {
-    set_screen_capture_allowed_at(&settings_path(&app)?, allowed)?;
-    crate::desktop_shell::apply_capture_policy(&app);
+    let path = settings_path(&app)?;
+    change_screen_capture(
+        screen_capture_allowed_at(&path),
+        allowed,
+        |value| crate::desktop_shell::apply_capture_policy(&app, value),
+        || set_screen_capture_allowed_at(&path, allowed),
+    )
+}
+
+fn change_screen_capture(
+    previous: bool,
+    requested: bool,
+    apply: impl Fn(bool) -> VaultResult<()>,
+    persist: impl FnOnce() -> VaultResult<()>,
+) -> VaultResult<()> {
+    if let Err(error) = apply(requested) {
+        let _ = apply(previous);
+        return Err(error);
+    }
+    if let Err(error) = persist() {
+        let _ = apply(previous);
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -291,5 +312,67 @@ mod tests {
         assert!(set_website_icons_enabled_at(&path, true, &state, &presence).is_ok());
         assert!(website_icons_enabled_at(&path));
         let _ = fs::remove_dir_all(path.parent().expect("settings parent"));
+    }
+
+    #[test]
+    fn a_refused_window_change_keeps_the_stored_choice_and_restores_the_windows() {
+        let applied = std::cell::RefCell::new(Vec::new());
+        let persisted = std::cell::Cell::new(false);
+        let result = change_screen_capture(
+            false,
+            true,
+            |value| {
+                applied.borrow_mut().push(value);
+                if value {
+                    Err("refused".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+            || {
+                persisted.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Err("refused".to_string()));
+        assert_eq!(*applied.borrow(), vec![true, false]);
+        assert!(!persisted.get());
+    }
+
+    #[test]
+    fn a_failed_save_puts_the_windows_back_to_the_previous_choice() {
+        let applied = std::cell::RefCell::new(Vec::new());
+        let result = change_screen_capture(
+            false,
+            true,
+            |value| {
+                applied.borrow_mut().push(value);
+                Ok(())
+            },
+            || Err("could not save".to_string()),
+        );
+        assert_eq!(result, Err("could not save".to_string()));
+        assert_eq!(*applied.borrow(), vec![true, false]);
+    }
+
+    #[test]
+    fn an_accepted_change_is_applied_once_and_saved() {
+        let applied = std::cell::RefCell::new(Vec::new());
+        let persisted = std::cell::Cell::new(false);
+        let result = change_screen_capture(
+            true,
+            false,
+            |value| {
+                applied.borrow_mut().push(value);
+                Ok(())
+            },
+            || {
+                persisted.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(*applied.borrow(), vec![false]);
+        assert!(persisted.get());
     }
 }

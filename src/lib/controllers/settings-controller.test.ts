@@ -319,6 +319,23 @@ describe('screen capture setting', () => {
     stop()
   })
 
+  it('keeps a toggle made while the first read is still pending', async () => {
+    const { controller } = harness()
+    let finishRead: (value: boolean) => void = () => {}
+    vaultApi.getScreenCaptureAllowed.mockReturnValue(new Promise<boolean>((resolve) => { finishRead = resolve }))
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+    await controller.toggleScreenCapture()
+    finishRead(false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(controller.state.value().screenCaptureAllowed).toBe(true)
+    stop()
+  })
+
   it('allows capture only after the desktop app accepts the change', async () => {
     const { controller, feedback } = harness()
     vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)

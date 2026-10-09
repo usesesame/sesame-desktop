@@ -179,8 +179,14 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     try { state.patch({ autostartEnabled: await getAutostartEnabled() }) } catch { /* leave the last known state on screen */ }
   }
 
+  let screenCaptureToggles = 0
+
   async function refreshScreenCaptureSetting() {
-    try { state.patch({ screenCaptureAllowed: await getScreenCaptureAllowed() }) } catch { /* the window keeps hiding from capture */ }
+    const startedAfterToggles = screenCaptureToggles
+    try {
+      const stored = await getScreenCaptureAllowed()
+      if (screenCaptureToggles === startedAfterToggles) state.patch({ screenCaptureAllowed: stored })
+    } catch { /* the window keeps hiding from capture */ }
   }
 
   async function refreshServiceConnection() {
@@ -492,6 +498,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     async toggleScreenCapture() {
       if (state.value().screenCaptureWorking) return
       const next = !state.value().screenCaptureAllowed
+      screenCaptureToggles += 1
       state.patch({ screenCaptureWorking: true })
       feedback.clearError()
       try {
