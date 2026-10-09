@@ -375,10 +375,10 @@
           "markdownDescription": "Compile-time-gated desktop test bridge for the main window."
         },
         {
-          "description": "Tray, quick-access shortcut, autostart, and website icon settings for the main window.",
+          "description": "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window.",
           "type": "string",
           "const": "desktop-settings",
-          "markdownDescription": "Tray, quick-access shortcut, autostart, and website icon settings for the main window."
+          "markdownDescription": "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window."
         },
         {
           "description": "Deliberate public update checks and installation for the main window.",

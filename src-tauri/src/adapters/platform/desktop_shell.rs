@@ -13,6 +13,10 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use crate::adapters::platform::webview_policy::{
+    display_affinity, DisplayAffinity, WEBVIEW2_BROWSER_ARGUMENTS,
+};
+use crate::desktop_settings;
 use crate::vault::VaultState;
 
 /// Boot-time launches stay in the tray instead of popping the window open.
@@ -85,10 +89,10 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_min_size(Some(LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
-        harden_release_webview(&window);
+        secure_window(&window);
     }
     if let Some(window) = app.get_webview_window("quick-access") {
-        harden_release_webview(&window);
+        secure_window(&window);
     }
 
     // Hidden by default so startup-entry launches stay in the tray; other launches show once.
@@ -272,11 +276,63 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .resizable(true)
         .decorations(false)
         .visible(false)
+        .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
-    harden_release_webview(&window);
+    secure_window(&window);
     Some(window)
+}
+
+fn secure_window(window: &WebviewWindow) {
+    harden_release_webview(window);
+    let capture_allowed = desktop_settings::settings_path(window.app_handle())
+        .is_ok_and(|path| desktop_settings::screen_capture_allowed_at(&path));
+    let _ = set_display_affinity(window, display_affinity(capture_allowed));
+}
+
+pub(crate) fn apply_capture_policy(app: &AppHandle, capture_allowed: bool) -> Result<(), String> {
+    let failed: Vec<&str> = ["main", "quick-access"]
+        .into_iter()
+        .filter(|label| {
+            app.get_webview_window(label).is_some_and(|window| {
+                set_display_affinity(&window, display_affinity(capture_allowed)).is_err()
+            })
+        })
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Windows did not change the screen capture setting for the {} window.",
+            failed.join(" and ")
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn set_display_affinity(window: &WebviewWindow, affinity: DisplayAffinity) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("The window handle is unavailable: {error}"))?;
+    let value = match affinity {
+        DisplayAffinity::ExcludeFromCapture => WDA_EXCLUDEFROMCAPTURE,
+        DisplayAffinity::Unrestricted => WDA_NONE,
+    };
+    let changed = unsafe { SetWindowDisplayAffinity(hwnd.0 as _, value) };
+    if changed == 0 {
+        return Err("SetWindowDisplayAffinity failed.".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn set_display_affinity(_window: &WebviewWindow, _affinity: DisplayAffinity) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(all(windows, not(debug_assertions)))]

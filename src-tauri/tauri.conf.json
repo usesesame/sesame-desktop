@@ -20,7 +20,8 @@
         "minHeight": 600,
         "resizable": true,
         "decorations": false,
-        "visible": false
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless"
       },
       {
         "label": "quick-access",
@@ -36,7 +37,8 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "center": true,
-        "shadow": true
+        "shadow": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless"
       }
     ],
     "security": {

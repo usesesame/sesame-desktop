@@ -1361,6 +1361,16 @@ export async function setWebsiteIconsEnabled(enabled: boolean): Promise<void> {
   await invoke('set_website_icons_enabled', { enabled })
 }
 
+export async function getScreenCaptureAllowed(): Promise<boolean> {
+  if (previewMode) return false
+  return invoke<boolean>('get_screen_capture_allowed')
+}
+
+export async function setScreenCaptureAllowed(allowed: boolean): Promise<void> {
+  if (previewMode) return
+  await invoke('set_screen_capture_allowed', { allowed })
+}
+
 export async function clearWebsiteIconCache(): Promise<void> {
   if (previewMode) return
   await invoke('clear_website_icon_cache')

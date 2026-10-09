@@ -177,7 +177,7 @@ commands.allow = [
 
 [[permission]]
 identifier = "desktop-settings"
-description = "Tray, quick-access shortcut, autostart, and website icon settings for the main window."
+description = "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window."
 commands.allow = [
   "set_tray_enabled",
   "set_quick_access_shortcut",
@@ -186,6 +186,8 @@ commands.allow = [
   "get_platform_capabilities",
   "get_website_icons_enabled",
   "set_website_icons_enabled",
+  "get_screen_capture_allowed",
+  "set_screen_capture_allowed",
 ]
 
 [[permission]]

@@ -746,6 +746,9 @@
         autostartEnabled={$settingsState.autostartEnabled}
         autostartWorking={$settingsState.autostartWorking}
         onToggleAutostart={settingsController.toggleAutostart}
+        screenCaptureAllowed={$settingsState.screenCaptureAllowed}
+        screenCaptureWorking={$settingsState.screenCaptureWorking}
+        onToggleScreenCapture={settingsController.toggleScreenCapture}
         quickAccessShortcut={$settings.quickAccessShortcut}
         quickAccessShortcutWorking={$settingsState.quickAccessShortcutWorking}
         onUpdateQuickAccessShortcut={settingsController.updateQuickAccessShortcut}
