@@ -56,9 +56,11 @@
     "externalBin": ["binaries/sesame-browser-host"],
     "linux": {
       "deb": {
+        "depends": ["bubblewrap", "xdg-dbus-proxy"],
         "preRemoveScript": "linux/pre-remove.sh"
       },
       "rpm": {
+        "depends": ["bubblewrap", "xdg-dbus-proxy"],
         "preRemoveScript": "linux/pre-remove.sh"
       }
     },

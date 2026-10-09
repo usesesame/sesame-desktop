@@ -70,3 +70,14 @@ regexes = [
   '''pattern\.password = "northwind-2026"''',
   '''password=hunter2fictional''',
 ]
+
+[[allowlists]]
+description = "Fictional TOTP seeds in the import accounting fixtures"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''src-tauri/sesame-core/tests/fixtures/imports/(aegis-vault-1-db-3-mixed|2fas-schema-4-mixed)\.json$''',
+  '''src-tauri/sesame-core/tests/import_accounting\.rs$''',
+]
+regexes = ['''"secret": "(KRSXG5CTMVRXEZLU|MFRGGZDFMZTWQ2LK|GEZDGNBVGY3TQOJQ|NBSWY3DPFQQHO33S|MZXW6YTBOI4TQOJQ)"''']

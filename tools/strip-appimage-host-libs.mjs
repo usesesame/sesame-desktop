@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -13,6 +13,44 @@ export const hostProvidedLibraryPatterns = [
 
 export function planStrippedLibraries(fileNames) {
   return fileNames.filter((name) => hostProvidedLibraryPatterns.some((pattern) => pattern.test(name)))
+}
+
+export const webkitHelperAlias = '_s'
+
+export const sandboxPathReplacements = [
+  ['././/lib/x86_64-linux-gnu/webkit2gtk-4.1', `./${webkitHelperAlias}/lib/x86_64-linux-gnu/webkit2gtk-4.1`],
+  ['././/', '/usr/'],
+]
+
+export function patchSandboxPaths(contents, replacements = sandboxPathReplacements) {
+  const buffer = Buffer.from(contents)
+  let replaced = 0
+  for (const [from, to] of replacements) {
+    const source = Buffer.from(from)
+    const target = Buffer.from(to)
+    if (source.length !== target.length) {
+      throw new Error(`The replacement for ${from} changes the byte length.`)
+    }
+    let index = buffer.indexOf(source)
+    while (index !== -1) {
+      target.copy(buffer, index)
+      replaced += 1
+      index = buffer.indexOf(source, index + source.length)
+    }
+  }
+  return { contents: buffer, replaced }
+}
+
+export async function addHelperAlias(tree) {
+  const alias = path.join(tree, 'usr', webkitHelperAlias)
+  if (await lstat(alias).catch(() => null)) return false
+  await symlink('.', alias)
+  return true
+}
+
+export function appRunHookWithLibraryPath(hook) {
+  if (hook.includes('LD_LIBRARY_PATH="$APPDIR/usr')) return null
+  return `${hook.replace(/\n$/, '')}\nexport LD_LIBRARY_PATH="$APPDIR/usr\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n`
 }
 
 function parseSquashfsSuperblock(summary) {
@@ -47,8 +85,29 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const libDirectory = path.join(tree, 'usr', 'lib')
     const libNames = await readdir(libDirectory)
     const planned = planStrippedLibraries(libNames)
-    if (planned.length === 0) {
-      return { appImage, stripped: [], unchanged: true }
+    let patched = 0
+    for (const entry of await readdir(libDirectory, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.startsWith('libwebkit2gtk-4.1.so.0')) continue
+      const file = path.join(entry.parentPath, entry.name)
+      const result = patchSandboxPaths(await readFile(file))
+      if (result.replaced === 0) continue
+      await writeFile(file, result.contents)
+      patched += result.replaced
+    }
+    if (patched > 0) await addHelperAlias(tree)
+    const hookPath = path.join(tree, 'apprun-hooks', 'linuxdeploy-plugin-gtk.sh')
+    let hookPatched = false
+    try {
+      const patchedHook = appRunHookWithLibraryPath(await readFile(hookPath, 'utf8'))
+      if (patchedHook) {
+        await writeFile(hookPath, patchedHook)
+        hookPatched = true
+      }
+    } catch {
+      hookPatched = false
+    }
+    if (planned.length === 0 && patched === 0 && !hookPatched) {
+      return { appImage, stripped: [], patched: 0, hookPatched: false, unchanged: true }
     }
     for (const name of planned) {
       await rm(path.join(libDirectory, name), { force: true })
@@ -81,7 +140,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     await chmod(replacement, 0o755)
     await rename(replacement, appImage)
     const size = await stat(appImage)
-    return { appImage, stripped: planned, unchanged: false, bytes: size.size }
+    return { appImage, stripped: planned, patched, hookPatched, unchanged: false, bytes: size.size }
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
@@ -95,10 +154,14 @@ async function main() {
   for (const input of inputs) {
     const result = await stripAppImageHostLibraries(input)
     if (result.unchanged) {
-      console.log(`${result.appImage}: no host-provided Wayland libraries are bundled; left unchanged.`)
+      console.log(`${result.appImage}: no host-provided Wayland libraries or sandbox paths needed changes; left unchanged.`)
       continue
     }
-    console.log(`${result.appImage}: removed bundled ${result.stripped.join(', ')} (${result.bytes} bytes).`)
+    const changes = []
+    if (result.stripped.length > 0) changes.push(`removed bundled ${result.stripped.join(', ')}`)
+    if (result.patched > 0) changes.push(`patched ${result.patched} sandbox path${result.patched === 1 ? '' : 's'}`)
+    if (result.hookPatched) changes.push('patched the AppRun library path')
+    console.log(`${result.appImage}: ${changes.join(' and ')} (${result.bytes} bytes).`)
   }
 }
 

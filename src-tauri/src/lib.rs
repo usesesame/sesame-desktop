@@ -131,6 +131,7 @@ macro_rules! sesame_invoke_handler {
             commands::lock_vault,
             commands::get_recovery_health,
             commands::grant_presence,
+            commands::check_release_presence,
             commands::reveal_login_secret,
             commands::link_desktop_service,
             commands::get_service_connection_status,
@@ -145,6 +146,7 @@ macro_rules! sesame_invoke_handler {
             adapters::platform::external_url::open_external_url,
             commands::get_browser_integration_status,
             commands::repair_browser_integration,
+            commands::get_browser_approval_wait,
             commands::get_pending_browser_fill,
             commands::resolve_browser_fill,
             commands::get_pending_browser_save,
@@ -274,6 +276,14 @@ pub fn run() {
         std::process::exit(1);
     }
     prepare_release_webview_environment();
+    #[cfg(target_os = "linux")]
+    let sandbox = adapters::platform::webview_sandbox::prepare();
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    if let Err(unavailable) = sandbox {
+        adapters::platform::webview_sandbox::refuse(context, unavailable);
+        return;
+    }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
@@ -347,7 +357,7 @@ pub fn run() {
     let builder = builder.invoke_handler(sesame_handler!());
 
     builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building Sesame desktop application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
