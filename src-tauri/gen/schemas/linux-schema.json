@@ -345,10 +345,10 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Optional desktop account linking and disconnection for the main window.",
+          "description": "Optional desktop account and own-server linking and disconnection for the main window.",
           "type": "string",
           "const": "account-service",
-          "markdownDescription": "Optional desktop account linking and disconnection for the main window."
+          "markdownDescription": "Optional desktop account and own-server linking and disconnection for the main window."
         },
         {
           "description": "Import, backup, export, restore, verification, and local-vault deletion for the main window.",

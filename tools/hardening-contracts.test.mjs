@@ -195,7 +195,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs')
   assert.match(quickCommands, /window\.label\(\) == QUICK_ACCESS_WINDOW/)
   assert.match(quickCommands, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
-  assert.doesNotMatch(quickCommands.split('#[cfg(test)]')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
+  assert.doesNotMatch(quickCommands.split('#[cfg(test)]\nmod tests')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
 })
 
 function assertNoUpdaterPermissions(projectRoot) {
@@ -767,9 +767,13 @@ test('the C ABI exports only the intended sesame_core symbols', () => {
 
 test('the recovery kit wait reads server time, never the local clock', () => {
   const source = readFileSync(join(root, 'src-tauri', 'src', 'commands', 'recovery_replacement.rs'), 'utf8')
-  assert.match(source, /trusted_time\(\)\.await\?\.latest/, 'a recovery kit request must record the later server time')
-  assert.match(source, /trusted_time\(\)\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
+  assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.latest/, 'a recovery kit request must record the later server time')
+  assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
   assert.doesNotMatch(source, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+  const time = readFileSync(join(root, 'src-tauri', 'src', 'adapters', 'network', 'trusted_time.rs'), 'utf8').split('#[cfg(test)]\nmod tests')[0]
+  assert.doesNotMatch(time, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the time sources read the local clock')
+  assert.match(time, /COMPANY_SOURCES: \[&str; 2\]/, 'the wait no longer starts from the two company sources')
+  assert.match(time, /Reading::At\(first\),\s*Reading::At\(second\)\)\s*=>\s*within_tolerance\(first, second\)/, 'two answering company sources no longer have to agree with each other')
 })
 
 const FEATURE_GATED_PERMISSIONS = ['sync-preview', 'desktop-e2e']
@@ -973,7 +977,7 @@ test('the shipping style policy has no inline allowance', () => {
 })
 
 test('every webview navigation goes through the app origin guard', () => {
-  const guard = read('src-tauri', 'src', 'adapters', 'platform', 'navigation_guard.rs').split('#[cfg(test)]')[0]
+  const guard = read('src-tauri', 'src', 'adapters', 'platform', 'navigation_guard.rs').split('#[cfg(test)]\nmod tests')[0]
   const lib = read('src-tauri', 'src', 'lib.rs')
   const platform = read('src-tauri', 'src', 'adapters', 'platform', 'mod.rs')
   assert.match(platform, /pub\(crate\) mod navigation_guard;/)

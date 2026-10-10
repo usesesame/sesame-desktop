@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ServiceConnectionStatus } from '../types'
 import { createAppStores } from '../stores/app-stores'
 import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
@@ -27,6 +28,8 @@ const vaultApi = vi.hoisted(() => ({
   getWebsiteIconCacheStatus: vi.fn(),
   getWebsiteIconsEnabled: vi.fn(),
   grantPresence: vi.fn(),
+  inspectCustomServer: vi.fn(),
+  linkCustomServer: vi.fn(),
   linkDesktopService: vi.fn(),
   onDesktopUpdateProgress: vi.fn(),
   recordDiagnostic: vi.fn(),
@@ -291,5 +294,120 @@ describe('recovery kit replacement', () => {
 
     expect(vaultApi.grantPresence).not.toHaveBeenCalled()
     expect(controller.state.value().recoveryReplacement?.requestedAt).toBeUndefined()
+  })
+})
+
+describe('own server pairing', () => {
+  const INSPECTION = { address: 'https://sesame.example.test', name: 'Home server', version: '1.0.0', fingerprint: 'a'.repeat(64), fingerprintInLink: true, codeInLink: true, plainHttp: false }
+  const CONNECTED = { state: 'connected', connected: true, online: true, deviceName: 'Linux desktop', syncAvailable: false, browserHelperAvailable: false, serverAddress: 'https://sesame.example.test', serverFingerprint: 'a'.repeat(64) }
+
+  it('returns the inspection without changing the stored connection', async () => {
+    const { controller } = harness()
+    vaultApi.inspectCustomServer.mockResolvedValue(INSPECTION)
+
+    const inspection = await controller.inspectServer('https://sesame.example.test/pair#code=x')
+
+    expect(inspection).toEqual(INSPECTION)
+    expect(vaultApi.inspectCustomServer).toHaveBeenCalledWith('https://sesame.example.test/pair#code=x')
+    expect(vaultApi.linkCustomServer).not.toHaveBeenCalled()
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('reports a refused server and returns nothing to confirm', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.inspectCustomServer.mockRejectedValue(new Error('The server\'s fingerprint does not match the pairing link. Do not pair with this server.'))
+
+    expect(await controller.inspectServer('https://sesame.example.test')).toBeNull()
+
+    expect(feedback.state.value().errorMessage).toContain('does not match the pairing link')
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('sends the confirmed fingerprint with the pairing and stores the result', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.linkCustomServer.mockResolvedValue(CONNECTED)
+
+    const paired = await controller.connectServer('https://sesame.example.test/pair#code=x', '', INSPECTION.fingerprint)
+
+    expect(paired).toBe(true)
+    expect(vaultApi.linkCustomServer).toHaveBeenCalledWith('https://sesame.example.test/pair#code=x', '', INSPECTION.fingerprint)
+    expect(controller.state.value().serviceConnection).toEqual(CONNECTED)
+    expect(feedback.state.value().notice?.title).toBe('Server connected')
+  })
+
+  it('keeps the disconnected state when the pairing is refused', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.linkCustomServer.mockRejectedValue(new Error('That desktop code is invalid, expired, or has already been used.'))
+
+    expect(await controller.connectServer('https://sesame.example.test', 'x', INSPECTION.fingerprint)).toBe(false)
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().errorMessage).toBe('That desktop code is invalid, expired, or has already been used.')
+    expect(feedback.state.value().notice).toBeNull()
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('clears an earlier error before it checks again', async () => {
+    const { controller, feedback } = harness()
+    feedback.setErrorMessage('An old error')
+    vaultApi.inspectCustomServer.mockResolvedValue(INSPECTION)
+
+    await controller.inspectServer('https://sesame.example.test')
+
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+})
+
+describe('disconnecting', () => {
+  const CONNECTED: ServiceConnectionStatus = { state: 'connected', connected: true, online: true, deviceName: 'Linux desktop', syncAvailable: false, browserHelperAvailable: false }
+  const OWN: ServiceConnectionStatus = { ...CONNECTED, serverAddress: 'https://sesame.example.test', serverFingerprint: 'a'.repeat(64) }
+
+  it('says the device is gone from the server when the revocation was sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: true })
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().notice?.title).toBe('Desktop disconnected')
+    expect(feedback.state.value().notice?.message).not.toMatch(/still be linked/)
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+
+  it('warns that an own server may still list the device when the revocation was not sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: false })
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().errorMessage).toMatch(/may still be linked on the server/)
+    expect(feedback.state.value().errorMessage).toMatch(/server console/)
+  })
+
+  it('points an account link at the account when the revocation was not sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: CONNECTED })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: false })
+
+    await controller.unlinkService()
+
+    expect(feedback.state.value().errorMessage).toMatch(/may still be linked on the server/)
+    expect(feedback.state.value().errorMessage).toMatch(/account/)
+    expect(feedback.state.value().errorMessage).not.toMatch(/server console/)
+  })
+
+  it('keeps the connection on screen when the local removal fails', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockRejectedValue(new Error('Sesame could not remove the desktop account connection.'))
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(OWN)
+    expect(feedback.state.value().errorMessage).toBe('Sesame could not remove the desktop account connection.')
   })
 })

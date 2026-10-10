@@ -20,7 +20,7 @@ import {
   storeTheme,
 } from '../preferences'
 import type { AppStores } from '../stores/app-stores'
-import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
+import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServerInspection, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
 import {
   cancelRecoveryReplacement,
   changeMasterPassword,
@@ -43,6 +43,8 @@ import {
   getWebsiteIconsEnabled,
   grantPresence,
   PRESENCE_REQUIRED,
+	inspectCustomServer,
+	linkCustomServer,
 	linkDesktopService,
 	onDesktopUpdateProgress,
   previewMode,
@@ -659,13 +661,44 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
         state.patch({ serviceWorking: false })
       }
     },
+    async inspectServer(input: string): Promise<ServerInspection | null> {
+      state.patch({ serviceWorking: true })
+      feedback.clearError()
+      try {
+        return await inspectCustomServer(input)
+      } catch (error) {
+        feedback.setError(error)
+        return null
+      } finally {
+        state.patch({ serviceWorking: false })
+      }
+    },
+    async connectServer(input: string, code: string, fingerprint: string): Promise<boolean> {
+      state.patch({ serviceWorking: true })
+      feedback.clearError()
+      try {
+        state.patch({ serviceConnection: await linkCustomServer(input, code, fingerprint) })
+        feedback.showNotice('Server connected', 'This desktop is paired with your server. Sync is still unavailable.')
+        return true
+      } catch (error) {
+        feedback.setError(error)
+        return false
+      } finally {
+        state.patch({ serviceWorking: false })
+      }
+    },
     async unlinkService() {
       state.patch({ serviceWorking: true })
       feedback.clearError()
       try {
-        await disconnectService()
+        const ownServer = Boolean(state.value().serviceConnection.serverAddress)
+        const outcome = await disconnectService()
         state.patch({ serviceConnection: emptyService })
-        feedback.showNotice('Desktop disconnected', 'The account connection was removed from this device. Your vault is unchanged.')
+        if (outcome?.revokedOnServer === false) {
+          feedback.setErrorMessage(`This desktop was disconnected, but Sesame could not tell the server, so the device may still be linked on the server. ${ownServer ? 'Revoke it in the server console.' : 'Revoke it in your Sesame account.'}`)
+        } else {
+          feedback.showNotice('Desktop disconnected', 'The account connection was removed from this device. Your vault is unchanged.')
+        }
       } catch (error) {
         feedback.setError(error)
       } finally {
