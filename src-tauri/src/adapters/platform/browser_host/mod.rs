@@ -886,6 +886,44 @@ mod boundary_tests {
         }
     }
 
+    fn v5_capabilities_request() -> BrowserRequest {
+        BrowserRequest {
+            version: crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION,
+            message_type: "capabilities".to_string(),
+            request_id: "capabilities-5-1".to_string(),
+            origin: None,
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn a_version_five_capabilities_probe_is_refused_by_the_host_relay() {
+        let request = v5_capabilities_request();
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+        let mut output = Vec::new();
+        let response_count =
+            serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                .expect("the host answers an unsupported version");
+
+        assert_eq!(response_count, 1);
+        let response = decode_frame(&output);
+        assert_eq!(
+            response.version,
+            crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION
+        );
+        assert_eq!(response.message_type, "error");
+        assert_eq!(response.request_id, request.request_id);
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Unsupported protocol version.")
+        );
+        assert!(response.validate_for(&request));
+    }
+
     #[test]
     fn a_totp_request_on_an_older_protocol_is_refused() {
         for version in [
