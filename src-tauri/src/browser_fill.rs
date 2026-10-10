@@ -303,7 +303,18 @@ pub fn start(app: AppHandle) -> io::Result<()> {
             diagnostics::record_browser_host_registration(&app, "pipe_server_started");
             let server_app = app.clone();
             if crate::browser_pipe::serve_forever(&expected_client, move |payload, peer| {
-                handle_pipe_payload(&server_app, payload, peer)
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle_pipe_payload(&server_app, payload, peer)
+                })) {
+                    Ok(response) => response,
+                    Err(_) => {
+                        diagnostics::record_browser_host_registration(
+                            &server_app,
+                            "pipe_handler_panicked",
+                        );
+                        zeroize::Zeroizing::new(Vec::new())
+                    }
+                }
             })
             .is_err()
             {
