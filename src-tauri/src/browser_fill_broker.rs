@@ -141,6 +141,7 @@ struct FillInner {
     pending: Option<PendingApproval>,
     recent_request_ids: VecDeque<String>,
     last_activation: Option<Instant>,
+    focus: FocusDelay,
 }
 
 #[derive(Default)]
@@ -149,6 +150,40 @@ pub struct BrowserFillState {
 }
 
 impl BrowserFillState {
+    #[cfg(test)]
+    fn with_clock(clock: Arc<dyn Clock>) -> Self {
+        Self {
+            inner: Mutex::new(FillInner {
+                focus: FocusDelay::new(clock),
+                ..FillInner::default()
+            }),
+        }
+    }
+
+    pub fn window_focus_changed(&self, focused: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.focus.window_focus_changed(focused);
+        }
+    }
+
+    pub fn approval_wait(&self) -> Duration {
+        self.inner
+            .lock()
+            .map_or(APPROVAL_FOCUS_DELAY, |inner| inner.focus.remaining())
+    }
+
+    fn require_ready(&self, approval_id: &str) -> Result<(), &'static str> {
+        let inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
+        let bound = inner
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.approval_id == approval_id);
+        if bound && !inner.focus.is_ready() {
+            return Err(APPROVAL_TOO_SOON);
+        }
+        Ok(())
+    }
+
     fn cancel_pending(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(pending) = inner.pending.take() {
@@ -199,6 +234,7 @@ impl BrowserFillState {
             return Err("approvalUnavailable");
         }
         let approval_id = random_id();
+        inner.focus.approval_shown();
         let (sender, receiver) = mpsc::sync_channel(1);
         let deadline = Instant::now() + APPROVAL_TIMEOUT;
         inner.pending = Some(PendingApproval {
@@ -303,6 +339,9 @@ impl BrowserFillState {
             return Err("approvalExpired");
         }
         if let ApprovalDecision::Selected(id) = &decision {
+            if !inner.focus.is_ready() {
+                return Err(APPROVAL_TOO_SOON);
+            }
             if !pending.request.offers(id) {
                 pending
                     .sender

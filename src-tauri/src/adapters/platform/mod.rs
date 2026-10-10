@@ -18,3 +18,5 @@ pub(crate) mod session_guard;
     all(target_os = "linux", not(debug_assertions), not(feature = "wdio"))
 ))]
 pub(crate) mod webview_environment;
+#[cfg(target_os = "linux")]
+pub(crate) mod webview_sandbox;
