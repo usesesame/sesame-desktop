@@ -22,7 +22,9 @@
     ? `Connected as ${connection.deviceName || 'this desktop'}.`
     : connection.state === 'suspended'
       ? 'This account is suspended. The local vault still works, and the link will resume when access is restored.'
-      : connection.state === 'revoked'
+      : connection.state === 'expired'
+        ? 'This desktop link expired. Use a new one-time code to reconnect.'
+        : connection.state === 'revoked'
         ? 'This desktop link was revoked. Use a new one-time code to reconnect.'
         : connection.state === 'rateLimited'
           ? 'Status checks are temporarily limited. Wait a moment, then try again.'

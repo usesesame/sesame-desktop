@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::adapters::network::trusted_time::trusted_time;
+use crate::adapters::network::trusted_time::{linked_time_source, trusted_time, LinkedTimeSource};
 use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
@@ -114,11 +114,21 @@ fn pending_for_unlocked(app: &AppHandle, state: &VaultState) -> VaultResult<Opti
     pending_request(&request_path(app)?, session)
 }
 
-async fn status_for(requested_at: Option<u64>) -> RecoveryReplacementStatus {
+fn linked_source(app: &AppHandle) -> Option<LinkedTimeSource> {
+    use zeroize::Zeroize;
+
+    let connection = crate::vault::service::read_service_connection(app).ok()?;
+    let source = linked_time_source(&connection)?;
+    let mut token = crate::vault::service::read_service_token(&connection).ok()?;
+    token.zeroize();
+    Some(source)
+}
+
+async fn status_for(app: &AppHandle, requested_at: Option<u64>) -> RecoveryReplacementStatus {
     let Some(requested_at) = requested_at else {
         return RecoveryReplacementStatus::default();
     };
-    let confirmed = trusted_time().await.ok();
+    let confirmed = trusted_time(linked_source(app)).await.ok();
     RecoveryReplacementStatus {
         requested_at: Some(requested_at),
         available_at: Some(requested_at.saturating_add(RECOVERY_REPLACEMENT_DELAY_SECS)),
@@ -134,7 +144,7 @@ pub async fn get_recovery_replacement_status(
     state: State<'_, VaultState>,
 ) -> VaultResult<RecoveryReplacementStatus> {
     let pending = pending_for_unlocked(&app, &state)?;
-    Ok(status_for(pending).await)
+    Ok(status_for(&app, pending).await)
 }
 
 #[tauri::command]
@@ -145,9 +155,9 @@ pub async fn request_recovery_replacement(
 ) -> VaultResult<RecoveryReplacementStatus> {
     require_release_presence(&state, &presence)?;
     if let Some(requested_at) = pending_for_unlocked(&app, &state)? {
-        return Ok(status_for(Some(requested_at)).await);
+        return Ok(status_for(&app, Some(requested_at)).await);
     }
-    let requested_at = trusted_time().await?.latest;
+    let requested_at = trusted_time(linked_source(&app)).await?.latest;
     {
         let session = state
             .session
@@ -156,7 +166,7 @@ pub async fn request_recovery_replacement(
         let session = session.as_ref().ok_or("Unlock your vault first.")?;
         write_request(&request_path(&app)?, session, requested_at)?;
     }
-    Ok(status_for(Some(requested_at)).await)
+    Ok(status_for(&app, Some(requested_at)).await)
 }
 
 #[tauri::command]
@@ -180,7 +190,7 @@ pub async fn complete_recovery_replacement(
 ) -> VaultResult<String> {
     require_release_presence(&state, &presence)?;
     pending_for_unlocked(&app, &state)?.ok_or("There is no recovery kit request to complete.")?;
-    let now = trusted_time().await?.earliest;
+    let now = trusted_time(linked_source(&app)).await?.earliest;
     let mut session = state
         .session
         .lock()

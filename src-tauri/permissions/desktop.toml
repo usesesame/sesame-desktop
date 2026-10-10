@@ -125,9 +125,11 @@ commands.allow = [
 
 [[permission]]
 identifier = "account-service"
-description = "Optional desktop account linking and disconnection for the main window."
+description = "Optional desktop account and own-server linking and disconnection for the main window."
 commands.allow = [
   "link_desktop_service",
+  "inspect_custom_server",
+  "link_custom_server",
   "get_service_connection_status",
   "disconnect_service",
 ]

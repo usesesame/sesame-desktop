@@ -138,7 +138,8 @@ export function createSyncPreviewController() {
       void loadConflictDetails()
       return
     }
-    store.patch({ working: false, error: message })
+    const entitlementPrefix = 'sync_not_entitled:'
+    store.patch({ working: false, error: message.startsWith(entitlementPrefix) ? message.slice(entitlementPrefix.length) : message })
   }
 
   async function loadConflictDetails() {

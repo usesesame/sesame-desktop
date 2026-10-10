@@ -134,6 +134,8 @@ macro_rules! sesame_invoke_handler {
             commands::check_release_presence,
             commands::reveal_login_secret,
             commands::link_desktop_service,
+            commands::inspect_custom_server,
+            commands::link_custom_server,
             commands::get_service_connection_status,
             commands::disconnect_service,
             commands::check_desktop_update,

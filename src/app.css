@@ -1065,6 +1065,17 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-service-connect input:focus-visible { box-shadow: var(--field-ring); outline: none; }
 .settings-service-actions .text-button { white-space: nowrap; }
 .settings-service-actions .secondary-button { gap: 6px; white-space: nowrap; }
+.settings-view article.settings-server-row { align-items: flex-start; }
+.server-form, .server-confirm { display: grid; gap: var(--space-2); }
+.server-form label { margin-top: var(--space-2); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-medium); }
+.server-form input { width: 100%; min-width: 0; min-height: 34px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); padding: 0 var(--space-3); color: var(--text); background: var(--field-bg); font-family: var(--font-code); font-size: var(--type-2); outline: none; }
+.server-form input:focus-visible { box-shadow: var(--field-ring); outline: none; }
+.server-form .settings-service-actions, .server-confirm .settings-service-actions { margin-top: var(--space-2); }
+.server-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-4); margin: var(--space-2) 0 0; font-size: var(--type-2); }
+.server-facts dt { color: var(--text-muted); }
+.server-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.server-address, .server-fingerprint { font-family: var(--font-code); overflow-wrap: anywhere; }
+.setting-copy p.server-problem { color: var(--warn-text); }
 .status-pill.offline { color: var(--warn-text); background: var(--warn-bg); }
 .status-pill.neutral { color: var(--text-muted); background: var(--surface-inset); }
 .status-pill.warning { color: var(--warn-text); background: var(--warn-bg); }
@@ -1259,6 +1270,8 @@ button.no-totp:hover { filter: brightness(.97); }
   .settings-view article { flex-wrap: wrap; }
   .settings-service-connect, .settings-service-actions { width: calc(100% - 52px); margin-left: 52px; }
   .settings-service-connect input { flex: 1; }
+  .settings-server-row .settings-service-actions { width: auto; margin-left: 0; }
+  .server-facts { grid-template-columns: minmax(0, 1fr); }
   .browser-setting-actions { width: calc(100% - 52px); margin-left: 52px; align-items: center; flex-direction: row; }
 }
 
