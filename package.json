@@ -52,6 +52,8 @@
     "release:update-manifest": "node tools/create-static-update-manifest.mjs",
     "release:publish": "node tools/publish-release-candidate.mjs",
     "supply-chain:sbom": "node tools/create-sbom.mjs",
+    "supply-chain:sbom:audit": "node tools/audit-sbom.mjs",
+    "supply-chain:sbom:appimage": "node tools/create-appimage-sbom.mjs",
     "tauri": "tauri",
     "tauri:dev:browser": "npm run desktop:host:stage && tauri dev",
     "desktop:host:build": "node tools/build-browser-host.mjs",
