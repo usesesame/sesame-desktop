@@ -134,7 +134,7 @@ fn updater_platform() -> VaultResult<&'static str> {
     updater_platform_for(std::env::consts::OS)
 }
 
-fn updater_platform_for(os: &str) -> VaultResult<&'static str> {
+pub(crate) fn updater_platform_for(os: &str) -> VaultResult<&'static str> {
     match os {
         "windows" => Ok("windows"),
         _ => Err("This operating system is not supported by the Sesame updater.".into()),

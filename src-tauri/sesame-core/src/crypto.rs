@@ -7,7 +7,7 @@ use chacha20poly1305::{
 use serde_json;
 use std::io::{self, Read, Write};
 use unicode_normalization::UnicodeNormalization;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     types::*, util::fill_random, VaultResult, MAX_KDF_ITERATIONS, MAX_KDF_MEMORY_KIB,
@@ -152,9 +152,37 @@ pub fn decrypt_bytes(
         .map_err(|_| "The encrypted vault could not be authenticated.".to_string())
 }
 
+const CAPPED_BUFFER_FIRST_BYTES: usize = 4096;
+
 struct CappedBuffer {
     bytes: Zeroizing<Vec<u8>>,
     limit: u64,
+}
+
+impl CappedBuffer {
+    fn new(limit: u64) -> Self {
+        Self {
+            bytes: Zeroizing::new(Vec::new()),
+            limit,
+        }
+    }
+
+    fn grow_to_fit(&mut self, needed: usize) -> Option<Zeroizing<Vec<u8>>> {
+        let current = self.bytes.capacity();
+        if needed <= current {
+            return None;
+        }
+        let ceiling = usize::try_from(self.limit).unwrap_or(usize::MAX);
+        let target = needed
+            .max(current.saturating_mul(2))
+            .max(CAPPED_BUFFER_FIRST_BYTES)
+            .min(ceiling.max(needed));
+        let mut grown = Zeroizing::new(Vec::with_capacity(target));
+        grown.extend_from_slice(&self.bytes);
+        let mut retired = std::mem::replace(&mut self.bytes, grown);
+        Zeroize::zeroize(&mut *retired);
+        Some(retired)
+    }
 }
 
 impl Write for CappedBuffer {
@@ -165,6 +193,7 @@ impl Write for CappedBuffer {
                 "the encoded vault would exceed its size limit",
             ));
         }
+        self.grow_to_fit(self.bytes.len() + data.len());
         self.bytes.extend_from_slice(data);
         Ok(data.len())
     }
@@ -179,10 +208,7 @@ pub fn serialize_payload(payload: &VaultPayload) -> VaultResult<Zeroizing<Vec<u8
 }
 
 fn serialize_payload_capped(payload: &VaultPayload, limit: u64) -> VaultResult<Zeroizing<Vec<u8>>> {
-    let mut buffer = CappedBuffer {
-        bytes: Zeroizing::new(Vec::new()),
-        limit,
-    };
+    let mut buffer = CappedBuffer::new(limit);
     serde_json::to_writer(&mut buffer, payload).map_err(|error| {
         if error.is_io() {
             VAULT_SIZE_LIMIT_MESSAGE.to_string()
@@ -307,13 +333,46 @@ mod tests {
 
     #[test]
     fn capped_buffer_keeps_only_bytes_under_the_limit() {
-        let mut buffer = CappedBuffer {
-            bytes: Zeroizing::new(Vec::new()),
-            limit: 4,
-        };
+        let mut buffer = CappedBuffer::new(4);
         buffer.write_all(b"abc").expect("under the limit");
         assert!(buffer.write_all(b"de").is_err());
         assert_eq!(&*buffer.bytes, b"abc");
+    }
+
+    #[test]
+    fn capped_buffer_wipes_each_buffer_it_replaces() {
+        let mut buffer = CappedBuffer::new(1024 * 1024);
+        let marker = b"fictional plaintext marker ";
+        let mut replaced = 0;
+        let mut written = 0;
+        while written < 40_000 {
+            let retired = buffer.grow_to_fit(buffer.bytes.len() + marker.len());
+            buffer.write_all(marker).expect("under the limit");
+            written += marker.len();
+            if let Some(retired) = retired {
+                replaced += 1;
+                assert!(retired.is_empty());
+                let capacity = retired.capacity();
+                let residue = unsafe { std::slice::from_raw_parts(retired.as_ptr(), capacity) };
+                assert!(residue.iter().all(|byte| *byte == 0));
+            }
+        }
+        assert!(replaced >= 3);
+        assert_eq!(buffer.bytes.len(), written);
+        assert!(buffer
+            .bytes
+            .chunks(marker.len())
+            .all(|chunk| chunk == marker));
+    }
+
+    #[test]
+    fn capped_buffer_never_grows_past_its_limit() {
+        let mut buffer = CappedBuffer::new(10_000);
+        buffer.write_all(&[1_u8; 6_000]).expect("first write");
+        buffer.write_all(&[2_u8; 4_000]).expect("second write");
+        assert!(buffer.bytes.capacity() <= 10_000);
+        assert!(buffer.write_all(&[3_u8]).is_err());
+        assert_eq!(buffer.bytes.len(), 10_000);
     }
 
     #[test]
