@@ -271,12 +271,21 @@ test('the sandbox path patch refuses a replacement with a different length', () 
   assert.throws(() => patchSandboxPaths(Buffer.from('abc'), [['abc', 'abcd']]), /byte length/)
 })
 
-test('the AppRun hook gains the bundled usr library path once', () => {
+test('the AppRun hook gains the bundled usr library path and the X11 backend once', () => {
   const hook = '#!/bin/sh\nexport APPDIR="${APPDIR:-$(dirname "$0")}"\n'
   const patched = appRunHookWithLibraryPath(hook)
   assert.ok(patched.includes('export LD_LIBRARY_PATH="$APPDIR/usr${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'))
+  assert.ok(patched.includes('\nexport GDK_BACKEND=x11\n'))
   assert.ok(patched.startsWith(hook))
   assert.equal(appRunHookWithLibraryPath(patched), null)
+})
+
+test('the AppRun hook keeps a backend line that is already exported and a commented one does not count', () => {
+  const exported = '#!/bin/sh\nexport GDK_BACKEND=x11\nexport LD_LIBRARY_PATH="$APPDIR/usr:$LD_LIBRARY_PATH"\n'
+  assert.equal(appRunHookWithLibraryPath(exported), null)
+  const commented = '#!/bin/sh\n# export GDK_BACKEND=x11 # Monitor this closely\nexport LD_LIBRARY_PATH="$APPDIR/usr:$LD_LIBRARY_PATH"\n'
+  const patched = appRunHookWithLibraryPath(commented)
+  assert.ok(patched.endsWith('\nexport GDK_BACKEND=x11\n'))
 })
 
 test('the Linux CI patches the AppImage before the AppImage gate binds it', async () => {
