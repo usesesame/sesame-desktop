@@ -72,6 +72,11 @@ pub fn resolve_browser_fill(
 }
 
 #[tauri::command]
+pub fn get_browser_approval_wait(state: State<'_, browser_fill::BrowserFillState>) -> u64 {
+    state.approval_wait().as_millis() as u64
+}
+
+#[tauri::command]
 pub fn get_pending_browser_fill(
     state: State<'_, browser_fill::BrowserFillState>,
 ) -> Option<browser_fill::BrowserFillRequestEvent> {
@@ -92,6 +97,8 @@ pub fn resolve_browser_save(
         browser_fill::resolve_save(&app, &state, &approval_id, false)?;
         return Ok(None);
     }
+
+    browser_fill::ensure_save_approval_ready(&state, &approval_id)?;
 
     let payload = browser_fill::save_payload(&state, &approval_id)
         .ok_or("That browser approval expired or is no longer available.")?;

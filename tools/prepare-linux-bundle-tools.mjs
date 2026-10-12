@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const run = promisify(execFile)
 
-export const verifiedCliVersion = '2.11.5'
+export const verifiedCliVersion = '2.12.1'
 
 export const pinnedBundleTools = {
   x86_64: [
@@ -17,19 +17,9 @@ export const pinnedBundleTools = {
       sha256: 'f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f',
     },
     {
-      name: 'linuxdeploy-x86_64.AppImage',
-      url: 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage',
-      sha256: 'e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef',
-    },
-    {
-      name: 'linuxdeploy-plugin-gtk.sh',
-      url: 'https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/dda522bce37387f1b853d9095713bfaa924c8423/linuxdeploy-plugin-gtk.sh',
-      sha256: '7804c9eef13e59bf2783aad9882ef9db8f3f3f9e8d631874b1d348d550a3693f',
-    },
-    {
-      name: 'linuxdeploy-plugin-gstreamer.sh',
-      url: 'https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/2a2e67491c32995a3f279ad0ecbe77abd512b42a/linuxdeploy-plugin-gstreamer.sh',
-      sha256: 'c107b49d84edbffc6ab226ed1007e0626a4f7aa2c3a36b7782bef62351d49e94',
+      name: 'linuxdeploy-07333c6-x86_64.AppImage',
+      url: 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage',
+      sha256: '36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62',
     },
     {
       name: 'linuxdeploy-plugin-appimage.AppImage',

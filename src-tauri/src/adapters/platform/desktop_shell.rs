@@ -6,6 +6,7 @@ use std::sync::{
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    webview::NewWindowResponse,
     App, AppHandle, LogicalSize, Manager, PhysicalSize, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder, Window, WindowEvent,
 };
@@ -153,6 +154,14 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
         }
         return;
     }
+    if let WindowEvent::Focused(focused) = event {
+        if let Some(fill) = window
+            .app_handle()
+            .try_state::<crate::browser_fill::BrowserFillState>()
+        {
+            fill.window_focus_changed(*focused);
+        }
+    }
     if let WindowEvent::Resized(size) = event {
         let scale = window.scale_factor().unwrap_or(1.0);
         if let Some(size) = bounded_main_size(*size, scale) {
@@ -263,6 +272,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .resizable(true)
         .decorations(false)
         .visible(false)
+        .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
     harden_release_webview(&window);

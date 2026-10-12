@@ -15,19 +15,13 @@
     },
     {
       "name": "@tauri-apps/api",
-      "version": "2.11",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
       "name": "@tauri-apps/cli",
-      "version": "2.11",
-      "source": "npm",
-      "reason": "In use before this gate was adopted."
-    },
-    {
-      "name": "@tauri-apps/plugin-clipboard-manager",
-      "version": "2.3",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
