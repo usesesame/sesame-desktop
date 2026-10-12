@@ -8,7 +8,6 @@
     "core:event:allow-unlisten",
     "core:window:allow-hide",
     "core:webview:deny-internal-toggle-devtools",
-    "clipboard-manager:allow-write-text",
     "quick-access"
   ]
 }

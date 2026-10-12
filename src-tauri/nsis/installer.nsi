@@ -3,6 +3,8 @@
 ; Derived from the Tauri 2.11.4 stock template (@tauri-apps/cli 2.11.4):
 ; https://raw.githubusercontent.com/tauri-apps/tauri/tauri-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 ; Retrieved and pinned 2026-08-11 for `INS-001`.
+; Refreshed against the Tauri 2.12.1 stock template (bundler 2.10.1): the
+; Restart Manager include and the full executable path in CheckIfAppIsRunning.
 ;
 ; Sesame's changes from upstream (search this file for "SESAME:" to find all
 ; of them):
@@ -64,6 +66,7 @@ ManifestDPIAwareness PerMonitorV2
 !include "FileAssociation.nsh"
 !include "Win\COM.nsh"
 !include "Win\Propkey.nsh"
+!include "Win\RestartManager.nsh"
 !include "StrFunc.nsh"
 ${StrCase}
 ${StrLoc}
@@ -724,7 +727,7 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -861,7 +864,7 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

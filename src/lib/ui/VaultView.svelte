@@ -68,7 +68,7 @@
   export let passwordPresenceRequired = false
   export let passwordPresenceSecret = ''
   export let passwordPresenceError = ''
-  export let passwordPresenceIntent: 'reveal' | 'copy' = 'reveal'
+  export let passwordPresenceIntent: 'reveal' | 'copy' | 'autotype' = 'reveal'
   export let onRevealPassword: () => Promise<void>
   export let onCopyPassword: () => void
   export let onConfirmPasswordPresence: () => void

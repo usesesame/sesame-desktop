@@ -169,7 +169,16 @@ jobs:
             xdg-utils \
             rpm \
             dbus \
+            bubblewrap \
+            xdg-dbus-proxy \
             xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
 
       - run: npm ci
 
@@ -208,6 +217,9 @@ jobs:
           --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
           -- --locked
 
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
+        run: node tools/strip-appimage-host-libs.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \
@@ -217,10 +229,16 @@ jobs:
 
       - name: Prove the shipped AppImage launches and refuses registration
         run: |
-          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
             --format appimage \
             --package "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" \
-            --out linux-appimage-shipped-evidence
+            --out linux-appimage-shipped-evidence; then
+            echo "--- launch log ---"
+            cat linux-appimage-shipped-evidence/linux-appimage-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-appimage-shipped-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
 
       # The shipped binary has no test bridge, so the package that installs
       # here is the test-featured build. It exercises the real deb layout,
