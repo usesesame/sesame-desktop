@@ -92,6 +92,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "curve25519-dalek",
+      "version": "5",
+      "reason": "Pairing a new device with a one-time code runs CPace on ristretto255. The crate is already in the lock file at 5.0.0 through ed25519-dalek and x25519-dalek, so this adds a direct edge and no new crate. The in-house implementation reproduces the IETF draft vectors."
+    },
+    {
       "name": "ed25519-dalek",
       "version": "3",
       "reason": "In use before this gate was adopted."

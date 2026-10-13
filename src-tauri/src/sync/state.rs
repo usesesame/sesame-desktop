@@ -6,48 +6,105 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::sync::devicelist::{DeviceList, DeviceListEntry};
+use crate::sync::header::Header;
 use crate::vault::VaultResult;
 
 pub const STATE_FILE_NAME: &str = "sync-state.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncBase {
-    pub version: u8,
-    pub vault_id: String,
-    pub revision: i64,
-    pub vault_epoch: i64,
-    /// Digest of the payload at that revision; a mismatch means unsynced local edits.
-    pub payload_digest: String,
-    /// Envelope digest of that revision, the chain predecessor; empty only for a device that never applied one.
-    #[serde(default)]
-    pub head_digest: String,
-    /// The service's signed acceptance, so this device re-checks against the service's attestation.
-    #[serde(default)]
-    pub receipt: String,
+pub struct StoredReceipt {
+    pub signature: String,
+    pub accepted_at: u64,
 }
 
-impl SyncBase {
-    pub fn new(vault_id: &str, revision: i64, vault_epoch: i64, payload: &[u8]) -> Self {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PostedCheckpoint {
+    pub device_list_index: u64,
+    pub header_revision: u64,
+    pub at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SyncState {
+    pub version: u8,
+    pub vault_id: String,
+    pub device_id: String,
+    pub entries: Vec<DeviceListEntry>,
+    pub head: Option<Header>,
+    pub payload_digest: String,
+    pub floor: u64,
+    pub receipt: Option<StoredReceipt>,
+    pub activated_epoch: u64,
+    #[serde(default)]
+    pub last_checkpoint: Option<PostedCheckpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_join: Option<crate::sync::pairing::ApproverIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_confirmation: Option<String>,
+}
+
+pub const STATE_VERSION: u8 = 3;
+
+pub const CHECKPOINT_INTERVAL_SECS: u64 = 60 * 60;
+
+pub fn checkpoint_due(
+    last: Option<&PostedCheckpoint>,
+    device_list_index: u64,
+    header_revision: u64,
+    now: u64,
+) -> bool {
+    match last {
+        None => true,
+        Some(last) => {
+            last.device_list_index != device_list_index
+                || last.header_revision != header_revision
+                || now.saturating_sub(last.at) >= CHECKPOINT_INTERVAL_SECS
+                || last.at > now
+        }
+    }
+}
+
+impl SyncState {
+    pub fn new(vault_id: &str, device_id: &str) -> Self {
         Self {
-            version: 1,
+            version: STATE_VERSION,
             vault_id: vault_id.to_string(),
-            revision,
-            vault_epoch,
-            payload_digest: payload_digest(payload),
-            head_digest: String::new(),
-            receipt: String::new(),
+            device_id: device_id.to_string(),
+            entries: Vec::new(),
+            head: None,
+            payload_digest: String::new(),
+            floor: 0,
+            receipt: None,
+            activated_epoch: 0,
+            last_checkpoint: None,
+            pending_join: None,
+            pending_confirmation: None,
         }
     }
 
-    pub fn with_head(mut self, head_digest: &str, receipt: &str) -> Self {
-        self.head_digest = head_digest.to_string();
-        self.receipt = receipt.to_string();
-        self
+    pub fn list(&self) -> Result<DeviceList, crate::sync::canonical::ProofError> {
+        DeviceList::verify(&self.entries)
+    }
+
+    pub fn head_revision(&self) -> u64 {
+        self.head.as_ref().map_or(0, |header| header.revision)
     }
 
     pub fn has_local_changes(&self, payload: &[u8]) -> bool {
         self.payload_digest != payload_digest(payload)
+    }
+
+    pub fn require_join_complete(&self) -> VaultResult<()> {
+        if self.pending_join.is_some() {
+            return Err(
+                "Finish joining this vault before syncing. Open Sync and try Join again.".into(),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -66,39 +123,24 @@ pub fn state_path(app_local_data_dir: &Path) -> PathBuf {
     app_local_data_dir.join(STATE_FILE_NAME)
 }
 
-/// Unreadable or wrongly versioned reads as absent: the failure direction is a conflict, never an overwrite.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn read(path: &Path) -> Option<SyncBase> {
-    let body = std::fs::read(path).ok()?;
-    let base: SyncBase = serde_json::from_slice(&body).ok()?;
-    if base.version != 1 || base.vault_id.is_empty() || base.revision < 0 {
-        return None;
-    }
-    Some(base)
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn write(path: &Path, base: &SyncBase) -> VaultResult<()> {
-    let body = serde_json::to_vec(base)
-        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
-    }
-    crate::vault::storage::atomic_replace(path, &body)
-}
-
 /// DPAPI-protected tag authenticating the state file; edited or foreign files fail to verify.
 fn tag_path(path: &Path) -> PathBuf {
     path.with_extension("json.tag")
 }
 
-fn state_tag(body: &[u8]) -> Vec<u8> {
+const STATE_TAG_LABEL: &[u8] = b"sesame-sync-state-tag-v1";
+
+fn tag_for(label: &[u8], body: &[u8]) -> Vec<u8> {
     let mut digest = Sha256::new();
-    digest.update(b"sesame-sync-state-tag-v1");
+    digest.update(label);
     digest.update((body.len() as u64).to_be_bytes());
     digest.update(body);
     digest.finalize().to_vec()
+}
+
+#[cfg(test)]
+fn state_tag(body: &[u8]) -> Vec<u8> {
+    tag_for(STATE_TAG_LABEL, body)
 }
 
 #[cfg(test)]
@@ -122,26 +164,21 @@ fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     crate::vault::platform::unprotect_for_device(bytes)
 }
 
-pub fn write_protected(path: &Path, base: &SyncBase) -> VaultResult<()> {
-    let body = serde_json::to_vec(base)
-        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
+pub(crate) fn write_tagged(path: &Path, label: &[u8], body: &[u8]) -> VaultResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
-    // Tag first: a crash leaves a mismatch that reads as absent, which fails closed.
-    let protected = protect(&state_tag(&body))?;
+    let protected = protect(&tag_for(label, body))?;
     crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
-    crate::vault::storage::atomic_replace(path, &body)
+    crate::vault::storage::atomic_replace(path, body)
 }
 
-/// Reads only when the tag proves this profile wrote it; a mismatch reads as no state, the safe direction.
-pub fn read_protected(path: &Path) -> Option<SyncBase> {
+pub(crate) fn read_tagged(path: &Path, label: &[u8]) -> Option<Vec<u8>> {
     let body = std::fs::read(path).ok()?;
     let protected = std::fs::read(tag_path(path)).ok()?;
     let expected = unprotect(&protected).ok()?;
-    let actual = state_tag(&body);
-    // Constant-time compare: an attacker who can write the state file controls both sides.
+    let actual = tag_for(label, &body);
     if actual.len() != expected.len()
         || actual
             .iter()
@@ -153,11 +190,23 @@ pub fn read_protected(path: &Path) -> Option<SyncBase> {
     {
         return None;
     }
-    let base: SyncBase = serde_json::from_slice(&body).ok()?;
-    if base.version != 1 || base.vault_id.is_empty() || base.revision < 0 {
+    Some(body)
+}
+
+pub fn write_protected(path: &Path, base: &SyncState) -> VaultResult<()> {
+    let body = serde_json::to_vec(base)
+        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
+    write_tagged(path, STATE_TAG_LABEL, &body)
+}
+
+pub fn read_protected(path: &Path) -> Option<SyncState> {
+    let body = read_tagged(path, STATE_TAG_LABEL)?;
+    let state: SyncState = serde_json::from_slice(&body).ok()?;
+    if state.version != STATE_VERSION || state.vault_id.is_empty() || state.device_id.is_empty() {
         return None;
     }
-    Some(base)
+    state.list().ok()?;
+    Some(state)
 }
 
 pub fn forget_protected(path: &Path) -> VaultResult<()> {
@@ -176,16 +225,17 @@ pub fn forget(path: &Path) -> VaultResult<()> {
 /// The decision an upload makes from its own recorded base, never the server head.
 #[derive(Debug, PartialEq, Eq)]
 pub enum UploadDecision {
-    Offer { revision: i64 },
-    Conflict { server_revision: i64 },
+    Offer { revision: u64 },
+    Conflict { server_revision: u64 },
 }
 
-pub fn decide_upload(base_revision: i64, server_revision: i64) -> UploadDecision {
+pub fn decide_upload(base_revision: u64, server_revision: u64) -> UploadDecision {
     if server_revision != base_revision {
         return UploadDecision::Conflict { server_revision };
     }
-    UploadDecision::Offer {
-        revision: base_revision.max(0) + 1,
+    match base_revision.checked_add(1) {
+        Some(revision) => UploadDecision::Offer { revision },
+        None => UploadDecision::Conflict { server_revision },
     }
 }
 
@@ -201,8 +251,11 @@ mod tests {
         dir.join(STATE_FILE_NAME)
     }
 
-    fn sample_base(revision: i64) -> SyncBase {
-        SyncBase::new("vault-1", revision, 2, b"payload-bytes").with_head("head-digest", "receipt")
+    fn sample_base(revision: u64) -> SyncState {
+        let mut state = SyncState::new("vault-1-0000000000000", "device-1-000000000000");
+        state.payload_digest = payload_digest(b"payload-bytes");
+        state.floor = revision;
+        state
     }
 
     #[test]
@@ -263,7 +316,7 @@ mod tests {
         let path = path_for(&dir);
         write_protected(&path, &sample_base(1)).unwrap();
         write_protected(&path, &sample_base(2)).unwrap();
-        assert_eq!(read_protected(&path).map(|base| base.revision), Some(2));
+        assert_eq!(read_protected(&path).map(|base| base.floor), Some(2));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

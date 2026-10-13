@@ -27,26 +27,3 @@ export function channelForVersion(version: string): string {
 }
 
 export const appChannel = derived(appVersion, channelForVersion)
-
-function configuredSiteOrigin(): string | undefined {
-  const value = import.meta.env.VITE_SESAME_SITE_ORIGIN?.trim()
-  if (!value) return undefined
-  let url: URL
-  try { url = new URL(value) } catch { return undefined }
-  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
-    return undefined
-  }
-  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    return undefined
-  }
-  return url.origin
-}
-
-const siteOrigin = configuredSiteOrigin()
-
-export const SYNC_STATUS_URL = siteOrigin ? `${siteOrigin}/roadmap#sync` : undefined
-
-/// Sync is not enabled; dev build plus explicit opt-in only.
-export const SYNC_PREVIEW_AVAILABLE =
-  import.meta.env.DEV && import.meta.env.VITE_SESAME_SYNC_PREVIEW === 'true'

@@ -5,8 +5,12 @@ pub(crate) mod account_service;
 pub(crate) mod breach;
 pub(crate) mod capabilities;
 pub(crate) mod public_updates;
-#[cfg(feature = "sync-preview")]
+pub(crate) mod server_address;
+pub(crate) mod server_trust;
 pub(crate) mod sync;
+pub(crate) mod sync_floor;
+#[cfg(test)]
+pub(crate) mod test_server;
 pub(crate) mod trusted_time;
 pub(crate) mod website_icons;
 

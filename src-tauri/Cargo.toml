@@ -34,12 +34,9 @@ edition = "2021"
 [features]
 browser-helper-dev = []
 wdio = []
-# Sesame Sync is not enabled; no shipping binary may contain a way to reach a Sync endpoint.
-# This feature gates the network client and the Tauri commands, and it is not in
-# any default set: a release build compiles neither, which is a stronger barrier
-# than a runtime check because there is no code path to enable by accident.
-# Development uses `cargo run --features sync-preview` against a local API.
-sync-preview = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 
 # A panic in the vault core is a usability failure at the worst possible moment:
 # the user is trying to reach a credential they cannot get any other way. Error
@@ -97,6 +94,7 @@ minisign-verify = "0.3.0"
 totp-rs = { version = "6", features = ["otpauth", "zeroize"] }
 url = "2.5"
 zeroize = { version = "1.8", features = ["derive"] }
+curve25519-dalek = "5"
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hkdf = "0.13"
 ts-rs = "12.0.1"

@@ -6,6 +6,7 @@
 
   export let navigation: NavigationGroup[]
   export let preview = false
+  export let vaultLabel = 'Local vault'
   export let duplicateReviewOpen = false
   export let notice: { title: string; message: string } | null = null
   export let errorMessage = ''
@@ -86,7 +87,7 @@
 <svelte:window on:keydown={handleShortcut} />
 
 <main class="app-shell">
-  <Sidebar {navigation} activeView={$selection.activeView} {preview} autoLockMinutes={$settings.autoLockMinutes} {onNavigate} {onLock} />
+  <Sidebar {navigation} activeView={$selection.activeView} {preview} {vaultLabel} autoLockMinutes={$settings.autoLockMinutes} {onNavigate} {onLock} />
 
   <section class="workspace" class:vault-workspace={$selection.activeView === 'vault'} class:cleanup-workspace={$selection.activeView === 'security' && duplicateReviewOpen} aria-labelledby="workspace-heading">
     <h1 id="workspace-heading" class="sr-only">{title}</h1>

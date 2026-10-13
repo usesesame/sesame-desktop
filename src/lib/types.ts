@@ -91,6 +91,8 @@ export type { RestoreHistoryVersionResult } from './generated/RestoreHistoryVers
 export type { VaultItemSummary } from './generated/VaultItemSummary'
 export type { SecuritySummary } from './generated/SecuritySummary'
 export type { ServiceConnectionStatus } from './generated/ServiceConnectionStatus'
+export type { DisconnectOutcome } from './generated/DisconnectOutcome'
+export type { ServerInspection } from './generated/ServerInspection'
 // Frontend name for backend's `VaultEntrySummary`: the frontend's own name
 // `VaultEntry` is not reused here on purpose, it would collide with the full
 // secret-bearing login record Rust also calls `VaultEntry` (password, TOTP,

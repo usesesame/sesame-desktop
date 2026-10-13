@@ -2,14 +2,15 @@
   import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
-  import SyncPreviewHost from './SyncPreviewHost.svelte'
+  import SyncPanel from './SyncPanel.svelte'
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
-  import { appVersion, SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
+  import { appVersion } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
   import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
-  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme } from '../types'
+  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServerInspection, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
+  import CustomServerSetting from './CustomServerSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
@@ -78,6 +79,8 @@
   export let serviceConnection: ServiceConnectionStatus = { state: 'disconnected', connected: false, online: false, syncAvailable: false, browserHelperAvailable: false }
   export let serviceWorking = false
   export let onLinkService: (code: string) => void
+  export let onInspectServer: (input: string) => Promise<ServerInspection | null>
+  export let onConnectServer: (input: string, code: string, fingerprint: string) => Promise<boolean>
   export let onDisconnectService: () => void
   export let onRefreshService: () => void
   export let serviceConnectionAvailable = true
@@ -90,9 +93,7 @@
   export let browserIntegrationWorking = false
   export let onRefreshBrowserIntegration: () => void
   export let onRepairBrowserIntegration: () => void
-  export let onOpenWebsite: (url: string) => void
 
-  const syncStatusUrl = SYNC_STATUS_URL
 
   type TabId = 'general' | 'security' | 'connections' | 'data'
   const tabs: { id: TabId; label: string; icon: string }[] = [
@@ -311,10 +312,10 @@
                 <div class="setting-copy"><strong>Recovery kit</strong><p>The new recovery kit you requested on {formatMoment(recoveryReplacement.requestedAt)} is ready. Getting it replaces your current kit.</p></div>
                 <div class="diagnostic-actions"><button type="button" class="text-button" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button><button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onIssueRecoveryKit}>Get new kit</button></div>
               {:else if recoveryRequested}
-                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame checks the time with usesesame.app and github.com before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
+                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame needs two independent servers to agree on the time before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
                 <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button>
               {:else}
-                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with usesesame.app and github.com, not this computer's clock.</p></div>
+                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with servers on the internet, not this computer's clock, and it needs two of them to agree.</p></div>
                 <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onRequestRecoveryKit}>Request new kit</button>
               {/if}
             </article>
@@ -340,27 +341,16 @@
         <section class="settings-group" aria-labelledby="settings-group-connections-account">
           <h3 id="settings-group-connections-account">Sesame account</h3>
           <div class="settings-list">
-            <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
-            {#if SYNC_PREVIEW_AVAILABLE}<SyncPreviewHost />{/if}
-            <!-- Renders no Sync control and imports nothing from the Sync client. -->
-            {#if !SYNC_PREVIEW_AVAILABLE}
-              <article>
-                <div class="setting-copy">
-                  <strong>Sesame Sync</strong>
-                  {#if serviceConnection.syncAvailable}
-                    <p>Your account can use Sesame Sync. This version of Sesame cannot, so install a newer one before turning it on.</p>
-                  {:else}
-                    <p>An encrypted copy of your vault that your other devices can read and Sesame cannot. It is not open yet: the protocol needs an independent review first.</p>
-                  {/if}
-                </div>
-                <div class="diagnostic-actions">
-                  {#if syncStatusUrl}
-                    <button type="button" class="text-button" on:click={() => onOpenWebsite(syncStatusUrl)}>Check status</button>
-                  {/if}
-                  <span class="status-pill">{serviceConnection.syncAvailable ? 'Update needed' : 'Not available'}</span>
-                </div>
-              </article>
+            {#if !serviceConnection.serverAddress}
+              <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
             {/if}
+            <SyncPanel />
+          </div>
+        </section>
+        <section class="settings-group" aria-labelledby="settings-group-connections-server">
+          <h3 id="settings-group-connections-server">Connect to your own server</h3>
+          <div class="settings-list">
+            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
           </div>
         </section>
       </div>
@@ -369,14 +359,7 @@
         <section class="settings-group" aria-labelledby="settings-group-data-vault">
           <h3 id="settings-group-data-vault">Your vault</h3>
           <div class="settings-list">
-            {#if SYNC_PREVIEW_AVAILABLE}
-              <SyncVaultStorageRow />
-            {:else}
-              <article>
-                <div class="setting-copy"><strong>Local-only vault</strong><p>Your vault is stored on this device. Sesame has no cloud copy.</p></div>
-                <span class="status-pill">Active</span>
-              </article>
-            {/if}
+            <SyncVaultStorageRow />
             <article>
               <div class="setting-copy"><strong>Export and deletion</strong><p>Export a readable copy or remove Sesame data from this device.</p></div>
               <button type="button" class="secondary-button settings-manage" on:click={onManageData}>Manage</button>

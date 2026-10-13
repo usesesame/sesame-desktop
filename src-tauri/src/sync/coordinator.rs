@@ -1,14 +1,11 @@
-//! The Sesame Sync coordinator: one transfer at a time, bounded retry with jitter, terminal halt states.
-//! A conflict is never resolved here: a person chooses the winner.
-
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
     Revoked,
     NotEntitled,
     Incompatible,
+    Fork,
     Conflict { server_revision: i64 },
     Locked,
 }
@@ -41,18 +38,6 @@ impl Default for Status {
     }
 }
 
-/// Recorded, not branched on: every trigger means the same thing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Trigger {
-    VaultSaved,
-    Unlocked,
-    Reconnected,
-    Resumed,
-    Started,
-    Periodic,
-    Requested,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Uploaded { revision: i64 },
@@ -65,12 +50,6 @@ pub enum Outcome {
 /// Gives up rather than hiding a failing device behind a spinner.
 pub const MAX_ATTEMPTS: u32 = 6;
 
-pub const BASE_BACKOFF: Duration = Duration::from_secs(2);
-pub const MAX_BACKOFF: Duration = Duration::from_secs(300);
-
-/// One save per keystroke must become one upload, not forty.
-pub const COALESCE_WINDOW: Duration = Duration::from_secs(3);
-
 #[derive(Clone)]
 pub struct Coordinator {
     inner: Arc<Mutex<State>>,
@@ -81,7 +60,6 @@ struct State {
     running: bool,
     /// One flag, not a queue: one agreement covers every request that arrived while running.
     follow_up: bool,
-    last_request: Option<Instant>,
 }
 
 impl Default for Coordinator {
@@ -97,7 +75,6 @@ impl Coordinator {
                 status: Status::default(),
                 running: false,
                 follow_up: false,
-                last_request: None,
             })),
         }
     }
@@ -111,39 +88,6 @@ impl Coordinator {
                 ..Status::default()
             },
         }
-    }
-
-    pub fn request(&self, trigger: Trigger, now: Instant) -> bool {
-        let Ok(mut state) = self.inner.lock() else {
-            return false;
-        };
-        if let Phase::Halted(_) = state.status.phase {
-            // A halt is final until something clears it.
-            return false;
-        }
-        state.status.pending = true;
-        state.last_request = Some(now);
-        if state.running {
-            state.follow_up = true;
-            return false;
-        }
-        // A vault save coalesces; everything else runs immediately.
-        if trigger == Trigger::VaultSaved {
-            return false;
-        }
-        state.running = true;
-        state.status.phase = Phase::Working;
-        true
-    }
-
-    pub fn coalesce_elapsed(&self, now: Instant) -> bool {
-        let Ok(state) = self.inner.lock() else {
-            return false;
-        };
-        if state.running || !state.status.pending {
-            return false;
-        }
-        matches!(state.last_request, Some(at) if now.duration_since(at) >= COALESCE_WINDOW)
     }
 
     pub fn begin(&self) -> bool {
@@ -181,6 +125,12 @@ impl Coordinator {
                 state.follow_up = false;
                 again
             }
+            Outcome::Halt(Halt::Locked) => {
+                state.status.phase = Phase::Idle;
+                state.status.pending = false;
+                state.follow_up = false;
+                false
+            }
             Outcome::Halt(halt) => {
                 // Terminal: retrying a final answer hammers the service.
                 state.status.phase = Phase::Halted(halt);
@@ -204,26 +154,40 @@ impl Coordinator {
             }
         }
     }
-
-    pub fn resume(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            state.status = Status {
-                last_success_revision: state.status.last_success_revision,
-                ..Status::default()
-            };
-            state.running = false;
-            state.follow_up = false;
-        }
-    }
 }
 
-/// Capped and jittered so reconnected devices do not retry in lockstep.
-pub fn backoff(attempt: u32) -> Duration {
-    let exponent = attempt.min(8);
-    let base = BASE_BACKOFF.saturating_mul(1_u32 << exponent);
-    let base = base.min(MAX_BACKOFF);
-    let mut jitter = [0_u8; 2];
-    crate::vault::util::fill_random(&mut jitter);
-    let spread = u16::from_be_bytes(jitter) as u64 % (base.as_millis() as u64 / 2 + 1);
-    base + Duration::from_millis(spread)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_locked_vault_pauses_one_run_and_does_not_stop_sync_for_good() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Locked));
+        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert!(coordinator.begin());
+    }
+
+    #[test]
+    fn a_revoked_device_stays_halted_until_something_clears_it() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Revoked));
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::Revoked));
+        assert!(!coordinator.begin());
+    }
+
+    #[test]
+    fn a_transient_failure_retries_and_gives_up_after_the_attempt_limit() {
+        let coordinator = Coordinator::new();
+        for attempt in 1..MAX_ATTEMPTS {
+            assert!(coordinator.begin());
+            assert!(coordinator.finish(Outcome::Transient));
+            assert_eq!(coordinator.status().phase, Phase::Retrying { attempt });
+        }
+        assert!(coordinator.begin());
+        assert!(!coordinator.finish(Outcome::Transient));
+        assert_eq!(coordinator.status().phase, Phase::Idle);
+    }
 }

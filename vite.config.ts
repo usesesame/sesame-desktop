@@ -31,14 +31,11 @@ const shippedNpmPackages = (): Plugin => {
 }
 
 export default defineConfig(() => {
-  const syncPreview = process.env.VITE_SESAME_SYNC_PREVIEW === 'true'
-
   return {
     plugins: [svelte(), shippedNpmPackages()],
     define: {
       __SESAME_APP_VERSION__: JSON.stringify(desktopVersion),
     },
-    cacheDir: syncPreview ? 'node_modules/.vite-sync-preview' : 'node_modules/.vite',
     build: {
       rollupOptions: {
         input: {
