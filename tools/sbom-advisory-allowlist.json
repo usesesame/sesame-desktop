@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "id": "UBUNTU-CVE-2026-40228",
+      "package": "systemd",
+      "reason": "The advisory is in systemd-journald. The AppImage bundles the systemd shared libraries, not the journald daemon, and Ubuntu 24.04 noble has no fixed systemd version. Every other advisory still fails the gate.",
+      "reviewed": "2026-10-07"
+    }
+  ]
+}

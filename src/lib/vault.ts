@@ -1317,6 +1317,11 @@ export async function grantPresence(secret: string): Promise<void> {
   await invoke('grant_presence', { secret })
 }
 
+export async function checkReleasePresence(): Promise<void> {
+  if (previewMode) return
+  await invoke('check_release_presence')
+}
+
 export async function revealLoginSecret(id: string): Promise<string> {
   if (previewMode) return 'fictional-preview-secret'
   return invoke<string>('reveal_login_secret', { id })
@@ -1415,6 +1420,11 @@ export async function repairBrowserIntegration(): Promise<BrowserIntegrationStat
 export async function resolveBrowserFill(approvalId: string, loginId: string | null): Promise<void> {
   if (previewMode) return
   await invoke('resolve_browser_fill', { approvalId, loginId })
+}
+
+export async function getBrowserApprovalWait(): Promise<number> {
+  if (previewMode) return 0
+  return invoke<number>('get_browser_approval_wait')
 }
 
 export async function getPendingBrowserFill(): Promise<BrowserFillRequest | null> {

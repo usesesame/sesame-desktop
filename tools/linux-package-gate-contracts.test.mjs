@@ -13,9 +13,7 @@ const repository = process.cwd()
 
 const bundlerFetchedToolNames = [
   'AppRun-x86_64',
-  'linuxdeploy-x86_64.AppImage',
-  'linuxdeploy-plugin-gtk.sh',
-  'linuxdeploy-plugin-gstreamer.sh',
+  'linuxdeploy-07333c6-x86_64.AppImage',
   'linuxdeploy-plugin-appimage.AppImage',
 ]
 
@@ -277,23 +275,20 @@ test('every tool the Tauri bundler can fetch is pinned by version and hash', asy
   const apprun = pins.find((pin) => pin.name === 'AppRun-x86_64')
   assert.equal(apprun.url, 'https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64')
   const linuxdeploy = pins.find((pin) => pin.name.startsWith('linuxdeploy-') && pin.name.endsWith('.AppImage'))
-  assert.equal(linuxdeploy.name, 'linuxdeploy-x86_64.AppImage')
-  assert.equal(linuxdeploy.url, 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage')
+  assert.equal(linuxdeploy.name, 'linuxdeploy-07333c6-x86_64.AppImage')
+  assert.equal(linuxdeploy.url, 'https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage')
   const plugin = pins.find((pin) => pin.name === 'linuxdeploy-plugin-appimage.AppImage')
   assert.equal(plugin.url, 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage')
   for (const pin of pins) {
     assert.doesNotMatch(pin.url, /\/releases\/download\/continuous\//, `${pin.name} comes from a rolling release whose bytes change under the pin`)
   }
-  const gtk = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
-  assert.match(gtk.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gtk\/[0-9a-f]{40}\/linuxdeploy-plugin-gtk\.sh$/, 'the gtk plugin is not pinned to an immutable commit')
-  const gstreamer = pins.find((pin) => pin.name === 'linuxdeploy-plugin-gstreamer.sh')
-  assert.match(gstreamer.url, /^https:\/\/raw\.githubusercontent\.com\/tauri-apps\/linuxdeploy-plugin-gstreamer\/[0-9a-f]{40}\/linuxdeploy-plugin-gstreamer\.sh$/, 'the gstreamer plugin is not pinned to an immutable commit')
+  assert.match(linuxdeploy.url, /\/releases\/download\/linuxdeploy-[0-9a-f]{7}\//, 'linuxdeploy is not pinned to a commit release')
   const lock = JSON.parse(await readFile(path.join(repository, 'package-lock.json'), 'utf8'))
   assert.equal(lock.packages['node_modules/@tauri-apps/cli'].version, verifiedCliVersion, 'the pinned Linux bundling tools target a different Tauri CLI; re-verify every bundler tool name and hash')
 })
 
 test('a download that does not match its pinned hash is refused before it is written', async () => {
-  const tool = pinnedBundleTools.x86_64.find((pin) => pin.name === 'linuxdeploy-plugin-gtk.sh')
+  const tool = pinnedBundleTools.x86_64.find((pin) => pin.name === 'linuxdeploy-plugin-appimage.AppImage')
   const toolsDir = await mkdtemp(path.join(tmpdir(), 'sesame-bundle-tools-'))
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => new Response('fictional tampered tool', { status: 200 })
