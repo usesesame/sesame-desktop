@@ -318,7 +318,7 @@ pub fn import_bitwarden_csv_entries(
             continue;
         }
         if row.name.is_empty() && row.login_username.is_empty() && row.login_password.is_empty() {
-            if [&row.login_uri, &row.notes, &row.login_totp]
+            if [&row.login_uri, &row.notes, &row.login_totp, &row.fields]
                 .iter()
                 .any(|value| !value.trim().is_empty())
             {
@@ -1542,6 +1542,13 @@ fn unsupported_code_reason(kind: &str) -> ImportItemReason {
 fn unsupported_otpauth_reason(line: &str) -> Option<ImportItemReason> {
     let after_scheme = line.trim_start_matches("otpauth://");
     let kind = after_scheme.split(['/', '?']).next().unwrap_or("");
+    if kind.is_empty()
+        || !kind
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Some(ImportItemReason::UnusableCode);
+    }
     if !kind.eq_ignore_ascii_case("totp") {
         return Some(unsupported_code_reason(kind));
     }

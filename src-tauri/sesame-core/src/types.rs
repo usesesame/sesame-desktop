@@ -2181,6 +2181,8 @@ pub struct BitwardenCsvEntry {
     pub login_password: String,
     #[serde(default)]
     pub login_totp: String,
+    #[serde(default)]
+    pub fields: String,
 }
 
 #[derive(Deserialize)]

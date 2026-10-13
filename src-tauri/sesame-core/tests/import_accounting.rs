@@ -345,3 +345,33 @@ fn bitwarden_json_accounts_for_logins_it_cannot_read() {
         1
     );
 }
+
+#[test]
+fn a_bitwarden_csv_row_with_only_custom_fields_is_accounted_for() {
+    let csv = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n,0,login,Žalias paštas,,,0,https://one.test,person,secret,\n,0,login,,,pin: 1234,0,,,,\n";
+    let parsed = parse_import_entries(csv, "bitwarden-csv").expect("Bitwarden CSV import");
+    assert_accounts_for_every_item(&parsed.accounting, 2);
+    assert_eq!(
+        reason_count(&parsed.accounting, ImportItemReason::MissingCredentials),
+        1
+    );
+}
+
+#[test]
+fn a_broken_otpauth_link_is_unreadable_and_not_unsupported() {
+    let list = "otpauth://totp/Fictional:person?secret=JBSWY3DPEHPK3PXP&issuer=Fictional\notpauth://?secret=JBSWY3DPEHPK3PXP\notpauth://hotp/Fictional:other?secret=JBSWY3DPEHPK3PXP&counter=1\n";
+    let parsed = parse_import_entries(list, "otpauth-txt").expect("otpauth list import");
+    assert_accounts_for_every_item(&parsed.accounting, 3);
+    assert_eq!(
+        reason_count(&parsed.accounting, ImportItemReason::UnusableCode),
+        1
+    );
+    assert_eq!(
+        reason_count(&parsed.accounting, ImportItemReason::CounterBasedCode),
+        1
+    );
+    assert_eq!(
+        reason_count(&parsed.accounting, ImportItemReason::UnsupportedCodeType),
+        0
+    );
+}
