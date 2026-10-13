@@ -375,7 +375,22 @@ describe('screen capture setting', () => {
     const stop = controller.start()
     await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
 
-    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: false, screenCaptureKnown: false })
+    stop()
+  })
+
+  it('keeps the first read when a toggle made while it was pending is refused', async () => {
+    const { controller } = harness()
+    let finishRead: (value: boolean) => void = () => {}
+    vaultApi.getScreenCaptureAllowed.mockReturnValue(new Promise<boolean>((resolve) => { finishRead = resolve }))
+    vaultApi.setScreenCaptureAllowed.mockRejectedValue(new Error('Sesame could not save the desktop setting.'))
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+    await controller.toggleScreenCapture()
+    finishRead(true)
+
+    await vi.waitFor(() => expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: true, screenCaptureKnown: true }))
     stop()
   })
 

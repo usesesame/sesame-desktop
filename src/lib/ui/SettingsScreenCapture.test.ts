@@ -71,6 +71,14 @@ test('the screen capture switch shows the allowed state and is disabled while a 
   expect(toggle.disabled).toBe(true)
 })
 
+test('the screen capture switch reports an unknown state and is disabled until the stored setting is read', async () => {
+  await renderSecurityTab({ screenCaptureKnown: false })
+
+  const toggle = screen.getByRole('switch', { name: 'Allow screen capture' }) as HTMLButtonElement
+  expect(toggle.getAttribute('aria-checked')).toBe('mixed')
+  expect(toggle.disabled).toBe(true)
+})
+
 test('the screen capture switch is absent where Sesame cannot hide its windows', async () => {
   platformCapabilities.set({ os: 'linux', ...hostCapabilities })
   await renderSecurityTab()

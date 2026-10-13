@@ -750,6 +750,7 @@
         autostartWorking={$settingsState.autostartWorking}
         onToggleAutostart={settingsController.toggleAutostart}
         screenCaptureAllowed={$settingsState.screenCaptureAllowed}
+        screenCaptureKnown={$settingsState.screenCaptureKnown}
         screenCaptureWorking={$settingsState.screenCaptureWorking}
         onToggleScreenCapture={settingsController.toggleScreenCapture}
         quickAccessShortcut={$settings.quickAccessShortcut}

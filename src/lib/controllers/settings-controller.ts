@@ -102,6 +102,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     autostartEnabled: false,
     autostartWorking: false,
     screenCaptureAllowed: false,
+    screenCaptureKnown: false,
     screenCaptureWorking: false,
     siteIconsWorking: false,
     siteIconsPresenceRequired: false,
@@ -188,8 +189,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     const startedAfterToggles = screenCaptureToggles
     try {
       const stored = await getScreenCaptureAllowed()
-      if (screenCaptureToggles === startedAfterToggles) state.patch({ screenCaptureAllowed: stored })
-    } catch { /* the window keeps hiding from capture */ }
+      if (screenCaptureToggles === startedAfterToggles) state.patch({ screenCaptureAllowed: stored, screenCaptureKnown: true })
+    } catch { /* the window keeps hiding from capture and the switch stays off until a read succeeds */ }
   }
 
   async function refreshServiceConnection() {
@@ -501,12 +502,12 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     async toggleScreenCapture() {
       if (state.value().screenCaptureWorking) return
       const next = !state.value().screenCaptureAllowed
-      screenCaptureToggles += 1
       state.patch({ screenCaptureWorking: true })
       feedback.clearError()
       try {
         await setScreenCaptureAllowed(next)
-        state.patch({ screenCaptureAllowed: next })
+        screenCaptureToggles += 1
+        state.patch({ screenCaptureAllowed: next, screenCaptureKnown: true })
         feedback.showNotice(next ? 'Screen capture allowed' : 'Screen capture blocked', next ? 'Screenshots, screen sharing and Windows Recall can now show Sesame. Turn this off after your support session.' : 'Windows will keep Sesame out of screenshots, screen sharing and Recall.')
       } catch (error) {
         feedback.setError(error)

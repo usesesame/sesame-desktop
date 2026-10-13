@@ -52,6 +52,7 @@
   export let autostartWorking = false
   export let onToggleAutostart: () => void
   export let screenCaptureAllowed = false
+  export let screenCaptureKnown = true
   export let screenCaptureWorking = false
   export let onToggleScreenCapture: () => void = () => {}
   export let quickAccessShortcut = 'Ctrl+Alt+S'
@@ -299,7 +300,7 @@
             {#if $platformCapabilities.os === 'windows'}
             <article>
               <div class="setting-copy"><strong>Allow screen capture</strong><p>Sesame asks Windows to keep its windows out of screenshots, screen sharing and Recall. Turn this on only while someone helps you in a support session.</p></div>
-              <button type="button" class="switch" class:active={screenCaptureAllowed} role="switch" aria-checked={screenCaptureAllowed} aria-label="Allow screen capture" disabled={screenCaptureWorking} on:click={onToggleScreenCapture}><span></span></button>
+              <button type="button" class="switch" class:active={screenCaptureKnown && screenCaptureAllowed} role="switch" aria-checked={screenCaptureKnown ? screenCaptureAllowed : "mixed"} aria-label="Allow screen capture" disabled={screenCaptureWorking || !screenCaptureKnown} on:click={onToggleScreenCapture}><span></span></button>
             </article>
             {/if}
             <article>
