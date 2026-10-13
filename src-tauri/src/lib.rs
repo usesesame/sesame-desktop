@@ -166,6 +166,8 @@ macro_rules! sesame_invoke_handler {
             desktop_shell::set_autostart_enabled,
             desktop_settings::get_website_icons_enabled,
             desktop_settings::set_website_icons_enabled,
+            desktop_settings::get_screen_capture_allowed,
+            desktop_settings::set_screen_capture_allowed,
             website_icons::get_website_icon,
             website_icons::clear_website_icon_cache,
             website_icons::get_website_icon_cache_status,
