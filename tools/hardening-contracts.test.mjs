@@ -907,6 +907,33 @@ test('the generated capability manifest matches the capability files', () => {
   assert.ok(generated['main-capability'] && generated['quick-access-capability'])
 })
 
+test('the generated ACL grants the feature gated commands only to their own builds', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = Object.fromEntries(capabilityFiles())
+  const permissions = applicationPermissions()
+  const enabledCommands = (configName) => {
+    const commands = new Set()
+    for (const identifier of configuredCapabilities(configName)) {
+      for (const command of capabilityCommands(manifests, capabilities, identifier)) commands.add(command)
+    }
+    return commands
+  }
+
+  const release = enabledCommands('tauri.conf.json')
+  for (const [permission, configName, capabilityName] of [
+    ['sync-preview', 'tauri.sync-preview.conf.json', 'sync-preview-capability'],
+    ['desktop-e2e', 'tauri.wdio.conf.json', 'desktop-e2e-capability'],
+  ]) {
+    const granted = [...capabilityCommands(manifests, capabilities, capabilityName)].sort()
+    assert.deepEqual(granted, [...permissions.get(permission)].sort(), `${capabilityName} drifted from the ${permission} permission`)
+    const feature = enabledCommands(configName)
+    for (const command of granted) {
+      assert.ok(feature.has(command), `${configName} cannot reach ${command} through ${capabilityName}`)
+      assert.ok(!release.has(command), `the release build reaches ${command} through ${capabilityName}`)
+    }
+  }
+})
+
 test('no webview holds a clipboard plugin permission or the clipboard plugin client', () => {
   const capabilities = capabilityFiles()
   for (const capability of capabilities.values()) {
