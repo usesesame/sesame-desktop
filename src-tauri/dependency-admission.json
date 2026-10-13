@@ -15,13 +15,13 @@
     },
     {
       "name": "@tauri-apps/api",
-      "version": "2.11",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
       "name": "@tauri-apps/cli",
-      "version": "2.11",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
