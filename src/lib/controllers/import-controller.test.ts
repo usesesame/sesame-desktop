@@ -34,6 +34,7 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
     sshKeys: 0,
     passkeysNotImported: 0,
     intentionallyOmittedItems: 0,
+    accounting: { supplied: 2, accepted: 2, retained: 0, unsupported: 0, malformed: 0, reasons: [] },
     fidelity: {
       logins: { imported: 2, transformed: 0, legacy: 0, malformed: 0, intentionallyOmitted: 0 },
       secureNotes: { imported: 0, transformed: 0, legacy: 0, malformed: 0, intentionallyOmitted: 0 },

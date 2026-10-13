@@ -33,7 +33,7 @@ pub mod sync;
 pub mod sync_adopt;
 #[cfg(feature = "sync-preview")]
 pub mod sync_transfer;
-mod updater;
+pub(crate) mod updater;
 
 pub(crate) use crate::adapters::network::account_api::*;
 pub(crate) use crate::adapters::platform::autotype::*;
