@@ -101,6 +101,9 @@ x25519-dalek = { version = "3", features = ["static_secrets"] }
 hkdf = "0.13"
 ts-rs = "12.0.1"
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already in the dependency graph through tauri-plugin-opener; naming it here
 # pins the same locked version rather than adding a second D-Bus stack.
