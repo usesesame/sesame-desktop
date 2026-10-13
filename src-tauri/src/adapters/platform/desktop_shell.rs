@@ -89,10 +89,10 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_min_size(Some(LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
-        secure_window(&window);
+        secure_window(&window).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
     }
     if let Some(window) = app.get_webview_window("quick-access") {
-        secure_window(&window);
+        secure_window(&window).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
     }
 
     // Hidden by default so startup-entry launches stay in the tray; other launches show once.
@@ -280,15 +280,18 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
-    secure_window(&window);
+    if secure_window(&window).is_err() {
+        let _ = window.destroy();
+        return None;
+    }
     Some(window)
 }
 
-fn secure_window(window: &WebviewWindow) {
+fn secure_window(window: &WebviewWindow) -> Result<(), String> {
     harden_release_webview(window);
     let capture_allowed = desktop_settings::settings_path(window.app_handle())
         .is_ok_and(|path| desktop_settings::screen_capture_allowed_at(&path));
-    let _ = set_display_affinity(window, display_affinity(capture_allowed));
+    set_display_affinity(window, display_affinity(capture_allowed))
 }
 
 pub(crate) fn apply_capture_policy(app: &AppHandle, capture_allowed: bool) -> Result<(), String> {
