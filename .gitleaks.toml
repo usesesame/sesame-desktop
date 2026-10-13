@@ -81,3 +81,11 @@ paths = [
   '''src-tauri/sesame-core/tests/import_accounting\.rs$''',
 ]
 regexes = ['''"secret": "(KRSXG5CTMVRXEZLU|MFRGGZDFMZTWQ2LK|GEZDGNBVGY3TQOJQ|NBSWY3DPFQQHO33S|MZXW6YTBOI4TQOJQ)"''']
+
+[[allowlists]]
+description = "Public deterministic verification keys in the cross-language Sync v3 fixture"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''src-tauri/contracts/sync/v3/v3-fixture\.json$''']
+regexes = ['''"(signerKey|subjectSigningKey)": "[A-Za-z0-9_-]{43}"''']
