@@ -732,8 +732,11 @@
         recoveryWorking={$settingsState.recoveryWorking}
         recoveryPresenceIntent={$settingsState.recoveryPresenceIntent}
         bind:recoveryPresencePassword={$settingsState.recoveryPresencePassword}
+        bind:recoveryPruneBackups={$settingsState.recoveryPruneBackups}
         issuedRecoveryKit={$settingsState.issuedRecoveryKit}
         bind:issuedRecoveryConfirmed={$settingsState.issuedRecoveryConfirmed}
+        issuedBackupsPruned={$settingsState.issuedBackupsPruned}
+        issuedBackupsRemaining={$settingsState.issuedBackupsRemaining}
         onRequestRecoveryKit={settingsController.startRecoveryKitRequest}
         onIssueRecoveryKit={settingsController.startRecoveryKitIssue}
         onCancelRecoveryRequest={() => void settingsController.cancelRecoveryKitRequest()}

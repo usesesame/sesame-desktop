@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -16,6 +16,11 @@ use crate::util::{fill_random, unix_timestamp};
 use crate::VaultResult;
 
 const RECORD_AAD_PREFIX: &[u8] = b"sesame:memory-record:v1";
+
+#[cfg(test)]
+thread_local! {
+    static LOCATOR_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,6 +59,7 @@ pub struct VaultRecordStore {
     header: CipherBlob,
     index: VaultSnapshot,
     active: Vec<SealedRecord>,
+    active_ordinals: HashMap<String, usize>,
     trash: Vec<SealedRecord>,
     history: Vec<SealedRecord>,
 }
@@ -143,11 +149,13 @@ impl VaultRecordStore {
             .map(|entry| seal_item(&key, "history", &entry.id, entry.item.kind(), entry))
             .collect::<VaultResult<Vec<_>>>()?;
         let index = snapshot_for(payload);
+        let active_ordinals = ordinals_by_id(&active);
         Ok(Self {
             key,
             header,
             index,
             active,
+            active_ordinals,
             trash,
             history,
         })
@@ -207,17 +215,25 @@ impl VaultRecordStore {
     }
 
     pub fn open_item(&self, id: &str) -> VaultResult<OpenedItem> {
-        let record = self
-            .active
-            .iter()
-            .find(|record| record.id == id)
-            .ok_or("That saved item no longer exists.")?;
+        let record = self.active_record(id)?;
         let mut item = open_active_record(&self.key, record)?;
         if validate_item_locator(&item, record).is_err() {
             item.zeroize();
             return Err(invalid_store());
         }
         Ok(OpenedItem(item))
+    }
+
+    fn active_record(&self, id: &str) -> VaultResult<&SealedRecord> {
+        let ordinal = self
+            .active_ordinals
+            .get(id)
+            .ok_or("That saved item no longer exists.")?;
+        let record = self.active.get(*ordinal).ok_or_else(invalid_store)?;
+        if !locator_matches(record, id) {
+            return Err(invalid_store());
+        }
+        Ok(record)
     }
 
     pub fn trash_item_preview(&self, id: &str) -> VaultResult<ItemPreview> {
@@ -260,6 +276,20 @@ impl VaultRecordStore {
         *self = replacement;
         Ok(())
     }
+}
+
+fn ordinals_by_id(records: &[SealedRecord]) -> HashMap<String, usize> {
+    let mut ordinals = HashMap::with_capacity(records.len());
+    for (ordinal, record) in records.iter().enumerate() {
+        ordinals.entry(record.id.clone()).or_insert(ordinal);
+    }
+    ordinals
+}
+
+fn locator_matches(record: &SealedRecord, id: &str) -> bool {
+    #[cfg(test)]
+    LOCATOR_COMPARISONS.with(|count| count.set(count.get() + 1));
+    record.id == id
 }
 
 fn ensure_unique_active_ids(payload: &VaultPayload) -> VaultResult<()> {
@@ -392,7 +422,7 @@ fn invalid_store() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::VaultEntry;
+    use crate::types::{Identity, VaultEntry};
 
     fn login(id: &str, title: &str, password: &str) -> VaultEntry {
         let mut entry = VaultEntry::default();
@@ -400,6 +430,51 @@ mod tests {
         entry.title = title.to_string();
         entry.password = password.to_string();
         entry
+    }
+
+    fn identity(id: &str, name: &str) -> Identity {
+        let mut identity = Identity::default();
+        identity.id = id.to_string();
+        identity.full_name = name.to_string();
+        identity
+    }
+
+    fn reindex(store: &mut VaultRecordStore) {
+        store.active_ordinals = ordinals_by_id(&store.active);
+    }
+
+    fn assert_index_matches_records(store: &VaultRecordStore) {
+        assert_eq!(store.active_ordinals.len(), store.active.len());
+        for (ordinal, record) in store.active.iter().enumerate() {
+            assert_eq!(store.active_ordinals.get(&record.id), Some(&ordinal));
+        }
+    }
+
+    fn comparisons_during(operation: impl FnOnce()) -> usize {
+        LOCATOR_COMPARISONS.with(|count| count.set(0));
+        operation();
+        LOCATOR_COMPARISONS.with(|count| count.get())
+    }
+
+    fn opened_password(store: &VaultRecordStore, id: &str) -> String {
+        match &*store.open_item(id).expect("opened item") {
+            TaggedItem::Login(entry) => entry.password.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn numbered_payload(count: usize) -> VaultPayload {
+        let mut value = payload();
+        value.entries = (0..count)
+            .map(|index| {
+                login(
+                    &format!("login-{index:04}"),
+                    "Northwind",
+                    &format!("fictional-secret-{index:04}"),
+                )
+            })
+            .collect();
+        value
     }
 
     fn payload() -> VaultPayload {
@@ -472,6 +547,7 @@ mod tests {
 
         store.active[0].kind = original_kind;
         store.active[0].id = "login-b".to_string();
+        reindex(&mut store);
 
         assert!(store.open_payload().is_err());
         assert!(store.open_item("login-b").is_err());
@@ -589,5 +665,214 @@ mod tests {
         assert!(previews.contains("Contoso"));
         assert!(!previews.contains("fictional-alpha-secret"));
         assert!(!previews.contains("fictional-beta-secret"));
+    }
+
+    #[test]
+    fn opening_every_record_compares_one_locator_per_lookup() {
+        let count = 400;
+        let store = VaultRecordStore::from_payload(&numbered_payload(count)).expect("record store");
+
+        let comparisons = comparisons_during(|| {
+            for index in 0..count {
+                store
+                    .open_item(&format!("login-{index:04}"))
+                    .expect("opened item");
+            }
+        });
+
+        assert_eq!(comparisons, count);
+    }
+
+    #[test]
+    fn index_covers_every_active_kind_in_record_order() {
+        let mut value = payload();
+        value.identities = vec![identity("identity-a", "Casey North")];
+        let store = VaultRecordStore::from_payload(&value).expect("record store");
+
+        assert_index_matches_records(&store);
+        assert_eq!(store.active_ordinals.get("login-a"), Some(&0));
+        assert_eq!(store.active_ordinals.get("login-b"), Some(&1));
+        assert_eq!(store.active_ordinals.get("identity-a"), Some(&2));
+        assert!(matches!(
+            &*store.open_item("identity-a").expect("opened identity"),
+            TaggedItem::Identity(found) if found.full_name == "Casey North"
+        ));
+    }
+
+    #[test]
+    fn index_holds_only_identifiers() {
+        let store = VaultRecordStore::from_payload(&payload()).expect("record store");
+
+        let mut keys: Vec<&str> = store.active_ordinals.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+
+        assert_eq!(keys, ["login-a", "login-b"]);
+    }
+
+    #[test]
+    fn inserted_records_become_reachable() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let mut grown = payload();
+        grown
+            .entries
+            .insert(0, login("login-new", "Fabrikam", "fictional-new-secret"));
+        grown
+            .identities
+            .push(identity("identity-new", "Robin South"));
+
+        store.replace_payload(&grown).expect("replaced");
+
+        assert_index_matches_records(&store);
+        assert_eq!(opened_password(&store, "login-new"), "fictional-new-secret");
+        assert_eq!(opened_password(&store, "login-a"), "fictional-alpha-secret");
+        assert_eq!(opened_password(&store, "login-b"), "fictional-beta-secret");
+        assert!(store.open_item("identity-new").is_ok());
+    }
+
+    #[test]
+    fn deleted_records_stop_resolving_and_the_rest_keep_resolving() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let mut shrunk = payload();
+        shrunk.entries.remove(0);
+
+        store.replace_payload(&shrunk).expect("replaced");
+
+        assert_index_matches_records(&store);
+        assert!(store.open_item("login-a").is_err());
+        assert_eq!(opened_password(&store, "login-b"), "fictional-beta-secret");
+        assert_eq!(store.active_ordinals.get("login-b"), Some(&0));
+    }
+
+    #[test]
+    fn trashed_and_restored_records_move_between_stores() {
+        let mut trashed = payload();
+        let removed = trashed.entries.remove(0);
+        trashed.trash.push(TrashedItem {
+            item: TaggedItem::Login(removed),
+            deleted_at: unix_timestamp(),
+        });
+        let mut store = VaultRecordStore::from_payload(&trashed).expect("record store");
+
+        assert!(store.open_item("login-a").is_err());
+        assert!(store.trash_item_preview("login-a").is_ok());
+
+        store.replace_payload(&payload()).expect("restored");
+
+        assert_index_matches_records(&store);
+        assert_eq!(opened_password(&store, "login-a"), "fictional-alpha-secret");
+        assert!(store.trash_item_preview("login-a").is_err());
+    }
+
+    #[test]
+    fn replaced_record_content_is_what_opens() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let mut edited = payload();
+        edited.entries[1].password = "fictional-rotated-secret".to_string();
+
+        store.replace_payload(&edited).expect("replaced");
+
+        assert_eq!(
+            opened_password(&store, "login-b"),
+            "fictional-rotated-secret"
+        );
+        assert_eq!(opened_password(&store, "login-a"), "fictional-alpha-secret");
+    }
+
+    #[test]
+    fn reordered_records_resolve_by_id() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let mut reordered = payload();
+        reordered.entries.reverse();
+
+        store.replace_payload(&reordered).expect("replaced");
+
+        assert_index_matches_records(&store);
+        assert_eq!(store.active_ordinals.get("login-b"), Some(&0));
+        assert_eq!(opened_password(&store, "login-a"), "fictional-alpha-secret");
+    }
+
+    #[test]
+    fn rebuilt_store_resolves_the_same_ids() {
+        let store = VaultRecordStore::from_payload(&numbered_payload(25)).expect("record store");
+        let opened = store.open_payload().expect("opened payload");
+
+        let reloaded = VaultRecordStore::from_payload(&opened).expect("reloaded store");
+
+        assert_index_matches_records(&reloaded);
+        for index in 0..25 {
+            let id = format!("login-{index:04}");
+            assert_eq!(
+                opened_password(&reloaded, &id),
+                format!("fictional-secret-{index:04}")
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_ids_across_kinds_are_rejected_and_keep_the_previous_index() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let mut invalid = payload();
+        invalid.identities = vec![identity("login-a", "Casey North")];
+
+        let result = store.replace_payload(&invalid);
+
+        assert!(result.is_err());
+        assert_index_matches_records(&store);
+        assert_eq!(opened_password(&store, "login-a"), "fictional-alpha-secret");
+        assert!(matches!(
+            &*store.open_item("login-a").expect("opened item"),
+            TaggedItem::Login(_)
+        ));
+    }
+
+    #[test]
+    fn unknown_ids_are_not_found() {
+        let store = VaultRecordStore::from_payload(&payload()).expect("record store");
+
+        for id in ["", "missing", "LOGIN-A", " login-a", "login-a ", "login-"] {
+            let error = store.open_item(id).err().expect("unknown id");
+            assert_eq!(error, "That saved item no longer exists.", "id {id:?}");
+        }
+    }
+
+    #[test]
+    fn ids_from_a_stale_snapshot_fail_after_the_records_change() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        let stale = store.snapshot();
+        let mut changed = payload();
+        changed.entries.remove(1);
+        changed
+            .entries
+            .push(login("login-c", "Fabrikam", "fictional-gamma-secret"));
+
+        store.replace_payload(&changed).expect("replaced");
+
+        let mut stale_ids: Vec<&str> = stale
+            .entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
+        stale_ids.sort_unstable();
+        assert_eq!(stale_ids, ["login-a", "login-b"]);
+        assert!(store.open_item("login-a").is_ok());
+        assert!(store.open_item("login-b").is_err());
+        assert!(store.open_item("login-c").is_ok());
+    }
+
+    #[test]
+    fn index_entry_pointing_at_another_record_is_rejected() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        store.active_ordinals.insert("login-a".to_string(), 1);
+
+        assert!(store.open_item("login-a").is_err());
+        assert_eq!(opened_password(&store, "login-b"), "fictional-beta-secret");
+    }
+
+    #[test]
+    fn index_entry_past_the_end_is_rejected() {
+        let mut store = VaultRecordStore::from_payload(&payload()).expect("record store");
+        store.active_ordinals.insert("login-a".to_string(), 2);
+
+        assert!(store.open_item("login-a").is_err());
     }
 }

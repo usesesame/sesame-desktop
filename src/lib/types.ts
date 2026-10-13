@@ -135,6 +135,7 @@ export interface PasswordAnalysis {
 }
 
 export type { RecoveryHealth } from './generated/RecoveryHealth'
+export type { RecoveryReplacementResult } from './generated/RecoveryReplacementResult'
 export type { RecoveryReplacementStatus } from './generated/RecoveryReplacementStatus'
 export type { DiagnosticStatus } from './generated/DiagnosticStatus'
 export type { WebsiteIconCacheStatus } from './generated/WebsiteIconCacheStatus'

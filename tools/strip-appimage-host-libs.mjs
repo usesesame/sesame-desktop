@@ -48,9 +48,15 @@ export async function addHelperAlias(tree) {
   return true
 }
 
+const libraryPathLine = 'export LD_LIBRARY_PATH="$APPDIR/usr${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'
+const x11BackendLine = 'export GDK_BACKEND=x11'
+
 export function appRunHookWithLibraryPath(hook) {
-  if (hook.includes('LD_LIBRARY_PATH="$APPDIR/usr')) return null
-  return `${hook.replace(/\n$/, '')}\nexport LD_LIBRARY_PATH="$APPDIR/usr\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n`
+  const missing = []
+  if (!hook.includes('LD_LIBRARY_PATH="$APPDIR/usr')) missing.push(libraryPathLine)
+  if (!/^export GDK_BACKEND=x11\b/m.test(hook)) missing.push(x11BackendLine)
+  if (missing.length === 0) return null
+  return `${hook.replace(/\n$/, '')}\n${missing.join('\n')}\n`
 }
 
 function parseSquashfsSuperblock(summary) {

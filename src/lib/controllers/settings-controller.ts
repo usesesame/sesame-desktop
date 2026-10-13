@@ -109,8 +109,11 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     recoveryReplacement: null as RecoveryReplacementStatus | null,
     recoveryPresenceIntent: null as 'request-kit' | 'issue-kit' | null,
     recoveryPresencePassword: '',
+    recoveryPruneBackups: false,
     recoveryWorking: false,
     issuedRecoveryKit: '',
+    issuedBackupsPruned: false,
+    issuedBackupsRemaining: null as number | null,
     issuedRecoveryConfirmed: false,
     changeMasterPasswordStep: 'verify' as 'verify' | 'details',
     currentMasterPassword: '',
@@ -574,12 +577,12 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     },
     startRecoveryKitIssue() {
       feedback.clearError()
-      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '' })
+      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '', recoveryPruneBackups: false })
     },
     cancelRecoveryPresence() {
       if (state.value().recoveryWorking) return
       feedback.clearError()
-      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false })
     },
     async confirmRecoveryPresence() {
       const current = state.value()
@@ -593,8 +596,17 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
           state.patch({ recoveryReplacement: status, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
           feedback.showNotice('New recovery kit requested', 'It will be ready in 72 hours. Sesame shows a warning until then.')
         } else {
-          const kit = await completeRecoveryReplacement()
-          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false, timeConfirmed: true }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+          const result = await completeRecoveryReplacement(current.recoveryPresencePassword, current.recoveryPruneBackups)
+          state.patch({
+            issuedRecoveryKit: result.recoveryKit, issuedRecoveryConfirmed: false, issuedBackupsPruned: current.recoveryPruneBackups,
+            issuedBackupsRemaining: result.backupsRemaining ?? null, recoveryReplacement: { ready: false, timeConfirmed: true },
+            recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false,
+          })
+          try {
+            vault.patch({ status: await getVaultStatus() })
+          } catch {
+            vault.patch({ status: { ...vault.value().status, pinUnlockAvailable: false, helloUnlockAvailable: false } })
+          }
         }
       } catch (error) {
         feedback.setError(error)
@@ -618,7 +630,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     },
     finishIssuedRecoveryKit() {
       if (!state.value().issuedRecoveryConfirmed) return
-      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false })
+      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false, issuedBackupsPruned: false, issuedBackupsRemaining: null })
       feedback.showNotice('New recovery kit saved', 'Your old recovery kit no longer opens this vault.')
     },
     finishMasterPasswordChange() {
@@ -704,8 +716,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
         changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
         confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false,
         changingMasterPassword: false,
-        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryWorking: false,
-        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, recoveryReplacement: null,
+        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false, recoveryWorking: false,
+        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, issuedBackupsPruned: false, issuedBackupsRemaining: null, recoveryReplacement: null,
       })
     },
   }
