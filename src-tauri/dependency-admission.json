@@ -147,6 +147,11 @@
       "reason": "Verifies updater signatures. 0.3.0 replaces unsafe byte copies with safe slice copies and keeps the same API."
     },
     {
+      "name": "poly1305",
+      "version": "0.9",
+      "reason": "Enables the zeroize feature so the Poly1305 authenticator state is wiped on drop. It is already a locked transitive crate."
+    },
+    {
       "name": "psl",
       "version": "2",
       "reason": "Compile-time public suffix list for registrable domain comparison in the lookalike host check."
