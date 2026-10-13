@@ -3204,6 +3204,7 @@ checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
 dependencies = [
  "cpufeatures 0.3.1",
  "universal-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -3997,6 +3998,7 @@ dependencies = [
  "hkdf",
  "libc",
  "minisign-verify 0.3.0",
+ "poly1305",
  "rand",
  "serde",
  "serde_json",

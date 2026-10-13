@@ -22,8 +22,8 @@ pub use linux::{
 
 mod fs;
 pub use fs::{
-    copy_private_file, create_private_dir, open_private_file, replace_file, same_file_identity,
-    securely_delete,
+    copy_private_file, create_private_dir, open_private_append, open_private_file, replace_file,
+    same_file_identity, securely_delete,
 };
 
 #[cfg(not(any(windows, target_os = "linux")))]
