@@ -29,7 +29,7 @@ pub mod sync_transfer;
 pub(crate) mod test_support;
 mod tools;
 mod trash;
-mod updater;
+pub(crate) mod updater;
 mod wifi;
 
 pub(crate) use crate::adapters::network::account_api::*;
