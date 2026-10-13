@@ -1,0 +1,16 @@
+{
+  "version": "1.2.3",
+  "url": "https://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe",
+  "notes": "Verification and release notes: https://downloads.example.test/v1.2.3/notes",
+  "platforms": {
+    "windows-x86_64-nsis": {
+      "url": "https://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe",
+      "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  },
+  "candidateReceipt": {
+    "payload": "sesame-release-set-candidate-v1\n1.2.3\nbeta\nwindows\nx86_64\nWindows 10,Windows 11\nhttps://downloads.example.test/v1.2.3/notes\n31dabc89d6bb31b8949d90ad9bcea36061797d6ec1409a42dae66284d4615cc6\nupdater\nnsis\nx86_64\nhttps://downloads.example.test/v1.2.3/Sesame_1.2.3_x64-setup.exe\nwindows/v1.2.3/Sesame_1.2.3_x64-setup.exe\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n42\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nfictional-updater-key",
+    "signingKeyId": "fictional-candidate-key",
+    "signature": "RVxdebwkZxBCOo2ArQlarZTFmZ5qcx2dwZpKiTiC8Ts_8cwbUGUfKSxcqqfT7RHJrSGAc2fMOX924iKNgxfQDw"
+  }
+}
