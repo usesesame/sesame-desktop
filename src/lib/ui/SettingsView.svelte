@@ -34,8 +34,11 @@
   export let recoveryWorking = false
   export let recoveryPresenceIntent: 'request-kit' | 'issue-kit' | null = null
   export let recoveryPresencePassword = ''
+  export let recoveryPruneBackups = false
   export let issuedRecoveryKit = ''
   export let issuedRecoveryConfirmed = false
+  export let issuedBackupsPruned = false
+  export let issuedBackupsRemaining: number | null = null
   export let onRequestRecoveryKit: () => void = () => {}
   export let onIssueRecoveryKit: () => void = () => {}
   export let onCancelRecoveryRequest: () => void = () => {}
@@ -432,10 +435,10 @@
 </section>
 
 {#if recoveryPresenceIntent}
-  <PasswordPresenceModal intent={recoveryPresenceIntent} bind:presenceSecret={recoveryPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmRecoveryPresence} onCancel={onCancelRecoveryPresence} />
+  <PasswordPresenceModal intent={recoveryPresenceIntent} bind:presenceSecret={recoveryPresencePassword} bind:pruneBackups={recoveryPruneBackups} errorMessage={errorMessage} onConfirm={onConfirmRecoveryPresence} onCancel={onCancelRecoveryPresence} />
 {/if}
 {#if issuedRecoveryKit}
-  <IssuedRecoveryKitModal recoveryKit={issuedRecoveryKit} bind:confirmed={issuedRecoveryConfirmed} onDone={onFinishIssuedRecoveryKit} />
+  <IssuedRecoveryKitModal recoveryKit={issuedRecoveryKit} bind:confirmed={issuedRecoveryConfirmed} backupsPruned={issuedBackupsPruned} backupsRemaining={issuedBackupsRemaining} onDone={onFinishIssuedRecoveryKit} />
 {/if}
 {#if siteIconsPresenceRequired}
   <PasswordPresenceModal intent="enable-icons" bind:presenceSecret={siteIconsPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmSiteIconsPresence} onCancel={onCancelSiteIconsPresence} />
