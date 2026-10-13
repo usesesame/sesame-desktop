@@ -107,9 +107,14 @@ good-faith report that turns out to be out of scope is not held against you.
   screen while a secret is shown.
 - Malware that controls your browser profile can act as the extension. The
   approval prompt in the Sesame window is the last check before a fill.
-- Changing the master password cannot reach copies made before the change:
-  exported backups, readable exports, operating system backups, cloud-synced
-  folders, and data left on an SSD.
+- Changing the master password or getting a new recovery kit cannot reach
+  copies made before the change: exported backups, readable exports,
+  operating system backups, cloud-synced folders, and data left on an SSD. A
+  copy made before a new kit still opens with the old kit.
+- Turning off PIN unlock does not change the vault key. A copy of the vault
+  file made while the PIN was on opens later versions for someone who also has
+  that PIN and this device's key, until you change the master password or get
+  a new recovery kit.
 - Anyone who can write to the vault folder can put back an older vault file.
   Sesame does not yet detect that rollback.
 - A master password or recovery kit that someone else learns opens any copy
