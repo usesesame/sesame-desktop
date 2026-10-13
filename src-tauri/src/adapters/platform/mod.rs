@@ -13,6 +13,11 @@ pub(crate) mod dll_search;
 pub(crate) mod external_url;
 pub(crate) mod navigation_guard;
 pub(crate) mod session_guard;
+#[cfg(any(
+    test,
+    all(target_os = "linux", not(debug_assertions), not(feature = "wdio"))
+))]
+pub(crate) mod webview_environment;
 pub(crate) mod webview_policy;
 #[cfg(target_os = "linux")]
 pub(crate) mod webview_sandbox;

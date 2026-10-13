@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "header": { "slots": null, "params": null },
+  "db": {
+    "version": 3,
+    "entries": [
+      {
+        "type": "totp",
+        "uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "marta@žalias.test",
+        "issuer": "Žalias paštas",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": { "secret": "KRSXG5CTMVRXEZLU", "algo": "SHA1", "digits": 6, "period": 30 },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "22222222-2222-4222-8222-222222222222",
+        "name": "雪@例え.test",
+        "issuer": "例えバンク",
+        "note": "",
+        "favorite": true,
+        "icon": null,
+        "info": { "secret": "MFRGGZDFMZTWQ2LK", "algo": "SHA256", "digits": 8, "period": 60 },
+        "groups": []
+      },
+      {
+        "type": "hotp",
+        "uuid": "33333333-3333-4333-8333-333333333333",
+        "name": "ūkininkas",
+        "issuer": "Žemės bankas",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": { "secret": "GEZDGNBVGY3TQOJQ", "algo": "SHA1", "digits": 6, "counter": 7 },
+        "groups": []
+      },
+      {
+        "type": "steam",
+        "uuid": "44444444-4444-4444-8444-444444444444",
+        "name": "žaidėjas",
+        "issuer": "Steam",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": { "secret": "NBSWY3DPFQQHO33S", "algo": "SHA1", "digits": 5, "period": 30 },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "55555555-5555-4555-8555-555555555555",
+        "name": "odd@example.test",
+        "issuer": "Naïve Café",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": { "secret": "MZXW6YTBOI4TQOJQ", "algo": "SHA3-256", "digits": 6, "period": 30 },
+        "groups": []
+      },
+      {
+        "type": "totp",
+        "uuid": "66666666-6666-4666-8666-666666666666",
+        "name": "empty@example.test",
+        "issuer": "Tuščias",
+        "note": "",
+        "favorite": false,
+        "icon": null,
+        "info": { "secret": "!!", "algo": "SHA1", "digits": 6, "period": 30 },
+        "groups": []
+      }
+    ],
+    "groups": []
+  }
+}
