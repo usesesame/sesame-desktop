@@ -12,7 +12,6 @@
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
     "core:webview:deny-internal-toggle-devtools",
-    "clipboard-manager:allow-write-text",
     "vault-lifecycle",
     "vault-read",
     "vault-edit",
@@ -25,8 +24,6 @@
     "browser-approval",
     "desktop-settings",
     "website-icons",
-    "clipboard-guard",
-    "sync-preview",
-    "desktop-e2e"
+    "clipboard-guard"
   ]
 }

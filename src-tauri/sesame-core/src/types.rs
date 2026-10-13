@@ -459,7 +459,8 @@ pub struct MergeCandidate {
 #[serde(rename_all = "camelCase")]
 pub struct MergeFieldOption {
     pub entry_id: String,
-    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
     pub present: bool,
 }
 

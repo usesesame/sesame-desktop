@@ -6,6 +6,7 @@ import {
   autoType,
   bulkAssignFolder,
   checkPasswordBreach,
+  checkReleasePresence,
   copyToClipboard,
   createFolder,
   deleteFolder,
@@ -29,7 +30,7 @@ import type { ModalController } from './modal-controller'
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
 const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
 
-export type PasswordIntent = 'reveal' | 'copy'
+export type PasswordIntent = 'reveal' | 'copy' | 'autotype'
 
   function copyFieldLabel(field: 'username' | 'email' | 'password'): string {
   return field === 'username' ? 'Username' : field === 'email' ? 'Email' : 'Password'
@@ -110,6 +111,33 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     ? $vault.snapshot?.entries.find((entry) => entry.id === $state.entryMenu?.id) ?? null
     : null)
   const loginIds = derived(vault, ($vault) => new Set(($vault.snapshot?.entries ?? []).map((entry) => entry.id)))
+
+  function beginAutoTypeCountdown(id: string) {
+    if (state.value().autoTypeCountdown > 0) return
+    stopAutoTypeCountdown()
+    state.patch({ autoTypeEntryId: id, autoTypeCountdown: AUTO_TYPE_COUNTDOWN_SECONDS })
+    const tick = () => {
+      const remaining = state.value().autoTypeCountdown - 1
+      if (remaining <= 0) {
+        state.patch({ autoTypeCountdown: 0 })
+        void (async () => {
+          feedback.clearError()
+          try {
+            await autoType(id)
+            feedback.showNotice('Typed', 'Sesame sent the saved sign-in details to the focused window.')
+          } catch (error) {
+            feedback.setError(error instanceof Error && error.message === PRESENCE_REQUIRED ? new Error('Confirm your master password again, then start auto-type.') : error)
+          } finally {
+            if (state.value().autoTypeEntryId === id) state.patch({ autoTypeEntryId: '' })
+          }
+        })()
+        return
+      }
+      state.patch({ autoTypeCountdown: remaining })
+      autoTypeTimer = setTimeout(tick, 1000)
+    }
+    autoTypeTimer = setTimeout(tick, 1000)
+  }
 
   async function readPassword(id: string, intent: PasswordIntent): Promise<string> {
     const generation = revealGeneration
@@ -394,6 +422,11 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         state.patch({ passwordPresenceError: messageFor(error) })
         return
       }
+      if (intent === 'autotype') {
+        state.patch({ passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceError: '' })
+        beginAutoTypeCountdown(id)
+        return
+      }
       if (intent === 'copy') {
         if (await copyPassword(id)) state.patch({ passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceError: '' })
         return
@@ -433,32 +466,20 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
         if (vault.value().loginCard?.id === entryId) state.patch({ breachCheckWorking: false })
       }
     },
-    startAutoType() {
+    async startAutoType() {
       const card = vault.value().loginCard
       if (!card || state.value().autoTypeCountdown > 0) return
-      stopAutoTypeCountdown()
-      state.patch({ autoTypeEntryId: card.id, autoTypeCountdown: AUTO_TYPE_COUNTDOWN_SECONDS })
-      const tick = () => {
-        const remaining = state.value().autoTypeCountdown - 1
-        if (remaining <= 0) {
-          state.patch({ autoTypeCountdown: 0 })
-          void (async () => {
-            feedback.clearError()
-            try {
-              await autoType(card.id)
-              feedback.showNotice('Typed', 'Sesame sent the saved sign-in details to the focused window.')
-            } catch (error) {
-              feedback.setError(error)
-            } finally {
-              if (state.value().autoTypeEntryId === card.id) state.patch({ autoTypeEntryId: '' })
-            }
-          })()
-          return
+      try {
+        await checkReleasePresence()
+      } catch (error) {
+        if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+          state.patch({ passwordPresenceRequired: true, passwordPresenceFor: card.id, passwordPresenceIntent: 'autotype', passwordPresenceSecret: '', passwordPresenceError: '' })
+        } else {
+          feedback.setError(error)
         }
-        state.patch({ autoTypeCountdown: remaining })
-        autoTypeTimer = setTimeout(tick, 1000)
+        return
       }
-      autoTypeTimer = setTimeout(tick, 1000)
+      beginAutoTypeCountdown(card.id)
     },
     cancelAutoType() {
       stopAutoTypeCountdown()

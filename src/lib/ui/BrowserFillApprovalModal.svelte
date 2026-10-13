@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
   import { useAppStores } from '../stores/app-stores'
   import type { BrowserFillRequest } from '../types'
@@ -68,10 +69,10 @@
   </div>
 
   <div class="browser-fill-footer">
-    <span>{remaining > 0 ? `Expires in ${remaining}s` : 'Request expired'}</span>
+    <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
-      <button type="button" class="primary-button" disabled={!$browserFill.selectedId || working || remaining === 0} on:click={onConfirm}>
+      <button type="button" class="primary-button" disabled={!$browserFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>
         {working ? 'Approving…' : 'Fill login'}
       </button>
     </div>

@@ -485,14 +485,43 @@ pub fn merge_duplicate_logins(
     })
 }
 
+const MIN_COMPARED_LOGINS: usize = 2;
+const MAX_COMPARED_LOGINS: usize = 16;
+
+fn checked_comparison_ids(ids: Vec<String>) -> VaultResult<Vec<String>> {
+    if ids.len() < MIN_COMPARED_LOGINS {
+        return Err("Choose at least two logins to compare.".into());
+    }
+    if ids.len() > MAX_COMPARED_LOGINS {
+        return Err(format!(
+            "Choose at most {MAX_COMPARED_LOGINS} logins to compare."
+        ));
+    }
+    let mut seen = HashSet::with_capacity(ids.len());
+    let mut checked = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Err("One of the selected logins is invalid.".into());
+        }
+        if !seen.insert(id.clone()) {
+            return Err("Each login can be compared only once.".into());
+        }
+        checked.push(id);
+    }
+    Ok(checked)
+}
+
 #[tauri::command]
 pub fn get_merge_comparison(
     ids: Vec<String>,
     state: State<'_, VaultState>,
 ) -> VaultResult<MergeComparison> {
-    if ids.len() < 2 {
-        return Err("Choose at least two logins to compare.".into());
-    }
+    merge_comparison_in_state(ids, &state)
+}
+
+fn merge_comparison_in_state(ids: Vec<String>, state: &VaultState) -> VaultResult<MergeComparison> {
+    let ids = checked_comparison_ids(ids)?;
     let session = state
         .session
         .lock()
@@ -500,7 +529,7 @@ pub fn get_merge_comparison(
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
     let mut opened = Vec::with_capacity(ids.len());
     for id in &ids {
-        opened.push(session.open_item(id.trim())?);
+        opened.push(session.open_item(id)?);
     }
     let group = opened
         .iter()
@@ -695,5 +724,145 @@ mod add_items_tag_command_tests {
         let stored = vault.stored_login("login-a");
         assert!(stored.tags.is_empty());
         assert_eq!(stored.updated_at, 41);
+    }
+}
+
+#[cfg(test)]
+mod merge_comparison_command_tests {
+    use super::*;
+    use crate::commands::test_support::TestVault;
+    use crate::vault::VaultEntry;
+
+    const PASSWORDS: [&str; 2] = ["fictional-bank-password", "fictional-mail-password"];
+    const SEEDS: [&str; 2] = ["FICTIONALSEEDBANK2222", "FICTIONALSEEDMAIL3333"];
+    const NOTES: [&str; 2] = ["fictional bank note", "fictional mail note"];
+
+    fn vault_with_two_secret_logins() -> TestVault {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        {
+            let mut guard = vault.state.session.lock().expect("session lock");
+            let session = guard.as_mut().expect("unlocked session");
+            let mut payload = session.open_payload().expect("opened payload").clone();
+            payload.entries[0].password = PASSWORDS[0].to_string();
+            payload.entries[0].totp = Some(SEEDS[0].to_string());
+            payload.entries[0].notes = Some(NOTES[0].to_string());
+            let mut second = VaultEntry::default();
+            second.id = "login-b".to_string();
+            second.title = "Northwind".to_string();
+            second.url = "https://northwind.example".to_string();
+            second.username = "fictional-user".to_string();
+            second.password = PASSWORDS[1].to_string();
+            second.totp = Some(SEEDS[1].to_string());
+            second.notes = Some(NOTES[1].to_string());
+            payload.entries.push(second);
+            commit_payload_change(session, payload).expect("seeded payload");
+        }
+        vault
+    }
+
+    fn ids(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn the_comparison_the_command_returns_holds_no_secret_value() {
+        let vault = vault_with_two_secret_logins();
+
+        let comparison = merge_comparison_in_state(ids(&["login-a", "login-b"]), &vault.state)
+            .expect("comparison");
+
+        let json = serde_json::to_string(&comparison).expect("serialized comparison");
+        for secret in PASSWORDS.iter().chain(&SEEDS).chain(&NOTES) {
+            assert!(!json.contains(secret), "the comparison leaked {secret}");
+        }
+        let password = comparison
+            .fields
+            .iter()
+            .find(|field| field.field == "password")
+            .expect("password field");
+        assert!(password.differs);
+        assert!(password.options.iter().all(|option| option.present));
+    }
+
+    #[test]
+    fn a_repeated_id_is_rejected() {
+        let vault = vault_with_two_secret_logins();
+
+        for repeated in [
+            ids(&["login-a", "login-a"]),
+            ids(&["login-a", "login-b", " login-a "]),
+        ] {
+            assert_eq!(
+                merge_comparison_in_state(repeated, &vault.state).err(),
+                Some("Each login can be compared only once.".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn one_id_or_none_is_rejected() {
+        let vault = vault_with_two_secret_logins();
+
+        for few in [Vec::new(), ids(&["login-a"])] {
+            assert_eq!(
+                merge_comparison_in_state(few, &vault.state).err(),
+                Some("Choose at least two logins to compare.".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn more_ids_than_the_cap_are_rejected_before_any_login_is_opened() {
+        let vault = vault_with_two_secret_logins();
+        let many = (0..=MAX_COMPARED_LOGINS)
+            .map(|index| format!("login-{index}"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            merge_comparison_in_state(many, &vault.state).err(),
+            Some("Choose at most 16 logins to compare.".to_string())
+        );
+    }
+
+    #[test]
+    fn the_cap_itself_is_accepted_up_to_the_first_missing_login() {
+        let vault = vault_with_two_secret_logins();
+        let mut at_cap = ids(&["login-a", "login-b"]);
+        at_cap.extend((2..MAX_COMPARED_LOGINS).map(|index| format!("missing-{index}")));
+
+        let error = merge_comparison_in_state(at_cap, &vault.state).err();
+
+        assert_ne!(
+            error,
+            Some("Choose at most 16 logins to compare.".to_string())
+        );
+        assert!(error.is_some());
+    }
+
+    #[test]
+    fn a_blank_id_is_rejected() {
+        let vault = vault_with_two_secret_logins();
+
+        assert_eq!(
+            merge_comparison_in_state(ids(&["login-a", "   "]), &vault.state).err(),
+            Some("One of the selected logins is invalid.".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unknown_login_is_rejected() {
+        let vault = vault_with_two_secret_logins();
+
+        assert!(merge_comparison_in_state(ids(&["login-a", "missing"]), &vault.state).is_err());
+    }
+
+    #[test]
+    fn a_locked_vault_is_rejected() {
+        let state = VaultState::default();
+
+        assert_eq!(
+            merge_comparison_in_state(ids(&["login-a", "login-b"]), &state).err(),
+            Some("Unlock your vault first.".to_string())
+        );
     }
 }
