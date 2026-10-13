@@ -48,7 +48,7 @@ test('the wry version whose defaults were copied is the locked one', () => {
   const lock = read('src-tauri', 'Cargo.lock')
   const wry = lock.match(/\[\[package\]\]\nname = "wry"\nversion = "([^"]+)"/)
   assert.ok(wry, 'Cargo.lock must lock wry')
-  assert.equal(wry[1], '0.55.1', 'read the new wry src/webview2/mod.rs create_environment defaults and update WEBVIEW2_BROWSER_ARGUMENTS before changing this version')
+  assert.equal(wry[1], '0.57.0', 'read the new wry src/webview2/mod.rs create_environment defaults and update WEBVIEW2_BROWSER_ARGUMENTS before changing this version')
 })
 
 test('nothing shipped to the webview uses WebAssembly, which the JIT switch disables', () => {
@@ -67,7 +67,7 @@ test('both windows hide from capture unless the stored setting allows it', () =>
   assert.match(shell, /SetWindowDisplayAffinity\(hwnd\.0 as _, value\)/)
   assert.match(shell, /DisplayAffinity::ExcludeFromCapture => WDA_EXCLUDEFROMCAPTURE/)
   assert.match(shell, /\["main", "quick-access"\]/)
-  assert.match(shell, /fn secure_window\(window: &WebviewWindow\) \{\n {4}harden_release_webview\(window\);[\s\S]*?set_display_affinity\(window, display_affinity\(capture_allowed\)\)/)
+  assert.match(shell, /fn secure_window\(window: &WebviewWindow\) -> Result<\(\), String> \{\n {4}harden_release_webview\(window\);[\s\S]*?set_display_affinity\(window, display_affinity\(capture_allowed\)\)/)
   assert.match(shell, /#\[cfg\(windows\)\]\nfn set_display_affinity/)
   assert.doesNotMatch(shell, /cfg\(all\(windows, not\(debug_assertions\)\)\)\]\nfn set_display_affinity/)
   assert.match(shell, /if changed == 0 \{\n\s+return Err\(/)
