@@ -7,9 +7,13 @@ use std::time::Duration;
 use super::ensure_crypto_provider;
 use serde::{Deserialize, Serialize};
 
-use crate::vault::service::{read_service_connection, read_service_token, service_api_base_url};
+use super::server_trust::verify_pinned_server;
+use crate::vault::service::{
+    read_service_connection, read_service_token, service_target, ServiceTarget,
+};
 use crate::vault::VaultResult;
 use tauri::AppHandle;
+use zeroize::Zeroize;
 
 /// Ceiling on any response body, derived from the protocol's own constant so the limits cannot drift apart.
 const MAX_RESPONSE_BYTES: usize = crate::sync::envelope::MAX_ENVELOPE_BYTES;
@@ -24,6 +28,7 @@ pub enum SyncError {
         vault_epoch: i64,
     },
     NotApproved,
+    NotEntitled,
     NotFound,
     Failed(String),
 }
@@ -37,6 +42,10 @@ impl std::fmt::Display for SyncError {
                 "Another device changed this vault. Review the difference before syncing."
             ),
             Self::NotApproved => write!(formatter, "This device is not approved to sync."),
+            Self::NotEntitled => write!(
+                formatter,
+                "This account's subscription does not include Sesame Sync."
+            ),
             Self::NotFound => write!(formatter, "That Sync record does not exist."),
             Self::Failed(message) => write!(formatter, "{message}"),
         }
@@ -182,33 +191,60 @@ pub struct SyncClient {
     base_url: String,
     http: reqwest::Client,
     token: String,
+    entitlement_enforced: bool,
 }
 
 impl SyncClient {
-    pub fn connect(app: &AppHandle) -> VaultResult<Self> {
-        let base_url = service_api_base_url()?;
+    pub async fn connect(app: &AppHandle) -> VaultResult<Self> {
         let connection = read_service_connection(app)?;
+        let target = service_target(&connection)?;
         let token = read_service_token(&connection)?;
+        Self::for_target(&target, token).await
+    }
+
+    pub(crate) async fn for_target(target: &ServiceTarget, mut token: String) -> VaultResult<Self> {
+        let base_url = target.base_url().to_string();
         let parsed = url::Url::parse(&base_url)
             .map_err(|_| "Sesame account service URL is invalid.".to_string())?;
         let loopback_http = parsed.scheme() == "http"
-            && parsed
-                .host_str()
-                .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
+            && match parsed.host() {
+                Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+                Some(url::Host::Ipv4(address)) => address.is_loopback(),
+                Some(url::Host::Ipv6(address)) => address.is_loopback(),
+                None => false,
+            };
         if parsed.scheme() != "https" && !loopback_http {
+            token.zeroize();
             return Err("Sesame refuses to send vault ciphertext over an insecure URL.".into());
         }
         ensure_crypto_provider();
         let http = reqwest::Client::builder()
             .https_only(!loopback_http)
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|_| "Sesame could not prepare its Sync connection.".to_string())?;
+        if let ServiceTarget::Custom { address, pin } = target {
+            if let Err(failure) = verify_pinned_server(&http, address, pin).await {
+                token.zeroize();
+                return Err(failure.message());
+            }
+        }
         Ok(Self {
             base_url,
             http,
             token,
+            entitlement_enforced: !target.is_custom(),
         })
+    }
+
+    fn classify(&self, status: reqwest::StatusCode, body: &[u8]) -> SyncError {
+        match classify(status, body) {
+            SyncError::NotEntitled if !self.entitlement_enforced => {
+                SyncError::Unavailable("Sesame Sync is not available.".into())
+            }
+            other => other,
+        }
     }
 
     async fn send<T: for<'de> Deserialize<'de>>(
@@ -235,7 +271,7 @@ impl SyncClient {
             return serde_json::from_slice(&bytes)
                 .map_err(|_| SyncError::Failed("Sesame could not read the Sync response.".into()));
         }
-        Err(classify(status, &bytes))
+        Err(self.classify(status, &bytes))
     }
 
     /// Creates the vault on first use and returns a one-time, vault-bound, expiring challenge.
@@ -315,7 +351,7 @@ impl SyncClient {
             return Ok(());
         }
         let bytes = read_capped(response).await.unwrap_or_default();
-        Err(classify(status, &bytes))
+        Err(self.classify(status, &bytes))
     }
 
     /// Naming this device in the query is safe: the package is sealed to its key regardless.
@@ -389,6 +425,7 @@ fn classify(status: reqwest::StatusCode, body: &[u8]) -> SyncError {
     match code {
         "sync_unavailable" => SyncError::Unavailable("Sesame Sync is not available.".into()),
         "sync_device_not_approved" => SyncError::NotApproved,
+        "sync_not_entitled" => SyncError::NotEntitled,
         "sync_device_not_found" | "sync_vault_not_found" => SyncError::NotFound,
         _ => match status {
             reqwest::StatusCode::FORBIDDEN => {
@@ -435,7 +472,7 @@ impl SyncClient {
             return Ok(());
         }
         let bytes = read_capped(response).await.unwrap_or_default();
-        Err(classify(status, &bytes))
+        Err(self.classify(status, &bytes))
     }
 
     /// Removes another device and rotates the vault key in one call.
@@ -469,7 +506,7 @@ impl SyncClient {
             return Ok(());
         }
         let bytes = read_capped(response).await.unwrap_or_default();
-        Err(classify(status, &bytes))
+        Err(self.classify(status, &bytes))
     }
 
     /// Destructive reset; refused while any approved device still works.
@@ -486,6 +523,105 @@ impl SyncClient {
             return Ok(());
         }
         let bytes = read_capped(response).await.unwrap_or_default();
-        Err(classify(status, &bytes))
+        Err(self.classify(status, &bytes))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::network::server_address::ServerAddress;
+    use crate::adapters::network::server_trust::parse_instance;
+    use crate::adapters::network::test_server::{FakeSesame, Reply, TestServer};
+
+    fn custom(server: &TestServer, pinned: &FakeSesame) -> ServiceTarget {
+        let pin = parse_instance(&serde_json::to_vec(&pinned.instance()).unwrap(), "0.3.0")
+            .unwrap()
+            .pin();
+        ServiceTarget::Custom {
+            address: ServerAddress::parse(&server.base()).unwrap(),
+            pin,
+        }
+    }
+
+    fn connect(target: &ServiceTarget) -> VaultResult<SyncClient> {
+        tauri::async_runtime::block_on(SyncClient::for_target(
+            target,
+            "fictional-device-token".to_string(),
+        ))
+    }
+
+    fn sent_the_token(server: &TestServer) -> bool {
+        server
+            .requests()
+            .iter()
+            .any(|request| request.headers.contains_key("authorization"))
+    }
+
+    #[test]
+    fn a_pinned_server_is_checked_and_then_gets_the_token() {
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(fake.handler());
+        let client = connect(&custom(&server, &fake)).unwrap();
+        assert_eq!(
+            server.paths(),
+            vec!["/v1/instance".to_string(), "/v1/capabilities".to_string()]
+        );
+        assert!(!sent_the_token(&server));
+        let _ = tauri::async_runtime::block_on(client.devices());
+        assert!(sent_the_token(&server));
+    }
+
+    #[test]
+    fn a_server_with_a_rotated_key_is_refused_before_any_token_is_sent() {
+        let pinned = FakeSesame::new(1);
+        let rotated = FakeSesame::new(2);
+        let server = TestServer::start(rotated.handler());
+        let error = connect(&custom(&server, &pinned)).err().unwrap();
+        assert!(error.contains("different key"), "{error}");
+        assert!(!sent_the_token(&server));
+        assert_eq!(server.paths(), vec!["/v1/instance".to_string()]);
+    }
+
+    #[test]
+    fn a_server_that_only_repeats_the_pinned_key_is_refused() {
+        let pinned = FakeSesame::new(1);
+        let instance = pinned.instance();
+        let forged = FakeSesame::new(2).signed(&pinned.capability_payload());
+        let server = TestServer::start(move |request| match request.path.as_str() {
+            "/v1/instance" => Reply::json(200, &instance),
+            _ => Reply::json(200, &forged),
+        });
+        assert!(connect(&custom(&server, &pinned)).is_err());
+        assert!(!sent_the_token(&server));
+    }
+
+    #[test]
+    fn an_unreachable_pinned_server_gets_no_token() {
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(fake.handler());
+        let target = custom(&server, &fake);
+        drop(server);
+        assert!(connect(&target).is_err());
+    }
+
+    #[test]
+    fn a_self_hosted_server_is_always_entitled_and_the_company_service_is_not() {
+        let body = br#"{"error":{"code":"sync_not_entitled"}}"#;
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(fake.handler());
+        let own = connect(&custom(&server, &fake)).unwrap();
+        assert!(matches!(
+            own.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            SyncError::Unavailable(_)
+        ));
+        let official = connect(&ServiceTarget::Official {
+            base_url: server.base(),
+        })
+        .unwrap();
+        assert!(matches!(
+            official.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            SyncError::NotEntitled
+        ));
     }
 }

@@ -71,6 +71,8 @@ pub struct DesktopLinkResponse {
     pub access_token: String,
     pub device: DesktopServiceDevice,
     pub sync_available: bool,
+    #[serde(default)]
+    pub expires_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -96,7 +98,7 @@ pub struct ServiceConnectionStatus {
     // Rust leaves this a plain `String`; override to keep the frontend's
     // closed literal union instead of widening to `string`.
     #[ts(
-        type = "'disconnected' | 'connected' | 'suspended' | 'revoked' | 'offline' | 'rateLimited' | 'serviceUnavailable' | 'needsAttention'"
+        type = "'disconnected' | 'connected' | 'suspended' | 'revoked' | 'offline' | 'rateLimited' | 'serviceUnavailable' | 'needsAttention' | 'serverKeyChanged' | 'serverIncompatible' | 'serverClockDiffers' | 'expired'"
     )]
     pub state: String,
     pub connected: bool,
@@ -104,6 +106,9 @@ pub struct ServiceConnectionStatus {
     pub device_name: Option<String>,
     pub sync_available: bool,
     pub browser_helper_available: bool,
+    pub server_address: Option<String>,
+    pub server_fingerprint: Option<String>,
+    pub server_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -114,6 +119,20 @@ pub struct ServiceConnectionFile {
     pub protected_token: String,
     pub device_id: String,
     pub device_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_server: Option<CustomServerPin>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomServerPin {
+    pub instance_id: String,
+    pub name: String,
+    pub capability_key_id: String,
+    pub capability_public_key: String,
+    pub fingerprint: String,
 }
 
 #[derive(Serialize, ts_rs::TS)]

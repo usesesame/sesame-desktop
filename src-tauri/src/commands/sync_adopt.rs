@@ -30,7 +30,7 @@ pub async fn sync_adopt_vault(
     state: tauri::State<'_, VaultState>,
     master_password: String,
 ) -> Result<SyncAdoptResult, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let path = crate::sync::identity::identity_path(&local_data_dir(&app)?);
     let identity = crate::sync::identity::DeviceIdentity::load(&path)
         .map_err(|_| "Set up Sesame Sync on this device first.".to_string())?;
