@@ -71,13 +71,14 @@ pub(super) fn present(error: SyncError) -> String {
         SyncError::Conflict {
             current_revision, ..
         } => format!("sync_conflict:{current_revision}"),
+        SyncError::NotEntitled => format!("sync_not_entitled:{}", SyncError::NotEntitled),
         other => other.to_string(),
     }
 }
 
 #[tauri::command]
 pub async fn sync_status(app: AppHandle) -> Result<SyncStatusView, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let this_device = crate::sync::identity::identity_path(&local_data_dir(&app)?);
     let this_device_id = crate::sync::identity::DeviceIdentity::load(&this_device)
         .ok()
@@ -123,7 +124,7 @@ pub async fn sync_enroll_device(app: AppHandle, label: String) -> Result<SyncDev
     if label.is_empty() || label.chars().count() > 64 {
         return Err("Give this device a name of 1 to 64 characters.".into());
     }
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let directory = local_data_dir(&app)?;
     let path = crate::sync::identity::identity_path(&directory);
 
@@ -184,7 +185,7 @@ fn this_device_identity(app: &AppHandle) -> Result<crate::sync::identity::Device
 /// This device's fingerprint from its own keys, so the joining screen can show it.
 #[tauri::command]
 pub async fn sync_this_device_fingerprint(app: AppHandle) -> Result<String, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_device_identity(&app)?;
     // The vault id is not key material; a lying service produces a mismatch, which is the point.
     let current = client.download().await.map_err(present)?;
@@ -231,7 +232,7 @@ pub async fn sync_prepare_approval(
     state: tauri::State<'_, VaultState>,
     device_id: String,
 ) -> Result<PreparedApproval, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let current = client.download().await.map_err(present)?;
     let listing = client.devices().await.map_err(present)?;
     let device = listing
@@ -322,7 +323,7 @@ pub async fn sync_disable(app: AppHandle, force: Option<bool>) -> Result<(), Str
 
     // Local keys go only after the service confirms the revocation, unless the caller forces it.
     if let Some(identity) = identity {
-        let revoked = match SyncClient::connect(&app) {
+        let revoked = match SyncClient::connect(&app).await {
             Ok(client) => client.revoke_device(&identity.device_id).await.is_ok(),
             Err(_) => false,
         };
@@ -357,4 +358,17 @@ fn decode_public_key(value: &str) -> Result<[u8; 32], String> {
 fn encode_key(bytes: [u8; 32]) -> String {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_entitlement_refusal_carries_its_code_and_a_readable_message() {
+        assert_eq!(
+            present(SyncError::NotEntitled),
+            "sync_not_entitled:This account's subscription does not include Sesame Sync."
+        );
+    }
 }

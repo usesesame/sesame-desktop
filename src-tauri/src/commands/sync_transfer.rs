@@ -28,7 +28,7 @@ pub(super) async fn approve_frozen_device(
     frozen_signing_key: &str,
     frozen_encryption_key: &str,
 ) -> Result<SyncDeviceView, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
 
     let current = client.download().await.map_err(present)?;
@@ -113,7 +113,7 @@ pub async fn sync_upload_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
     let current = client.download().await.map_err(present)?;
     let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
@@ -211,7 +211,7 @@ pub async fn sync_download_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
 
     let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
@@ -384,7 +384,7 @@ pub async fn sync_remove_device(
     device_id: String,
     master_password: String,
 ) -> Result<SyncRemovalResult, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
     if device_id == identity.device_id {
         return Err("Turn Sesame Sync off on this device instead of removing it.".into());
@@ -560,14 +560,14 @@ pub struct SyncRemovalResult {
 /// Refuses a device still waiting for approval. It never received the vault key, so nothing rotates.
 #[tauri::command]
 pub async fn sync_deny_device(app: AppHandle, device_id: String) -> Result<(), String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     client.deny_device(&device_id).await.map_err(present)
 }
 
 /// Proves this device can act on its key package before the service treats it as live.
 #[tauri::command]
 pub async fn sync_activate_device(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
     let package = client
         .key_package(&identity.device_id)
@@ -581,7 +581,7 @@ pub async fn sync_activate_device(app: AppHandle) -> Result<(), String> {
 /// Empties the service-side vault when no device can read it. The local vault is untouched.
 #[tauri::command]
 pub async fn sync_reset_vault(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     client.reset_vault().await.map_err(present)?;
     crate::sync::state::forget_protected(&crate::sync::state::state_path(&local_data_dir(&app)?))
 }
@@ -608,7 +608,7 @@ pub async fn sync_conflict_details(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncConflictView, String> {
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let (current, envelope, sender_label) = fetch_verified_snapshot(&app, &client).await?;
     let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
     let base = crate::sync::state::read_protected(&state_file);
@@ -661,7 +661,7 @@ pub async fn sync_resolve_conflict(
         _ => return Err("Choose which vault to keep.".into()),
     };
 
-    let client = SyncClient::connect(&app)?;
+    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
     let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
     let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
@@ -923,7 +923,7 @@ async fn run_one_transfer(
 ) -> Result<crate::sync::coordinator::Outcome, String> {
     use crate::sync::coordinator::Outcome;
 
-    let client = SyncClient::connect(app)?;
+    let client = SyncClient::connect(app).await?;
     let current = client.download().await.map_err(present)?;
     let state_file = crate::sync::state::state_path(&local_data_dir(app)?);
     let base = crate::sync::state::read_protected(&state_file);

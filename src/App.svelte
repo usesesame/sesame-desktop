@@ -786,6 +786,8 @@
         onCheckForUpdate={() => settingsController.checkForUpdate(true)}
         onInstallUpdate={settingsController.installUpdate}
         onLinkService={settingsController.connectService}
+        onInspectServer={settingsController.inspectServer}
+        onConnectServer={settingsController.connectServer}
         onDisconnectService={settingsController.unlinkService}
         onRefreshService={settingsController.refreshServiceConnection}
         browserIntegration={$settingsState.browserIntegration}
