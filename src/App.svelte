@@ -429,8 +429,8 @@
     ] },
   ]
   const importSources: Array<{ value: ImportSource; label: string }> = [
+    { value: 'bitwarden-json', label: 'Bitwarden JSON (recommended)' },
     { value: 'bitwarden-csv', label: 'Bitwarden CSV' },
-    { value: 'bitwarden-json', label: 'Bitwarden JSON' },
     { value: 'dashlane-csv', label: 'Dashlane CSV' },
     { value: 'lastpass-csv', label: 'LastPass CSV' },
     { value: 'onepassword-csv', label: '1Password CSV' },
@@ -749,6 +749,10 @@
         autostartEnabled={$settingsState.autostartEnabled}
         autostartWorking={$settingsState.autostartWorking}
         onToggleAutostart={settingsController.toggleAutostart}
+        screenCaptureAllowed={$settingsState.screenCaptureAllowed}
+        screenCaptureKnown={$settingsState.screenCaptureKnown}
+        screenCaptureWorking={$settingsState.screenCaptureWorking}
+        onToggleScreenCapture={settingsController.toggleScreenCapture}
         quickAccessShortcut={$settings.quickAccessShortcut}
         quickAccessShortcutWorking={$settingsState.quickAccessShortcutWorking}
         onUpdateQuickAccessShortcut={settingsController.updateQuickAccessShortcut}

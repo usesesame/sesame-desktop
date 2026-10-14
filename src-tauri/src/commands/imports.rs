@@ -149,6 +149,7 @@ pub fn preview_import(
         ssh_keys: parsed.ssh_keys.len(),
         passkeys_not_imported: parsed.passkeys_not_imported,
         intentionally_omitted_items: parsed.intentionally_omitted_items,
+        accounting: parsed.accounting.clone(),
         fidelity: parsed.fidelity.clone(),
     };
     let pending = PendingImport::new(parsed);
