@@ -98,7 +98,7 @@
     },
     {
       "name": "eslint",
-      "version": "10.11",
+      "version": "10.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -116,7 +116,7 @@
     },
     {
       "name": "globals",
-      "version": "17.12",
+      "version": "17.13",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -272,7 +272,7 @@
     },
     {
       "name": "typescript-eslint",
-      "version": "8.70",
+      "version": "8.71",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
