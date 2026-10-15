@@ -488,6 +488,7 @@ jobs:
         env:
           VITE_SESAME_WDIO: 'true'
         run: |
+          npm run desktop:host:stage
           npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb -- --locked
           xvfb-run -a node tools/linux-installed-package-gate.mjs \
             --package "$(ls src-tauri/target/release/bundle/deb/Sesame_*_amd64.deb)" \
