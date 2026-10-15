@@ -248,7 +248,7 @@ function workflowJob(workflow, name) {
   const start = workflow.indexOf(`\n  ${name}:\n`)
   assert.notEqual(start, -1, `ci.yml has no ${name} job`)
   const rest = workflow.slice(start + 1)
-  const next = rest.slice(1).search(/\n  [a-z-]+:\n|\n  # -{20,}\n/)
+  const next = rest.slice(1).search(/\n {2}[a-z-]+:\n|\n {2}# -{20,}\n/)
   return next === -1 ? rest : rest.slice(0, next + 1)
 }
 
@@ -299,6 +299,6 @@ test('the standalone boundary runs every part of the owned command in its own jo
   for (const name of owned) assert.ok(matrix.includes(name), `the boundary matrix does not run ${name}`)
   const pkg = JSON.parse(read('package.json'))
   for (const name of owned.slice(1)) assert.match(pkg.scripts['desktop:ci'], new RegExp(`npm run ${name}( |$)`), name)
-  assert.match(workflow, /^  boundary:\n    needs: \[boundary-part\]\n    if: always\(\)$/m)
+  assert.match(workflow, /^ {2}boundary:\n {4}needs: \[boundary-part\]\n {4}if: always\(\)$/m)
   assert.match(workflow, /test "\$RESULT" = "success"/)
 })
