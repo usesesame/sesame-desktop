@@ -117,6 +117,13 @@ const initialState: SyncPreviewState = {
   conflictOtherDevice: emptySide,
 }
 
+const ENTITLEMENT_PREFIX = 'sync_not_entitled:'
+
+function readableMessage(error: unknown, fallback: string) {
+  const message = typeof error === 'string' ? error : fallback
+  return message.startsWith(ENTITLEMENT_PREFIX) ? message.slice(ENTITLEMENT_PREFIX.length) : message
+}
+
 export function createSyncPreviewController() {
   const store = controllerStore(initialState)
 
@@ -138,7 +145,7 @@ export function createSyncPreviewController() {
       void loadConflictDetails()
       return
     }
-    store.patch({ working: false, error: message })
+    store.patch({ working: false, error: readableMessage(message, message) })
   }
 
   async function loadConflictDetails() {
@@ -230,7 +237,7 @@ export function createSyncPreviewController() {
       store.patch({
         working: false,
         loadError:
-          typeof error === 'string' ? error : 'Sesame could not read the Sync status.',
+          readableMessage(error, 'Sesame could not read the Sync status.'),
       })
     }
   }
@@ -298,7 +305,7 @@ export function createSyncPreviewController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not remove that device.',
+            readableMessage(error, 'Sesame could not remove that device.'),
         })
       }
     },
@@ -351,7 +358,7 @@ export function createSyncPreviewController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not restore that copy.',
+            readableMessage(error, 'Sesame could not restore that copy.'),
         })
       }
     },
@@ -381,7 +388,7 @@ export function createSyncPreviewController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not reset Sesame Sync.',
+            readableMessage(error, 'Sesame could not reset Sesame Sync.'),
         })
       }
     },
