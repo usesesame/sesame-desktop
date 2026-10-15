@@ -246,7 +246,7 @@ test('the installer never launches an executable through an unquoted path', () =
 
 test('Windows CI builds the installer and runs its install lifecycle', () => {
   const workflow = read('.github', 'workflows', 'ci.yml')
-  const windows = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  desktop-linux:'))
+  const windows = workflow.slice(workflow.indexOf('  windows-installer:'), workflow.indexOf('  desktop:'))
   assert.match(windows, /npx tauri build --bundles nsis --config \$config -- --locked/)
   assert.match(windows, /createUpdaterArtifacts":false/)
   assert.match(windows, /\.\/tools\/test-windows-installer\.ps1 -InstallerPath/)
