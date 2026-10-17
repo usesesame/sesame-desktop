@@ -53,6 +53,7 @@
     "tools/run-vault-restore-gate.mjs",
     "tools/desktop-e2e-bridge.mjs",
     "tools/test-browser-host-pipe.mjs",
+    "tools/test-glib-patches.mjs",
     "tools/linux-installed-package-gate.mjs",
     "tools/linux-package-gate-contracts.test.mjs",
     "tools/linux-shipped-package-gate.mjs",

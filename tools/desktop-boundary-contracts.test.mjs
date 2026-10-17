@@ -76,11 +76,13 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.equal(pkg.scripts['desktop:contracts'], 'npm run contracts')
   assert.match(pkg.scripts.contracts, /node --test "tools\/\*-contracts\.test\.mjs"/)
   assert.doesNotMatch(pkg.scripts.contracts, /tools\/\*\*/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:version:check/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:lint:js/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:contracts/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:check/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:build/)
+  assert.match(pkg.scripts['desktop:ci'], /^npm run desktop:ci:web && /)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:version:check/)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:lint:js/)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:dependency:admission/)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:contracts/)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:check/)
+  assert.match(pkg.scripts['desktop:ci:web'], /desktop:build/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:lint:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust:sync/)
@@ -88,7 +90,11 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(pkg.scripts['desktop:lint:rust'], /cargo clippy --manifest-path src-tauri\/Cargo\.toml --all-targets --locked/)
   assert.match(pkg.scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml --locked$/)
   assert.match(pkg.scripts['desktop:test:rust:sync'], /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked$/)
-  assert.match(pkg.scripts['desktop:test:glib'], /cargo test --manifest-path src-tauri\/Cargo\.toml --release --test glib_patch --locked$/)
+  assert.equal(pkg.scripts['desktop:test:glib'], 'node tools/test-glib-patches.mjs')
+  const glib = read('tools', 'test-glib-patches.mjs')
+  assert.match(glib, /process\.platform !== 'linux'/)
+  assert.match(glib, /'test', '--manifest-path', 'src-tauri\/Cargo\.toml', '--release', '--test', 'glib_patch', '--locked'/)
+  assert.match(read('src-tauri', 'tests', 'glib_patch.rs'), /^#!\[cfg\(target_os = "linux"\)\]/)
   assert.doesNotMatch(pkg.scripts['desktop:ci'], /website|admin|backend|extension:/)
   assert.match(pkg.scripts['release:bundle:linux:unsigned'], /^npm run desktop:linux:bundle-prerequisites/)
   assert.match(pkg.scripts['release:bundle:linux:unsigned'], /createUpdaterArtifacts":false/)
@@ -238,20 +244,61 @@ test('test acceleration preserves application checks and release profiles', () =
   }
 })
 
+function workflowJob(workflow, name) {
+  const start = workflow.indexOf(`\n  ${name}:\n`)
+  assert.notEqual(start, -1, `ci.yml has no ${name} job`)
+  const rest = workflow.slice(start + 1)
+  const next = rest.slice(1).search(/\n {2}[a-z-]+:\n|\n {2}# -{20,}\n/)
+  return next === -1 ? rest : rest.slice(0, next + 1)
+}
+
 test('native CI waits for quick checks and still runs both feature configurations', () => {
   const workflow = read('.github', 'workflows', 'ci.yml')
-  const windows = workflow.slice(workflow.indexOf('  desktop:'), workflow.indexOf('  desktop-linux:'))
-  const linux = workflow.slice(workflow.indexOf('  desktop-linux:'), workflow.indexOf('  supply-chain:'))
-  for (const job of [windows, linux]) {
-    assert.match(job, /needs: \[lint, typecheck\]/)
-    assert.doesNotMatch(job, /continue-on-error:|^\s+if:/m)
+  const windowsJobs = ['windows-js', 'windows-rust-lint', 'windows-rust-test', 'windows-rust-test-sync', 'windows-installer']
+  const linuxJobs = ['linux-rust', 'linux-bundles', 'linux-installed']
+  for (const name of [...windowsJobs, ...linuxJobs]) {
+    const job = workflowJob(workflow, name)
+    assert.match(job, /needs: \[lint, typecheck\]/, name)
+    assert.doesNotMatch(job, /continue-on-error:|^\s+if:/m, name)
   }
-  assert.match(windows, /run: npm run desktop:ci/)
+  const windows = windowsJobs.map((name) => workflowJob(workflow, name)).join('\n')
+  for (const script of ['desktop:version:check', 'desktop:lint:js', 'desktop:dependency:admission', 'desktop:contracts', 'desktop:check', 'desktop:lint:rust', 'desktop:test:rust', 'desktop:test:rust:sync']) {
+    assert.match(windows, new RegExp(`run: npm run ${script}\\n`), script)
+  }
+  const linux = linuxJobs.map((name) => workflowJob(workflow, name)).join('\n')
   assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --locked\n/)
   assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked/)
   assert.match(linux, /linux-installed-package-gate\.mjs/)
+  assert.match(workflowJob(workflow, 'linux-bundles'), /run: npm run desktop:test:glib\n/)
   const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
   const pkg = JSON.parse(read('package.json'))
   assert.equal(config.build.beforeBuildCommand, 'npm run desktop:bundle:prepare')
   assert.match(pkg.scripts['desktop:bundle:prepare'], /npm run desktop:build/)
+})
+
+test('the required desktop checks pass only when every job behind them passed', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const expected = {
+    desktop: ['windows-js', 'windows-rust-lint', 'windows-rust-test', 'windows-rust-test-sync', 'windows-installer'],
+    'desktop-linux': ['linux-rust', 'linux-bundles', 'linux-installed'],
+  }
+  for (const [name, workers] of Object.entries(expected)) {
+    const job = workflowJob(workflow, name)
+    assert.match(job, new RegExp(`needs: \\[${workers.join(', ')}\\]`), name)
+    assert.match(job, /^\s+if: always\(\)$/m, `${name} must run even when a job behind it fails`)
+    assert.match(job, /RESULTS: \$\{\{ join\(needs\.\*\.result, ' '\) \}\}/, name)
+    assert.match(job, /test "\$result" = "success"/, name)
+    assert.doesNotMatch(job, /continue-on-error:/, name)
+  }
+})
+
+test('the standalone boundary runs every part of the owned command in its own job', () => {
+  const workflow = read('.github', 'workflows', 'boundary.yml')
+  const owned = ['desktop:ci:web', 'desktop:lint:rust', 'desktop:test:rust', 'desktop:test:rust:sync', 'desktop:test:glib']
+  const matrix = workflow.slice(workflow.indexOf('matrix:'), workflow.indexOf('steps:'))
+  for (const name of owned) assert.ok(matrix.includes(name), `the boundary matrix does not run ${name}`)
+  const pkg = JSON.parse(read('package.json'))
+  for (const name of owned.slice(1)) assert.match(pkg.scripts['desktop:ci'], new RegExp(`npm run ${name}( |$)`), name)
+  assert.match(workflow, /^ {2}boundary:\n {4}needs: \[boundary-part\]\n {4}if: always\(\)$/m)
+  assert.match(workflow, /test "\$RESULT" = "success"/)
 })
