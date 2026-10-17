@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { createFeedbackController } from '../controllers/feedback-controller'
 import { createLoginController } from '../controllers/login-controller'
 import { createModalController } from '../controllers/modal-controller'
+import { createPresenceController } from '../controllers/presence-controller'
 import { APP_STORES, createAppStores } from '../stores/app-stores'
 import type { LoginCard, VaultSnapshot } from '../types'
 import type { VaultItem } from '../vault-items'
@@ -154,6 +155,7 @@ function renderReveal() {
     stores,
     feedback,
     modal: createModalController({ stores, feedback }),
+    presence: createPresenceController(),
     refreshDiagnostics: async () => {},
     requestDelete: () => {},
     requestBulkDelete: () => {},

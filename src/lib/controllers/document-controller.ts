@@ -1,15 +1,16 @@
-import type { Attachment, DocumentMetadata, DocumentMetadataInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { Attachment, DocumentMetadata, DocumentMetadataInput, SecretView } from '../types'
 import { addDocumentAttachment, deleteDocument, getDocument, removeDocumentAttachment, saveDocument } from '../vault'
 import { controllerStore } from './controller-store'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyDocumentDraft(): DocumentMetadataInput {
-  return { title: '', documentType: '', documentNumber: '', issuingAuthority: '', issueDate: '', expiryDate: '', notes: '', tags: [] }
+  return { title: '', documentType: '', documentNumber: '', issuingAuthority: '', issueDate: '', expiryDate: '', notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(document: DocumentMetadata): DocumentMetadataInput {
+function draftFrom(document: SecretView<DocumentMetadata>): DocumentMetadataInput {
   const { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags } = document
-  return { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags: tags ?? [] }
+  return { id, title, documentType, documentNumber, issuingAuthority, issueDate, expiryDate, notes, tags: tags ?? [], keptSecrets: keptSecretKeys(document) }
 }
 
 // URL-safe no-pad alphabet; Rust's decoder expects exactly this.
@@ -57,7 +58,7 @@ export function createDocumentController(options: RecordControllerOptions) {
     removingAttachmentId: null as string | null,
   })
 
-  async function fetchDocument(id: string): Promise<DocumentMetadata> {
+  async function fetchDocument(id: string): Promise<SecretView<DocumentMetadata>> {
     const document = await getDocument(id)
     if (base.state.value().draft.id === id) {
       attachmentState.patch({ documentAttachments: document.attachments ?? [] })

@@ -267,10 +267,19 @@ fn bounded_clear_after_ms(clear_after_ms: u64) -> u64 {
 pub fn copy_secret(
     app: AppHandle,
     state: State<'_, ClipboardGuard>,
+    value: String,
+    clear_after_ms: Option<u64>,
+) -> VaultResult<u64> {
+    copy_secret_value(app, &state, value, clear_after_ms)
+}
+
+pub(crate) fn copy_secret_value(
+    app: AppHandle,
+    state: &ClipboardGuard,
     mut value: String,
     clear_after_ms: Option<u64>,
 ) -> VaultResult<u64> {
-    let written = arm_secret(&state, &SystemClipboard, &value);
+    let written = arm_secret(state, &SystemClipboard, &value);
     value.zeroize();
     let epoch = written?;
     if let Some(clear_after_ms) = clear_after_ms {

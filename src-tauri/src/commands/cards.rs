@@ -72,6 +72,7 @@ impl_record_commands! {
     from_input: card_from_input,
     get_fn: get_card,
     save_fn: save_card,
+    save_in_state_fn: save_card_in_state,
     delete_fn: delete_card,
     missing_noun: "card",
     save_unlock_msg: "Unlock your vault before saving a card.",

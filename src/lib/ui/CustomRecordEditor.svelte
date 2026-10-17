@@ -4,6 +4,7 @@
   import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
   import type { CustomFieldEntry, CustomRecordInput } from '../types'
+  import type { DraftField } from '../controllers/custom-record-controller'
 
   export let recordDraft: CustomRecordInput
   export let editorTitle = 'Add a record'
@@ -30,6 +31,13 @@
   function updateField(index: number, patch: Partial<CustomFieldEntry>) {
     recordDraft = { ...recordDraft, fields: recordDraft.fields.map((field, i) => (i === index ? { ...field, ...patch } : field)) }
     dirty = true
+  }
+
+  function isKept(field: CustomFieldEntry): boolean {
+    return (field as DraftField).keptFrom !== undefined && field.kind === 'secret' && !field.value
+  }
+  function dropKept(index: number) {
+    updateField(index, { keptFrom: undefined } as Partial<CustomFieldEntry>)
   }
 
   function requestClose() {
@@ -94,6 +102,9 @@
           />
           <button type="button" class="icon-button" aria-label={`Remove field ${index + 1}`} title="Remove field" on:click={() => removeField(index)}><Icon name="trash" size={14} /></button>
         </div>
+        {#if isKept(field)}
+          <p class="field-hint">A saved value stays as it is unless you type a new one. <button type="button" class="text-button" on:click={() => dropKept(index)}>Remove it</button></p>
+        {/if}
       {/each}
       <button type="button" class="secondary-button custom-field-add" on:click={addField}><Icon name="plus" size={14} /><span>Add field</span></button>
     </section>

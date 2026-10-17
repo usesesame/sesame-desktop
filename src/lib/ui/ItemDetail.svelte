@@ -1,56 +1,44 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte'
   import Icon from '../Icon.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import type { ItemDetail } from '../item-fields'
   import type { Folder, ItemKind } from '../types'
   import { itemKindIcon, itemKindLabel, uniqueTags } from '../vault-items'
 
-  const SECRET_REVEAL_TIMEOUT_MS = 30_000
-
   export let kind: ItemKind
   export let detail: ItemDetail
-  export let itemId = ''
   export let folders: Folder[] = []
+  export let revealed: Record<string, string> = {}
   export let onCopy: (value: string, label: string) => void
+  export let onCopyField: (key: string, label: string) => void
+  export let onReveal: (key: string) => void
+  export let onHide: (key: string) => void
   export let onToggleFavourite: (favourite: boolean) => void
   export let onEdit: () => void
   export let onDelete: () => void
   export let onMove: (folderId?: string) => void
   export let onShowTag: (tag: string) => void
 
-  let revealed: Record<number, boolean> = {}
-  let revealTimers: Record<number, ReturnType<typeof setTimeout>> = {}
+  type DetailField = ItemDetail['fields'][number]
 
-  function clearRevealTimers() {
-    for (const timer of Object.values(revealTimers)) clearTimeout(timer)
-    revealTimers = {}
-    revealed = {}
+  function isShown(field: DetailField): boolean {
+    return Boolean(field.secretKey) && revealed[field.secretKey as string] !== undefined
   }
 
-  function hide(index: number) {
-    const { [index]: _hidden, ...rest } = revealed
-    revealed = rest
-    clearTimeout(revealTimers[index])
-    const { [index]: _timer, ...timers } = revealTimers
-    revealTimers = timers
+  function shownValue(field: DetailField): string {
+    return field.secretKey ? revealed[field.secretKey] ?? '' : field.value
   }
 
-  function toggleReveal(index: number) {
-    if (revealed[index]) {
-      hide(index)
-      return
-    }
-    revealed = { ...revealed, [index]: true }
-    revealTimers = { ...revealTimers, [index]: setTimeout(() => hide(index), SECRET_REVEAL_TIMEOUT_MS) }
+  function toggle(field: DetailField) {
+    if (!field.secretKey) return
+    if (isShown(field)) onHide(field.secretKey)
+    else onReveal(field.secretKey)
   }
 
-  let lastItemId = itemId
-  $: if (itemId !== lastItemId) {
-    lastItemId = itemId
-    clearRevealTimers()
+  function copyField(field: DetailField) {
+    if (field.secretKey) onCopyField(field.secretKey, field.label)
+    else onCopy(field.value, field.label)
   }
-  onDestroy(clearRevealTimers)
 
   function attachmentSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`
@@ -87,15 +75,15 @@
       {#if !field.multiline}
       <div class="credential-row">
         <div class="credential-label"><Icon name={field.icon} size={16} /><span>{field.label}</span></div>
-        {#if field.secret && !revealed[index]}
+        {#if field.secret && !isShown(field)}
           <code class="concealed">••••••••••••••••</code>
         {:else}
-          <code>{field.value}</code>
+          <code>{shownValue(field)}</code>
         {/if}
         {#if field.secret}
-          <button type="button" class="credential-button" aria-label={revealed[index] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[index]} on:click={() => toggleReveal(index)}><Icon name={revealed[index] ? 'eye-off' : 'eye'} size={16} /></button>
+          <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
         {/if}
-        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
+        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
       </div>
       {/if}
     {/each}
@@ -108,15 +96,15 @@
         <h3>{field.label}</h3>
         <div class="multiline-field-actions">
           {#if field.secret}
-            <button type="button" class="credential-button" aria-label={revealed[index] ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={revealed[index]} on:click={() => toggleReveal(index)}><Icon name={revealed[index] ? 'eye-off' : 'eye'} size={16} /></button>
+            <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
           {/if}
-          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
+          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
         </div>
       </div>
-      {#if field.secret && !revealed[index]}
+      {#if field.secret && !isShown(field)}
         <p class="multiline-value concealed">••••••••••••••••</p>
       {:else}
-        <p class="multiline-value" class:mono={kind !== 'secure_note'}>{field.value}</p>
+        <p class="multiline-value" class:mono={kind !== 'secure_note'}>{shownValue(field)}</p>
       {/if}
     </section>
   {/if}
@@ -144,7 +132,7 @@
   <section class="details-section">
     <div class="section-heading"><h3>Legacy data</h3></div>
     {#each detail.legacyFields as field, index (index)}
-      <p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button type="button" class="text-button" on:click={() => onCopy(field.value, field.label)}>Copy</button></p>
+      <p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button type="button" class="text-button" on:click={() => (field.secret ? onCopyField(`legacy:${index}`, field.label) : onCopy(field.value, field.label))}>Copy</button></p>
     {/each}
   </section>
 {/if}

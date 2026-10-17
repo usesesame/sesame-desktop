@@ -105,6 +105,15 @@ On Linux:
 
 - Idle time comes from GNOME or KDE. The automatic-lock delay is hidden on
   other desktops.
+- Screen lock comes from systemd logind or the screen saver service. When
+  neither answers, Settings says the vault will not follow the screen lock.
+  Sesame looks for missing sources again every 30 seconds and locks the vault
+  once the automatic-lock delay has passed with no source answering after one
+  had.
+- Sesame asks the kernel to keep the vault key out of swap and crash dumps.
+  When the kernel refuses, for example under a low memory lock limit, the key
+  stays in ordinary memory that Sesame wipes on lock, and the diagnostics log
+  records `key_page_fallback`.
 - Wayland has no global-hotkey protocol. Use the tray icon, or start Sesame
   with `GDK_BACKEND=x11`.
 - PIN unlock and account linking need a Secret Service wallet. Sesame starts

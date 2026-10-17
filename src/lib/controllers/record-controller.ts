@@ -1,5 +1,5 @@
 import type { AppStores } from '../stores/app-stores'
-import type { LegacyField, VaultSnapshot } from '../types'
+import type { LegacyField, SecretView, VaultSnapshot } from '../types'
 import { recordDiagnostic } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
@@ -21,10 +21,10 @@ export interface RecordConfig<TItem extends RecordLike, TInput extends { id?: st
   deleteModalKind: ModalKind
   deleteModal(id: string): NonNullable<ActiveModal>
   emptyDraft(): TInput
-  draftFrom(item: TItem): TInput
+  draftFrom(item: SecretView<TItem>): TInput
   draftTitle(draft: TInput): string
   api: {
-    get(id: string): Promise<TItem>
+    get(id: string): Promise<SecretView<TItem>>
     save(input: TInput): Promise<{ id: string; snapshot: VaultSnapshot }>
     delete(id: string): Promise<{ deletedId: string; snapshot: VaultSnapshot }>
   }

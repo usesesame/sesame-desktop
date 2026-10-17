@@ -18,7 +18,7 @@ const status: VaultStatus = {
 }
 
 beforeEach(() => {
-  platformCapabilities.set({ os: 'linux', pinUnlock: true, biometricUnlock: false, autoType: false, browserIntegration: false, sessionAutoLock: false, quickAccessShortcut: false, accountLinking: false, desktopUpdates: false, windowControls: false })
+  platformCapabilities.set({ os: 'linux', pinUnlock: true, biometricUnlock: false, autoType: false, browserIntegration: false, sessionAutoLock: false, screenLockMonitoring: false, quickAccessShortcut: false, accountLinking: false, desktopUpdates: false, windowControls: false })
 })
 
 afterEach(() => {

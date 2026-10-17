@@ -57,6 +57,12 @@
   export let onDeleteItem: () => void
   export let onMoveItem: (folderId?: string) => void
   export let onItemCopy: (value: string, label: string) => void
+  export let onCopyBackupCodes: () => void
+  export let onCopyLegacySecret: (index: number, label: string) => void
+  export let onItemCopyField: (key: string, label: string) => void
+  export let onItemReveal: (key: string) => void
+  export let onItemHide: (key: string) => void
+  export let itemRevealed: Record<string, string> = {}
   export let onOpenRecoveryNotApplicable: () => void
   export let breachCheckOpen = false
   export let breachCheckWorking = false
@@ -560,9 +566,12 @@
           <ItemDetail
             kind={$selection.activeItemKind}
             detail={itemDetail}
-            itemId={$selection.activeItemId ?? ''}
             {folders}
+            revealed={itemRevealed}
             onCopy={onItemCopy}
+            onCopyField={onItemCopyField}
+            onReveal={onItemReveal}
+            onHide={onItemHide}
             onToggleFavourite={(favourite) => $selection.activeItemId && onToggleFavourite($selection.activeItemId, favourite)}
             onEdit={onOpenItemEditor}
             onDelete={onDeleteItem}
@@ -645,8 +654,8 @@
           <div class="section-heading"><h3>Recovery details</h3><button class="text-button" on:click={onOpenLoginEditor}>Edit</button></div>
           {#if loginCard.recoveryNotApplicable}
             <div class="recovery-empty recovery-exempt"><span class="recovery-icon"><Icon name="shield" size={16} /></span><div><strong>No separate recovery details</strong><p>Marked as not applicable for this login.</p></div><button class="text-button" on:click={onOpenLoginEditor}>Change</button></div>
-          {:else if loginCard.backupCodes?.length || loginCard.recoveryEmail || loginCard.recoveryPhone}
-            <div class="recovery-grid">{#if loginCard.backupCodes?.length}<article><span class="recovery-icon"><Icon name="file-key" size={15} /></span><div><strong>Backup codes</strong><p>{loginCard.backupCodes.length} stored</p></div><button on:click={() => loginCard.backupCodes && onCopy(loginCard.backupCodes.join('\n'), 'Backup codes')}>Copy</button></article>{/if}{#if loginCard.recoveryEmail}<article><span class="recovery-icon"><Icon name="mail" size={15} /></span><div><strong>Recovery email</strong><p>{loginCard.recoveryEmail}</p></div><span class="status-pill">Saved</span></article>{/if}{#if loginCard.recoveryPhone}<article><span class="recovery-icon"><Icon name="phone" size={15} /></span><div><strong>Recovery phone</strong><p>{loginCard.recoveryPhone}</p></div><span class="status-pill">Saved</span></article>{/if}</div>
+          {:else if loginCard.backupCodeCount || loginCard.recoveryEmail || loginCard.recoveryPhone}
+            <div class="recovery-grid">{#if loginCard.backupCodeCount}<article><span class="recovery-icon"><Icon name="file-key" size={15} /></span><div><strong>Backup codes</strong><p>{loginCard.backupCodeCount} stored</p></div><button on:click={onCopyBackupCodes}>Copy</button></article>{/if}{#if loginCard.recoveryEmail}<article><span class="recovery-icon"><Icon name="mail" size={15} /></span><div><strong>Recovery email</strong><p>{loginCard.recoveryEmail}</p></div><span class="status-pill">Saved</span></article>{/if}{#if loginCard.recoveryPhone}<article><span class="recovery-icon"><Icon name="phone" size={15} /></span><div><strong>Recovery phone</strong><p>{loginCard.recoveryPhone}</p></div><span class="status-pill">Saved</span></article>{/if}</div>
           {:else}
             <div class="recovery-empty"><span class="recovery-icon"><Icon name="file-key" size={16} /></span><div><strong>Recovery not reviewed</strong><p>Save an option if this site provides one, or mark that it does not.</p></div><div class="recovery-empty-actions"><button class="text-button" on:click={onOpenLoginEditor}>Add recovery info</button><button class="text-button muted" disabled={recoveryActionWorking} on:click={onOpenRecoveryNotApplicable}>{recoveryActionWorking ? 'Marking…' : 'No recovery options'}</button></div></div>
           {/if}
@@ -664,7 +673,7 @@
         {#if loginCard.legacyFields?.length}
           <section class="details-section">
             <div class="section-heading"><h3>Legacy data</h3></div>
-            {#each loginCard.legacyFields as field, index (index)}<p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button class="text-button" on:click={() => onCopy(field.value, field.label)}>Copy</button></p>{/each}
+            {#each loginCard.legacyFields as field, index (index)}<p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button class="text-button" on:click={() => (field.secret ? onCopyLegacySecret(index, field.label) : onCopy(field.value, field.label))}>Copy</button></p>{/each}
           </section>
         {/if}
       {:else}

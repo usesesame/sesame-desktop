@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import LegacyDataPanel from './LegacyDataPanel.svelte'
@@ -158,6 +159,7 @@
       <input name="card-number" value={groupNumber(numberDigits)} on:input={onNumberInput} maxlength="24" inputmode="numeric" autocomplete="off" placeholder="e.g. 4242 4242 4242 4242" spellcheck="false" aria-invalid={numberLooksMistyped ? 'true' : undefined} />
       {#if numberLooksMistyped}<span class="field-warning" aria-live="polite">Check this number. A digit looks mistyped.</span>{/if}
     </label>
+    <KeptSecret draft={cardDraft} key="number" typed={cardDraft.number} onChange={(next) => (cardDraft = { ...cardDraft, ...next })} />
     <div class="editor-two-column">
       <label>Expiry month <span class="field-hint">MM</span>
         <input name="card-expiry-month" value={cardDraft.expiryMonth} on:input={onMonthInput} maxlength="2" inputmode="numeric" autocomplete="off" placeholder="09" aria-invalid={monthOutOfRange ? 'true' : undefined} />
@@ -172,6 +174,7 @@
       <label>Security code {#if cscExpected}<span class="field-hint">{cscExpected} digits</span>{/if}
         <input name="card-security-code" bind:value={cardDraft.securityCode} maxlength="4" inputmode="numeric" autocomplete="off" spellcheck="false" aria-invalid={cscUnexpectedLength ? 'true' : undefined} />
         {#if cscUnexpectedLength}<span class="field-warning" aria-live="polite">{network?.name} uses {cscExpected} digits.</span>{/if}
+        <KeptSecret draft={cardDraft} key="securityCode" typed={cardDraft.securityCode} onChange={(next) => (cardDraft = { ...cardDraft, ...next })} />
       </label>
       <label>Network <span class="field-hint">Filled from the card number</span><input name="card-network" bind:value={cardDraft.brand} maxlength="64" autocomplete="off" /></label>
     </div>

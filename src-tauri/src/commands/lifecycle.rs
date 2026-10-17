@@ -135,6 +135,7 @@ pub fn create_vault(
 
     // `OpenedVault` zeroizes on drop, so clone and let it drop rather than moving fields out.
     let unlocked = UnlockedVault::from_opened(path, &opened)?;
+    crate::vault::report_key_page_fallback(&app, &unlocked);
     let snapshot = unlocked.snapshot();
     *session = Some(unlocked);
     state.advance_session_epoch();
@@ -146,6 +147,7 @@ pub fn create_vault(
 
 /// Shared unlock tail: persist any migration, install the session, advance the epoch.
 fn install_unlocked_session(
+    app: &AppHandle,
     state: &State<'_, VaultState>,
     session: &mut Option<UnlockedVault>,
     path: PathBuf,
@@ -159,6 +161,7 @@ fn install_unlocked_session(
     let hello_unlock_available = opened.file.hello_wrap.is_some();
     // Same zeroize-on-drop workaround `create_vault` uses.
     let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
+    crate::vault::report_key_page_fallback(app, &unlocked);
     if opened.migrated {
         if let Err(error) = persist_session(&mut unlocked) {
             return Err(format!(
@@ -220,7 +223,7 @@ pub fn unlock_recovery_vault(
     let file = sesame_core::loader::VaultLoader::read(&path)?;
     let supplied_kit = Zeroizing::new(request.recovery_kit);
     let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &supplied_kit)?;
-    install_unlocked_session(&state, &mut session, path, key_array, file)
+    install_unlocked_session(&app, &state, &mut session, path, key_array, file)
 }
 
 #[tauri::command]
@@ -321,7 +324,7 @@ pub fn unlock_with_windows_hello(
         .decode(&wrap.ciphertext)
         .map_err(|_| "The Windows Hello unlock data for this vault is invalid.".to_string())?;
     let mut key_array = windows_hello::open_and_unwrap(&wrap.key_name, &ciphertext)?;
-    let result = install_unlocked_session(&state, &mut session, path, key_array, file).map_err(
+    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file).map_err(
         |_| {
             "Windows Hello unlock no longer matches this vault. Use your master password or recovery kit."
                 .to_string()
@@ -390,7 +393,7 @@ fn unlock_pin_vault_inner(
         .try_into()
         .map_err(|_| "The local vault key is invalid.".to_string())?;
     vault_key.zeroize();
-    let result = install_unlocked_session(&state, &mut session, path, key_array, file);
+    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file);
     drop(session);
     if result.is_ok() {
         if let Ok(mut guard) = state.pin_guard.lock() {
@@ -466,7 +469,7 @@ pub fn unlock_vault(
     let file = sesame_core::loader::VaultLoader::read(&path)?;
     let master_password = Zeroizing::new(request.master_password);
     let key_array = sesame_core::api::unwrap_key_with_password(&file, &master_password)?;
-    let result = install_unlocked_session(&state, &mut session, path, key_array, file);
+    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file);
     drop(session);
     if result.is_ok() {
         let _ = establish_pin_throttle_state(&app, &state);
@@ -500,6 +503,7 @@ pub fn change_master_password(
             &new_password,
         )?;
         retire_unlock_methods_after_key_rotation(&app, &state);
+        crate::vault::report_key_page_fallback(&app, session);
         Ok(ChangeMasterPasswordResult {
             recovery_kit: rotation.recovery_kit,
             backups_remaining: rotation.backups_remaining,

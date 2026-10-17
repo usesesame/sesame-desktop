@@ -54,8 +54,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_vault_snapshot,
             commands::get_quick_access_status,
             commands::search_quick_access_items,
-            commands::get_quick_access_field,
-            commands::confirm_quick_access_field,
+            commands::copy_quick_access_field,
             commands::open_quick_access_item,
             commands::get_login_card,
             commands::search_items,
@@ -133,6 +132,9 @@ macro_rules! sesame_invoke_handler {
             commands::grant_presence,
             commands::check_release_presence,
             commands::reveal_login_secret,
+            commands::check_login_breach,
+            commands::release_item_field,
+            commands::copy_item_field,
             commands::link_desktop_service,
             commands::inspect_custom_server,
             commands::link_custom_server,
@@ -277,7 +279,6 @@ pub fn run() {
         )
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
-        .manage(commands::QuickAccessConfirmations::default())
         .manage(commands::FileSelectionState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())

@@ -43,6 +43,7 @@ function loginDraft(overrides: Partial<LoginInput> = {}): LoginInput {
     password: '',
     folder: '',
     totp: undefined,
+    keepBackupCodes: false,
     backupCodes: [],
     recoveryEmail: '',
     recoveryPhone: '',

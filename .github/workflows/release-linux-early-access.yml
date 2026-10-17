@@ -337,9 +337,6 @@ jobs:
             echo
             echo "Early access build for Linux x86_64: deb, rpm, and AppImage packages."
             echo
-            echo "This GitHub release is an unpublished draft until a maintainer publishes it"
-            echo "deliberately, so no public download is reachable from it yet."
-            echo
             echo "The packages are not signed by a distribution key. Every file was built in"
             echo "public CI from tag $GITHUB_REF_NAME and signed keylessly with Sigstore."
             echo

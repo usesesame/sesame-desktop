@@ -5,13 +5,15 @@ import { createAppStores } from '../stores/app-stores'
 import { createFeedbackController } from './feedback-controller'
 import { createLoginController } from './login-controller'
 import { createModalController } from './modal-controller'
+import { createPresenceController } from './presence-controller'
 
 const vaultApi = vi.hoisted(() => ({
   addItemsTag: vi.fn(),
   autoType: vi.fn(),
   bulkAssignFolder: vi.fn(),
-  checkPasswordBreach: vi.fn(),
+  checkLoginBreach: vi.fn(),
   checkReleasePresence: vi.fn(),
+  copyItemField: vi.fn(),
   copyToClipboard: vi.fn(),
   createFolder: vi.fn(),
   deleteFolder: vi.fn(),
@@ -80,15 +82,17 @@ function harness(activeItemId = 'login-a') {
   stores.selection.patch({ activeItemId, activeItemKind: 'login' })
   const feedback = createFeedbackController()
   const deleted: string[][] = []
+  const presence = createPresenceController()
   const controller = createLoginController({
     stores,
     feedback,
     modal: createModalController({ stores, feedback }),
+    presence,
     refreshDiagnostics: async () => {},
     requestDelete: () => {},
     requestBulkDelete: (entries) => deleted.push(entries.map((entry) => entry.id)),
   })
-  return { stores, feedback, controller, deleted }
+  return { stores, feedback, controller, deleted, presence }
 }
 
 function requirePresenceOnce(id: string) {
@@ -98,6 +102,9 @@ function requirePresenceOnce(id: string) {
     if (requested === id && !granted) throw new Error('presenceRequired')
     return secrets[requested]
   })
+  vaultApi.copyItemField.mockImplementation(async (_kind: string, requested: string) => {
+    if (requested === id && !granted) throw new Error('presenceRequired')
+  })
 }
 
 beforeEach(() => {
@@ -106,6 +113,7 @@ beforeEach(() => {
   vaultApi.getLoginCard.mockImplementation(async (id: string) => card(id))
   vaultApi.recordItemUse.mockResolvedValue({ entries: [], folders: [] })
   vaultApi.copyToClipboard.mockResolvedValue(undefined)
+  vaultApi.copyItemField.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -118,7 +126,9 @@ describe('copying a login password', () => {
 
     await controller.copySelectedField('password')
 
-    expect(vaultApi.copyToClipboard).toHaveBeenCalledWith('fictional-alpha-secret')
+    expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-a', 'password')
+    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+    expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
     expect(controller.state.value()).toMatchObject({ passwordVisible: false, revealedPassword: '' })
   })
 
@@ -127,14 +137,15 @@ describe('copying a login password', () => {
     const { controller } = harness()
 
     await controller.copySelectedField('password')
-    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+    expect(vaultApi.copyItemField).toHaveBeenCalledTimes(1)
     expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: true, passwordPresenceIntent: 'copy', passwordPresenceFor: 'login-a' })
 
     controller.state.patch({ passwordPresenceSecret: 'fictional master password' })
     await controller.confirmPasswordPresence()
 
     expect(vaultApi.grantPresence).toHaveBeenCalledWith('fictional master password')
-    expect(vaultApi.copyToClipboard).toHaveBeenCalledWith('fictional-alpha-secret')
+    expect(vaultApi.copyItemField).toHaveBeenCalledTimes(2)
+    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
     expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: false, passwordVisible: false, revealedPassword: '' })
   })
 
@@ -157,7 +168,7 @@ describe('copying a login password', () => {
 
     await controller.copyContextField('login-b', 'password')
 
-    expect(vaultApi.copyToClipboard).toHaveBeenCalledWith('fictional-bravo-secret')
+    expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-b', 'password')
     expect(vaultApi.recordItemUse).toHaveBeenCalledWith('login-b')
   })
 
@@ -169,11 +180,11 @@ describe('copying a login password', () => {
     requirePresenceOnce('login-b')
     await controller.copyContextField('login-b', 'password')
     controller.cancelPasswordPresence()
-    vaultApi.revealLoginSecret.mockImplementation(async (id: string) => secrets[id])
+    vaultApi.copyItemField.mockResolvedValue(undefined)
     await controller.copyContextField('login-b', 'password')
 
-    expect(vaultApi.copyToClipboard).toHaveBeenCalledTimes(1)
-    expect(vaultApi.copyToClipboard).toHaveBeenCalledWith('fictional-bravo-secret')
+    expect(vaultApi.copyItemField).toHaveBeenLastCalledWith('login', 'login-b', 'password')
+    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
   })
 
   it('keeps the check open when the master password is wrong', async () => {
@@ -185,7 +196,7 @@ describe('copying a login password', () => {
     controller.state.patch({ passwordPresenceSecret: 'wrong fictional password' })
     await controller.confirmPasswordPresence()
 
-    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+    expect(vaultApi.copyItemField).toHaveBeenCalledTimes(1)
     expect(controller.state.value()).toMatchObject({ passwordPresenceRequired: true, passwordPresenceError: 'That master password did not match.', passwordVisible: false })
   })
 
@@ -199,7 +210,7 @@ describe('copying a login password', () => {
     await controller.confirmPasswordPresence()
 
     expect(vaultApi.grantPresence).not.toHaveBeenCalled()
-    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+    expect(vaultApi.copyItemField).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -401,5 +412,102 @@ describe('auto-type', () => {
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(vaultApi.autoType).not.toHaveBeenCalled()
+  })
+})
+
+describe('secrets other than the password', () => {
+  it('copies the backup codes in the host and passes nothing through the window', async () => {
+    const { controller, stores } = harness()
+    stores.vault.patch({ loginCard: { ...card('login-a'), backupCodeCount: 3 } })
+
+    controller.copyBackupCodes()
+    await vi.waitFor(() => expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-a', 'backupCodes'))
+
+    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('does nothing for backup codes a login does not hold', () => {
+    const { controller } = harness()
+
+    controller.copyBackupCodes()
+
+    expect(vaultApi.copyItemField).not.toHaveBeenCalled()
+  })
+
+  it('asks for the master password before copying backup codes and copies after the grant', async () => {
+    const { controller, stores, presence } = harness()
+    stores.vault.patch({ loginCard: { ...card('login-a'), backupCodeCount: 3 } })
+    let granted = false
+    vaultApi.grantPresence.mockImplementation(async () => { granted = true })
+    vaultApi.copyItemField.mockImplementation(async () => {
+      if (!granted) throw new Error('presenceRequired')
+    })
+
+    controller.copyBackupCodes()
+    await vi.waitFor(() => expect(presence.state.value().open).toBe(true))
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    expect(vaultApi.copyItemField).toHaveBeenCalledTimes(2)
+  })
+
+  it('copies a secret legacy value by its position', async () => {
+    const { controller } = harness()
+
+    controller.copyLegacySecret(1, 'Old PIN')
+    await vi.waitFor(() => expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-a', 'legacy:1'))
+  })
+
+  it('checks the password for breaches in the host without revealing it', async () => {
+    const { controller } = harness()
+    vaultApi.checkLoginBreach.mockResolvedValue({ breached: true, count: 4 })
+    controller.toggleBreachCheck()
+
+    await controller.runBreachCheck()
+
+    expect(vaultApi.checkLoginBreach).toHaveBeenCalledWith('login-a')
+    expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
+    expect(controller.state.value()).toMatchObject({ breachCheckResult: { breached: true, count: 4 }, revealedPassword: '' })
+  })
+
+  it('asks for the master password before a breach check and runs it after the grant', async () => {
+    const { controller, presence } = harness()
+    let granted = false
+    vaultApi.grantPresence.mockImplementation(async () => { granted = true })
+    vaultApi.checkLoginBreach.mockImplementation(async () => {
+      if (!granted) throw new Error('presenceRequired')
+      return { breached: false, count: 0 }
+    })
+    controller.toggleBreachCheck()
+
+    await controller.runBreachCheck()
+    expect(presence.state.value()).toMatchObject({ open: true, intent: 'check-password' })
+    expect(controller.state.value().breachCheckWorking).toBe(false)
+
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    expect(controller.state.value().breachCheckResult).toEqual({ breached: false, count: 0 })
+  })
+
+  it('opens the editor without backup codes and keeps the saved ones unless told otherwise', async () => {
+    const { controller, stores } = harness()
+    stores.vault.patch({ loginCard: { ...card('login-a'), backupCodeCount: 2 } })
+
+    controller.openEditor()
+
+    expect(controller.state.value().loginDraft).toMatchObject({ backupCodes: [], keepBackupCodes: true })
+    expect(controller.state.value().editorBackupCodeCount).toBe(2)
+  })
+
+  it('sends the keep flag with a save so the host retains the codes', async () => {
+    const { controller, stores } = harness()
+    stores.vault.patch({ loginCard: { ...card('login-a'), backupCodeCount: 2 } })
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: { entries: [], folders: [] } })
+
+    controller.openEditor()
+    await controller.submit(false)
+
+    expect(vaultApi.saveLogin).toHaveBeenCalledWith(expect.objectContaining({ backupCodes: [], keepBackupCodes: true }))
   })
 })

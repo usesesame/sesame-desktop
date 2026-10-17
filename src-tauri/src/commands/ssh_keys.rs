@@ -63,6 +63,7 @@ impl_record_commands! {
     from_input: ssh_key_from_input,
     get_fn: get_ssh_key,
     save_fn: save_ssh_key,
+    save_in_state_fn: save_ssh_key_in_state,
     delete_fn: delete_ssh_key,
     missing_noun: "key",
     save_unlock_msg: "Unlock your vault before saving a key.",

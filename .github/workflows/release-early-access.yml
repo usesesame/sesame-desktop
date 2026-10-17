@@ -546,10 +546,6 @@ jobs:
             echo
             echo "Early access build for Windows 10 and 11, x64."
             echo
-            echo "This GitHub release is an unpublished draft. No public installer or updater"
-            echo "manifest is reachable from it until the installer is Authenticode signed and"
-            echo "a maintainer publishes the release deliberately."
-            echo
             echo "This installer is not Authenticode signed, so SmartScreen will warn you."
             echo "That is expected on this channel and does not mean the download is unverified."
             echo "Every file here was built in public CI from tag $GITHUB_REF_NAME and signed"

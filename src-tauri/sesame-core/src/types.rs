@@ -270,6 +270,10 @@ pub struct SecuritySummary {
     pub two_factor_logins: Vec<TwoFactorSiteLogin>,
 }
 
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
@@ -298,8 +302,8 @@ pub struct LoginCard {
     pub totp_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub totp_remaining: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backup_codes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub backup_code_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recovery_email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -398,6 +402,8 @@ pub struct LoginInput {
     pub totp: Option<String>,
     #[serde(default)]
     pub backup_codes: Vec<String>,
+    #[serde(default)]
+    pub keep_backup_codes: bool,
     #[serde(default)]
     pub recovery_email: String,
     #[serde(default)]
@@ -1365,6 +1371,8 @@ pub struct CardInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1430,6 +1438,8 @@ pub struct WifiNetworkInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1499,6 +1509,8 @@ pub struct SshKeyInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1568,6 +1580,8 @@ pub struct SoftwareLicenseInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1672,6 +1686,8 @@ pub struct DocumentMetadataInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -1739,6 +1755,8 @@ pub struct CustomRecordInput {
     pub notes: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]

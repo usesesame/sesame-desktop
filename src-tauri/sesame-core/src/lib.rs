@@ -14,6 +14,7 @@ pub mod password_analysis;
 pub mod pending_import;
 pub mod platform;
 pub mod record_store;
+pub mod secret_fields;
 pub mod snapshot;
 pub mod storage;
 pub mod throttle;
@@ -46,6 +47,8 @@ pub use pending_import::*;
 pub use platform::*;
 #[allow(unused_imports)]
 pub use record_store::*;
+#[allow(unused_imports)]
+pub use secret_fields::*;
 #[allow(unused_imports)]
 pub use snapshot::*;
 #[allow(unused_imports)]
@@ -290,6 +293,10 @@ impl UnlockedVault {
         operation: impl FnOnce(&[u8; 32]) -> VaultResult<T>,
     ) -> VaultResult<T> {
         self.key.expose(operation)
+    }
+
+    pub fn key_uses_page_fallback(&self) -> bool {
+        self.key.uses_page_fallback()
     }
 
     pub fn replace_vault_key(&mut self, key: vault_key::VaultKey) -> vault_key::VaultKey {

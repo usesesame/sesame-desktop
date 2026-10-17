@@ -12,6 +12,7 @@ const linux = (overrides: Partial<PlatformCapabilities> = {}): PlatformCapabilit
   autoType: false,
   browserIntegration: false,
   sessionAutoLock: false,
+  screenLockMonitoring: false,
   quickAccessShortcut: false,
   accountLinking: false,
   desktopUpdates: false,

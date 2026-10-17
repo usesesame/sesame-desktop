@@ -52,7 +52,7 @@ function harness(overrides: Partial<RecordConfig<FakeItem, FakeInput>['api']> = 
     draftFrom: (item) => ({ id: item.id, title: 'loaded' }),
     draftTitle: (draft) => draft.title,
     api: {
-      get: async (id) => ({ id }),
+      get: async (id) => ({ id, secretFields: [] }),
       save: async (input) => {
         const id = input.id ?? 'new-id'
         saved.push({ id })

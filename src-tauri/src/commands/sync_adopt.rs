@@ -71,6 +71,7 @@ pub(super) fn finish_adoption(
         crate::sync::conflict_backup::prune(&directory, &[written]);
         let _ = vault_id;
         let recovery_kit = adopt(vault, key, payload, master_password)?;
+        crate::vault::report_key_page_fallback(app, vault);
         state.advance_session_epoch();
         recovery_kit
     };
