@@ -140,7 +140,7 @@ test('Linux CI installs a package and runs the gate before the build finishes', 
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
   assert.match(workflow, /linux-installed-package-gate\.mjs/, 'the Linux job does not run the installed-package gate')
   assert.match(workflow, /xvfb-run -a node tools\/linux-installed-package-gate\.mjs/, 'the installed-package gate is not run under a display server')
-  const job = workflow.slice(workflow.indexOf('desktop-linux:'))
+  const job = workflow.slice(workflow.indexOf('  linux-installed:'), workflow.indexOf('  desktop-linux:'))
   assert.match(job, /--bundles deb/, 'the Linux job does not build the deb the gate installs')
   assert.match(job, /--features wdio/, 'the Linux job does not build the test-featured package the gate drives')
 })
@@ -304,7 +304,7 @@ test('a download that does not match its pinned hash is refused before it is wri
 
 test('Linux CI exercises the shipped rpm and AppImage gates before tagging', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
-  const job = workflow.slice(workflow.indexOf('desktop-linux:'))
+  const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
   for (const format of ['rpm', 'appimage']) {
     assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
   }

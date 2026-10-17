@@ -1,8 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
+  import { isAuthenticatorSource, omittedCount } from '../import-accounting'
   import { useAppStores } from '../stores/app-stores'
   import type { ImportSource } from '../types'
+  import ImportAccountingList from './ImportAccountingList.svelte'
   import ModalShell from './ModalShell.svelte'
 
   export let importSources: Array<{ value: ImportSource; label: string }>
@@ -29,9 +31,11 @@
   const { imports } = useAppStores()
   let sourceButton: HTMLButtonElement
 
-  // Authenticator apps export codes, not items, so they have nothing to attach.
-  const authenticatorSources: ImportSource[] = ['otpauth-txt', 'aegis-json', '2fas-json']
-  $: importsWholeItems = !authenticatorSources.includes($imports.source)
+  $: authenticator = isAuthenticatorSource($imports.source)
+  $: importsWholeItems = !authenticator
+  $: accounting = $imports.preview?.accounting
+  $: showCsvNote = $imports.source === 'bitwarden-csv' && !$imports.preview
+  $: showAccounting = Boolean(accounting) && (authenticator || omittedCount(accounting!) > 0)
 
   function sourceOptions() {
     const dialog = sourceButton?.closest<HTMLElement>('[role="dialog"]')
@@ -113,7 +117,7 @@
   <span class="import-icon"><Icon name="archive" size={21} /></span><h2 id="import-heading">{$imports.preview ? 'Check this import' : 'Import your vault'}</h2><p id="import-description">{$imports.preview ? `${$imports.fileName} stays on this device until you choose to add it.` : 'Reads it on this device before changing your vault.'}</p>
   <div class="import-source">
     <span id="import-source-label">Import from</span>
-    <button bind:this={sourceButton} class="source-select" type="button" aria-haspopup="listbox" aria-labelledby="import-source-label" aria-controls="import-source-options" aria-expanded={$imports.sourceMenuOpen} on:click={() => imports.patch({ sourceMenuOpen: !$imports.sourceMenuOpen })} on:keydown={handleSourceKeydown} disabled={$imports.importing || Boolean($imports.preview)}>
+    <button bind:this={sourceButton} class="source-select" type="button" aria-haspopup="listbox" aria-labelledby="import-source-label" aria-controls="import-source-options" aria-expanded={$imports.sourceMenuOpen} aria-describedby={showCsvNote ? 'import-source-note' : undefined} on:click={() => imports.patch({ sourceMenuOpen: !$imports.sourceMenuOpen })} on:keydown={handleSourceKeydown} disabled={$imports.importing || Boolean($imports.preview)}>
       <span>{importSources.find((source) => source.value === $imports.source)?.label}</span>
       <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
     </button>
@@ -124,10 +128,17 @@
         {/each}
       </div>
     {/if}
+    {#if showCsvNote}
+      <p class="import-source-note" id="import-source-note">Sesame reads only the logins in a Bitwarden CSV file, and it leaves out custom fields. The JSON export keeps those and also brings in secure notes, cards, identities and SSH keys.</p>
+      <button type="button" class="text-button import-source-switch" on:click={() => chooseSource('bitwarden-json')}>Use Bitwarden JSON</button>
+    {/if}
   </div>
   {#if $imports.preview}
     <section class="import-preview" aria-live="polite">
-      <div class="import-preview-head"><span><Icon name="shield" size={16} /></span><div><strong>{$imports.preview.totalEntries} {$imports.preview.totalEntries === 1 ? 'login' : 'logins'} found</strong><p>Review these details before anything is saved.</p></div></div>
+      <div class="import-preview-head"><span><Icon name="shield" size={16} /></span><div><strong>{#if authenticator && accounting}{accounting.accepted} of {accounting.supplied} {accounting.supplied === 1 ? 'code' : 'codes'} can be added{:else}{$imports.preview.totalEntries} {$imports.preview.totalEntries === 1 ? 'login' : 'logins'} found{/if}</strong><p>Review these details before anything is saved.</p></div></div>
+      {#if showAccounting && accounting}
+        <ImportAccountingList {accounting} {authenticator} />
+      {/if}
       <dl>
         <div><dt>Exact duplicates already saved</dt><dd>{$imports.preview.exactDuplicates}</dd></div>
         <div><dt>Same account, different details</dt><dd>{$imports.preview.accountConflicts}</dd></div>
@@ -142,7 +153,6 @@
         <div><dt>Saved identities found</dt><dd>{$imports.preview.identities}</dd></div>
         <div><dt>SSH keys found</dt><dd>{$imports.preview.sshKeys}</dd></div>
         <div><dt>Passkeys Sesame cannot store yet</dt><dd>{$imports.preview.passkeysNotImported}</dd></div>
-        <div><dt>Items Sesame cannot import yet</dt><dd>{$imports.preview.intentionallyOmittedItems}</dd></div>
       </dl>
       {#if $imports.preview.invalidTotp > 0 || $imports.preview.invalidUrls > 0}
         <div class="import-conflict-note"><Icon name="alert" size={16} /><p><strong>Some values could not be used.</strong><span>A 2FA secret that produces no code, or an address Sesame cannot open, is left out rather than saved. Everything else is imported.</span></p></div>
@@ -158,9 +168,6 @@
       {/if}
       {#if importsWholeItems}
         <div class="import-conflict-note"><Icon name="file-key" size={16} /><p><strong>File attachments are not in this export.</strong><span>This export format carries no attached files, so anything attached to an item stays only in your old manager. Save those files separately before you remove it.</span></p></div>
-      {/if}
-      {#if $imports.preview.intentionallyOmittedItems > 0}
-        <div class="import-conflict-note"><Icon name="alert" size={16} /><p><strong>Some items are not imported.</strong><span>Sesame does not yet support this item type. Keep the original export until you have checked that the imported items are complete.</span></p></div>
       {/if}
       <label class="import-option"><input name="skip-exact-duplicates" type="checkbox" checked={$imports.skipExactDuplicates} on:change={(event) => imports.patch({ skipExactDuplicates: event.currentTarget.checked })} /><span><strong>Skip exact duplicates</strong><small>Only logins with the same account details are skipped. Conflicts are still imported separately for review.</small></span></label>
       <div class="import-preview-actions"><button type="button" class="secondary-button" on:click={onResetImport} disabled={$imports.importing}>Choose another file</button><button type="button" class="primary-button" on:click={onConfirmImport} disabled={$imports.importing}>{$imports.importing ? 'Adding locally…' : 'Add to vault'}</button></div>

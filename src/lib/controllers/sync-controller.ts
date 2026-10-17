@@ -149,6 +149,13 @@ function writeCache(enrolled: boolean, state: string) {
   }
 }
 
+const ENTITLEMENT_PREFIX = 'sync_not_entitled:'
+
+function readableMessage(error: unknown, fallback: string) {
+  const message = typeof error === 'string' ? error : fallback
+  return message.startsWith(ENTITLEMENT_PREFIX) ? message.slice(ENTITLEMENT_PREFIX.length) : message
+}
+
 export type SyncChromeTone = 'ok' | 'busy' | 'warn'
 
 export function describeSyncForChrome(state: Pick<SyncControllerState, 'enrolled' | 'state' | 'activity' | 'alarm' | 'needsNewKey'>): { label: string; tone: SyncChromeTone } | undefined {
@@ -268,7 +275,7 @@ export function createSyncController() {
       store.patch({
         working: false,
         loadError:
-          typeof error === 'string' ? error : 'Sesame could not read the Sync status.',
+          readableMessage(error, 'Sesame could not read the Sync status.'),
       })
     }
   }
@@ -421,7 +428,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not remove that device.',
+            readableMessage(error, 'Sesame could not remove that device.'),
         })
       }
     },
@@ -532,7 +539,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not restore that copy.',
+            readableMessage(error, 'Sesame could not restore that copy.'),
         })
       }
     },
@@ -546,7 +553,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           loadError:
-            typeof error === 'string' ? error : 'Sesame could not reset Sesame Sync.',
+            readableMessage(error, 'Sesame could not reset Sesame Sync.'),
         })
       }
     },

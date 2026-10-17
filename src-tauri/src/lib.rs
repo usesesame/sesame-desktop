@@ -168,6 +168,8 @@ macro_rules! sesame_invoke_handler {
             desktop_shell::set_autostart_enabled,
             desktop_settings::get_website_icons_enabled,
             desktop_settings::set_website_icons_enabled,
+            desktop_settings::get_screen_capture_allowed,
+            desktop_settings::set_screen_capture_allowed,
             website_icons::get_website_icon,
             website_icons::clear_website_icon_cache,
             website_icons::get_website_icon_cache_status,
@@ -262,7 +264,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![desktop_shell::MINIMIZED_LAUNCH_ARG]),
         ))
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(

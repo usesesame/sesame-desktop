@@ -14,8 +14,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  boundary:
+  # The standalone copy runs the same owned command as `desktop:ci`, one part
+  # per job so the slowest part sets the wall-clock time. The parts together
+  # are everything `desktop:ci` runs. `boundary` passes only when all of them do.
+  boundary-part:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script:
+          - desktop:ci:web
+          - desktop:build desktop:lint:rust
+          - desktop:build desktop:test:rust
+          - desktop:build desktop:test:rust:sync
+          - desktop:build desktop:host:stage desktop:test:glib
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -31,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri -> ${{ runner.temp }}/sesame-desktop-boundary-target
+          key: ${{ strategy.job-index }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview and tray libraries
@@ -48,4 +61,16 @@ jobs:
       - name: Verify the desktop boundary
         env:
           TMPDIR: ${{ runner.temp }}
-        run: npm run desktop:boundary:verify
+        run: npm run desktop:boundary:verify -- --script ${{ matrix.script }}
+
+  boundary:
+    needs: [boundary-part]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every boundary part to pass
+        env:
+          RESULT: ${{ needs.boundary-part.result }}
+        run: |
+          echo "Boundary parts: $RESULT"
+          test "$RESULT" = "success"

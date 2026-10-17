@@ -52,6 +52,10 @@
   export let autostartEnabled = false
   export let autostartWorking = false
   export let onToggleAutostart: () => void
+  export let screenCaptureAllowed = false
+  export let screenCaptureKnown = true
+  export let screenCaptureWorking = false
+  export let onToggleScreenCapture: () => void = () => {}
   export let quickAccessShortcut = 'Ctrl+Alt+S'
   export let quickAccessShortcutWorking = false
   export let onUpdateQuickAccessShortcut: (accelerator: string) => void
@@ -294,6 +298,12 @@
               <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
             </article>
             {/if}
+            {#if $platformCapabilities.os === 'windows'}
+            <article>
+              <div class="setting-copy"><strong>Allow screen capture</strong><p>Sesame asks Windows to keep its windows out of screenshots, screen sharing and Recall. Turn this on only while someone helps you in a support session.</p></div>
+              <button type="button" class="switch" class:active={screenCaptureKnown && screenCaptureAllowed} role="switch" aria-checked={screenCaptureKnown ? screenCaptureAllowed : "mixed"} aria-label="Allow screen capture" disabled={screenCaptureWorking || !screenCaptureKnown} on:click={onToggleScreenCapture}><span></span></button>
+            </article>
+            {/if}
             <article>
               <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>
               <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay" use:slidingSelection>{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
@@ -345,6 +355,12 @@
               <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
             {/if}
             <SyncPanel />
+          </div>
+        </section>
+        <section class="settings-group" aria-labelledby="settings-group-connections-server">
+          <h3 id="settings-group-connections-server">Connect to your own server</h3>
+          <div class="settings-list">
+            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
           </div>
         </section>
         <section class="settings-group" aria-labelledby="settings-group-connections-server">

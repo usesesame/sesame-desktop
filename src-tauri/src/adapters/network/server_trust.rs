@@ -151,6 +151,7 @@ pub fn parse_instance(body: &[u8], client_version: &str) -> Result<InstanceInfo,
     if !bounded_identifier(&document.instance_id)
         || !bounded_identifier(&document.capability_key_id)
         || document.name.chars().count() > MAX_NAME_CHARS
+        || document.name.len() > MAX_IDENTIFIER_BYTES
         || document.name.chars().any(char::is_control)
         || document.version.chars().count() > MAX_NAME_CHARS
         || document.version.chars().any(char::is_control)
@@ -461,6 +462,7 @@ mod tests {
             (|d: &mut serde_json::Value| d["name"] = serde_json::json!("Home\nserver"))
                 as fn(&mut serde_json::Value),
             |d| d["name"] = serde_json::json!("x".repeat(MAX_NAME_CHARS + 1)),
+            |d| d["name"] = serde_json::json!("\u{1F512}".repeat(MAX_NAME_CHARS)),
             |d| d["name"] = serde_json::json!("bell\u{7}"),
             |d| d["version"] = serde_json::json!("1\u{0}"),
             |d| d["instanceId"] = serde_json::json!(""),

@@ -83,9 +83,9 @@ paths = [
 regexes = ['''"secret": "(KRSXG5CTMVRXEZLU|MFRGGZDFMZTWQ2LK|GEZDGNBVGY3TQOJQ|NBSWY3DPFQQHO33S|MZXW6YTBOI4TQOJQ)"''']
 
 [[allowlists]]
-description = "Deterministic public signing keys in the Sync v3 conformance fixture"
+description = "Public deterministic verification keys in the cross-language Sync v3 fixture"
 targetRules = ["generic-api-key"]
 condition = "AND"
 regexTarget = "line"
-paths = ['''src\-tauri/contracts/sync/v3/v3\-fixture\.json$''']
-regexes = ['''"(?:subjectSigningKey|signerKey)": "(?:7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E|gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q|iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w)"''']
+paths = ['''src-tauri/contracts/sync/v3/v3-fixture\.json$''']
+regexes = ['''"(signerKey|subjectSigningKey)": "[A-Za-z0-9_-]{43}"''']

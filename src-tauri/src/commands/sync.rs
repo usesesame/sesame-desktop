@@ -605,3 +605,16 @@ mod local_status_tests {
         assert!(!never_turned_on(false, true));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_entitlement_refusal_carries_its_code_and_a_readable_message() {
+        assert_eq!(
+            present(SyncError::NotEntitled),
+            "sync_not_entitled:This account's subscription does not include Sesame Sync."
+        );
+    }
+}
