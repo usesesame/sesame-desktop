@@ -6,7 +6,7 @@ import SettingsView from './SettingsView.svelte'
 
 vi.mock('../vault', () => ({ getPlatformCapabilities: vi.fn() }))
 
-const hostCapabilities = { pinUnlock: false, biometricUnlock: false, autoType: false, browserIntegration: false, sessionAutoLock: false, quickAccessShortcut: false, accountLinking: false, desktopUpdates: false, windowControls: false }
+const hostCapabilities = { pinUnlock: false, biometricUnlock: false, autoType: false, browserIntegration: false, sessionAutoLock: false, screenLockMonitoring: false, quickAccessShortcut: false, accountLinking: false, desktopUpdates: false, windowControls: false }
 
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })

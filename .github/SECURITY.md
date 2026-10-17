@@ -110,6 +110,14 @@ good-faith report that turns out to be out of scope is not held against you.
   computer. Malware running as you, or as an administrator, can read the
   app's memory, drive its window, record your keystrokes, or capture the
   screen while a secret is shown.
+- Showing or copying a saved secret asks for your master password, and one
+  check covers the next two minutes. That covers login passwords, backup
+  codes, card numbers and security codes, Wi-Fi passwords, SSH keys and
+  passphrases, licence keys, document numbers and secret custom fields. They
+  stay in Sesame's native code until you ask, and copying happens there too.
+  Login one-time codes, secure note contents and notes show without the
+  check, because the window has to display them, and a one-time code expires
+  within a minute or so.
 - Malware that controls your browser profile can act as the extension. The
   approval prompt in the Sesame window is the last check before a fill.
 - Changing the master password or getting a new recovery kit cannot reach

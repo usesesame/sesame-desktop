@@ -1,14 +1,27 @@
-import type { CustomRecord, CustomRecordInput } from '../types'
+import type { CustomFieldEntry, CustomRecord, CustomRecordInput, SecretView } from '../types'
 import { deleteCustomRecord, getCustomRecord, saveCustomRecord } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyRecordDraft(): CustomRecordInput {
-  return { title: '', fields: [], notes: '', tags: [] }
+  return { title: '', fields: [], notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(record: CustomRecord): CustomRecordInput {
+export type DraftField = CustomFieldEntry & { keptFrom?: number }
+
+function draftFrom(record: SecretView<CustomRecord>): CustomRecordInput {
   const { id, title, fields, notes, tags } = record
-  return { id, title, fields, notes, tags: tags ?? [] }
+  const rows: DraftField[] = fields.map((field, index) => record.secretFields.includes(`field:${index}`) ? { ...field, value: '', keptFrom: index } : field)
+  return { id, title, fields: rows, notes, tags: tags ?? [], keptSecrets: [] }
+}
+
+function inputFrom(draft: CustomRecordInput): CustomRecordInput {
+  const keptSecrets: string[] = []
+  const fields = (draft.fields as DraftField[]).map((row, index) => {
+    const { keptFrom, ...field } = row
+    if (keptFrom !== undefined && field.kind === 'secret' && !field.value) keptSecrets.push(`field:${index}<-${keptFrom}`)
+    return field
+  })
+  return { ...draft, fields, keptSecrets }
 }
 
 export function createCustomRecordController(options: RecordControllerOptions) {
@@ -19,7 +32,7 @@ export function createCustomRecordController(options: RecordControllerOptions) {
     emptyDraft: emptyRecordDraft,
     draftFrom,
     draftTitle: (draft) => draft.title.trim(),
-    api: { get: getCustomRecord, save: saveCustomRecord, delete: deleteCustomRecord },
+    api: { get: getCustomRecord, save: (draft) => saveCustomRecord(inputFrom(draft)), delete: deleteCustomRecord },
     copy: {
       addTitle: 'Add a record',
       editTitle: 'Edit record',

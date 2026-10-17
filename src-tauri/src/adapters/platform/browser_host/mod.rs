@@ -9,8 +9,7 @@ use crate::browser_protocol::{
 };
 
 const HOST_NAME: &str = "app.usesesame.browser";
-const PINNED_CHROMIUM_EXTENSION_ID: &str = "idbkfhhjnniibleeanchljhakfhecnlg";
-const PINNED_CHROMIUM_LAUNCHER_ORIGIN: &str = "chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg";
+const TRUSTED_CHROMIUM_EXTENSION_IDS: &[&str] = &["idbkfhhjnniibleeanchljhakfhecnlg"];
 const PINNED_FIREFOX_EXTENSION_ID: &str = "sesame@usesesame.app";
 
 #[cfg(target_os = "linux")]
@@ -263,7 +262,7 @@ fn finish_verb(result: Result<(), RegistrationError>, ok_code: &'static str) {
 
 /// Chromium passes the calling extension origin first. Firefox passes the manifest
 /// path first and the extension id second, so each browser is checked where it speaks.
-/// This stays an explicit two-entry allowlist; it is never widened to a wildcard.
+/// Chromium ids come from an explicit list of exact ids and are never widened to a wildcard.
 fn launcher_allowed(first: Option<&std::ffi::OsStr>, second: Option<&std::ffi::OsStr>) -> bool {
     launcher_origin_allowed(first) || firefox_launcher_allowed(second)
 }
@@ -275,8 +274,11 @@ fn firefox_launcher_allowed(extension_id: Option<&std::ffi::OsStr>) -> bool {
 fn launcher_origin_allowed(origin: Option<&std::ffi::OsStr>) -> bool {
     // Chrome registers the origin with a trailing slash but launches it bare; accept only those two spellings.
     origin.is_some_and(|value| {
-        value == std::ffi::OsStr::new(PINNED_CHROMIUM_LAUNCHER_ORIGIN)
-            || value == std::ffi::OsStr::new(&format!("{PINNED_CHROMIUM_LAUNCHER_ORIGIN}/"))
+        TRUSTED_CHROMIUM_EXTENSION_IDS.iter().any(|id| {
+            let bare = format!("chrome-extension://{id}");
+            value == std::ffi::OsStr::new(&bare)
+                || value == std::ffi::OsStr::new(&format!("{bare}/"))
+        })
     })
 }
 
@@ -372,9 +374,10 @@ fn manifest_bytes(host: &Path) -> Result<Vec<u8>, serde_json::Error> {
         "description": "Sesame Browser Helper native host",
         "path": host,
         "type": "stdio",
-        "allowed_origins": [
-            format!("chrome-extension://{PINNED_CHROMIUM_EXTENSION_ID}/")
-        ]
+        "allowed_origins": TRUSTED_CHROMIUM_EXTENSION_IDS
+            .iter()
+            .map(|id| format!("chrome-extension://{id}/"))
+            .collect::<Vec<_>>()
     }))
 }
 
@@ -539,15 +542,63 @@ mod launcher_tests {
     use std::ffi::OsStr;
 
     #[test]
-    fn the_pinned_chromium_origin_is_accepted_bare_and_with_a_slash() {
-        assert!(launcher_allowed(
-            Some(OsStr::new(PINNED_CHROMIUM_LAUNCHER_ORIGIN)),
-            None
-        ));
-        assert!(launcher_allowed(
-            Some(OsStr::new(&format!("{PINNED_CHROMIUM_LAUNCHER_ORIGIN}/"))),
-            None
-        ));
+    fn every_trusted_chromium_origin_is_accepted_bare_and_with_a_slash() {
+        for id in TRUSTED_CHROMIUM_EXTENSION_IDS {
+            let bare = format!("chrome-extension://{id}");
+            assert!(launcher_allowed(Some(OsStr::new(&bare)), None));
+            assert!(launcher_allowed(
+                Some(OsStr::new(&format!("{bare}/"))),
+                None
+            ));
+        }
+    }
+
+    #[test]
+    fn trusted_chromium_ids_are_exact_unique_extension_ids() {
+        let mut seen = std::collections::HashSet::new();
+        for id in TRUSTED_CHROMIUM_EXTENSION_IDS {
+            assert_eq!(id.len(), 32, "{id} is not 32 characters");
+            assert!(
+                id.bytes().all(|byte| (b'a'..=b'p').contains(&byte)),
+                "{id} has characters outside a to p"
+            );
+            assert!(seen.insert(*id), "{id} is listed twice");
+        }
+    }
+
+    #[test]
+    fn near_miss_chromium_origins_are_refused() {
+        for id in TRUSTED_CHROMIUM_EXTENSION_IDS {
+            let upper = format!("chrome-extension://{}", id.to_uppercase());
+            let truncated = format!("chrome-extension://{}", &id[..31]);
+            let extended = format!("chrome-extension://{id}a");
+            let with_path = format!("chrome-extension://{id}/popup.html");
+            let double_slash = format!("chrome-extension://{id}//");
+            let other_scheme = format!("moz-extension://{id}");
+            let https = format!("https://{id}");
+            let bare_id = (*id).to_string();
+            let suffixed = format!("chrome-extension://{id}.example.test");
+            let wildcard = "chrome-extension://*".to_string();
+            let empty = String::new();
+            for candidate in [
+                upper,
+                truncated,
+                extended,
+                with_path,
+                double_slash,
+                other_scheme,
+                https,
+                bare_id,
+                suffixed,
+                wildcard,
+                empty,
+            ] {
+                assert!(
+                    !launcher_allowed(Some(OsStr::new(&candidate)), None),
+                    "{candidate} was accepted"
+                );
+            }
+        }
     }
 
     /// Firefox passes the manifest path first and the extension id second.
@@ -595,7 +646,7 @@ mod manifest_tests {
     use super::*;
 
     #[test]
-    fn the_chromium_manifest_pins_the_host_and_the_extension_origin() {
+    fn the_chromium_manifest_pins_the_host_and_each_trusted_origin() {
         let bytes = manifest_bytes(Path::new("/opt/sesame/sesame-browser-host")).unwrap();
         let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(manifest["name"], HOST_NAME);
@@ -603,9 +654,10 @@ mod manifest_tests {
         assert_eq!(manifest["type"], "stdio");
         assert_eq!(
             manifest["allowed_origins"],
-            serde_json::json!([format!(
-                "chrome-extension://{PINNED_CHROMIUM_EXTENSION_ID}/"
-            )])
+            serde_json::json!(TRUSTED_CHROMIUM_EXTENSION_IDS
+                .iter()
+                .map(|id| format!("chrome-extension://{id}/"))
+                .collect::<Vec<_>>())
         );
     }
 

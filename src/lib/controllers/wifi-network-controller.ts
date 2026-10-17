@@ -1,14 +1,15 @@
-import type { WifiNetwork, WifiNetworkInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { SecretView, WifiNetwork, WifiNetworkInput } from '../types'
 import { deleteWifiNetwork, getWifiNetwork, saveWifiNetwork } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyNetworkDraft(): WifiNetworkInput {
-  return { title: '', ssid: '', password: '', securityType: '', notes: '', tags: [] }
+  return { title: '', ssid: '', password: '', securityType: '', notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(network: WifiNetwork): WifiNetworkInput {
+function draftFrom(network: SecretView<WifiNetwork>): WifiNetworkInput {
   const { id, title, ssid, password, securityType, notes, tags } = network
-  return { id, title, ssid, password, securityType, notes, tags: tags ?? [] }
+  return { id, title, ssid, password, securityType, notes, tags: tags ?? [], keptSecrets: keptSecretKeys(network) }
 }
 
 export function createWifiNetworkController(options: RecordControllerOptions) {

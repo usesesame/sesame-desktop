@@ -63,6 +63,7 @@ impl_record_commands! {
     from_input: wifi_network_from_input,
     get_fn: get_wifi_network,
     save_fn: save_wifi_network,
+    save_in_state_fn: save_wifi_network_in_state,
     delete_fn: delete_wifi_network,
     missing_noun: "network",
     save_unlock_msg: "Unlock your vault before saving a network.",

@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use sesame_core::api::{create_vault, open_vault_with_password};
 
 use crate::vault::storage::commit_payload_change;
-use crate::vault::{random_id, LoginInput, UnlockedVault, VaultEntry, VaultFile, VaultState};
+use crate::vault::{
+    random_id, LoginInput, UnlockedVault, VaultEntry, VaultFile, VaultPayload, VaultState,
+};
 
 const TEST_PASSWORD: &str = "fictional master password";
 
@@ -43,6 +45,14 @@ impl TestVault {
         }
     }
 
+    pub(crate) fn seed(&self, change: impl FnOnce(&mut VaultPayload)) {
+        let mut session = self.state.session.lock().expect("session lock");
+        let session = session.as_mut().expect("session");
+        let mut payload = session.open_payload().expect("opened payload").clone();
+        change(&mut payload);
+        commit_payload_change(session, payload).expect("seeded payload");
+    }
+
     pub(crate) fn stored_login(&self, id: &str) -> VaultEntry {
         let bytes = std::fs::read(&self.path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
@@ -77,6 +87,7 @@ pub(crate) fn login_input(id: Option<&str>, url: &str, password: &str) -> LoginI
         folder_id: None,
         totp: None,
         backup_codes: Vec::new(),
+        keep_backup_codes: false,
         recovery_email: String::new(),
         recovery_phone: String::new(),
         recovery_not_applicable: false,

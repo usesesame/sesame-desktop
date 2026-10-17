@@ -74,6 +74,7 @@ impl_record_commands! {
     from_input: identity_from_input,
     get_fn: get_identity,
     save_fn: save_identity,
+    save_in_state_fn: save_identity_in_state,
     delete_fn: delete_identity,
     missing_noun: "identity",
     save_unlock_msg: "Unlock your vault before saving an identity.",

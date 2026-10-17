@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
@@ -63,6 +64,7 @@
         <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
       </span>
     </label>
+    <KeptSecret draft={networkDraft} key="password" typed={networkDraft.password} onChange={(next) => (networkDraft = { ...networkDraft, ...next })} />
     <label>Security type <span class="field-hint">Optional</span>
       <input name="wifi-security-type" bind:value={networkDraft.securityType} list="wifi-security-types" maxlength="32" autocomplete="off" placeholder="e.g. WPA2…" spellcheck="false" />
       <datalist id="wifi-security-types">

@@ -10,10 +10,10 @@ pub struct VaultKey {
 
 impl VaultKey {
     pub fn new(mut key: [u8; 32]) -> VaultResult<Self> {
-        let stored = platform::StoredKey::new(key)?;
+        let stored = platform::StoredKey::new(key);
         key.zeroize();
         Ok(Self {
-            inner: Mutex::new(stored),
+            inner: Mutex::new(stored?),
         })
     }
 
@@ -22,6 +22,13 @@ impl VaultKey {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .expose(operation)
+    }
+
+    pub fn uses_page_fallback(&self) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .uses_page_fallback()
     }
 }
 
@@ -107,6 +114,10 @@ mod platform {
                 return Err(error);
             }
             result
+        }
+
+        pub fn uses_page_fallback(&self) -> bool {
+            false
         }
     }
 
@@ -202,7 +213,6 @@ mod platform {
 
     pub struct StoredKey {
         storage: Storage,
-        #[cfg_attr(not(test), allow(dead_code))]
         locked: bool,
     }
 
@@ -236,6 +246,10 @@ mod platform {
                 Storage::Locked(region) => operation(region.bytes()),
                 Storage::Zeroized(stored) => operation(&stored),
             }
+        }
+
+        pub fn uses_page_fallback(&self) -> bool {
+            !self.locked
         }
 
         #[cfg(test)]
@@ -422,6 +436,10 @@ mod platform {
         ) -> VaultResult<T> {
             operation(&self.0)
         }
+
+        pub fn uses_page_fallback(&self) -> bool {
+            false
+        }
     }
 }
 
@@ -560,6 +578,55 @@ mod tests {
                 let flags = platform::mapping_flags(address, length).expect("mapped");
                 assert!(flags.split_whitespace().any(|flag| flag == "lo"));
             }
+        }
+
+        #[test]
+        fn linux_page_lock_failure_is_reported_and_the_key_still_works() {
+            let mut command =
+                std::process::Command::new(std::env::current_exe().expect("this test binary"));
+            command
+                .arg("--ignored")
+                .arg("--exact")
+                .arg("vault_key::tests::linux_tests::linux_page_lock_failure_child");
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                command.pre_exec(|| {
+                    let limit = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_MEMLOCK, &limit) == 0 {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::last_os_error())
+                    }
+                });
+            }
+            let output = command.output().expect("child test process");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "the lowered-memlock child did not pass: {stdout}{}",
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+
+        #[test]
+        #[ignore = "runs in a child process with RLIMIT_MEMLOCK lowered"]
+        fn linux_page_lock_failure_child() {
+            let expected = [7_u8; 32];
+            let key = VaultKey::new(expected).expect("stored key");
+            assert!(key.uses_page_fallback());
+            assert!(key
+                .expose(|bytes| Ok(bytes == &expected))
+                .expect("exposed key"));
+            let stored = key
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(!stored.is_locked());
+            assert!(stored.locked_region().is_none());
+            assert!(stored.is_plaintext(&expected));
         }
 
         #[test]

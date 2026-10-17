@@ -85,6 +85,7 @@ impl_record_commands! {
     from_input: document_from_input,
     get_fn: get_document,
     save_fn: save_document,
+    save_in_state_fn: save_document_in_state,
     delete_fn: delete_document,
     missing_noun: "document",
     save_unlock_msg: "Unlock your vault before saving a document.",

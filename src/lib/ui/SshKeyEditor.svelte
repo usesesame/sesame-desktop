@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
@@ -86,6 +87,7 @@
     <label>Name <span class="field-hint">How this key appears in your list, e.g. “Deploy key”</span><input name="ssh-key-title" bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key…" autocomplete="off" /></label>
     <label>Key type <span class="field-hint">Read from the key you paste</span><input name="ssh-key-type" bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" placeholder="e.g. ed25519…" spellcheck="false" /></label>
     <label>Private key<textarea name="ssh-private-key" bind:value={keyDraft.privateKey} on:input={fillKeyType} rows="6" maxlength="16000" class="monospace-field" spellcheck="false"></textarea></label>
+    <KeptSecret draft={keyDraft} key="privateKey" typed={keyDraft.privateKey} onChange={(next) => (keyDraft = { ...keyDraft, ...next })} />
     <label>Public key<textarea name="ssh-public-key" bind:value={keyDraft.publicKey} on:input={fillKeyType} rows="3" maxlength="4000" class="monospace-field" spellcheck="false"></textarea></label>
     <label>Passphrase
       <span class="password-field single">
@@ -93,6 +95,7 @@
         <button type="button" class="icon-button" aria-label={passphraseVisible ? 'Hide passphrase' : 'Show passphrase'} aria-pressed={passphraseVisible} on:click={() => (passphraseVisible = !passphraseVisible)}><Icon name={passphraseVisible ? 'eye-off' : 'eye'} size={15} /></button>
       </span>
     </label>
+    <KeptSecret draft={keyDraft} key="passphrase" typed={keyDraft.passphrase} onChange={(next) => (keyDraft = { ...keyDraft, ...next })} />
     <label>Notes<textarea name="ssh-key-notes" bind:value={keyDraft.notes} rows="4" maxlength="4000"></textarea></label>
     <label>Tags <span class="field-hint">Comma separated, optional</span><input name="ssh-key-tags" value={keyDraft.tags.join(', ')} on:input={(event) => (keyDraft = { ...keyDraft, tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. work, deploy…" /></label>
   </div>

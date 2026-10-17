@@ -54,6 +54,7 @@ impl_record_commands! {
     from_input: secure_note_from_input,
     get_fn: get_secure_note,
     save_fn: save_secure_note,
+    save_in_state_fn: save_secure_note_in_state,
     delete_fn: delete_secure_note,
     missing_noun: "note",
     save_unlock_msg: "Unlock your vault before saving a note.",

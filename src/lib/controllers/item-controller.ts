@@ -1,9 +1,10 @@
 import { derived } from 'svelte/store'
-import { itemDetail, type ItemDetail, type ItemRecord, type RecordKind } from '../item-fields'
+import { itemDetail, type ItemDetail, type ItemRecordView, type RecordKind } from '../item-fields'
 import type { AppStores } from '../stores/app-stores'
 import type { ItemKind } from '../types'
 import {
   bulkAssignFolder,
+  copyItemField,
   copyToClipboard,
   getCard,
   getCustomRecord,
@@ -15,6 +16,7 @@ import {
   getWifiNetwork,
   recordDiagnostic,
   recordItemUse,
+  releaseItemField,
   searchItems,
   setItemFavourite,
 } from '../vault'
@@ -23,10 +25,12 @@ import { itemMatchesQuery, vaultItems, type VaultItem } from '../vault-items'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { LoginController } from './login-controller'
+import type { PresenceController } from './presence-controller'
 
 export const SEARCH_DEBOUNCE_MS = 120
+export const SECRET_REVEAL_TIMEOUT_MS = 30_000
 
-const recordLoaders: Record<RecordKind, (id: string) => Promise<ItemRecord>> = {  identity: getIdentity,
+const recordLoaders: Record<RecordKind, (id: string) => Promise<ItemRecordView>> = {  identity: getIdentity,
   secure_note: getSecureNote,
   card: getCard,
   wifi_network: getWifiNetwork,
@@ -46,19 +50,22 @@ interface ItemControllerOptions {
   stores: AppStores
   feedback: FeedbackController
   login: LoginController
+  presence: PresenceController
   editors: Record<RecordKind, RecordEditor>
 }
 
-export function createItemController({ stores, feedback, login, editors }: ItemControllerOptions) {
+export function createItemController({ stores, feedback, login, presence, editors }: ItemControllerOptions) {
   const { selection, settings, vault } = stores
   const state = controllerStore({
     detail: null as ItemDetail | null,
+    revealed: {} as Record<string, string>,
     loading: false,
     addMenuOpen: false,
     filterMenuOpen: false,
     /** Ranked ids from Rust only; which fields matched a search is never held here. */
     searchMatchIds: [] as string[],
   })
+  const hideTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let detailRequestToken = 0
   let searchRequestToken = 0
   let loadedDetailKey = ''
@@ -122,10 +129,64 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
     void select(activeItemId, activeItemKind)
   })
 
+  function hideAllFields() {
+    for (const timer of hideTimers.values()) clearTimeout(timer)
+    hideTimers.clear()
+    state.patch({ revealed: {} })
+  }
+
+  function hideField(key: string) {
+    const timer = hideTimers.get(key)
+    if (timer) clearTimeout(timer)
+    hideTimers.delete(key)
+    const { [key]: _hidden, ...rest } = state.value().revealed
+    state.patch({ revealed: rest })
+  }
+
   function clearDetail() {
     detailRequestToken += 1
     loadedDetailKey = ''
+    hideAllFields()
     state.patch({ detail: null, loading: false })
+  }
+
+  function activeRecord(): { id: string; kind: Exclude<ItemKind, 'login'> } | null {
+    const { activeItemId, activeItemKind } = selection.value()
+    if (!activeItemId || !activeItemKind || activeItemKind === 'login') return null
+    return { id: activeItemId, kind: activeItemKind }
+  }
+
+  async function revealField(key: string): Promise<void> {
+    const active = activeRecord()
+    if (!active) return
+    try {
+      const value = await releaseItemField(active.kind, active.id, key)
+      if (selection.value().activeItemId !== active.id || !vault.value().status.unlocked) return
+      state.patch({ revealed: { ...state.value().revealed, [key]: value } })
+      const previous = hideTimers.get(key)
+      if (previous) clearTimeout(previous)
+      hideTimers.set(key, setTimeout(() => hideField(key), SECRET_REVEAL_TIMEOUT_MS))
+    } catch (error) {
+      if (presence.required(error)) presence.ask('reveal-field', () => revealField(key))
+      else feedback.setError(error)
+    }
+  }
+
+  async function copyField(key: string, label: string): Promise<void> {
+    const active = activeRecord()
+    if (!active) return
+    try {
+      await copyItemField(active.kind, active.id, key)
+      void markUsed(active.id)
+      feedback.showNotice(`${label} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+    } catch (error) {
+      if (presence.required(error)) {
+        presence.ask('copy-field', () => copyField(key, label))
+        return
+      }
+      void recordDiagnostic('clipboard', 'failed')
+      feedback.setError(error)
+    }
   }
 
   function detailKey(id: string): string {
@@ -147,6 +208,7 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
     loadedDetailKey = ''
     const requestToken = detailRequestToken
     selection.patch({ activeItemId: id, activeItemKind: kind })
+    hideAllFields()
     state.patch({ loading: true, detail: null })
     feedback.clearError()
     try {
@@ -189,6 +251,9 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
     recentItems,
     select,
     copy,
+    copyField,
+    revealField,
+    hideField,
     openNew(kind: ItemKind) {
       state.patch({ addMenuOpen: false })
       if (kind === 'login') {
@@ -293,7 +358,8 @@ export function createItemController({ stores, feedback, login, editors }: ItemC
       detailRequestToken += 1
       searchRequestToken += 1
       cancelDebouncedSearch()
-      state.set({ detail: null, loading: false, addMenuOpen: false, filterMenuOpen: false, searchMatchIds: [] })
+      hideAllFields()
+      state.set({ detail: null, revealed: {}, loading: false, addMenuOpen: false, filterMenuOpen: false, searchMatchIds: [] })
       selection.patch({ activeItemId: null, activeItemKind: null, recentItemIds: [] })
     },
   }

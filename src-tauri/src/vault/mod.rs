@@ -74,6 +74,12 @@ pub use sesame_core::{
     VAULT_FORMAT_VERSION, WRAP_AAD,
 };
 
+pub fn report_key_page_fallback(app: &tauri::AppHandle, unlocked: &UnlockedVault) {
+    if unlocked.key_uses_page_fallback() {
+        crate::diagnostics::record_vault_key_fallback(app, "key_page_fallback");
+    }
+}
+
 /// The desktop event half of locking; every lock entry point calls this so the behavior cannot drift.
 pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResult<()> {
     use tauri::{Emitter, Manager};

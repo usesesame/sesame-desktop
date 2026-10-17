@@ -34,6 +34,8 @@
   export let savingLogin = false
   export let focusUrl = false
   export let hasTotp = false
+  export let backupCodeCount = 0
+  let typedBackupCodes = loginDraft.backupCodes.join('\n')
   export let onSubmit: (totpEntered: boolean) => void
   export let onClose: () => void
   export let onDelete: () => void
@@ -233,7 +235,10 @@
       <div><h3>Account recovery</h3><p>Keep only the options this site actually offers.</p></div>
       <label class="recovery-applicability"><input name="login-recovery-not-applicable" type="checkbox" bind:checked={loginDraft.recoveryNotApplicable} /><span><strong>This site has no separate recovery options</strong><small>Use this when there are no backup codes, recovery email, or recovery phone.</small></span></label>
       {#if !loginDraft.recoveryNotApplicable}
-        <label>Backup codes<textarea name="login-backup-codes" value={loginDraft.backupCodes.join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, backupCodes: event.currentTarget.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) })} placeholder="One code per line…" autocomplete="off" spellcheck="false"></textarea></label>
+        <label>Backup codes<textarea name="login-backup-codes" value={typedBackupCodes} on:input={(event) => { typedBackupCodes = event.currentTarget.value; loginDraft = { ...loginDraft, backupCodes: typedBackupCodes.split(/[\n,]/).map((value) => value.trim()).filter(Boolean) } }} placeholder={backupCodeCount ? 'Type new codes to replace the saved ones…' : 'One code per line…'} autocomplete="off" spellcheck="false"></textarea></label>
+        {#if backupCodeCount}
+          <label class="recovery-applicability"><input name="login-keep-backup-codes" type="checkbox" bind:checked={loginDraft.keepBackupCodes} /><span><strong>Keep the {backupCodeCount} saved backup {backupCodeCount === 1 ? 'code' : 'codes'}</strong><small>Codes you type above replace them. Clear this to remove them.</small></span></label>
+        {/if}
         <div class="editor-two-column">
           <label>Recovery email <span class="field-hint">Optional</span><input name="login-recovery-email" type="email" bind:value={loginDraft.recoveryEmail} autocomplete="off" spellcheck="false" /></label>
           <label>Recovery phone <span class="field-hint">Optional</span><input name="login-recovery-phone" type="tel" bind:value={loginDraft.recoveryPhone} autocomplete="off" /></label>

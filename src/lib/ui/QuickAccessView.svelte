@@ -2,7 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
-  import { confirmQuickAccessField, copyToClipboard, getQuickAccessField, getQuickAccessStatus, openQuickAccessItem, previewMode, searchQuickAccessItems } from '../vault'
+  import { copyQuickAccessField, getQuickAccessStatus, openQuickAccessItem, PRESENCE_REQUIRED, previewMode, searchQuickAccessItems } from '../vault'
   import type { QuickAccessAction, QuickAccessItem } from '../types'
   import { itemKindIcon, itemKindLabel } from '../vault-items'
 
@@ -15,7 +15,7 @@
   let workingId = ''
   let doneId = ''
   let doneLabel = ''
-  let confirming: { id: string; field: string } | null = null
+  let presenceItem: QuickAccessItem | null = null
   let searchInput: HTMLInputElement | undefined
   let searchSequence = 0
 
@@ -31,7 +31,7 @@
     workingId = ''
     doneId = ''
     doneLabel = ''
-    confirming = null
+    presenceItem = null
   }
 
   async function updateSearch() {
@@ -41,7 +41,7 @@
       if (sequence !== searchSequence) return
       items = next
       selectedIndex = 0
-      confirming = null
+      presenceItem = null
     } catch {
       if (sequence === searchSequence) stage = 'locked'
     }
@@ -78,43 +78,39 @@
       }
       return
     }
-    if (action.guarded && (confirming?.id !== item.id || confirming?.field !== action.field)) {
-      workingId = item.id
-      try {
-        await confirmQuickAccessField(item.id, action.field)
-        confirming = { id: item.id, field: action.field }
-      } catch {
-        confirming = null
-      }
-      workingId = ''
-      return
-    }
     workingId = item.id
+    presenceItem = null
     try {
-      const { value } = await getQuickAccessField(item.id, action.field)
-      if (!value) {
-        workingId = ''
-        return
-      }
-      await copyToClipboard(value)
+      await copyQuickAccessField(item.id, action.field)
       doneId = item.id
       doneLabel = action.label.replace(/^Copy /, '')
-      confirming = null
       window.setTimeout(closeWindow, 550)
+    } catch (error) {
+      workingId = ''
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) presenceItem = item
+    }
+  }
+
+  async function openPresenceItem() {
+    if (!presenceItem) return
+    const { id } = presenceItem
+    presenceItem = null
+    try {
+      await openQuickAccessItem(id)
     } catch {
       workingId = ''
     }
   }
 
   function primaryAction(item: QuickAccessItem): QuickAccessAction | undefined {
-    return item.actions.find((action) => !action.guarded) ?? item.actions[0]
+    return item.actions[0]
   }
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault()
-      if (confirming) {
-        confirming = null
+      if (presenceItem) {
+        presenceItem = null
         return
       }
       closeWindow()
@@ -190,23 +186,25 @@
               <button
                 type="button"
                 class="quick-access-action-button"
-                class:confirming={confirming?.id === item.id && confirming?.field === action.field}
-                aria-label={confirming?.id === item.id && confirming?.field === action.field ? `Confirm: ${action.label.toLowerCase()} for ${item.title}` : `${action.label} for ${item.title}`}
-                title={confirming?.id === item.id && confirming?.field === action.field ? 'Select again to confirm' : action.label}
+                aria-label={`${action.label} for ${item.title}`}
+                title={action.label}
                 disabled={Boolean(workingId) && workingId !== item.id}
                 on:mouseenter={() => (selectedIndex = index)}
                 on:click|stopPropagation={() => void runAction(item, action)}
               >
-                <Icon name={action.guarded ? 'shield-alert' : 'copy'} size={14} />
-                <span>{confirming?.id === item.id && confirming?.field === action.field ? 'Confirm' : action.label.replace(/^Copy /, '')}</span>
+                <Icon name="copy" size={14} />
+                <span>{action.label.replace(/^Copy /, '')}</span>
               </button>
             {/each}
             </span>
           </li>
         {/each}
       </ul>
-      {#if confirming}
-        <p class="quick-access-confirm" role="status">Select that action again to copy the protected value.</p>
+      {#if presenceItem}
+        <p class="quick-access-presence" role="status">
+          <span>Confirm your master password in Sesame to copy from {presenceItem.title}.</span>
+          <button type="button" on:click={() => void openPresenceItem()}>Open Sesame</button>
+        </p>
       {/if}
     {:else}
       <p class="quick-access-empty">{query.trim() ? 'No saved item matches.' : 'Nothing saved yet.'}</p>
@@ -232,13 +230,14 @@
   .quick-access-result-row > button:first-child:disabled { cursor: default; opacity: .7; }
   .quick-access-action-button { display: inline-flex; min-height: 32px; flex: none; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-bold); white-space: nowrap; cursor: pointer; }
   .quick-access-action-button:hover:not(:disabled) { background: var(--tint); }
-  .quick-access-action-button.confirming { color: var(--danger); background: var(--danger-bg); }
   .quick-access-action-button:disabled { cursor: default; opacity: .6; }
   .quick-access-result-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
   .quick-access-result-copy strong { overflow: hidden; font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-result-copy small { overflow: hidden; color: var(--text-muted); font-size: var(--type-2); text-overflow: ellipsis; white-space: nowrap; }
   .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: var(--type-2); font-weight: var(--weight-medium); white-space: nowrap; }
   .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-3); text-align: center; }
-  .quick-access-confirm { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: var(--type-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .quick-access-confirm { color: var(--danger); }
+  .quick-access-presence { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--type-2); }
+  .quick-access-presence span { min-width: 0; }
+  .quick-access-presence button { flex: none; min-height: 32px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-bold); cursor: pointer; }
+  .quick-access-presence button:hover { background: var(--tint); }
 </style>

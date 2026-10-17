@@ -91,6 +91,7 @@ impl_record_commands! {
     from_input: custom_record_from_input,
     get_fn: get_custom_record,
     save_fn: save_custom_record,
+    save_in_state_fn: save_custom_record_in_state,
     delete_fn: delete_custom_record,
     missing_noun: "record",
     save_unlock_msg: "Unlock your vault before saving a record.",

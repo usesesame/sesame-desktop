@@ -5,8 +5,9 @@ import {
   addItemsTag,
   autoType,
   bulkAssignFolder,
-  checkPasswordBreach,
+  checkLoginBreach,
   checkReleasePresence,
+  copyItemField,
   copyToClipboard,
   createFolder,
   deleteFolder,
@@ -26,6 +27,7 @@ import { uniqueTags, vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
 import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
+import type { PresenceController } from './presence-controller'
 
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
 const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
@@ -39,7 +41,7 @@ export type PasswordIntent = 'reveal' | 'copy' | 'autotype'
 function emptyLoginDraft(password = ''): LoginInput {
   return {
     title: '', url: '', urls: [], tags: [], username: '', email: '', password, folder: '', totp: undefined, backupCodes: [],
-    recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '',
+    recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '', keepBackupCodes: false,
   }
 }
 
@@ -47,12 +49,13 @@ interface LoginControllerOptions {
   stores: AppStores
   feedback: FeedbackController
   modal: ModalController
+  presence: PresenceController
   refreshDiagnostics: () => Promise<void>
   requestDelete: (entry: CleanupEntry) => void
   requestBulkDelete: (entries: CleanupEntry[]) => void
 }
 
-export function createLoginController({ stores, feedback, modal, refreshDiagnostics, requestDelete, requestBulkDelete }: LoginControllerOptions) {
+export function createLoginController({ stores, feedback, modal, presence, refreshDiagnostics, requestDelete, requestBulkDelete }: LoginControllerOptions) {
   const { selection, settings, totp, vault } = stores
   const state = controllerStore({
     passwordVisible: false,
@@ -66,6 +69,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     editorTitle: 'Add a login',
     editorFocusUrl: false,
     editorHasTotp: false,
+    editorBackupCodeCount: 0,
     loginDraft: emptyLoginDraft(),
     entryMenu: null as { id: string; x: number; y: number } | null,
     folderWorking: false,
@@ -165,10 +169,60 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
   }
 
   async function copyPassword(id: string): Promise<boolean> {
-    const secret = await readPassword(id, 'copy')
-    if (!secret) return false
-    await copy(secret, copyFieldLabel('password'), id)
+    const generation = revealGeneration
+    try {
+      await copyItemField('login', id, 'password')
+    } catch (error) {
+      if (generation !== revealGeneration) return false
+      if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
+        state.patch({ passwordPresenceRequired: true, passwordPresenceFor: id, passwordPresenceIntent: 'copy', passwordPresenceSecret: '', passwordPresenceError: '' })
+      } else {
+        void recordDiagnostic('clipboard', 'failed')
+        void refreshDiagnostics()
+        feedback.setError(error)
+      }
+      return false
+    }
+    state.patch({ passwordPresenceRequired: false })
+    void markUsed(id)
+    feedback.showNotice('Password copied', `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
     return true
+  }
+
+  async function copyLoginSecret(id: string, field: string, label: string): Promise<void> {
+    try {
+      await copyItemField('login', id, field)
+    } catch (error) {
+      if (presence.required(error)) {
+        presence.ask('copy-field', () => copyLoginSecret(id, field, label))
+        return
+      }
+      void recordDiagnostic('clipboard', 'failed')
+      void refreshDiagnostics()
+      feedback.setError(error)
+      return
+    }
+    if (field === 'backupCodes') void markUsed(id)
+    feedback.showNotice(`${label} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+  }
+
+  async function checkBreach(entryId: string): Promise<void> {
+    state.patch({ breachCheckWorking: true, breachCheckError: '' })
+    try {
+      const result = await checkLoginBreach(entryId)
+      if (vault.value().loginCard?.id !== entryId || state.value().breachCheckEntryId !== entryId) return
+      state.patch({ breachCheckResult: result })
+    } catch (error) {
+      if (vault.value().loginCard?.id !== entryId) return
+      if (presence.required(error)) {
+        state.patch({ breachCheckWorking: false })
+        presence.ask('check-password', () => checkBreach(entryId))
+        return
+      }
+      state.patch({ breachCheckError: error instanceof Error ? error.message : 'Sesame could not reach the breach-check service. Try again.' })
+    } finally {
+      if (vault.value().loginCard?.id === entryId) state.patch({ breachCheckWorking: false })
+    }
   }
 
   async function selectEntry(id: string) {
@@ -243,7 +297,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
 
   function closeEditor() {
     modal.close('login-editor')
-    state.patch({ loginDraft: emptyLoginDraft(), editorHasTotp: false })
+    state.patch({ loginDraft: emptyLoginDraft(), editorHasTotp: false, editorBackupCodeCount: 0 })
   }
 
   function openEditor() {
@@ -254,10 +308,11 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     state.patch({
       loginDraft: {
         id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
-        folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: card.backupCodes || [],
+        folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], keepBackupCodes: (card.backupCodeCount ?? 0) > 0,
         recoveryEmail: card.recoveryEmail || '', recoveryPhone: card.recoveryPhone || '',
         recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '',
       },
+      editorBackupCodeCount: card.backupCodeCount ?? 0,
       editorHasTotp: card.hasTotp,
       editorTitle: 'Edit login', editorFocusUrl: false,
     })
@@ -451,20 +506,15 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
     async runBreachCheck() {
       const card = vault.value().loginCard
       if (!card?.hasPassword || state.value().breachCheckWorking) return
-      const entryId = card.id
-      const secret = await ensureRevealed(entryId)
-      if (!secret) return
-      state.patch({ breachCheckWorking: true, breachCheckError: '' })
-      try {
-        const result = await checkPasswordBreach(secret)
-        if (vault.value().loginCard?.id !== entryId || state.value().breachCheckEntryId !== entryId) return
-        state.patch({ breachCheckResult: result })
-      } catch (error) {
-        if (vault.value().loginCard?.id !== entryId) return
-        state.patch({ breachCheckError: error instanceof Error ? error.message : 'Sesame could not reach the breach-check service. Try again.' })
-      } finally {
-        if (vault.value().loginCard?.id === entryId) state.patch({ breachCheckWorking: false })
-      }
+      await checkBreach(card.id)
+    },
+    copyBackupCodes() {
+      const card = vault.value().loginCard
+      if (card?.backupCodeCount) void copyLoginSecret(card.id, 'backupCodes', 'Backup codes')
+    },
+    copyLegacySecret(index: number, label: string) {
+      const card = vault.value().loginCard
+      if (card) void copyLoginSecret(card.id, `legacy:${index}`, label)
     },
     async startAutoType() {
       const card = vault.value().loginCard
@@ -499,10 +549,10 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       try {
         const result = await saveLogin({
           id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
-          folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], recoveryEmail: '', recoveryPhone: '',
+          folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], keepBackupCodes: false, recoveryEmail: '', recoveryPhone: '',
           recoveryNotApplicable: true, notes: card.notes || '',
         })
-        vault.patch({ snapshot: result.snapshot, loginCard: { ...card, backupCodes: undefined, recoveryEmail: undefined, recoveryPhone: undefined, recoveryNotApplicable: true } })
+        vault.patch({ snapshot: result.snapshot, loginCard: { ...card, backupCodeCount: 0, recoveryEmail: undefined, recoveryPhone: undefined, recoveryNotApplicable: true } })
         feedback.showNotice('Recovery checked', `${card.title} is marked as having no separate recovery options.`)
       } catch (error) {
         feedback.setError(error)
@@ -707,7 +757,7 @@ export function createLoginController({ stores, feedback, modal, refreshDiagnost
       state.set({
         passwordVisible: false, revealedPassword: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
         savingLogin: false, editorTitle: 'Add a login',
-        editorFocusUrl: false, editorHasTotp: false, loginDraft: emptyLoginDraft(),
+        editorFocusUrl: false, editorHasTotp: false, editorBackupCodeCount: 0, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,
         breachCheckEntryId: '', breachCheckOpen: false, breachCheckWorking: false, breachCheckResult: null, breachCheckError: '',
         autoTypeEntryId: '', autoTypeCountdown: 0,

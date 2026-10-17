@@ -399,10 +399,10 @@
           "markdownDescription": "Rust-policy-checked external navigation for the main window."
         },
         {
-          "description": "The quick-access window's redacted status/search, selected secret fetch, and guarded copy lifecycle.",
+          "description": "The quick-access window's redacted status and search, the guarded native copy of one field, and opening an item in Sesame.",
           "type": "string",
           "const": "quick-access",
-          "markdownDescription": "The quick-access window's redacted status/search, selected secret fetch, and guarded copy lifecycle."
+          "markdownDescription": "The quick-access window's redacted status and search, the guarded native copy of one field, and opening an item in Sesame."
         },
         {
           "description": "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on.",
