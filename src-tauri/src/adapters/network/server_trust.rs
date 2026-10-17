@@ -4,7 +4,9 @@ use reqwest::{header::DATE, Client};
 use serde::Deserialize;
 
 use super::account_service::{pin_key, read_limited};
-use super::capabilities::{fetch_signed_document, require_linking_enabled, CapabilityError};
+use super::capabilities::{
+    fetch_signed_document, require_instance, require_linking_enabled, CapabilityError,
+};
 use super::server_address::{fingerprint_of_public_key, normalized_fingerprint, ServerAddress};
 use super::trusted_time::parse_http_date;
 use crate::vault::types::CustomServerPin;
@@ -228,6 +230,8 @@ pub async fn inspect_server(
         }
         CapabilityError::Unavailable(message) => ServerFailure::Invalid(message),
     })?;
+    require_instance(&document, &info.instance_id)
+        .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
     require_linking_enabled(&document, env!("CARGO_PKG_VERSION"))
         .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
     Ok(info)
@@ -243,15 +247,18 @@ pub async fn verify_pinned_server(
     if info.fingerprint != pin.fingerprint || info.capability_key_id != pin.capability_key_id {
         return Err(ServerFailure::KeyChanged);
     }
-    fetch_signed_document(client, address.as_str(), &key, Some(&pin.capability_key_id))
-        .await
-        .map_err(|error| match error {
-            CapabilityError::Untrusted => ServerFailure::KeyChanged,
-            CapabilityError::ClockDifference => {
-                ServerFailure::ClockDifference(String::from(CapabilityError::ClockDifference))
-            }
-            CapabilityError::Unavailable(message) => ServerFailure::Invalid(message),
-        })?;
+    let document =
+        fetch_signed_document(client, address.as_str(), &key, Some(&pin.capability_key_id))
+            .await
+            .map_err(|error| match error {
+                CapabilityError::Untrusted => ServerFailure::KeyChanged,
+                CapabilityError::ClockDifference => {
+                    ServerFailure::ClockDifference(String::from(CapabilityError::ClockDifference))
+                }
+                CapabilityError::Unavailable(message) => ServerFailure::Invalid(message),
+            })?;
+    require_instance(&document, &pin.instance_id)
+        .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
     Ok(date)
 }
 

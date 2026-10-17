@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
+import { prepareReleaseSet, releaseSetSigningPayload, syncFloorPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -152,6 +152,19 @@ async function signCandidate(candidate, outputDirectory) {
   const receiptPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.update-receipt.json`)
   await writeFile(receiptPath, `${JSON.stringify(updateReceipt, null, 2)}\n`, 'utf8')
   console.log(`Created legacy-format update receipt: ${receiptPath}`)
+
+  const minimumSyncVersion = process.env.SESAME_SYNC_MINIMUM_VERSION?.trim()
+  if (minimumSyncVersion) {
+    const floorPayload = syncFloorPayload(candidate, minimumSyncVersion)
+    const syncFloor = {
+      payload: floorPayload,
+      signingKeyId: candidate.candidateSigningKeyId,
+      signature: sign(null, Buffer.from(floorPayload), signingKey).toString('base64url'),
+    }
+    const floorPath = path.join(outputDirectory, `sesame-${candidate.version}-${candidate.platform}-${candidate.architecture}.sync-floor.json`)
+    await writeFile(floorPath, `${JSON.stringify(syncFloor, null, 2)}\n`, 'utf8')
+    console.log(`Created Sync floor: ${floorPath}`)
+  }
 }
 
 const arguments_ = process.argv.slice(2)

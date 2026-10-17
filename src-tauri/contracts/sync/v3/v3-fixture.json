@@ -1,0 +1,531 @@
+{
+  "chain": [
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 1,
+        "previousDigest": "",
+        "kind": "create",
+        "signerDeviceId": "deviceLaptop00000001",
+        "subjectDeviceId": "deviceLaptop00000001",
+        "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+        "epochAfter": 1,
+        "snapshotFloor": 0,
+        "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c7441414141414141414141414130310000000000000001310000000000000000000000000000000663726561746500000000000000146465766963654c6170746f70303030303030303100000000000000146465766963654c6170746f703030303030303031000000000000002b696f6a6a3358514a385a583955747374504c70646373706e436238646c4249623833534941625150623177000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041514542415145424151454241514542415145424151454241514542415145424151454241514542415145424151454241514542415145424151454241514542000000000000000131000000000000000130",
+      "digest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA"
+    },
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 2,
+        "previousDigest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA",
+        "kind": "add",
+        "signerDeviceId": "deviceLaptop00000001",
+        "subjectDeviceId": "deviceDesktop0000001",
+        "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+        "epochAfter": 1,
+        "snapshotFloor": 4,
+        "signature": "OqnoqLtS2snwUxU3lejrEy5hv-LrrB4rUovg9gp-NR64rf3jIdhXmcUW8PwyqkLr4ZuBbq4tH5UP2VuJlaYzBQ"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c744141414141414141414141413031000000000000000132000000000000002b3051634644456469654e534d7262786a306770524c77457134754e7a5433464452385575667848416a5841000000000000000361646400000000000000146465766963654c6170746f70303030303030303100000000000000146465766963654465736b746f7030303030303031000000000000002b67546c3344716839463139576f31526d7730782d7a4d754e69704730376a65695866595057345f4a733551000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943000000000000000131000000000000000134",
+      "digest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY"
+    },
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 3,
+        "previousDigest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY",
+        "kind": "add",
+        "signerDeviceId": "deviceDesktop0000001",
+        "subjectDeviceId": "devicePhone000000001",
+        "subjectSigningKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+        "epochAfter": 1,
+        "snapshotFloor": 6,
+        "signature": "_TOjrsYKJguczR4cP6MT_zAMUGNwDFcYGaeKiJCLttK3oNf94koIxZs-05YBGCOeOMK2yo8mlVvq0O7ReoCJDQ"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c744141414141414141414141413031000000000000000133000000000000002b41516f5a6966774b39794b357a6b5851344b4a427871585966654870356c4a643579475739364d70337159000000000000000361646400000000000000146465766963654465736b746f7030303030303031000000000000001464657669636550686f6e65303030303030303031000000000000002b37556b6f78696a527773627136514d346b466d5659536c5a4a7a7063595f6b324e734647464b79484e3945000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943000000000000000131000000000000000136",
+      "digest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA"
+    }
+  ],
+  "removalChain": [
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 1,
+        "previousDigest": "",
+        "kind": "create",
+        "signerDeviceId": "deviceLaptop00000001",
+        "subjectDeviceId": "deviceLaptop00000001",
+        "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+        "epochAfter": 1,
+        "snapshotFloor": 0,
+        "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c7441414141414141414141414130310000000000000001310000000000000000000000000000000663726561746500000000000000146465766963654c6170746f70303030303030303100000000000000146465766963654c6170746f703030303030303031000000000000002b696f6a6a3358514a385a583955747374504c70646373706e436238646c4249623833534941625150623177000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041514542415145424151454241514542415145424151454241514542415145424151454241514542415145424151454241514542415145424151454241514542000000000000000131000000000000000130",
+      "digest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA"
+    },
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 2,
+        "previousDigest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA",
+        "kind": "add",
+        "signerDeviceId": "deviceLaptop00000001",
+        "subjectDeviceId": "deviceDesktop0000001",
+        "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+        "epochAfter": 1,
+        "snapshotFloor": 4,
+        "signature": "OqnoqLtS2snwUxU3lejrEy5hv-LrrB4rUovg9gp-NR64rf3jIdhXmcUW8PwyqkLr4ZuBbq4tH5UP2VuJlaYzBQ"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c744141414141414141414141413031000000000000000132000000000000002b3051634644456469654e534d7262786a306770524c77457134754e7a5433464452385575667848416a5841000000000000000361646400000000000000146465766963654c6170746f70303030303030303100000000000000146465766963654465736b746f7030303030303031000000000000002b67546c3344716839463139576f31526d7730782d7a4d754e69704730376a65695866595057345f4a733551000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943000000000000000131000000000000000134",
+      "digest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY"
+    },
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 3,
+        "previousDigest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY",
+        "kind": "add",
+        "signerDeviceId": "deviceDesktop0000001",
+        "subjectDeviceId": "devicePhone000000001",
+        "subjectSigningKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+        "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+        "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+        "epochAfter": 1,
+        "snapshotFloor": 6,
+        "signature": "_TOjrsYKJguczR4cP6MT_zAMUGNwDFcYGaeKiJCLttK3oNf94koIxZs-05YBGCOeOMK2yo8mlVvq0O7ReoCJDQ"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c744141414141414141414141413031000000000000000133000000000000002b41516f5a6966774b39794b357a6b5851344b4a427871585966654870356c4a643579475739364d70337159000000000000000361646400000000000000146465766963654465736b746f7030303030303031000000000000001464657669636550686f6e65303030303030303031000000000000002b37556b6f78696a527773627136514d346b466d5659536c5a4a7a7063595f6b324e734647464b79484e3945000000000000002b42776348427763484277634842776348427763484277634842776348427763484277634842776348427763000000000000004041674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943416749434167494341674943000000000000000131000000000000000136",
+      "digest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA"
+    },
+    {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 4,
+        "previousDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "kind": "remove",
+        "signerDeviceId": "deviceLaptop00000001",
+        "subjectDeviceId": "devicePhone000000001",
+        "subjectSigningKey": "",
+        "subjectPackageKey": "",
+        "sealedLabel": "",
+        "epochAfter": 2,
+        "snapshotFloor": 0,
+        "signature": "Ba36Rf5MO5_Xa7Nj2fbmORy0J7Zt7DVK83It336ByfX1aSeVfrCXn3ImLiKevrlDX4So3px0qEhzJO0CDxKECA"
+      },
+      "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6465766963656c69737400000000000000137661756c744141414141414141414141413031000000000000000134000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000000672656d6f766500000000000000146465766963654c6170746f703030303030303031000000000000001464657669636550686f6e65303030303030303031000000000000000000000000000000000000000000000000000000000000000132000000000000000130",
+      "digest": "W2SyKTc_EqlBEroE2IsTq_iHYM2et0-3vZCLmJrbOBw"
+    }
+  ],
+  "headers": [
+    {
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceLaptop00000001",
+        "revision": 1,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "71cc7U3YEWRhAbfmOSiDsCdRvHxvSbnucLdgtYDvWdSwz5SEDWk_rOnE2ztZs6qQN-Ko5xRL1J_6eyyc0fd9Cg"
+      },
+      "signingPayloadHex": "0000000000000015736573616d652d73796e632d76332d68656164657200000000000000013300000000000000137661756c74414141414141414141414141303100000000000000146465766963654c6170746f703030303030303031000000000000000131000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e5449585079410000000000000000000000000000002b716e4a6555616e5936616972343837366146596447615377624738564a7552754f6c57694f75393150484d0000000000000002363400000000000000204251554642515546425155464251554642515546425155464251554642515546",
+      "digest": "IRZWkXjsQ6IWSinw0lcc8YjN9ZxdmFGQxEI_e00qqnU",
+      "aadHex": "0000000000000012736573616d652d73796e632d76332d61616400000000000000013300000000000000137661756c74414141414141414141414141303100000000000000146465766963654c6170746f703030303030303031000000000000000131000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e5449585079410000000000000000"
+    },
+    {
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceDesktop0000001",
+        "revision": 2,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "IRZWkXjsQ6IWSinw0lcc8YjN9ZxdmFGQxEI_e00qqnU",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "Uj7MGTJIDSwjabEEJbTltEtGH2tOAwsc-OFio9i2V5dI2BwtFSYO1XoZ4wWUAI098DgyP9_piHXSsp2Dbu0xBw"
+      },
+      "signingPayloadHex": "0000000000000015736573616d652d73796e632d76332d68656164657200000000000000013300000000000000137661756c74414141414141414141414141303100000000000000146465766963654465736b746f7030303030303031000000000000000132000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000002b49525a576b586a735136495753696e77306c636338596a4e395a78646d4647517845495f65303071716e55000000000000002b716e4a6555616e5936616972343837366146596447615377624738564a7552754f6c57694f75393150484d0000000000000002363400000000000000204251554642515546425155464251554642515546425155464251554642515546",
+      "digest": "k0pBA0WhrVAhGC4mRTWFZCGS9A3oNBppBBObDNKqtSk",
+      "aadHex": "0000000000000012736573616d652d73796e632d76332d61616400000000000000013300000000000000137661756c74414141414141414141414141303100000000000000146465766963654465736b746f7030303030303031000000000000000132000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000002b49525a576b586a735136495753696e77306c636338596a4e395a78646d4647517845495f65303071716e55"
+    },
+    {
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "devicePhone000000001",
+        "revision": 3,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "k0pBA0WhrVAhGC4mRTWFZCGS9A3oNBppBBObDNKqtSk",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "KQinv2-1OPP9jUhCPSb05M95GRWTCL6cOaVjygwH7ClMU1rQ_QvbXURxL_JDc35TLW07B53A5zUBRO7CqzrhCg"
+      },
+      "signingPayloadHex": "0000000000000015736573616d652d73796e632d76332d68656164657200000000000000013300000000000000137661756c744141414141414141414141413031000000000000001464657669636550686f6e65303030303030303031000000000000000133000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000002b6b30704241305768725641684743346d525457465a4347533941336f4e42707042424f62444e4b7174536b000000000000002b716e4a6555616e5936616972343837366146596447615377624738564a7552754f6c57694f75393150484d0000000000000002363400000000000000204251554642515546425155464251554642515546425155464251554642515546",
+      "digest": "b7B4psoQrQArc_4wBDbso-hbtM8IL-yU-7KuwRzaOkc",
+      "aadHex": "0000000000000012736573616d652d73796e632d76332d61616400000000000000013300000000000000137661756c744141414141414141414141413031000000000000001464657669636550686f6e65303030303030303031000000000000000133000000000000000131000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000002b6b30704241305768725641684743346d525457465a4347533941336f4e42707042424f62444e4b7174536b"
+    }
+  ],
+  "ciphertext": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ",
+  "request": {
+    "method": "POST",
+    "target": "/v1/sync/reset",
+    "body": "{\"vaultEpoch\":2}",
+    "token": "token-one",
+    "timestamp": 1000000,
+    "nonce": "BAQEBAQEBAQEBAQEBAQEBA",
+    "signingPayloadHex": "0000000000000016736573616d652d73796e632d76332d726571756573740000000000000004504f5354000000000000000e2f76312f73796e632f7265736574000000000000002061218ad6e0cfaa72e112929e3290210600255e1e7ee1504363c15056f3f3b1d3000000000000002075c5c10f256c75b650c6ffc2e83c6588af02766efd2de28f4de34547006e8d1a000000000000000731303030303030000000000000001642415145424151454241514542415145424151454241",
+    "signature": "dFMxFhPxGOTS-uPxWcFHGXrLxHGbgLnVWeHth9_Pm2IGRs03CQQ9y3ehOSqPz2qVQ6MuEwkgg75il3vEPnjOAg",
+    "signerKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "receipt": {
+    "vaultId": "vaultAAAAAAAAAAAA01",
+    "revision": 3,
+    "headerDigest": "b7B4psoQrQArc_4wBDbso-hbtM8IL-yU-7KuwRzaOkc",
+    "vaultEpoch": 1,
+    "acceptedAt": 1000001,
+    "signingPayloadHex": "0000000000000016736573616d652d73796e632d76332d7265636569707400000000000000137661756c744141414141414141414141413031000000000000000133000000000000002b6237423470736f5172514172635f3477424462736f2d6862744d38494c2d79552d374b7577527a614f6b63000000000000000131000000000000000731303030303031",
+    "signature": "_InGNIC4hqIXqRbWz9Gk1z8UjOU1BzioLQqNQ7rgjBLGs1ytYjGeABmcsr3Azm0H4FQ8wgMnx8y0Ll58ElkoAA",
+    "signerKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "keyPackage": {
+    "vaultId": "vaultAAAAAAAAAAAA01",
+    "senderDeviceId": "deviceLaptop00000001",
+    "recipientDeviceId": "deviceDesktop0000001",
+    "vaultEpoch": 1,
+    "entryDigest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY",
+    "ciphertext": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD",
+    "signature": "RKBwe86L_ZJL2rNkN5yge7SdWE2mSlwTZYBBk8HPLmkdY-iV3Qcj1hwEXYmre63WipyzpeoDMOYfnGi3mKtGDQ",
+    "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d6b65797061636b61676500000000000000137661756c74414141414141414141414141303100000000000000146465766963654c6170746f70303030303030303100000000000000146465766963654465736b746f7030303030303031000000000000000131000000000000002b41516f5a6966774b39794b357a6b5851344b4a427871585966654870356c4a643579475739364d70337159000000000000008041774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d4441774d44",
+    "digest": "KbSnyK5xcnpn8tp96aQQg_fuPnGafrft72FovTb8_c0",
+    "signerKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "checkpoint": {
+    "checkpoint": {
+      "version": 3,
+      "vaultId": "vaultAAAAAAAAAAAA01",
+      "deviceId": "deviceDesktop0000001",
+      "deviceListIndex": 3,
+      "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+      "headerRevision": 3,
+      "headerDigest": "b7B4psoQrQArc_4wBDbso-hbtM8IL-yU-7KuwRzaOkc",
+      "observedAt": 1000002,
+      "signature": "iO16E0kREPFBm2VsCmbQlDZ51H8oKmdhy4JX4oDfkGjfgRMeHU7PSeIOBcb9n18aRRMJPdvVYw4KgKl8A2v_AA"
+    },
+    "signingPayloadHex": "0000000000000019736573616d652d73796e632d76332d636865636b706f696e7400000000000000013300000000000000137661756c74414141414141414141414141303100000000000000146465766963654465736b746f7030303030303031000000000000000133000000000000002b6179676570735741516d4a3057784f6f647142446c32504e66446f7050627435754e34446e544958507941000000000000000133000000000000002b6237423470736f5172514172635f3477424462736f2d6862744d38494c2d79552d374b7577527a614f6b63000000000000000731303030303032",
+    "signerKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q"
+  },
+  "brokenChains": [
+    {
+      "name": "a signature from a device that is not a member",
+      "chain": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 1,
+          "previousDigest": "",
+          "kind": "create",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceLaptop00000001",
+          "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "epochAfter": 1,
+          "snapshotFloor": 0,
+          "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 2,
+          "previousDigest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA",
+          "kind": "add",
+          "signerDeviceId": "deviceThief000000001",
+          "subjectDeviceId": "deviceDesktop0000001",
+          "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 1,
+          "snapshotFloor": 0,
+          "signature": "vZ2vwbMMYjZ1RNZHQt92f7TNAJL1_V42IgxHhel4ESedcKvmgakC9wWFu-XPISAypzrwUlrywqrRg1yFol8wCg"
+        }
+      ]
+    },
+    {
+      "name": "a wrong previous digest",
+      "chain": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 1,
+          "previousDigest": "",
+          "kind": "create",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceLaptop00000001",
+          "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "epochAfter": 1,
+          "snapshotFloor": 0,
+          "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 2,
+          "previousDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+          "kind": "add",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceDesktop0000001",
+          "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 1,
+          "snapshotFloor": 4,
+          "signature": "SP6JN-nb-63seoO42AS0Bk_5iGA3kBShRvsDUeGmnbnTPUztV3LKpZr14hGag3NkDKI-c7IOan2Ksq63h4P_AQ"
+        }
+      ]
+    },
+    {
+      "name": "a removal that skips an epoch",
+      "chain": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 1,
+          "previousDigest": "",
+          "kind": "create",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceLaptop00000001",
+          "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "epochAfter": 1,
+          "snapshotFloor": 0,
+          "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 2,
+          "previousDigest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA",
+          "kind": "add",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceDesktop0000001",
+          "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 1,
+          "snapshotFloor": 4,
+          "signature": "OqnoqLtS2snwUxU3lejrEy5hv-LrrB4rUovg9gp-NR64rf3jIdhXmcUW8PwyqkLr4ZuBbq4tH5UP2VuJlaYzBQ"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 3,
+          "previousDigest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY",
+          "kind": "remove",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceDesktop0000001",
+          "subjectSigningKey": "",
+          "subjectPackageKey": "",
+          "sealedLabel": "",
+          "epochAfter": 3,
+          "snapshotFloor": 0,
+          "signature": "clmNQA_1VCeVHsJ65Tcs1ce7DoP3MiflINRAZyjHtfEm8so0IylHKpLAdGGurpqES4T_ftj3V_eOSbZqwd2iAQ"
+        }
+      ]
+    },
+    {
+      "name": "a removed device added again",
+      "chain": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 1,
+          "previousDigest": "",
+          "kind": "create",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceLaptop00000001",
+          "subjectSigningKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "epochAfter": 1,
+          "snapshotFloor": 0,
+          "signature": "6kwL9qmq8tD0h4d8U8CPUjnH4hjzB5d_5ZI7LnSR4XNVa9kwXKexDBTsjYoelHsmXZABYezcNCJdq3dUI4nHBA"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 2,
+          "previousDigest": "0QcFDEdieNSMrbxj0gpRLwEq4uNzT3FDR8UufxHAjXA",
+          "kind": "add",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "deviceDesktop0000001",
+          "subjectSigningKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 1,
+          "snapshotFloor": 4,
+          "signature": "OqnoqLtS2snwUxU3lejrEy5hv-LrrB4rUovg9gp-NR64rf3jIdhXmcUW8PwyqkLr4ZuBbq4tH5UP2VuJlaYzBQ"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 3,
+          "previousDigest": "AQoZifwK9yK5zkXQ4KJBxqXYfeHp5lJd5yGW96Mp3qY",
+          "kind": "add",
+          "signerDeviceId": "deviceDesktop0000001",
+          "subjectDeviceId": "devicePhone000000001",
+          "subjectSigningKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 1,
+          "snapshotFloor": 6,
+          "signature": "_TOjrsYKJguczR4cP6MT_zAMUGNwDFcYGaeKiJCLttK3oNf94koIxZs-05YBGCOeOMK2yo8mlVvq0O7ReoCJDQ"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 4,
+          "previousDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+          "kind": "remove",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "devicePhone000000001",
+          "subjectSigningKey": "",
+          "subjectPackageKey": "",
+          "sealedLabel": "",
+          "epochAfter": 2,
+          "snapshotFloor": 0,
+          "signature": "Ba36Rf5MO5_Xa7Nj2fbmORy0J7Zt7DVK83It336ByfX1aSeVfrCXn3ImLiKevrlDX4So3px0qEhzJO0CDxKECA"
+        },
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 5,
+          "previousDigest": "W2SyKTc_EqlBEroE2IsTq_iHYM2et0-3vZCLmJrbOBw",
+          "kind": "add",
+          "signerDeviceId": "deviceLaptop00000001",
+          "subjectDeviceId": "devicePhone000000001",
+          "subjectSigningKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "subjectPackageKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          "sealedLabel": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "epochAfter": 2,
+          "snapshotFloor": 0,
+          "signature": "B-JWH7SRZGF8OQaLM1dOXl67unteGUuHtWQiGnDbWfA4A8e4QFFvmouYt1eV7DqUAzNyoW_dwzTzo8_6q6PzDQ"
+        }
+      ]
+    }
+  ],
+  "brokenHeaders": [
+    {
+      "name": "a revision built on a different second revision",
+      "previous": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceDesktop0000001",
+        "revision": 2,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "IRZWkXjsQ6IWSinw0lcc8YjN9ZxdmFGQxEI_e00qqnU",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "Uj7MGTJIDSwjabEEJbTltEtGH2tOAwsc-OFio9i2V5dI2BwtFSYO1XoZ4wWUAI098DgyP9_piHXSsp2Dbu0xBw"
+      },
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceLaptop00000001",
+        "revision": 3,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "C5YuaxlC5mMGjgRHzOCGeZXbnWNpQPHFc1bjNerGx2c",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "ph8CfZDuula4lm6giycQuWVGnOeKv5T89oLoRmC1QRsOMHFMZdqcaPXox1vqloCKOGvMsVJwqI6ir9xISn_HCA"
+      }
+    },
+    {
+      "name": "a revision that skips one",
+      "previous": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceLaptop00000001",
+        "revision": 1,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "71cc7U3YEWRhAbfmOSiDsCdRvHxvSbnucLdgtYDvWdSwz5SEDWk_rOnE2ztZs6qQN-Ko5xRL1J_6eyyc0fd9Cg"
+      },
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "devicePhone000000001",
+        "revision": 3,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "k0pBA0WhrVAhGC4mRTWFZCGS9A3oNBppBBObDNKqtSk",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "KQinv2-1OPP9jUhCPSb05M95GRWTCL6cOaVjygwH7ClMU1rQ_QvbXURxL_JDc35TLW07B53A5zUBRO7CqzrhCg"
+      }
+    },
+    {
+      "name": "a header edited after it was signed",
+      "previous": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceLaptop00000001",
+        "revision": 1,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 64,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "71cc7U3YEWRhAbfmOSiDsCdRvHxvSbnucLdgtYDvWdSwz5SEDWk_rOnE2ztZs6qQN-Ko5xRL1J_6eyyc0fd9Cg"
+      },
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceDesktop0000001",
+        "revision": 2,
+        "vaultEpoch": 1,
+        "deviceListIndex": 3,
+        "deviceListDigest": "aygepsWAQmJ0WxOodqBDl2PNfDopPbt5uN4DnTIXPyA",
+        "previousDigest": "IRZWkXjsQ6IWSinw0lcc8YjN9ZxdmFGQxEI_e00qqnU",
+        "ciphertextDigest": "qnJeUanY6air4876aFYdGaSwbG8VJuRuOlWiOu91PHM",
+        "ciphertextLength": 65,
+        "nonce": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+        "signature": "Uj7MGTJIDSwjabEEJbTltEtGH2tOAwsc-OFio9i2V5dI2BwtFSYO1XoZ4wWUAI098DgyP9_piHXSsp2Dbu0xBw"
+      }
+    }
+  ],
+  "seedHexByDevice": {
+    "deviceDesktop0000001": "0202020202020202020202020202020202020202020202020202020202020202",
+    "deviceLaptop00000001": "0101010101010101010101010101010101010101010101010101010101010101",
+    "devicePhone000000001": "0303030303030303030303030303030303030303030303030303030303030303"
+  },
+  "headerSignerId": "deviceLaptop00000001"
+}

@@ -79,7 +79,17 @@ pub(crate) fn updater_public_key_if_configured() -> Option<&'static str> {
     required[1]
 }
 
-fn configured_endpoint() -> VaultResult<url::Url> {
+pub(crate) fn candidate_trust() -> VaultResult<(&'static str, &'static str)> {
+    match (
+        configured_value("candidate-key"),
+        configured_value("candidate-key-id"),
+    ) {
+        (Some(key), Some(key_id)) => Ok((key, key_id)),
+        _ => Err("This Sesame build does not include a release-candidate key.".into()),
+    }
+}
+
+pub(crate) fn configured_endpoint() -> VaultResult<url::Url> {
     if updater_public_key_if_configured().is_none() {
         return Err(
             "This Sesame build does not include a complete signed-update configuration.".into(),

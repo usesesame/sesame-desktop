@@ -574,3 +574,36 @@ describe('disconnecting', () => {
     expect(feedback.state.value().errorMessage).toBe('Sesame could not remove the desktop account connection.')
   })
 })
+
+describe('the first run Sync notice', () => {
+  it('stays hidden until the saved preference has been read, then shows for a device that never saw it', () => {
+    const { controller } = harness()
+    expect(controller.state.value().syncNoticeSeen).toBe(true)
+    expect(localStorage.getItem('sesame-sync-notice-v1')).toBeNull()
+  })
+
+  it('remembers that it was seen so it is not shown twice', () => {
+    const { controller } = harness()
+    controller.state.patch({ syncNoticeSeen: false })
+    controller.dismissSyncNotice()
+    expect(controller.state.value().syncNoticeSeen).toBe(true)
+    expect(localStorage.getItem('sesame-sync-notice-v1')).toBe('seen')
+  })
+
+  it('opens the Connections tab and counts as seen when the person asks for Sync settings', () => {
+    const { controller } = harness()
+    controller.state.patch({ syncNoticeSeen: false, settingsTab: 'general' })
+    controller.openSyncSettings()
+    expect(controller.state.value().settingsTab).toBe('connections')
+    expect(controller.state.value().syncNoticeSeen).toBe(true)
+    expect(localStorage.getItem('sesame-sync-notice-v1')).toBe('seen')
+  })
+
+  it('shows again after onboarding is reset', () => {
+    const { controller } = harness()
+    controller.dismissSyncNotice()
+    controller.resetOnboarding()
+    expect(controller.state.value().syncNoticeSeen).toBe(false)
+    expect(localStorage.getItem('sesame-sync-notice-v1')).toBeNull()
+  })
+})

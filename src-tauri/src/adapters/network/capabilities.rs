@@ -27,16 +27,25 @@ pub(crate) struct Document {
     features: std::collections::BTreeMap<String, bool>,
     expires_at: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
+    instance_id: Option<String>,
+    #[serde(default)]
     issued_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-fn official_capability_key() -> VaultResult<VerifyingKey> {
-    let encoded = option_env!("SESAME_CAPABILITY_PUBLIC_KEY")
+pub(crate) fn official_capability_public_key() -> VaultResult<String> {
+    option_env!("SESAME_CAPABILITY_PUBLIC_KEY")
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or("Desktop capability verification is not configured for this build.")?;
+        .map(str::to_string)
+        .ok_or_else(|| {
+            "Desktop capability verification is not configured for this build.".to_string()
+        })
+}
+
+fn official_capability_key() -> VaultResult<VerifyingKey> {
+    let encoded = official_capability_public_key()?;
     let key_bytes = URL_SAFE_NO_PAD
-        .decode(encoded)
+        .decode(encoded.as_str())
         .map_err(|_| "Desktop capability verification key is invalid.")?;
     Ok(VerifyingKey::from_bytes(
         key_bytes
@@ -141,6 +150,15 @@ pub(crate) fn verify_capability_envelope(
     Ok(document)
 }
 
+pub(crate) fn require_instance(document: &Document, expected: &str) -> Result<(), CapabilityError> {
+    if document.instance_id.as_deref() != Some(expected) {
+        return Err(unavailable(
+            "The server's signed document names a different server than the one this desktop paired with.",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn require_linking_enabled(
     document: &Document,
     client_version: &str,
@@ -155,6 +173,21 @@ pub(crate) fn require_linking_enabled(
     }
     if version_lt(client_version, &document.minimum_desktop_version) {
         return Err(unavailable("Update Sesame before linking this desktop."));
+    }
+    Ok(())
+}
+
+pub(crate) fn require_sync_enabled(
+    document: &Document,
+    client_version: &str,
+) -> Result<(), CapabilityError> {
+    if !document.features.get("sync").copied().unwrap_or(false) {
+        return Err(unavailable(
+            "Sesame Sync is not turned on for this service.",
+        ));
+    }
+    if version_lt(client_version, &document.minimum_desktop_version) {
+        return Err(unavailable("Update Sesame before using Sync."));
     }
     Ok(())
 }

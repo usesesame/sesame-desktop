@@ -2,6 +2,7 @@ import {
   nextTheme,
   readAutoLock,
   readBetaOnboardingDismissed,
+  readSyncNoticeSeen,
   readClipboardClearSeconds,
   readRecoveryVerified,
   readSortMode,
@@ -12,6 +13,7 @@ import {
   resetOnboardingPreferences,
   storeAutoLock,
   storeBetaOnboardingDismissed,
+  storeSyncNoticeSeen,
   storeClipboardClearSeconds,
   storeRecoveryVerified,
   storeKeepInTray,
@@ -83,6 +85,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
   const state = controllerStore({
     betaOnboardingOpen: false,
     betaOnboardingDismissed: false,
+    syncNoticeSeen: true,
     recoveryVerified: false,
     preferenceLoaded: false,
     diagnosticStatus: emptyDiagnostics,
@@ -252,6 +255,11 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     storeBetaOnboardingDismissed()
   }
 
+  function dismissSyncNotice() {
+    state.patch({ syncNoticeSeen: true })
+    storeSyncNoticeSeen()
+  }
+
   function markRecoveryVerified() {
     state.patch({ recoveryVerified: true })
     storeRecoveryVerified()
@@ -288,6 +296,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       selection.patch({ sortMode: readSortMode() })
       state.patch({
         betaOnboardingDismissed: readBetaOnboardingDismissed(),
+        syncNoticeSeen: readSyncNoticeSeen(),
         recoveryVerified: readRecoveryVerified(),
         preferenceLoaded: true,
       })
@@ -337,10 +346,15 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
     },
     dismissOnboarding,
+    dismissSyncNotice,
+    openSyncSettings() {
+      dismissSyncNotice()
+      state.patch({ settingsTab: 'connections' })
+    },
     markRecoveryVerified,
     resetOnboarding() {
       resetOnboardingPreferences()
-      state.patch({ betaOnboardingOpen: false, betaOnboardingDismissed: false, recoveryVerified: false })
+      state.patch({ betaOnboardingOpen: false, betaOnboardingDismissed: false, syncNoticeSeen: false, recoveryVerified: false })
     },
     openBackupsFromOnboarding() {
       dismissOnboarding()

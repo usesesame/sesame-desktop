@@ -331,7 +331,6 @@ jobs:
         run: |
           npm run desktop:lint:rust
           cargo test --manifest-path src-tauri/Cargo.toml --locked
-          cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview --locked
 
       # The host registers its manifests, unregisters them, and then completes
       # an authenticated native-messaging exchange with the live broker.

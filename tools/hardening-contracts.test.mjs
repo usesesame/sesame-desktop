@@ -143,6 +143,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'desktop-settings',
     'website-icons',
     'clipboard-guard',
+    'sync',
   ])
   assert.deepEqual(quick.permissions, [
     'core:event:allow-listen',
@@ -831,7 +832,7 @@ test('the recovery kit wait reads server time, never the local clock', () => {
   assert.match(time, /Reading::At\(first\),\s*Reading::At\(second\)\)\s*=>\s*within_tolerance\(first, second\)/, 'two answering company sources no longer have to agree with each other')
 })
 
-const FEATURE_GATED_PERMISSIONS = ['sync-preview', 'desktop-e2e']
+const FEATURE_GATED_PERMISSIONS = ['desktop-e2e']
 
 function applicationPermissions() {
   const permissions = new Map()
@@ -856,12 +857,11 @@ function shippingRegisteredCommands() {
   return new Set(commandNames(shared[1]))
 }
 
-function featureRegisteredCommands(feature) {
+function featureRegisteredCommands() {
   const lib = read('src-tauri', 'src', 'lib.rs')
-  const arms = [...lib.matchAll(new RegExp(`#\\[cfg\\(all\\(feature = "wdio"[^\\]]*\\)\\)\\]\\s*macro_rules! sesame_wdio_handler \\{([\\s\\S]*?)\\n\\}`, 'g'))]
-  const sync = lib.match(/#\[cfg\(feature = "sync-preview"\)\]\s*macro_rules! sesame_handler \{([\s\S]*?)\n\}/)
-  assert.ok(sync && arms.length === 2, 'the feature gated handler arms moved')
-  return new Set(feature === 'sync-preview' ? commandNames(sync[1]) : commandNames(arms.map((arm) => arm[1]).join('\n')).filter((name) => !name.startsWith('sync_')))
+  const wdio = lib.match(/#\[cfg\(feature = "wdio"\)\]\s*macro_rules! sesame_wdio_handler \{([\s\S]*?)\n\}/)
+  assert.ok(wdio, 'the wdio handler arm moved')
+  return new Set(commandNames(wdio[1]))
 }
 
 function capabilityFiles() {
@@ -916,8 +916,8 @@ test('a permission whose commands are not all shipping commands is feature gated
 
 test('the feature gated permissions name only commands their own build registers', () => {
   const permissions = applicationPermissions()
-  for (const [permission, feature] of [['sync-preview', 'sync-preview'], ['desktop-e2e', 'wdio']]) {
-    const registered = featureRegisteredCommands(feature === 'wdio' ? 'wdio' : feature)
+  for (const [permission, feature] of [['desktop-e2e', 'wdio']]) {
+    const registered = featureRegisteredCommands()
     assert.deepEqual(
       permissions.get(permission).filter((command) => !registered.has(command)),
       [],
@@ -929,9 +929,8 @@ test('the feature gated permissions name only commands their own build registers
 test('the feature gated capabilities exist only in the builds that compile their commands', () => {
   const capabilities = capabilityFiles()
   const shipped = new Set(configuredCapabilities('tauri.conf.json'))
-  assert.deepEqual(capabilities.get('sync-preview-capability')?.permissions, ['sync-preview'])
   assert.deepEqual(capabilities.get('desktop-e2e-capability')?.permissions, ['desktop-e2e'])
-  for (const identifier of ['sync-preview-capability', 'desktop-e2e-capability']) {
+  for (const identifier of ['desktop-e2e-capability']) {
     assert.ok(!shipped.has(identifier), `the shipping configuration enables ${identifier}`)
     assert.deepEqual(capabilities.get(identifier).windows, ['main'])
   }
@@ -939,15 +938,8 @@ test('the feature gated capabilities exist only in the builds that compile their
     'desktop-e2e-capability',
     'main-capability',
     'quick-access-capability',
-    'sync-preview-capability',
   ])
   assert.deepEqual(configuredCapabilities('tauri.wdio.conf.json'), ['main-capability', 'desktop-e2e-capability'])
-  assert.deepEqual(
-    configuredCapabilities('tauri.sync-preview.conf.json'),
-    ['main-capability', 'quick-access-capability', 'sync-preview-capability'],
-  )
-  const runner = read('tools', 'run-sync-preview-desktop.mjs')
-  assert.match(runner, /'--features', 'sync-preview', '--config', 'src-tauri\/tauri\.sync-preview\.conf\.json'/)
   const wdioCommands = [
     ...read('.github', 'workflows', 'ci.yml').matchAll(/tauri build --features wdio[^\n]*/g),
     ...read('.github', 'workflows', 'release-early-access.yml').matchAll(/tauri build --features wdio[^\n]*/g),
@@ -980,7 +972,6 @@ test('the generated ACL grants the feature gated commands only to their own buil
 
   const release = enabledCommands('tauri.conf.json')
   for (const [permission, configName, capabilityName] of [
-    ['sync-preview', 'tauri.sync-preview.conf.json', 'sync-preview-capability'],
     ['desktop-e2e', 'tauri.wdio.conf.json', 'desktop-e2e-capability'],
   ]) {
     const granted = [...capabilityCommands(manifests, capabilities, capabilityName)].sort()
@@ -990,6 +981,21 @@ test('the generated ACL grants the feature gated commands only to their own buil
       assert.ok(feature.has(command), `${configName} cannot reach ${command} through ${capabilityName}`)
       assert.ok(!release.has(command), `the release build reaches ${command} through ${capabilityName}`)
     }
+  }
+})
+
+test('the generated ACL grants Sync only to the main window', () => {
+  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
+  const capabilities = Object.fromEntries(capabilityFiles())
+  const permissions = applicationPermissions()
+  const main = capabilityCommands(manifests, capabilities, 'main-capability')
+  const quickAccess = capabilityCommands(manifests, capabilities, 'quick-access-capability')
+  const sync = permissions.get('sync')
+  assert.ok(sync?.length > 0)
+  assert.deepEqual(manifests['__app-acl__'].permissions.sync.commands.allow.slice().sort(), sync.slice().sort())
+  for (const command of sync) {
+    assert.ok(main.has(command), `the main window cannot reach ${command}`)
+    assert.ok(!quickAccess.has(command), `the quick access window can reach ${command}`)
   }
 })
 

@@ -266,6 +266,10 @@ button.no-totp, .credential-button, .more-button {
 .chrome-mark { display: block; width: 17px; height: 17px; flex: none; }
 .chrome-separator { color: var(--chrome-separator); font-weight: var(--weight-regular); }
 .chrome-context { color: var(--chrome-sub); font-weight: var(--weight-regular); }
+.chrome-sync { display: inline-flex; align-items: center; gap: 7px; }
+.chrome-sync-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-text); }
+.chrome-sync-dot.busy { background: var(--chrome-sub); }
+.chrome-sync-dot.warn { background: var(--danger); }
 .window-controls { display: flex; height: 100%; }
 .window-control { display: grid; width: 46px; height: 100%; place-items: center; border: 0; color: var(--chrome-text); background: transparent; }
 .window-control:hover { background: var(--chrome-hover); }

@@ -1,53 +1,68 @@
-//! Network client for the `/v1/sync` control plane; compiled only under `sync-preview`.
-//! Only ciphertext, identifiers, and signatures leave; authentication is the desktop device token, never a cookie.
-//! Conflicts are surfaced, never resolved by retrying: overwriting a lost compare-and-swap is how a password change disappears.
-
 use std::time::Duration;
 
-use super::ensure_crypto_provider;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use zeroize::Zeroize;
 
+use super::capabilities::{
+    fetch_signed_document, official_capability_public_key, require_sync_enabled,
+};
+use super::ensure_crypto_provider;
 use super::server_trust::verify_pinned_server;
+use crate::sync::canonical::REQUEST_NONCE_BYTES;
+use crate::sync::checkpoint::Checkpoint;
+use crate::sync::devicelist::DeviceListEntry;
+use crate::sync::engine::{ServedCheckpoint, ServedHeader};
+use crate::sync::header::Header;
+use crate::sync::identity::DeviceIdentity;
+use crate::sync::request::{KeyPackageV3, RequestSignature};
 use crate::vault::service::{
     read_service_connection, read_service_token, service_target, ServiceTarget,
 };
 use crate::vault::VaultResult;
-use tauri::AppHandle;
-use zeroize::Zeroize;
 
-/// Ceiling on any response body, derived from the protocol's own constant so the limits cannot drift apart.
-const MAX_RESPONSE_BYTES: usize = crate::sync::envelope::MAX_ENVELOPE_BYTES;
+const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub enum SyncError {
     Unavailable(String),
-    /// A compare-and-swap lost; carries the service's revision for the conflict screen.
-    Conflict {
-        current_revision: i64,
-        vault_epoch: i64,
-    },
+    Conflict,
     NotApproved,
+    NotActivated,
     NotEntitled,
     NotFound,
+    StorageFull,
     Failed(String),
 }
 
 impl std::fmt::Display for SyncError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unavailable(message) => write!(formatter, "{message}"),
-            Self::Conflict { .. } => write!(
+            Self::Unavailable(message) | Self::Failed(message) => write!(formatter, "{message}"),
+            Self::Conflict => write!(
                 formatter,
                 "Another device changed this vault. Review the difference before syncing."
             ),
             Self::NotApproved => write!(formatter, "This device is not approved to sync."),
+            Self::NotActivated => write!(
+                formatter,
+                "This device has not taken the new vault key yet."
+            ),
             Self::NotEntitled => write!(
                 formatter,
                 "This account's subscription does not include Sesame Sync."
             ),
             Self::NotFound => write!(formatter, "That Sync record does not exist."),
-            Self::Failed(message) => write!(formatter, "{message}"),
+            Self::StorageFull => write!(
+                formatter,
+                "This vault is too large for the space the service gives it."
+            ),
         }
     }
 }
@@ -60,107 +75,139 @@ impl From<SyncError> for String {
 
 pub type SyncResult<T> = Result<T, SyncError>;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EnrollmentChallenge {
+pub struct StateView {
     pub vault_id: String,
-    pub vault_epoch: i64,
-    pub challenge: String,
-    pub expires_at: String,
+    pub vault_epoch: u64,
+    pub current_revision: u64,
+    pub device_state: String,
+    pub activated_epoch: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncDevice {
+pub struct PairingRecord {
     pub device_id: String,
+    pub signing_key: String,
+    pub package_key: String,
     pub state: String,
-    pub device_epoch: i64,
-    pub label: String,
-    pub signing_public_key: String,
-    pub encryption_public_key: String,
-    pub created_at: String,
-    #[serde(default)]
-    pub approved_at: Option<String>,
-    #[serde(default)]
-    pub revoked_at: Option<String>,
+    pub offer: String,
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub confirm: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DevicesView {
+    pub pairings: Vec<PairingRecord>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeviceList {
-    pub vault_id: String,
-    pub vault_epoch: i64,
-    pub devices: Vec<SyncDevice>,
+pub struct PairingStatus {
+    pub state: String,
+    #[serde(default, deserialize_with = "empty_as_none")]
+    pub answer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct KeyPackage {
-    pub vault_id: String,
-    pub sender_device_id: String,
-    pub recipient_device_id: String,
+pub struct Accepted {
+    pub revision: u64,
+    pub digest: String,
+    pub receipt: String,
+    pub accepted_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServedSnapshot {
+    pub header: Header,
+    pub accepted_at: String,
     pub ciphertext: String,
-    pub signature: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DownloadedEnvelope {
-    pub vault_id: String,
-    pub vault_epoch: i64,
-    pub revision: i64,
-    #[serde(default)]
-    pub envelope: Option<serde_json::Value>,
-    /// Service-reported, not signed, so it is shown to a person and never branched on.
-    #[serde(default)]
-    pub uploaded_at: String,
-    /// Chain predecessor; recomputed locally before it is trusted.
-    #[serde(default)]
-    pub digest: String,
-    #[serde(default)]
-    pub receipt: String,
+fn empty_as_none<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.filter(|text| !text.is_empty()))
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadAccepted {
-    pub vault_id: String,
-    pub revision: i64,
-    pub vault_epoch: i64,
-    /// Checked against the locally computed digest before being recorded.
-    #[serde(default)]
-    pub digest: String,
-    #[serde(default)]
-    pub receipt: String,
+#[derive(Deserialize)]
+struct Entries {
+    entries: Vec<DeviceListEntry>,
+}
+
+#[derive(Deserialize)]
+struct Headers {
+    headers: Vec<ServedHeader>,
+}
+
+#[derive(Deserialize)]
+struct Checkpoints {
+    checkpoints: Vec<ServedCheckpoint>,
+}
+
+#[derive(Serialize)]
+struct CheckpointBody<'a> {
+    checkpoint: &'a Checkpoint,
+}
+
+#[derive(Deserialize)]
+struct PackageBody {
+    package: KeyPackageV3,
+}
+
+#[derive(Serialize)]
+struct CreateVaultBody<'a> {
+    entry: &'a DeviceListEntry,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EnrollBeginBody<'a> {
-    vault_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EnrollFinishBody<'a> {
+struct BeginPairingBody<'a> {
     device_id: &'a str,
-    signing_public_key: &'a str,
-    encryption_public_key: &'a str,
-    challenge: &'a str,
-    proof: &'a str,
-    label: &'a str,
+    signing_key: &'a str,
+    package_key: &'a str,
+    message: &'a str,
+}
+
+#[derive(Serialize)]
+struct MessageBody<'a> {
+    message: &'a str,
+}
+
+#[derive(Serialize)]
+struct ApproveBody<'a> {
+    entry: &'a DeviceListEntry,
+    package: &'a KeyPackageV3,
+}
+
+#[derive(Serialize)]
+struct RemoveBody<'a> {
+    entry: &'a DeviceListEntry,
+    packages: &'a [KeyPackageV3],
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ApproveBody<'a> {
-    sender_device_id: &'a str,
-    expected_vault_epoch: i64,
-    ciphertext: &'a str,
-    signature: &'a str,
+struct ActivateBody<'a> {
+    package_digest: &'a str,
 }
 
-/// Chunked read with a hard cap: a lying length must not allocate past it.
+#[derive(Serialize)]
+struct UploadBody<'a> {
+    header: &'a Header,
+    ciphertext: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetBody {
+    vault_epoch: u64,
+}
+
 async fn read_capped(response: reqwest::Response) -> SyncResult<Vec<u8>> {
     if let Some(declared) = response.content_length() {
         if declared > MAX_RESPONSE_BYTES as u64 {
@@ -176,7 +223,7 @@ async fn read_capped(response: reqwest::Response) -> SyncResult<Vec<u8>> {
         .await
         .map_err(|_| SyncError::Failed("Sesame could not read the Sync response.".into()))?
     {
-        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
             return Err(SyncError::Failed(
                 "Sesame Sync returned more data than it accepts.".into(),
             ));
@@ -186,16 +233,28 @@ async fn read_capped(response: reqwest::Response) -> SyncResult<Vec<u8>> {
     Ok(body)
 }
 
-/// Built per operation so a revoked token is never cached across a long-lived handle.
 pub struct SyncClient {
     base_url: String,
     http: reqwest::Client,
     token: String,
     entitlement_enforced: bool,
+    instance_key: String,
+}
+
+impl Drop for SyncClient {
+    fn drop(&mut self) {
+        self.token.zeroize();
+    }
 }
 
 impl SyncClient {
     pub async fn connect(app: &AppHandle) -> VaultResult<Self> {
+        use tauri::Manager;
+        let data_dir = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|_| "Sesame could not locate its local data folder.".to_string())?;
+        super::sync_floor::require_sync_allowed(&data_dir).await?;
         let connection = read_service_connection(app)?;
         let target = service_target(&connection)?;
         let token = read_service_token(&connection)?;
@@ -224,42 +283,122 @@ impl SyncClient {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|_| "Sesame could not prepare its Sync connection.".to_string())?;
-        if let ServiceTarget::Custom { address, pin } = target {
-            if let Err(failure) = verify_pinned_server(&http, address, pin).await {
-                token.zeroize();
-                return Err(failure.message());
+        let (key_text, key_id) = match target {
+            ServiceTarget::Official { .. } => (official_capability_public_key()?, None),
+            ServiceTarget::Custom { address, pin } => {
+                if let Err(failure) = verify_pinned_server(&http, address, pin).await {
+                    token.zeroize();
+                    return Err(failure.message());
+                }
+                (
+                    pin.capability_public_key.clone(),
+                    Some(pin.capability_key_id.clone()),
+                )
             }
+        };
+        let key_bytes: [u8; 32] = URL_SAFE_NO_PAD
+            .decode(&key_text)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| "The service key is invalid.".to_string())?;
+        let verifying = ed25519_dalek::VerifyingKey::from_bytes(&key_bytes)
+            .map_err(|_| "The service key is invalid.".to_string())?;
+        let document = fetch_signed_document(&http, &base_url, &verifying, key_id.as_deref()).await;
+        let document = match document {
+            Ok(document) => document,
+            Err(failure) => {
+                token.zeroize();
+                return Err(failure.into());
+            }
+        };
+        if let Err(failure) = require_sync_enabled(&document, env!("CARGO_PKG_VERSION")) {
+            token.zeroize();
+            return Err(failure.into());
         }
         Ok(Self {
             base_url,
             http,
             token,
             entitlement_enforced: !target.is_custom(),
+            instance_key: key_text,
         })
     }
 
-    fn classify(&self, status: reqwest::StatusCode, body: &[u8]) -> SyncError {
-        match classify(status, body) {
-            SyncError::NotEntitled if !self.entitlement_enforced => {
-                SyncError::Unavailable("Sesame Sync is not available.".into())
-            }
-            other => other,
+    #[cfg(test)]
+    pub(crate) fn for_tests(base_url: &str, token: &str, instance_key: &str) -> Self {
+        ensure_crypto_provider();
+        Self {
+            base_url: base_url.to_string(),
+            http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("client"),
+            token: token.to_string(),
+            entitlement_enforced: false,
+            instance_key: instance_key.to_string(),
         }
     }
 
-    async fn send<T: for<'de> Deserialize<'de>>(
+    pub fn instance_key(&self) -> &str {
+        &self.instance_key
+    }
+
+    fn classify(&self, status: reqwest::StatusCode, body: &[u8]) -> SyncError {
+        let parsed: Option<ErrorEnvelope> = serde_json::from_slice(body).ok();
+        let code = parsed
+            .as_ref()
+            .and_then(|envelope| envelope.error.as_ref())
+            .map(|error| error.code.as_str())
+            .unwrap_or_default();
+        match code {
+            "sync_unavailable" => SyncError::Unavailable("Sesame Sync is not available.".into()),
+            "sync_not_entitled" if self.entitlement_enforced => SyncError::NotEntitled,
+            "sync_not_entitled" => SyncError::Unavailable("Sesame Sync is not available.".into()),
+            "sync_not_activated" => SyncError::NotActivated,
+            "sync_forbidden" => SyncError::NotApproved,
+            "sync_vault_not_found" | "sync_not_found" => SyncError::NotFound,
+            "sync_conflict" | "sync_vault_exists" => SyncError::Conflict,
+            "sync_storage_limit_reached" => SyncError::StorageFull,
+            "sync_signature_invalid" => SyncError::Failed(
+                "The service did not accept this device's signature. Check that the date and time on this computer are correct."
+                    .into(),
+            ),
+            "sync_replayed" => SyncError::Failed(
+                "The service saw that request twice. Try again.".into(),
+            ),
+            _ => match status {
+                reqwest::StatusCode::UNAUTHORIZED => SyncError::Failed(
+                    "This desktop is no longer linked to the service.".into(),
+                ),
+                reqwest::StatusCode::FORBIDDEN => {
+                    SyncError::Unavailable("Sesame Sync is not available.".into())
+                }
+                reqwest::StatusCode::NOT_FOUND => SyncError::NotFound,
+                _ => SyncError::Failed("Sesame Sync could not complete that request.".into()),
+            },
+        }
+    }
+
+    async fn dispatch(
         &self,
         method: reqwest::Method,
         path: &str,
-        body: Option<&(impl Serialize + ?Sized)>,
-    ) -> SyncResult<T> {
+        raw: Vec<u8>,
+        signature: Option<String>,
+        long: bool,
+    ) -> SyncResult<Vec<u8>> {
         let mut request = self
             .http
             .request(method, format!("{}{}", self.base_url, path))
-            // Device token, never a cookie; the service rejects cookies on these routes.
             .header("Authorization", format!("Sesame {}", self.token));
-        if let Some(payload) = body {
-            request = request.json(payload);
+        if let Some(value) = signature {
+            request = request.header("Sesame-Request-Signature", value);
+        }
+        if long {
+            request = request.timeout(TRANSFER_TIMEOUT);
+        }
+        if !raw.is_empty() {
+            request = request.header("Content-Type", "application/json").body(raw);
         }
         let response = request
             .send()
@@ -268,126 +407,317 @@ impl SyncClient {
         let status = response.status();
         let bytes = read_capped(response).await?;
         if status.is_success() {
-            return serde_json::from_slice(&bytes)
-                .map_err(|_| SyncError::Failed("Sesame could not read the Sync response.".into()));
+            return Ok(bytes);
         }
         Err(self.classify(status, &bytes))
     }
 
-    /// Creates the vault on first use and returns a one-time, vault-bound, expiring challenge.
-    pub async fn enroll_begin(&self, vault_id: &str) -> SyncResult<EnrollmentChallenge> {
-        self.send(
-            reqwest::Method::POST,
-            "/v1/sync/enroll/begin",
-            Some(&EnrollBeginBody { vault_id }),
+    async fn read<T: for<'de> Deserialize<'de>>(&self, path: &str, long: bool) -> SyncResult<T> {
+        let bytes = self
+            .dispatch(reqwest::Method::GET, path, Vec::new(), None, long)
+            .await?;
+        parse(&bytes)
+    }
+
+    async fn write<T: for<'de> Deserialize<'de>>(
+        &self,
+        identity: &DeviceIdentity,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&(impl Serialize + ?Sized)>,
+        long: bool,
+    ) -> SyncResult<T> {
+        let bytes = self.write_raw(identity, method, path, body, long).await?;
+        parse(&bytes)
+    }
+
+    async fn write_raw(
+        &self,
+        identity: &DeviceIdentity,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&(impl Serialize + ?Sized)>,
+        long: bool,
+    ) -> SyncResult<Vec<u8>> {
+        let raw = match body {
+            Some(value) => serde_json::to_vec(value)
+                .map_err(|_| SyncError::Failed("Sesame could not prepare the request.".into()))?,
+            None => Vec::new(),
+        };
+        let mut nonce = [0u8; REQUEST_NONCE_BYTES];
+        SysRng
+            .try_fill_bytes(&mut nonce)
+            .map_err(|_| SyncError::Failed("Sesame could not gather randomness.".into()))?;
+        let nonce = URL_SAFE_NO_PAD.encode(nonce);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| SyncError::Failed("This computer's clock is not usable.".into()))?
+            .as_secs();
+        let signature = identity.sign_request(&RequestSignature {
+            method: method.as_str(),
+            target: path,
+            body: &raw,
+            token: &self.token,
+            timestamp,
+            nonce: &nonce,
+        });
+        self.dispatch(
+            method,
+            path,
+            raw,
+            Some(format!("{timestamp}.{nonce}.{signature}")),
+            long,
         )
         .await
     }
 
-    /// Registers this device as pending; it holds no key package, so it can decrypt nothing until approved.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn enroll_finish(
+    pub async fn state(&self) -> SyncResult<StateView> {
+        self.read("/v1/sync/state", false).await
+    }
+
+    pub async fn create_vault(
         &self,
-        device_id: &str,
-        signing_public_key: &str,
-        encryption_public_key: &str,
-        challenge: &str,
-        proof: &str,
-        label: &str,
-    ) -> SyncResult<SyncDevice> {
-        self.send(
+        identity: &DeviceIdentity,
+        entry: &DeviceListEntry,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
             reqwest::Method::POST,
-            "/v1/sync/enroll/finish",
-            Some(&EnrollFinishBody {
+            "/v1/sync/vault",
+            Some(&CreateVaultBody { entry }),
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn device_list(&self, after: u64) -> SyncResult<Vec<DeviceListEntry>> {
+        let entries: Entries = self
+            .read(&format!("/v1/sync/device-list?after={after}"), false)
+            .await?;
+        Ok(entries.entries)
+    }
+
+    pub async fn devices(&self) -> SyncResult<DevicesView> {
+        self.read("/v1/sync/devices", false).await
+    }
+
+    pub async fn begin_pairing(
+        &self,
+        identity: &DeviceIdentity,
+        device_id: &str,
+        signing_key: &str,
+        package_key: &str,
+        message: &[u8],
+    ) -> SyncResult<()> {
+        let message = URL_SAFE_NO_PAD.encode(message);
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/pairings",
+            Some(&BeginPairingBody {
                 device_id,
-                signing_public_key,
-                encryption_public_key,
-                challenge,
-                proof,
-                label,
+                signing_key,
+                package_key,
+                message: &message,
             }),
+            false,
         )
         .await
+        .map(|_| ())
     }
 
-    pub async fn devices(&self) -> SyncResult<DeviceList> {
-        self.send::<DeviceList>(reqwest::Method::GET, "/v1/sync/devices", NO_BODY)
-            .await
+    pub async fn pairing_status(&self) -> SyncResult<PairingStatus> {
+        self.read("/v1/sync/pairings/mine", false).await
     }
 
-    /// Sealed key package only; the plaintext vault key never appears in this call.
-    pub async fn approve_device(
+    pub async fn answer_pairing(
         &self,
+        identity: &DeviceIdentity,
         device_id: &str,
-        sender_device_id: &str,
-        expected_vault_epoch: i64,
-        sealed_package: &str,
-        signature: &str,
-    ) -> SyncResult<SyncDevice> {
-        self.send(
+        message: &[u8],
+    ) -> SyncResult<()> {
+        let message = URL_SAFE_NO_PAD.encode(message);
+        self.write_raw(
+            identity,
             reqwest::Method::POST,
-            &format!("/v1/sync/devices/{device_id}/approve"),
-            Some(&ApproveBody {
-                sender_device_id,
-                expected_vault_epoch,
-                ciphertext: sealed_package,
-                signature,
-            }),
+            &format!("/v1/sync/pairings/{device_id}/answer"),
+            Some(&MessageBody { message: &message }),
+            false,
         )
         .await
+        .map(|_| ())
     }
 
-    pub async fn revoke_device(&self, device_id: &str) -> SyncResult<()> {
-        let path = format!("/v1/sync/devices/{device_id}");
-        let response = self
-            .http
-            .delete(format!("{}{}", self.base_url, path))
-            .header("Authorization", format!("Sesame {}", self.token))
-            .send()
-            .await
-            .map_err(|_| SyncError::Failed("Sesame could not reach Sesame Sync.".into()))?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        let bytes = read_capped(response).await.unwrap_or_default();
-        Err(self.classify(status, &bytes))
+    pub async fn confirm_pairing(
+        &self,
+        identity: &DeviceIdentity,
+        message: &[u8],
+    ) -> SyncResult<()> {
+        let message = URL_SAFE_NO_PAD.encode(message);
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/pairings/mine/confirm",
+            Some(&MessageBody { message: &message }),
+            false,
+        )
+        .await
+        .map(|_| ())
     }
 
-    /// Naming this device in the query is safe: the package is sealed to its key regardless.
-    pub async fn key_package(&self, device_id: &str) -> SyncResult<KeyPackage> {
-        self.send::<KeyPackage>(
-            reqwest::Method::GET,
-            &format!(
-                "/v1/sync/key-package?deviceId={}",
-                opaque_query_value(device_id)?
-            ),
+    pub async fn cancel_pairing(
+        &self,
+        identity: &DeviceIdentity,
+        device_id: &str,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::DELETE,
+            &format!("/v1/sync/pairings/{device_id}"),
             NO_BODY,
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn approve(
+        &self,
+        identity: &DeviceIdentity,
+        entry: &DeviceListEntry,
+        package: &KeyPackageV3,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/devices",
+            Some(&ApproveBody { entry, package }),
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn remove(
+        &self,
+        identity: &DeviceIdentity,
+        entry: &DeviceListEntry,
+        packages: &[KeyPackageV3],
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/devices/remove",
+            Some(&RemoveBody { entry, packages }),
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn key_package(&self) -> SyncResult<KeyPackageV3> {
+        let body: PackageBody = self.read("/v1/sync/key-package", false).await?;
+        Ok(body.package)
+    }
+
+    pub async fn activate(
+        &self,
+        identity: &DeviceIdentity,
+        package_digest: &str,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/activate",
+            Some(&ActivateBody { package_digest }),
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn upload(
+        &self,
+        identity: &DeviceIdentity,
+        header: &Header,
+        ciphertext: &[u8],
+    ) -> SyncResult<Accepted> {
+        let ciphertext = URL_SAFE_NO_PAD.encode(ciphertext);
+        self.write(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/snapshots",
+            Some(&UploadBody {
+                header,
+                ciphertext: &ciphertext,
+            }),
+            true,
         )
         .await
     }
 
-    pub async fn download(&self) -> SyncResult<DownloadedEnvelope> {
-        self.send::<DownloadedEnvelope>(reqwest::Method::GET, "/v1/sync/envelope", NO_BODY)
-            .await
+    pub async fn headers(&self, after: u64) -> SyncResult<Vec<ServedHeader>> {
+        let mut collected = Vec::new();
+        let mut cursor = after;
+        loop {
+            let page: Headers = self
+                .read(&format!("/v1/sync/headers?after={cursor}&limit=500"), false)
+                .await?;
+            let count = page.headers.len();
+            if let Some(last) = page.headers.last() {
+                cursor = last.header.revision;
+            }
+            collected.extend(page.headers);
+            if count < 500 || collected.len() > 20_000 {
+                return Ok(collected);
+            }
+        }
     }
 
-    /// Compare-and-swap upload; a lost race returns a conflict and must never be retried by overwriting.
-    pub async fn upload(&self, envelope: &serde_json::Value) -> SyncResult<UploadAccepted> {
-        self.send(reqwest::Method::POST, "/v1/sync/envelope", Some(envelope))
-            .await
+    pub async fn checkpoints(&self) -> SyncResult<Vec<ServedCheckpoint>> {
+        let page: Checkpoints = self.read("/v1/sync/checkpoints", false).await?;
+        Ok(page.checkpoints)
+    }
+
+    pub async fn post_checkpoint(
+        &self,
+        identity: &DeviceIdentity,
+        checkpoint: &Checkpoint,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/checkpoints",
+            Some(&CheckpointBody { checkpoint }),
+            false,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn snapshot(&self) -> SyncResult<ServedSnapshot> {
+        self.read("/v1/sync/snapshot", true).await
+    }
+
+    pub async fn reset(&self, identity: &DeviceIdentity, vault_epoch: u64) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/reset",
+            Some(&ResetBody { vault_epoch }),
+            false,
+        )
+        .await
+        .map(|_| ())
     }
 }
 
 const NO_BODY: Option<&()> = None;
 
-/// The two error shapes disagree (flat string versus `code` object), so they parse as separate types.
-#[derive(Deserialize)]
-struct ConflictBody {
-    #[serde(rename = "currentRevision")]
-    current_revision: i64,
-    #[serde(rename = "vaultEpoch")]
-    vault_epoch: i64,
+fn parse<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> SyncResult<T> {
+    serde_json::from_slice(bytes)
+        .map_err(|_| SyncError::Failed("Sesame could not read the Sync response.".into()))
 }
 
 #[derive(Deserialize)]
@@ -402,226 +732,135 @@ struct ErrorBody {
     code: String,
 }
 
-/// A conflict stays its own variant: collapsing it would let a caller retry and discard another device's upload.
-fn classify(status: reqwest::StatusCode, body: &[u8]) -> SyncError {
-    if status == reqwest::StatusCode::CONFLICT {
-        return match serde_json::from_slice::<ConflictBody>(body) {
-            Ok(conflict) => SyncError::Conflict {
-                current_revision: conflict.current_revision,
-                vault_epoch: conflict.vault_epoch,
-            },
-            // An unparsable conflict must not render a difference against a fake revision.
-            Err(_) => SyncError::Failed(
-                "Another device changed this vault. Review the difference before syncing.".into(),
-            ),
-        };
-    }
-    let parsed: Option<ErrorEnvelope> = serde_json::from_slice(body).ok();
-    let code = parsed
-        .as_ref()
-        .and_then(|envelope| envelope.error.as_ref())
-        .map(|error| error.code.as_str())
-        .unwrap_or_default();
-    match code {
-        "sync_unavailable" => SyncError::Unavailable("Sesame Sync is not available.".into()),
-        "sync_device_not_approved" => SyncError::NotApproved,
-        "sync_not_entitled" => SyncError::NotEntitled,
-        "sync_device_not_found" | "sync_vault_not_found" => SyncError::NotFound,
-        _ => match status {
-            reqwest::StatusCode::FORBIDDEN => {
-                SyncError::Unavailable("Sesame Sync is not available.".into())
-            }
-            reqwest::StatusCode::NOT_FOUND => SyncError::NotFound,
-            _ => SyncError::Failed("Sesame Sync could not complete that request.".into()),
-        },
-    }
-}
-
-/// Base64url alphabet checked instead of percent-encoding; anything outside it is refused.
-fn opaque_query_value(value: &str) -> SyncResult<&str> {
-    let valid = !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-    if !valid {
-        return Err(SyncError::Failed(
-            "This device identifier is not usable with Sesame Sync.".into(),
-        ));
-    }
-    Ok(value)
-}
-
-impl SyncClient {
-    /// Records that this device opened the key package it was given.
-    pub async fn activate(&self, proof: &str) -> SyncResult<()> {
-        #[derive(Serialize)]
-        struct Body<'a> {
-            proof: &'a str,
-        }
-        let response = self
-            .http
-            .post(format!("{}/v1/sync/activate", self.base_url))
-            .header("Authorization", format!("Sesame {}", self.token))
-            .json(&Body { proof })
-            .send()
-            .await
-            .map_err(|_| SyncError::Failed("Sesame could not reach Sesame Sync.".into()))?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        let bytes = read_capped(response).await.unwrap_or_default();
-        Err(self.classify(status, &bytes))
-    }
-
-    /// Removes another device and rotates the vault key in one call.
-    pub async fn rekey_device(
-        &self,
-        device_id: &str,
-        body: &serde_json::Value,
-    ) -> SyncResult<UploadAccepted> {
-        self.send(
-            reqwest::Method::POST,
-            &format!("/v1/sync/devices/{device_id}/rekey"),
-            Some(body),
-        )
-        .await
-    }
-
-    /// A pending device never held the vault key, so nothing is rotated.
-    pub async fn deny_device(&self, device_id: &str) -> SyncResult<()> {
-        let response = self
-            .http
-            .post(format!(
-                "{}/v1/sync/devices/{device_id}/deny",
-                self.base_url
-            ))
-            .header("Authorization", format!("Sesame {}", self.token))
-            .send()
-            .await
-            .map_err(|_| SyncError::Failed("Sesame could not reach Sesame Sync.".into()))?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        let bytes = read_capped(response).await.unwrap_or_default();
-        Err(self.classify(status, &bytes))
-    }
-
-    /// Destructive reset; refused while any approved device still works.
-    pub async fn reset_vault(&self) -> SyncResult<()> {
-        let response = self
-            .http
-            .post(format!("{}/v1/sync/reset", self.base_url))
-            .header("Authorization", format!("Sesame {}", self.token))
-            .send()
-            .await
-            .map_err(|_| SyncError::Failed("Sesame could not reach Sesame Sync.".into()))?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        let bytes = read_capped(response).await.unwrap_or_default();
-        Err(self.classify(status, &bytes))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::network::server_address::ServerAddress;
-    use crate::adapters::network::server_trust::parse_instance;
-    use crate::adapters::network::test_server::{FakeSesame, Reply, TestServer};
 
-    fn custom(server: &TestServer, pinned: &FakeSesame) -> ServiceTarget {
-        let pin = parse_instance(&serde_json::to_vec(&pinned.instance()).unwrap(), "0.3.0")
-            .unwrap()
-            .pin();
-        ServiceTarget::Custom {
-            address: ServerAddress::parse(&server.base()).unwrap(),
-            pin,
-        }
+    fn fixture() -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("contracts")
+            .join("sync")
+            .join("v3")
+            .join("wire-fixture.json");
+        serde_json::from_slice(&std::fs::read(path).expect("read")).expect("parse")
     }
 
-    fn connect(target: &ServiceTarget) -> VaultResult<SyncClient> {
-        tauri::async_runtime::block_on(SyncClient::for_target(
-            target,
-            "fictional-device-token".to_string(),
-        ))
+    fn response<T: for<'de> Deserialize<'de>>(name: &str) -> T {
+        serde_json::from_value(fixture()["responses"][name].clone())
+            .unwrap_or_else(|error| panic!("response {name} does not parse: {error}"))
     }
 
-    fn sent_the_token(server: &TestServer) -> bool {
-        server
-            .requests()
-            .iter()
-            .any(|request| request.headers.contains_key("authorization"))
+    fn request(name: &str) -> serde_json::Value {
+        fixture()["requests"][name].clone()
     }
 
     #[test]
-    fn a_pinned_server_is_checked_and_then_gets_the_token() {
-        let fake = FakeSesame::new(1);
-        let server = TestServer::start(fake.handler());
-        let client = connect(&custom(&server, &fake)).unwrap();
+    fn every_service_response_parses_into_the_client_types() {
+        let state: StateView = response("state");
         assert_eq!(
-            server.paths(),
-            vec!["/v1/instance".to_string(), "/v1/capabilities".to_string()]
+            (
+                state.current_revision,
+                state.vault_epoch,
+                state.device_state.as_str()
+            ),
+            (5, 1, "approved")
         );
-        assert!(!sent_the_token(&server));
-        let _ = tauri::async_runtime::block_on(client.devices());
-        assert!(sent_the_token(&server));
+        let entries: Entries = response("deviceList");
+        assert_eq!(entries.entries.len(), 1);
+        let devices: DevicesView = response("devices");
+        assert_eq!(devices.pairings.len(), 1);
+        assert!(devices.pairings[0].confirm.is_none());
+        let status: PairingStatus = response("pairingStatus");
+        assert!(status.answer.is_none());
+        let package: PackageBody = response("keyPackage");
+        assert_eq!(package.package.vault_epoch, 1);
+        let headers: Headers = response("headers");
+        assert_eq!(headers.headers[0].header.revision, 5);
+        assert_eq!(headers.headers[0].digest, "digest");
+        assert!(headers.headers[0].accepted_at_unix().is_some());
+        let snapshot: ServedSnapshot = response("snapshot");
+        assert_eq!(snapshot.header.revision, 5);
+        assert_eq!(snapshot.ciphertext, "ciphertext");
+        let accepted: Accepted = response("upload");
+        assert_eq!(accepted.revision, 5);
+        let checkpoints: Checkpoints = response("checkpoints");
+        assert_eq!(checkpoints.checkpoints[0].checkpoint.header_revision, 5);
+        assert_eq!(
+            checkpoints.checkpoints[0].checkpoint.observed_at,
+            1_800_000_000
+        );
     }
 
     #[test]
-    fn a_server_with_a_rotated_key_is_refused_before_any_token_is_sent() {
-        let pinned = FakeSesame::new(1);
-        let rotated = FakeSesame::new(2);
-        let server = TestServer::start(rotated.handler());
-        let error = connect(&custom(&server, &pinned)).err().unwrap();
-        assert!(error.contains("different key"), "{error}");
-        assert!(!sent_the_token(&server));
-        assert_eq!(server.paths(), vec!["/v1/instance".to_string()]);
+    fn every_request_body_has_exactly_the_shape_the_service_decodes() {
+        let entry: DeviceListEntry =
+            serde_json::from_value(request("createVault")["entry"].clone()).expect("entry");
+        let package: KeyPackageV3 =
+            serde_json::from_value(request("approve")["package"].clone()).expect("package");
+        let header: Header =
+            serde_json::from_value(request("upload")["header"].clone()).expect("header");
+        let to = |value: &dyn erased::Json| value.to_value();
+        assert_eq!(
+            to(&CreateVaultBody { entry: &entry }),
+            request("createVault")
+        );
+        assert_eq!(
+            to(&BeginPairingBody {
+                device_id: "deviceBBBBBBBBBBBB01",
+                signing_key: "signingkey",
+                package_key: "packagekey",
+                message: "message",
+            }),
+            request("beginPairing")
+        );
+        assert_eq!(to(&MessageBody { message: "message" }), request("message"));
+        assert_eq!(
+            to(&ApproveBody {
+                entry: &entry,
+                package: &package
+            }),
+            request("approve")
+        );
+        assert_eq!(
+            to(&RemoveBody {
+                entry: &entry,
+                packages: std::slice::from_ref(&package)
+            }),
+            request("remove")
+        );
+        assert_eq!(
+            to(&ActivateBody {
+                package_digest: "packagedigest"
+            }),
+            request("activate")
+        );
+        assert_eq!(
+            to(&UploadBody {
+                header: &header,
+                ciphertext: "ciphertext"
+            }),
+            request("upload")
+        );
+        assert_eq!(to(&ResetBody { vault_epoch: 2 }), request("reset"));
+        let checkpoint: Checkpoint =
+            serde_json::from_value(request("checkpoint")["checkpoint"].clone())
+                .expect("checkpoint");
+        assert_eq!(
+            to(&CheckpointBody {
+                checkpoint: &checkpoint
+            }),
+            request("checkpoint")
+        );
     }
 
-    #[test]
-    fn a_server_that_only_repeats_the_pinned_key_is_refused() {
-        let pinned = FakeSesame::new(1);
-        let instance = pinned.instance();
-        let forged = FakeSesame::new(2).signed(&pinned.capability_payload());
-        let server = TestServer::start(move |request| match request.path.as_str() {
-            "/v1/instance" => Reply::json(200, &instance),
-            _ => Reply::json(200, &forged),
-        });
-        assert!(connect(&custom(&server, &pinned)).is_err());
-        assert!(!sent_the_token(&server));
-    }
-
-    #[test]
-    fn an_unreachable_pinned_server_gets_no_token() {
-        let fake = FakeSesame::new(1);
-        let server = TestServer::start(fake.handler());
-        let target = custom(&server, &fake);
-        drop(server);
-        assert!(connect(&target).is_err());
-    }
-
-    #[test]
-    fn a_self_hosted_server_is_always_entitled_and_the_company_service_is_not() {
-        let body = br#"{"error":{"code":"sync_not_entitled"}}"#;
-        let fake = FakeSesame::new(1);
-        let server = TestServer::start(fake.handler());
-        let own = connect(&custom(&server, &fake)).unwrap();
-        assert!(matches!(
-            own.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
-            SyncError::Unavailable(_)
-        ));
-        let official = connect(&ServiceTarget::Official {
-            base_url: server.base(),
-        })
-        .unwrap();
-        assert!(matches!(
-            official.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
-            SyncError::NotEntitled
-        ));
+    mod erased {
+        pub trait Json {
+            fn to_value(&self) -> serde_json::Value;
+        }
+        impl<T: serde::Serialize> Json for T {
+            fn to_value(&self) -> serde_json::Value {
+                serde_json::to_value(self).expect("serialize")
+            }
+        }
     }
 }

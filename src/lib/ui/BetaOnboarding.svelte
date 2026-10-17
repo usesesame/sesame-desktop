@@ -17,7 +17,7 @@
   <p class="eyebrow">Public beta</p>
   <h2 id="beta-onboarding-heading">Before you add important logins</h2>
   <p id="beta-onboarding-description" class="beta-onboarding-intro">
-    Sesame is still being tested. Your vault stays on this device and is not synced to a cloud account.
+    Sesame is still being tested. Your vault stays on this device unless you turn on Sync.
   </p>
 
   <ul class="beta-onboarding-list">

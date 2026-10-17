@@ -85,11 +85,11 @@ test('the desktop repository owns a closed standalone command surface', () => {
   assert.match(pkg.scripts['desktop:ci:web'], /desktop:build/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:lint:rust/)
   assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust/)
-  assert.match(pkg.scripts['desktop:ci'], /desktop:test:rust:sync/)
+  assert.doesNotMatch(pkg.scripts['desktop:ci'], /desktop:test:rust:sync/)
   assert.match(pkg.scripts['desktop:lint:rust'], /cargo fmt --manifest-path src-tauri\/Cargo\.toml --all --check/)
   assert.match(pkg.scripts['desktop:lint:rust'], /cargo clippy --manifest-path src-tauri\/Cargo\.toml --all-targets --locked/)
   assert.match(pkg.scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml --locked$/)
-  assert.match(pkg.scripts['desktop:test:rust:sync'], /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked$/)
+  assert.equal(pkg.scripts['desktop:test:rust:sync'], 'npm run desktop:test:rust')
   assert.equal(pkg.scripts['desktop:test:glib'], 'node tools/test-glib-patches.mjs')
   const glib = read('tools', 'test-glib-patches.mjs')
   assert.match(glib, /process\.platform !== 'linux'/)
@@ -145,23 +145,18 @@ test('desktop code and owned checks do not read a former product sibling', () =>
 })
 
 test('desktop Sync fixtures are digest-bound local snapshots', () => {
-  const contractRoot = join(root, 'src-tauri', 'contracts', 'sync', 'v2')
+  const contractRoot = join(root, 'src-tauri', 'contracts', 'sync', 'v3')
   const source = JSON.parse(readFileSync(join(contractRoot, 'source.json'), 'utf8'))
   assert.equal(source.schemaVersion, 1)
-  assert.match(source.sourceCommit, /^[0-9a-f]{40}$/)
-  assert.equal(source.sourcePath, 'backend/internal/syncproto/testdata')
-  assert.deepEqual(Object.keys(source.files).sort(), [
-    'enrollment-signing-payload.json',
-    'envelope-signing-payload.json',
-    'key-package-signing-payload.json',
-    'snapshot-aad.json',
-  ])
+  assert.match(source.sourceCommit, /^(?:[0-9a-f]{40}|unpublished)$/)
+  assert.deepEqual(source.sourcePaths, { 'v3-fixture.json': 'internal/syncproto/testdata/v3-fixture.json', 'wire-fixture.json': 'internal/syncv3http/testdata/wire-fixture.json' })
+  assert.deepEqual(Object.keys(source.files).sort(), ['v3-fixture.json', 'wire-fixture.json'])
   for (const [name, expected] of Object.entries(source.files)) {
     const actual = createHash('sha256').update(readFileSync(join(contractRoot, name))).digest('hex')
     assert.equal(actual, expected, `${name} no longer matches its recorded source digest`)
   }
 
-  const rust = read('src-tauri', 'src', 'sync', 'envelope.rs') + read('src-tauri', 'src', 'sync', 'identity.rs')
+  const rust = read('src-tauri', 'src', 'sync', 'v3_contract_tests.rs')
   for (const name of Object.keys(source.files)) assert.match(rust, new RegExp(name.replaceAll('.', '\\.')))
   assert.doesNotMatch(rust, /\.\.\/backend\/internal\/syncproto\/testdata/)
 })
@@ -267,7 +262,6 @@ test('native CI waits for quick checks and still runs both feature configuration
   }
   const linux = linuxJobs.map((name) => workflowJob(workflow, name)).join('\n')
   assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --locked\n/)
-  assert.match(linux, /cargo test --manifest-path src-tauri\/Cargo\.toml --features sync-preview --locked/)
   assert.match(linux, /linux-installed-package-gate\.mjs/)
   assert.match(workflowJob(workflow, 'linux-bundles'), /run: npm run desktop:test:glib\n/)
   const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
@@ -294,9 +288,9 @@ test('the required desktop checks pass only when every job behind them passed', 
 
 test('the standalone boundary runs every part of the owned command in its own job', () => {
   const workflow = read('.github', 'workflows', 'boundary.yml')
-  const owned = ['desktop:ci:web', 'desktop:lint:rust', 'desktop:test:rust', 'desktop:test:rust:sync', 'desktop:test:glib']
+  const owned = ['desktop:ci:web', 'desktop:lint:rust', 'desktop:test:rust', 'desktop:test:glib']
   const matrix = workflow.slice(workflow.indexOf('matrix:'), workflow.indexOf('steps:'))
-  for (const name of owned) assert.ok(matrix.includes(name), `the boundary matrix does not run ${name}`)
+  for (const name of [...owned, 'desktop:test:rust:sync']) assert.ok(matrix.includes(name), `the boundary matrix does not run ${name}`)
   const pkg = JSON.parse(read('package.json'))
   for (const name of owned.slice(1)) assert.match(pkg.scripts['desktop:ci'], new RegExp(`npm run ${name}( |$)`), name)
   assert.match(workflow, /^ {2}boundary:\n {4}needs: \[boundary-part\]\n {4}if: always\(\)$/m)

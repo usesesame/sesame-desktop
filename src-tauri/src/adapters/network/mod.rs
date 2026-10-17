@@ -7,8 +7,8 @@ pub(crate) mod capabilities;
 pub(crate) mod public_updates;
 pub(crate) mod server_address;
 pub(crate) mod server_trust;
-#[cfg(feature = "sync-preview")]
 pub(crate) mod sync;
+pub(crate) mod sync_floor;
 #[cfg(test)]
 pub(crate) mod test_server;
 pub(crate) mod trusted_time;

@@ -223,28 +223,28 @@ commands.allow = [
 ]
 
 [[permission]]
-identifier = "sync-preview"
-description = "Compile-time-gated Sync preview commands for the main window only."
+identifier = "sync"
+description = "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on."
 commands.allow = [
   "sync_status",
-  "sync_enroll_device",
-  "sync_this_device_fingerprint",
+  "sync_local_status",
+  "sync_create_vault",
   "sync_disable",
-  "sync_prepare_approval",
-  "sync_approve_prepared_device",
+  "sync_reset_vault",
+  "sync_pairing_code",
+  "sync_cancel_pairing",
+  "sync_approve_with_code",
+  "sync_join_with_code",
   "sync_upload_vault",
   "sync_download_vault",
+  "sync_take_new_key",
   "sync_conflict_details",
   "sync_resolve_conflict",
   "sync_list_conflict_backups",
   "sync_restore_conflict_backup",
   "sync_remove_device",
-  "sync_deny_device",
-  "sync_activate_device",
-  "sync_reset_vault",
   "sync_coordinator_status",
   "sync_now",
-  "sync_adopt_vault",
 ]
 
 [[permission]]
