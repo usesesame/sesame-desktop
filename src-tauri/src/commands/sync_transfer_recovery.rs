@@ -27,6 +27,6 @@ pub async fn sync_restore_conflict_backup(app: AppHandle, state: tauri::State<'_
     drop(session);
     crate::browser_fill::cancel_pending_approvals(&app);
     crate::sync::state::forget_protected(&crate::sync::state::state_path(&data_dir))?;
-    crate::sync::conflict_backup::prune(&directory, &[written]);
+    crate::sync::conflict_backup::prune_and_report(&app, &directory, &[written]);
     Ok(SyncTransferResult { revision: contents.revision, vault_epoch: 0, entry_count })
 }
