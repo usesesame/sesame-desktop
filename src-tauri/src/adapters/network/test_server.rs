@@ -43,6 +43,10 @@ impl Reply {
         }
     }
 
+    pub fn disconnect() -> Self {
+        Self::bytes(0, Vec::new())
+    }
+
     pub fn with_header(mut self, name: &str, value: &str) -> Self {
         self.headers.push((name.into(), value.into()));
         self
@@ -173,6 +177,9 @@ fn serve(
     };
     requests.lock().unwrap().push(recorded.clone());
     let reply = handler(&recorded);
+    if reply.status == 0 {
+        return;
+    }
     let mut response = format!(
         "HTTP/1.1 {} Test\r\nContent-Length: {}\r\nConnection: close\r\n",
         reply.status,
@@ -254,6 +261,7 @@ impl FakeSesame {
             "features": { "desktopLinking": self.desktop_linking, "sync": false },
             "serviceStatus": {},
             "expiresAt": self.capability_expires_at,
+            "instanceId": "instance-1",
         })
     }
 

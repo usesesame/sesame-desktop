@@ -1,0 +1,44 @@
+[package]
+name = "sesame-sync-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.sesame]
+path = ".."
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_package"
+path = "fuzz_targets/key_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "device_list"
+path = "fuzz_targets/device_list.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pairing_message"
+path = "fuzz_targets/pairing_message.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

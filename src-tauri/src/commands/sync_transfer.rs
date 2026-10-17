@@ -1,103 +1,21 @@
-//! Approval and vault transfer for Sync; compiled only under `sync-preview`.
-//! The vault key never leaves this call graph and is never returned to the webview.
-
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde::Serialize;
 use tauri::AppHandle;
 use zeroize::Zeroize;
 
-use super::sync::{local_data_dir, present, SyncDeviceView};
+use super::sync::{
+    load_state, local_data_dir, present, present_proof, record_checkpoint_if_due, refresh,
+    save_state, this_identity, vault_id_of, Refreshed,
+};
+use super::sync_adopt::{adopt, verify_master_password};
 use crate::sync::client::SyncClient;
+use crate::sync::devicelist::DeviceList;
+use crate::sync::engine::{build_header, open_label, plan_header, remove_entry, verify_accepted};
+use crate::sync::header::Header;
+use crate::sync::request::KeyPackageV3;
+use crate::sync::state::{payload_digest, SyncState};
 use crate::vault::{VaultResult, VaultState};
-
-use crate::sync::envelope::{snapshot_aad, snapshot_aad_for, snapshot_aad_for_draft};
-
-fn this_identity(app: &AppHandle) -> VaultResult<crate::sync::identity::DeviceIdentity> {
-    let path = crate::sync::identity::identity_path(&local_data_dir(app)?);
-    crate::sync::identity::DeviceIdentity::load(&path)
-        .map_err(|_| "Set up Sesame Sync on this device first.".to_string())
-}
-
-/// Seals the vault key to a device whose keys were frozen before fingerprint confirmation.
-pub(super) async fn approve_frozen_device(
-    app: AppHandle,
-    state: tauri::State<'_, VaultState>,
-    vault_id: &str,
-    expected_vault_epoch: i64,
-    expected_session_epoch: u64,
-    device_id: &str,
-    frozen_signing_key: &str,
-    frozen_encryption_key: &str,
-) -> Result<SyncDeviceView, String> {
-    let client = SyncClient::connect(&app).await?;
-    let identity = this_identity(&app)?;
-
-    let current = client.download().await.map_err(present)?;
-    if current.vault_id != vault_id {
-        return Err("That approval was prepared for a different vault.".into());
-    }
-    if current.vault_epoch != expected_vault_epoch {
-        return Err("That approval is no longer current. Compare the codes again.".into());
-    }
-    let recipient_key = decode_key(frozen_encryption_key)?;
-    let device_id = device_id.to_string();
-
-    // Lock released before await: holding a std::sync lock across an await can deadlock the vault.
-    let sealed = {
-        if state.session_epoch() != expected_session_epoch {
-            return Err("That approval is no longer current. Compare the codes again.".into());
-        }
-        let session = state
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session
-            .as_ref()
-            .ok_or("Unlock Sesame before approving a device.")?;
-        let payload = vault.open_payload()?;
-        if payload.vault_id.as_deref() != Some(vault_id) {
-            return Err("That approval was prepared for a different vault.".into());
-        }
-        vault.expose_vault_key(|key| {
-            crate::sync::keys::seal_vault_key(key, &recipient_key, &current.vault_id)
-        })?
-    };
-
-    let encoded = crate::sync::keys::encode_package(&sealed);
-    let signature = identity.sign_key_package(&current.vault_id, &device_id, &encoded)?;
-    let device = client
-        .approve_device(
-            &device_id,
-            &identity.device_id,
-            expected_vault_epoch,
-            &encoded,
-            &signature,
-        )
-        .await
-        .map_err(present)?;
-    crate::sync::peers::record_approved(
-        &crate::sync::peers::peers_path(&local_data_dir(&app)?),
-        &current.vault_id,
-        &device_id,
-        frozen_signing_key,
-        frozen_encryption_key,
-    )?;
-    Ok(SyncDeviceView {
-        is_this_device: false,
-        // The frozen keys, not this response's: the person never confirmed those.
-        fingerprint: super::sync::approval_fingerprint(
-            &current.vault_id,
-            &device_id,
-            frozen_signing_key,
-            frozen_encryption_key,
-        ),
-        device_id: device.device_id,
-        state: device.state,
-        label: device.label,
-        created_at: device.created_at,
-        approved_at: device.approved_at,
-        revoked_at: device.revoked_at,
-    })
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,276 +25,434 @@ pub struct SyncTransferResult {
     pub entry_count: usize,
 }
 
-/// Encrypts and uploads the current vault under a compare-and-swap; a lost race is never retried.
+const SEAL_OVERHEAD_BYTES: usize = 16;
+
+fn signed_revision(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn transfer_result(revision: u64, epoch: u64, entries: usize) -> SyncTransferResult {
+    SyncTransferResult {
+        revision: signed_revision(revision),
+        vault_epoch: signed_revision(epoch),
+        entry_count: entries,
+    }
+}
+
+fn decode_bytes(value: &str) -> Result<Vec<u8>, String> {
+    URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| "A Sync value is not valid base64.".to_string())
+}
+
+fn require_activated(refreshed: &Refreshed) -> Result<(), String> {
+    if refreshed.server.device_state != "approved" {
+        return Err("This device is not approved to sync.".into());
+    }
+    if refreshed.server.activated_epoch != refreshed.server.vault_epoch {
+        return Err(
+            "This device has not taken the new vault key yet. Open Sync and take it.".into(),
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn local_payload_bytes(
+    vault: &crate::vault::UnlockedVault,
+) -> Result<(Vec<u8>, usize), String> {
+    let payload = vault.open_payload()?;
+    let bytes = serde_json::to_vec(&*payload)
+        .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
+    Ok((bytes, payload.entries.len()))
+}
+
+fn persist(
+    app: &AppHandle,
+    mut state: SyncState,
+    refreshed_entries: Vec<crate::sync::devicelist::DeviceListEntry>,
+) -> VaultResult<SyncState> {
+    state.entries = refreshed_entries;
+    save_state(app, &state)?;
+    Ok(state)
+}
+
+async fn upload_on(
+    app: &AppHandle,
+    vault: &tauri::State<'_, VaultState>,
+    previous: Option<Header>,
+    base: &SyncState,
+    client: &SyncClient,
+    refreshed: Refreshed,
+) -> Result<SyncTransferResult, String> {
+    let identity = this_identity(app)?;
+    let list = refreshed.update.list;
+    let plan = plan_header(&identity.device_id, &list, previous.as_ref()).map_err(present_proof)?;
+    let aad = plan.aad();
+    let (blob, entry_count, plaintext_digest) = {
+        let session = vault
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
+        let (plaintext, entries) = local_payload_bytes(unlocked)?;
+        let digest = payload_digest(&plaintext);
+        let padded = crate::vault::crypto::serialize_payload(&*unlocked.open_payload()?)?;
+        if padded.len() + SEAL_OVERHEAD_BYTES
+            > crate::sync::canonical::MAX_CIPHERTEXT_BYTES as usize
+        {
+            return Err(
+                "This vault is too large to sync yet. Sync accepts a vault up to 10 MiB.".into(),
+            );
+        }
+        let blob = unlocked
+            .expose_vault_key(|key| crate::vault::crypto::encrypt_bytes(key, &padded, &aad))?;
+        (blob, entries, digest)
+    };
+    let nonce = decode_bytes(&blob.nonce)?;
+    let ciphertext = decode_bytes(&blob.ciphertext)?;
+    let header = build_header(&identity, &plan, &nonce, &ciphertext);
+    let accepted = client
+        .upload(&identity, &header, &ciphertext)
+        .await
+        .map_err(present)?;
+    let receipt = verify_accepted(
+        &header,
+        &accepted.digest,
+        accepted.revision,
+        &accepted.receipt,
+        &accepted.accepted_at,
+        client.instance_key(),
+    )
+    .map_err(present_proof)?;
+    let mut next = base.clone();
+    next.entries = refreshed.update.entries;
+    next.head = Some(header.clone());
+    next.payload_digest = plaintext_digest;
+    next.receipt = Some(receipt);
+    save_state(app, &next)?;
+    Ok(transfer_result(
+        header.revision,
+        header.vault_epoch,
+        entry_count,
+    ))
+}
+
 #[tauri::command]
 pub async fn sync_upload_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
     let client = SyncClient::connect(&app).await?;
-    let identity = this_identity(&app)?;
-    let current = client.download().await.map_err(present)?;
-    let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
-
-    // Successor to the revision this device applied, not the service's current one.
-    let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
-    let base = crate::sync::state::read_protected(&state_file);
-    let base_revision = base.as_ref().map(|entry| entry.revision).unwrap_or(0);
-
-    let next_revision = match crate::sync::state::decide_upload(base_revision, current.revision) {
-        crate::sync::state::UploadDecision::Offer { revision } => revision,
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let refreshed = refresh(&client, &local).await?;
+    require_activated(&refreshed)?;
+    match crate::sync::state::decide_upload(
+        local.head_revision(),
+        refreshed.server.current_revision,
+    ) {
+        crate::sync::state::UploadDecision::Offer { .. } => {}
         crate::sync::state::UploadDecision::Conflict { server_revision } => {
+            persist(&app, local, refreshed.update.entries)?;
             return Err(format!("sync_conflict:{server_revision}"));
         }
-    };
-    if let Some(base) = base.as_ref() {
-        if base.vault_id != current.vault_id {
-            return Err("This device is set up for a different synced vault.".into());
-        }
     }
+    let previous = local.head.clone();
+    upload_on(&app, &state, previous, &local, &client, refreshed).await
+}
 
-    // AEAD context binds the position this snapshot will occupy, so it precedes encryption.
-    let aad = snapshot_aad(
-        &current.vault_id,
-        &identity.device_id,
-        next_revision as u64,
-        (next_revision as u64).saturating_sub(1),
-        current.vault_epoch.max(1) as u64,
-        device_epoch,
-        crate::sync::envelope::OPERATION_SNAPSHOT,
-    );
-    let (blob, entry_count, plaintext_digest) = {
-        let session = state
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-        let payload = vault.open_payload()?;
-        let plaintext = serde_json::to_vec(&*payload)
-            .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-        let digest = crate::sync::state::payload_digest(&plaintext);
-        let blob = vault
-            .expose_vault_key(|key| crate::vault::crypto::encrypt_bytes(key, &plaintext, &aad))?;
-        (blob, payload.entries.len(), digest)
+fn decrypt_remote(
+    key: &[u8; 32],
+    header: &Header,
+    ciphertext_b64: &str,
+) -> VaultResult<sesame_core::loader::AuthenticatedPayload> {
+    let ciphertext = decode_bytes(ciphertext_b64)?;
+    header
+        .verify_ciphertext(&ciphertext)
+        .map_err(present_proof)?;
+    let blob = crate::vault::types::CipherBlob {
+        nonce: header.nonce.clone(),
+        ciphertext: ciphertext_b64.to_string(),
     };
+    sesame_core::loader::VaultLoader::open_snapshot(header.version, key, &blob, &header.aad())
+        .map_err(Into::into)
+}
 
-    let nonce = decode_bytes(&blob.nonce)?;
-    let ciphertext = decode_bytes(&blob.ciphertext)?;
-    let envelope = identity.seal_envelope(&crate::sync::envelope::EnvelopeDraft {
-        vault_id: &current.vault_id,
-        device_id: &identity.device_id,
-        revision: next_revision as u64,
-        vault_epoch: current.vault_epoch.max(1) as u64,
-        device_epoch,
-        operation: crate::sync::envelope::OPERATION_SNAPSHOT,
-        tombstone_id: "",
-        previous_digest: base
-            .as_ref()
-            .map(|entry| entry.head_digest.as_str())
-            .unwrap_or(""),
-        nonce: &nonce,
-        ciphertext: &ciphertext,
-    })?;
-    let sent_digest = crate::sync::envelope::digest(&envelope);
-    let body = serde_json::to_value(&envelope)
-        .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-    let accepted = client.upload(&body).await.map_err(present)?;
+struct Remote {
+    refreshed: Refreshed,
+    header: Header,
+    accepted_at: String,
+    ciphertext: String,
+}
 
-    // Write the agreement only after the service accepted it, and verify the digest it recorded.
-    if !accepted.digest.is_empty() && accepted.digest != sent_digest {
-        return Err("Sesame Sync recorded a different version than this device sent.".into());
+async fn fetch_remote(client: &SyncClient, local: &SyncState) -> Result<Remote, String> {
+    let refreshed = refresh(client, local).await?;
+    let head = refreshed
+        .update
+        .head
+        .clone()
+        .ok_or("This vault has not been synced from another device yet.")?;
+    let snapshot = client.snapshot().await.map_err(present)?;
+    if snapshot.header.digest() != head.digest() {
+        return Err(
+            "sync_fork:The snapshot the service sent is not the one its history names.".into(),
+        );
     }
-    crate::sync::state::write_protected(
-        &state_file,
-        &crate::sync::state::SyncBase {
-            version: 1,
-            vault_id: current.vault_id.clone(),
-            revision: accepted.revision,
-            vault_epoch: accepted.vault_epoch,
-            payload_digest: plaintext_digest,
-            head_digest: sent_digest,
-            receipt: accepted.receipt.clone(),
-        },
-    )?;
-    Ok(SyncTransferResult {
-        revision: accepted.revision,
-        vault_epoch: accepted.vault_epoch,
-        entry_count,
+    Ok(Remote {
+        refreshed,
+        header: head,
+        accepted_at: snapshot.accepted_at,
+        ciphertext: snapshot.ciphertext,
     })
 }
 
-/// Downloads, verifies the sender, and replaces the local vault; without a trusted base it refuses.
 #[tauri::command]
 pub async fn sync_download_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
     let client = SyncClient::connect(&app).await?;
-    let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
-
-    let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
-    let base = match crate::sync::state::read_protected(&state_file) {
-        Some(base) => base,
-        None => {
-            return Err(
-                "This device has no record of what it last synced. Join the synced vault from Sesame Sync settings before downloading."
-                    .into(),
-            )
-        }
-    };
-    if base.vault_id != current.vault_id {
-        return Err("This device is set up for a different synced vault.".into());
-    }
-    if current.revision < base.revision {
-        return Err(format!(
-            "The service offered revision {} after this device already applied {}.",
-            current.revision, base.revision
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let remote = fetch_remote(&client, &local).await?;
+    require_activated(&remote.refreshed)?;
+    let current_revision = local.head_revision();
+    if remote.header.revision <= current_revision && local.head.is_some() {
+        persist(&app, local, remote.refreshed.update.entries)?;
+        return Ok(transfer_result(
+            current_revision,
+            remote.header.vault_epoch,
+            0,
         ));
     }
-
-    let blob = crate::vault::types::CipherBlob {
-        nonce: envelope.nonce.clone(),
-        ciphertext: envelope.ciphertext.clone(),
-    };
-    let (entry_count, applied_digest) = {
+    let (applied_digest, entry_count) = {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
-
-        // An ordinary pull replaces the vault, so it must not run over edits never uploaded.
-        let payload = vault.open_payload()?;
-        let local = serde_json::to_vec(&*payload)
-            .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-        if base.has_local_changes(&local) {
-            return Err(
-                "This device has changes that are not synced yet. Upload them, or resolve the difference."
-                    .into(),
-            );
+        let unlocked = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
+        let (plaintext, _) = local_payload_bytes(unlocked)?;
+        if local.has_local_changes(&plaintext) {
+            return Err("This device has changes that are not synced yet. Upload them, or resolve the difference.".into());
         }
-
-        let authenticated = vault.expose_vault_key(|key| {
-            sesame_core::loader::VaultLoader::open_snapshot(
-                envelope.version,
-                key,
-                &blob,
-                &snapshot_aad_for(&envelope),
-            )
-            .map_err(Into::into)
-        })?;
+        let authenticated = unlocked
+            .expose_vault_key(|key| decrypt_remote(key, &remote.header, &remote.ciphertext))?;
         let payload = authenticated.payload().clone();
-        let count = payload.entries.len();
-        let digest = crate::sync::state::payload_digest(authenticated.bytes());
-        crate::vault::storage::commit_payload_change(vault, payload)?;
-        // Session epoch bumps before the lock releases: approvals must not release stale credentials.
+        let entries = payload.entries.len();
+        let digest = payload_digest(
+            &serde_json::to_vec(&payload)
+                .map_err(|_| "Sesame could not read the synced vault.".to_string())?,
+        );
+        crate::vault::storage::commit_payload_change(unlocked, payload)?;
         state.advance_session_epoch();
-        (count, digest)
+        (digest, entries)
     };
     crate::browser_fill::cancel_pending_approvals(&app);
-
-    crate::sync::state::write_protected(
-        &state_file,
-        &crate::sync::state::SyncBase {
-            version: 1,
-            vault_id: current.vault_id.clone(),
-            revision: current.revision,
-            vault_epoch: current.vault_epoch,
-            payload_digest: applied_digest,
-            head_digest: crate::sync::envelope::digest(&envelope),
-            receipt: current.receipt.clone(),
-        },
-    )?;
-    Ok(SyncTransferResult {
-        revision: current.revision,
-        vault_epoch: current.vault_epoch,
+    let mut next = local;
+    next.entries = remote.refreshed.update.entries;
+    next.head = Some(remote.header.clone());
+    next.payload_digest = applied_digest;
+    next.receipt = remote.refreshed.update.receipt;
+    save_state(&app, &next)?;
+    Ok(transfer_result(
+        remote.header.revision,
+        remote.header.vault_epoch,
         entry_count,
-    })
+    ))
 }
 
-/// Downloads and verifies the snapshot: sender approval, signature, and response agreement.
-async fn fetch_verified_snapshot(
-    app: &AppHandle,
-    client: &SyncClient,
-) -> Result<
-    (
-        crate::sync::client::DownloadedEnvelope,
-        crate::sync::envelope::Envelope,
-        String,
-    ),
-    String,
-> {
-    let current = client.download().await.map_err(present)?;
-    let raw = current
-        .envelope
-        .clone()
-        .ok_or("This vault has not been synced from another device yet.")?;
-    let envelope: crate::sync::envelope::Envelope = serde_json::from_value(raw)
-        .map_err(|_| "The synced vault could not be read.".to_string())?;
-
-    let listing = client.devices().await.map_err(present)?;
-    let sender = listing
-        .devices
-        .iter()
-        .find(|device| device.device_id == envelope.device_id)
-        .ok_or_else(|| "The device that uploaded this vault is not registered.".to_string())?;
-    if sender.state != "approved" {
-        return Err("The device that uploaded this vault is not approved.".into());
-    }
-    let verifying =
-        ed25519_dalek::VerifyingKey::from_bytes(&decode_key(&sender.signing_public_key)?)
-            .map_err(|_| "The synced vault could not be verified.".to_string())?;
-    crate::sync::envelope::verify(&envelope, &verifying)?;
-    crate::sync::peers::record_verified(
-        &crate::sync::peers::peers_path(&local_data_dir(app)?),
-        &current.vault_id,
-        &sender.device_id,
-        &sender.signing_public_key,
-    )?;
-
-    if envelope.vault_id != current.vault_id
-        || envelope.revision as i64 != current.revision
-        || envelope.vault_epoch as i64 != current.vault_epoch
-    {
-        return Err("The synced vault does not match what the service described.".into());
-    }
-    let label = if sender.label.trim().is_empty() {
-        "Another device".to_string()
-    } else {
-        sender.label.clone()
-    };
-    Ok((current, envelope, label))
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTakeKeyResult {
+    pub recovery_kit: String,
 }
 
-async fn this_device_epoch(client: &SyncClient, device_id: &str) -> Result<u64, String> {
-    let listing = client.devices().await.map_err(present)?;
-    let device = listing
-        .devices
-        .iter()
-        .find(|entry| entry.device_id == device_id)
-        .ok_or_else(|| "This device is not registered for Sync.".to_string())?;
-    if device.state != "approved" {
+#[tauri::command]
+pub async fn sync_take_new_key(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    master_password: String,
+) -> Result<SyncTakeKeyResult, String> {
+    let client = SyncClient::connect(&app).await?;
+    let identity = this_identity(&app)?;
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let refreshed = refresh(&client, &local).await?;
+    if refreshed.server.device_state != "approved" {
         return Err("This device is not approved to sync.".into());
     }
-    Ok(device.device_epoch.max(1) as u64)
-}
-
-fn decode_key(value: &str) -> Result<[u8; 32], String> {
-    decode_bytes(value)?
+    let list = &refreshed.update.list;
+    let epoch = list.epoch();
+    if refreshed.server.activated_epoch >= epoch {
+        return Err("This device already has the current vault key.".into());
+    }
+    let package = client.key_package().await.map_err(present)?;
+    let sender = list
+        .member(&package.sender_device_id)
+        .ok_or("The key package came from a device that is not in the device list.")?;
+    package.verify(&sender.signing_key).map_err(present_proof)?;
+    if package.recipient_device_id != identity.device_id
+        || package.vault_id != local.vault_id
+        || package.vault_epoch != epoch
+    {
+        return Err("The key package is not the one this device was promised.".into());
+    }
+    crate::sync::engine::verify_package_for_removal(&refreshed.update.entries, &package)
+        .map_err(present_proof)?;
+    let sealed = decode_bytes(&package.ciphertext)?;
+    let mut opened = identity.open_key_package(&sealed, &local.vault_id)?;
+    let key: [u8; 32] = opened
+        .as_slice()
         .try_into()
-        .map_err(|_| "A Sync device key is invalid.".to_string())
+        .map_err(|_| "The synced vault key is invalid.".to_string())?;
+    opened.zeroize();
+    let recovery_kit = {
+        let mut session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_mut()
+            .ok_or("Unlock Sesame before taking the new key.")?;
+        verify_master_password(unlocked, &master_password)?;
+        let payload = unlocked.open_payload()?.clone();
+        let kit = adopt(unlocked, key, payload, &master_password)?;
+        state.advance_session_epoch();
+        kit
+    };
+    state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
+    crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
+    crate::browser_fill::cancel_pending_approvals(&app);
+    client
+        .activate(&identity, &package.digest())
+        .await
+        .map_err(present)?;
+    let mut next = local;
+    next.entries = refreshed.update.entries;
+    next.activated_epoch = epoch;
+    save_state(&app, &next)?;
+    Ok(SyncTakeKeyResult { recovery_kit })
 }
 
-fn decode_bytes(value: &str) -> Result<Vec<u8>, String> {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .map_err(|_| "A Sync value is not valid base64.".to_string())
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRemovalResult {
+    pub recovery_kit: String,
 }
 
-include!("sync_transfer_recovery.rs");
+fn survivor_packages(
+    identity: &crate::sync::identity::DeviceIdentity,
+    list: &DeviceList,
+    vault_id: &str,
+    new_key: &[u8; 32],
+    excluded: &[&str],
+    epoch: u64,
+    entry_digest: &str,
+) -> Result<Vec<KeyPackageV3>, String> {
+    let mut packages = Vec::new();
+    for member in list.current() {
+        if excluded.contains(&member.device_id.as_str()) {
+            continue;
+        }
+        let recipient: [u8; 32] = decode_bytes(&member.package_key)?
+            .try_into()
+            .map_err(|_| "A Sync device key is invalid.".to_string())?;
+        let sealed = crate::sync::keys::seal_vault_key(new_key, &recipient, vault_id)?;
+        packages.push(identity.sign_key_package(KeyPackageV3 {
+            vault_id: vault_id.to_string(),
+            sender_device_id: identity.device_id.clone(),
+            recipient_device_id: member.device_id.clone(),
+            vault_epoch: epoch,
+            entry_digest: entry_digest.to_string(),
+            ciphertext: URL_SAFE_NO_PAD.encode(sealed),
+            signature: String::new(),
+        }));
+    }
+    Ok(packages)
+}
 
-/// Removes a device and rotates the vault key; every key operation happens in Rust.
+async fn rekey_without(
+    app: &AppHandle,
+    vault: &tauri::State<'_, VaultState>,
+    subject: &str,
+    master_password: &str,
+    adopt_locally: bool,
+) -> Result<Option<String>, String> {
+    let client = SyncClient::connect(app).await?;
+    let identity = this_identity(app)?;
+    let local = load_state(app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let refreshed = refresh(&client, &local).await?;
+    require_activated(&refreshed)?;
+    let list = &refreshed.update.list;
+    if list
+        .member(subject)
+        .is_none_or(|member| member.removed_index != 0)
+    {
+        return Err("That device is not part of this vault.".into());
+    }
+    {
+        let session = vault
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_ref()
+            .ok_or("Unlock Sesame before removing a device.")?;
+        verify_master_password(unlocked, master_password)?;
+        if vault_id_of(unlocked)? != local.vault_id {
+            return Err("The unlocked vault is not the Sync vault.".into());
+        }
+    }
+    let entry = remove_entry(&identity, list, subject).map_err(present_proof)?;
+    let mut new_key = [0u8; 32];
+    crate::vault::util::fill_random(&mut new_key);
+    let excluded = [subject, identity.device_id.as_str()];
+    let packages = survivor_packages(
+        &identity,
+        list,
+        &local.vault_id,
+        &new_key,
+        &excluded,
+        entry.epoch_after,
+        &entry.digest(),
+    )?;
+    client
+        .remove(&identity, &entry, &packages)
+        .await
+        .map_err(present)?;
+
+    let mut entries = refreshed.update.entries.clone();
+    entries.push(entry.clone());
+    let mut next = local.clone();
+    next.entries = entries;
+    let recovery_kit = if adopt_locally {
+        let kit = {
+            let mut session = vault
+                .session
+                .lock()
+                .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+            let unlocked = session
+                .as_mut()
+                .ok_or("Unlock Sesame before removing a device.")?;
+            let payload = unlocked.open_payload()?.clone();
+            let kit = adopt(unlocked, new_key, payload, master_password)?;
+            vault.advance_session_epoch();
+            kit
+        };
+        vault.cache_pin_unlock(false);
+        vault.cache_hello_unlock(false);
+        crate::commands::lifecycle::discard_pin_throttle_state(app, vault);
+        crate::browser_fill::cancel_pending_approvals(app);
+        next.activated_epoch = entry.epoch_after;
+        Some(kit)
+    } else {
+        None
+    };
+    new_key.zeroize();
+    if adopt_locally {
+        save_state(app, &next)?;
+    }
+    Ok(recovery_kit)
+}
+
 #[tauri::command]
 pub async fn sync_remove_device(
     app: AppHandle,
@@ -384,206 +460,25 @@ pub async fn sync_remove_device(
     device_id: String,
     master_password: String,
 ) -> Result<SyncRemovalResult, String> {
-    let client = SyncClient::connect(&app).await?;
     let identity = this_identity(&app)?;
     if device_id == identity.device_id {
         return Err("Turn Sesame Sync off on this device instead of removing it.".into());
     }
-    let current = client.download().await.map_err(present)?;
-    let listing = client.devices().await.map_err(present)?;
+    let kit = rekey_without(&app, &state, &device_id, &master_password, true)
+        .await?
+        .ok_or("Sesame could not finish the removal.")?;
+    Ok(SyncRemovalResult { recovery_kit: kit })
+}
 
-    let survivors: Vec<_> = listing
-        .devices
-        .iter()
-        .filter(|device| {
-            device.state == "approved"
-                && device.device_id != device_id
-                && device.device_id != identity.device_id
-        })
-        .collect();
-
-    let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
-    let new_epoch = current.vault_epoch.max(1) as u64 + 1;
-
-    let peers = crate::sync::peers::peers_path(&local_data_dir(&app)?);
-    for survivor in &survivors {
-        crate::sync::peers::require_releasable(
-            &peers,
-            &current.vault_id,
-            &survivor.device_id,
-            &survivor.signing_public_key,
-            &survivor.encryption_public_key,
-        )?;
-    }
-
-    // Old key never sent anywhere; it is dropped with the session.
-    let mut new_key = [0_u8; 32];
-    crate::vault::util::fill_random(&mut new_key);
-
-    let (blob, entry_count, plaintext_digest) = {
-        let session = state
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-        let payload = vault.open_payload()?;
-        if payload.vault_id.as_deref() != Some(current.vault_id.as_str()) {
-            return Err("The unlocked vault is not the Sync vault for this account.".into());
-        }
-        // Verify the current wrapper before asking the service to commit: a mistype must not orphan every path.
-        let mut confirmed = crate::vault::crypto::unwrap_with_password(
-            &master_password,
-            &vault.kdf,
-            &vault.key_wrap,
-            crate::vault::WRAP_AAD,
-        )?
-        .ok_or("That master password is not correct.")?;
-        let matches = vault.expose_vault_key(|key| {
-            Ok(crate::vault::crypto::bytes_match(confirmed.as_slice(), key))
-        })?;
-        confirmed.zeroize();
-        if !matches {
-            return Err("That master password is not correct.".into());
-        }
-        let plaintext = serde_json::to_vec(&*payload)
-            .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-        let blob = crate::vault::crypto::encrypt_bytes(
-            &new_key,
-            &plaintext,
-            &snapshot_aad(
-                &current.vault_id,
-                &identity.device_id,
-                (current.revision + 1) as u64,
-                current.revision as u64,
-                new_epoch,
-                new_epoch,
-                crate::sync::envelope::OPERATION_SNAPSHOT,
-            ),
-        )?;
-        (
-            blob,
-            payload.entries.len(),
-            crate::sync::state::payload_digest(&plaintext),
-        )
-    };
-
-    let nonce = decode_bytes(&blob.nonce)?;
-    let ciphertext = decode_bytes(&blob.ciphertext)?;
-    let envelope = identity.seal_envelope(&crate::sync::envelope::EnvelopeDraft {
-        vault_id: &current.vault_id,
-        device_id: &identity.device_id,
-        revision: (current.revision + 1) as u64,
-        vault_epoch: new_epoch,
-        device_epoch: new_epoch,
-        operation: crate::sync::envelope::OPERATION_SNAPSHOT,
-        tombstone_id: "",
-        previous_digest: &current.digest,
-        nonce: &nonce,
-        ciphertext: &ciphertext,
-    })?;
-
-    let mut wrapped = Vec::with_capacity(survivors.len());
-    for survivor in &survivors {
-        let recipient = decode_key(&survivor.encryption_public_key)?;
-        let sealed = crate::sync::keys::seal_vault_key(&new_key, &recipient, &current.vault_id)?;
-        let encoded = crate::sync::keys::encode_package(&sealed);
-        let signature =
-            identity.sign_key_package(&current.vault_id, &survivor.device_id, &encoded)?;
-        wrapped.push(serde_json::json!({
-            "deviceId": survivor.device_id,
-            "ciphertext": encoded,
-            "signature": signature,
-        }));
-    }
-
-    // Signed by this device: an account token alone cannot authorise or replay a removal.
-    let intent = identity.sign_revocation_intent(&current.vault_id, &device_id, device_epoch)?;
-
-    let body = serde_json::json!({
-        "envelope": envelope,
-        "survivors": wrapped,
-        "intent": intent,
-    });
-    let accepted = client
-        .rekey_device(&device_id, &body)
+pub(super) async fn leave_vault(
+    app: &AppHandle,
+    state: &tauri::State<'_, VaultState>,
+    master_password: &str,
+) -> Result<(), String> {
+    let identity = this_identity(app)?;
+    rekey_without(app, state, &identity.device_id, master_password, false)
         .await
-        .map_err(present)?;
-
-    // Rebuild every wrap only after the service accepted; the recovery kit changes with the key.
-    let recovery_kit = {
-        let mut session = state
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
-        let payload = vault.open_payload()?.clone();
-        let recovery_kit = super::sync_adopt::adopt(vault, new_key, payload, &master_password)?;
-        state.advance_session_epoch();
-        recovery_kit
-    };
-    state.cache_pin_unlock(false);
-    state.cache_hello_unlock(false);
-    crate::commands::lifecycle::discard_pin_throttle_state(&app, &state);
-    crate::browser_fill::cancel_pending_approvals(&app);
-
-    let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
-    crate::sync::state::write_protected(
-        &state_file,
-        &crate::sync::state::SyncBase {
-            version: 1,
-            vault_id: current.vault_id.clone(),
-            revision: accepted.revision,
-            vault_epoch: accepted.vault_epoch,
-            payload_digest: plaintext_digest,
-            head_digest: crate::sync::envelope::digest(&envelope),
-            receipt: accepted.receipt.clone(),
-        },
-    )?;
-
-    Ok(SyncRemovalResult {
-        revision: accepted.revision,
-        vault_epoch: accepted.vault_epoch,
-        entry_count,
-        recovery_kit,
-    })
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncRemovalResult {
-    pub revision: i64,
-    pub vault_epoch: i64,
-    pub entry_count: usize,
-    pub recovery_kit: String,
-}
-
-/// Refuses a device still waiting for approval. It never received the vault key, so nothing rotates.
-#[tauri::command]
-pub async fn sync_deny_device(app: AppHandle, device_id: String) -> Result<(), String> {
-    let client = SyncClient::connect(&app).await?;
-    client.deny_device(&device_id).await.map_err(present)
-}
-
-/// Proves this device can act on its key package before the service treats it as live.
-#[tauri::command]
-pub async fn sync_activate_device(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app).await?;
-    let identity = this_identity(&app)?;
-    let package = client
-        .key_package(&identity.device_id)
-        .await
-        .map_err(present)?;
-    let epoch = this_device_epoch(&client, &identity.device_id).await?;
-    let proof = identity.sign_activation(&package.vault_id, epoch, &package.ciphertext)?;
-    client.activate(&proof).await.map_err(present)
-}
-
-/// Empties the service-side vault when no device can read it. The local vault is untouched.
-#[tauri::command]
-pub async fn sync_reset_vault(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app).await?;
-    client.reset_vault().await.map_err(present)?;
-    crate::sync::state::forget_protected(&crate::sync::state::state_path(&local_data_dir(&app)?))
+        .map(|_| ())
 }
 
 #[derive(Serialize)]
@@ -602,38 +497,63 @@ pub struct SyncConflictView {
     pub other_device: SyncConflictSideView,
 }
 
-/// Reads both sides of a conflict in memory; the local vault is not touched.
+fn sender_label(
+    unlocked: &crate::vault::UnlockedVault,
+    local: &SyncState,
+    list: &DeviceList,
+    device_id: &str,
+) -> String {
+    list.member(device_id)
+        .and_then(|member| {
+            unlocked
+                .expose_vault_key(|key| {
+                    Ok(open_label(
+                        key,
+                        &local.vault_id,
+                        &member.device_id,
+                        &member.sealed_label,
+                    ))
+                })
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| "Another device".to_string())
+}
+
 #[tauri::command]
 pub async fn sync_conflict_details(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncConflictView, String> {
     let client = SyncClient::connect(&app).await?;
-    let (current, envelope, sender_label) = fetch_verified_snapshot(&app, &client).await?;
-    let state_file = crate::sync::state::state_path(&local_data_dir(&app)?);
-    let base = crate::sync::state::read_protected(&state_file);
-
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let remote = fetch_remote(&client, &local).await?;
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-    let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-    let local_payload = vault.open_payload()?;
-    let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
-    let remote_payload = remote.payload();
-
+    let unlocked = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
+    let local_payload = unlocked.open_payload()?;
+    let authenticated =
+        unlocked.expose_vault_key(|key| decrypt_remote(key, &remote.header, &remote.ciphertext))?;
+    let label = sender_label(
+        unlocked,
+        &local,
+        &remote.refreshed.update.list,
+        &remote.header.device_id,
+    );
     Ok(SyncConflictView {
         this_device: SyncConflictSideView {
             device_label: "This device".to_string(),
-            revision: base.as_ref().map(|entry| entry.revision).unwrap_or(0),
+            revision: signed_revision(local.head_revision()),
             changed_at: String::new(),
             entry_count: local_payload.entries.len(),
         },
         other_device: SyncConflictSideView {
-            device_label: sender_label,
-            revision: current.revision,
-            changed_at: current.uploaded_at.clone(),
-            entry_count: remote_payload.entries.len(),
+            device_label: label,
+            revision: signed_revision(remote.header.revision),
+            changed_at: remote.accepted_at.clone(),
+            entry_count: authenticated.payload().entries.len(),
         },
     })
 }
@@ -644,11 +564,9 @@ pub struct SyncResolutionResult {
     pub revision: i64,
     pub vault_epoch: i64,
     pub entry_count: usize,
-    /// File names only: paths are a filesystem detail the webview has no business holding.
     pub recovery_copies: Vec<String>,
 }
 
-/// The only path that may discard a vault; recovery copies are verified before any apply.
 #[tauri::command]
 pub async fn sync_resolve_conflict(
     app: AppHandle,
@@ -660,59 +578,43 @@ pub async fn sync_resolve_conflict(
         "other" => false,
         _ => return Err("Choose which vault to keep.".into()),
     };
-
     let client = SyncClient::connect(&app).await?;
-    let identity = this_identity(&app)?;
-    let (current, envelope, _) = fetch_verified_snapshot(&app, &client).await?;
-    let device_epoch = this_device_epoch(&client, &identity.device_id).await?;
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let remote = fetch_remote(&client, &local).await?;
+    require_activated(&remote.refreshed)?;
     let data_dir = local_data_dir(&app)?;
-    let state_file = crate::sync::state::state_path(&data_dir);
-    let base = crate::sync::state::read_protected(&state_file);
-    let base_revision = base.as_ref().map(|entry| entry.revision).unwrap_or(0);
-    if let Some(base) = base.as_ref() {
-        if base.vault_id != current.vault_id {
-            return Err("This device is set up for a different synced vault.".into());
-        }
-    }
 
-    // Vault lock for this block only; the network work above and below runs without it.
-    let (local_plaintext, remote_plaintext, local_entries, remote_entries, recovery_copies) = {
+    let (local_plaintext, remote_authenticated, local_entries, remote_entries, recovery_copies) = {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-
-        let local_payload = vault.open_payload()?;
-        let local = serde_json::to_vec(&*local_payload)
-            .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-        let remote = vault.expose_vault_key(|key| decrypt_snapshot(key, &envelope))?;
-        let remote_payload = remote.payload();
-        let remote_entries = remote_payload.entries.len();
-        let local_entries = local_payload.entries.len();
-
+        let unlocked = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
+        let (local_bytes, local_count) = local_payload_bytes(unlocked)?;
+        let decrypted = unlocked
+            .expose_vault_key(|key| decrypt_remote(key, &remote.header, &remote.ciphertext))?;
+        let remote_count = decrypted.payload().entries.len();
         let directory = crate::sync::conflict_backup::backup_dir(&data_dir);
         let stamp = backup_stamp();
         let mut written = Vec::with_capacity(2);
         for (side, revision, payload) in [
             (
                 crate::sync::conflict_backup::Side::ThisDevice,
-                base_revision,
-                local.as_slice(),
+                signed_revision(local.head_revision()),
+                local_bytes.as_slice(),
             ),
             (
                 crate::sync::conflict_backup::Side::OtherDevice,
-                current.revision,
-                remote.bytes(),
+                signed_revision(remote.header.revision),
+                decrypted.bytes(),
             ),
         ] {
-            let path = crate::sync::conflict_backup::write_verified(
-                &directory, vault, side, revision, payload, &stamp,
-            )?;
-            written.push(path);
+            written.push(crate::sync::conflict_backup::write_verified(
+                &directory, unlocked, side, revision, payload, &stamp,
+            )?);
         }
         crate::sync::conflict_backup::prune(&directory, &written);
-        let written: Vec<String> = written
+        let names: Vec<String> = written
             .into_iter()
             .map(|path| {
                 path.file_name()
@@ -720,134 +622,77 @@ pub async fn sync_resolve_conflict(
                     .unwrap_or_default()
             })
             .collect();
-        (local, remote, local_entries, remote_entries, written)
+        (local_bytes, decrypted, local_count, remote_count, names)
     };
-
-    // An edit landing in the upload window would be lost; both branches re-verify the captured digest.
-    let captured_digest = crate::sync::state::payload_digest(&local_plaintext);
+    let captured = payload_digest(&local_plaintext);
 
     if keep_this {
-        let blob = {
+        let upload_base = {
+            let mut base = local.clone();
+            base.head = Some(remote.header.clone());
+            base
+        };
+        {
             let session = state
                 .session
                 .lock()
                 .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-            let vault = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-            confirm_unchanged(vault, &captured_digest)?;
-            vault.expose_vault_key(|key| {
-                crate::vault::crypto::encrypt_bytes(
-                    key,
-                    &local_plaintext,
-                    &snapshot_aad_for_draft(&crate::sync::envelope::EnvelopeDraft {
-                        vault_id: &current.vault_id,
-                        device_id: &identity.device_id,
-                        revision: (current.revision + 1) as u64,
-                        vault_epoch: current.vault_epoch.max(1) as u64,
-                        device_epoch,
-                        operation: crate::sync::envelope::OPERATION_SNAPSHOT,
-                        tombstone_id: "",
-                        previous_digest: &current.digest,
-                        nonce: &[],
-                        ciphertext: &[],
-                    }),
-                )
-            })?
-        };
-        let nonce = decode_bytes(&blob.nonce)?;
-        let ciphertext = decode_bytes(&blob.ciphertext)?;
-        let sealed = identity.seal_envelope(&crate::sync::envelope::EnvelopeDraft {
-            vault_id: &current.vault_id,
-            device_id: &identity.device_id,
-            revision: (current.revision + 1) as u64,
-            vault_epoch: current.vault_epoch.max(1) as u64,
-            device_epoch,
-            operation: crate::sync::envelope::OPERATION_SNAPSHOT,
-            tombstone_id: "",
-            previous_digest: &current.digest,
-            nonce: &nonce,
-            ciphertext: &ciphertext,
-        })?;
-        let sent_digest = crate::sync::envelope::digest(&sealed);
-        let body = serde_json::to_value(&sealed)
-            .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-        let accepted = client.upload(&body).await.map_err(present)?;
-        crate::sync::state::write_protected(
-            &state_file,
-            &crate::sync::state::SyncBase::new(
-                &current.vault_id,
-                accepted.revision,
-                accepted.vault_epoch,
-                &local_plaintext,
-            )
-            .with_head(&sent_digest, &accepted.receipt),
-        )?;
+            let unlocked = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
+            confirm_unchanged(unlocked, &captured)?;
+        }
+        let result = upload_on(
+            &app,
+            &state,
+            Some(remote.header.clone()),
+            &upload_base,
+            &client,
+            remote.refreshed,
+        )
+        .await?;
         return Ok(SyncResolutionResult {
-            revision: accepted.revision,
-            vault_epoch: accepted.vault_epoch,
+            revision: result.revision,
+            vault_epoch: result.vault_epoch,
             entry_count: local_entries,
             recovery_copies,
         });
     }
 
-    let payload = remote_plaintext.payload().clone();
+    let payload = remote_authenticated.payload().clone();
+    let applied_digest = payload_digest(
+        &serde_json::to_vec(&payload)
+            .map_err(|_| "Sesame could not read the synced vault.".to_string())?,
+    );
     {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
-        confirm_unchanged(vault, &captured_digest)?;
-        crate::vault::storage::commit_payload_change(vault, payload)?;
+        let unlocked = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
+        confirm_unchanged(unlocked, &captured)?;
+        crate::vault::storage::commit_payload_change(unlocked, payload)?;
         state.advance_session_epoch();
     }
     crate::browser_fill::cancel_pending_approvals(&app);
-    crate::sync::state::write_protected(
-        &state_file,
-        &crate::sync::state::SyncBase::new(
-            &current.vault_id,
-            current.revision,
-            current.vault_epoch,
-            remote_plaintext.bytes(),
-        )
-        .with_head(&crate::sync::envelope::digest(&envelope), &current.receipt),
-    )?;
+    let mut next = local;
+    next.entries = remote.refreshed.update.entries;
+    next.head = Some(remote.header.clone());
+    next.payload_digest = applied_digest;
+    next.receipt = remote.refreshed.update.receipt;
+    save_state(&app, &next)?;
     Ok(SyncResolutionResult {
-        revision: current.revision,
-        vault_epoch: current.vault_epoch,
+        revision: signed_revision(remote.header.revision),
+        vault_epoch: signed_revision(remote.header.vault_epoch),
         entry_count: remote_entries,
         recovery_copies,
     })
 }
 
-/// Refuses to continue if the local vault changed since capture: the recovery copy lacks later edits.
 fn confirm_unchanged(vault: &crate::vault::UnlockedVault, captured: &str) -> Result<(), String> {
-    let payload = vault.open_payload()?;
-    let now = serde_json::to_vec(&*payload)
-        .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-    if crate::sync::state::payload_digest(&now) != captured {
-        return Err(
-            "This vault changed while you were deciding. Open Sesame Sync and resolve the difference again."
-                .into(),
-        );
+    let (now, _) = local_payload_bytes(vault)?;
+    if payload_digest(&now) != captured {
+        return Err("This vault changed while you were deciding. Open Sesame Sync and resolve the difference again.".into());
     }
     Ok(())
-}
-
-fn decrypt_snapshot(
-    key: &[u8; 32],
-    envelope: &crate::sync::envelope::Envelope,
-) -> VaultResult<sesame_core::loader::AuthenticatedPayload> {
-    let blob = crate::vault::types::CipherBlob {
-        nonce: envelope.nonce.clone(),
-        ciphertext: envelope.ciphertext.clone(),
-    };
-    sesame_core::loader::VaultLoader::open_snapshot(
-        envelope.version,
-        key,
-        &blob,
-        &snapshot_aad_for(envelope),
-    )
-    .map_err(Into::into)
 }
 
 fn backup_stamp() -> String {
@@ -858,7 +703,6 @@ fn backup_stamp() -> String {
     format!("{seconds}")
 }
 
-/// Coordinator state for the Sync panel; paths, sites, and entries never cross IPC.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncCoordinatorView {
@@ -884,6 +728,7 @@ pub async fn sync_coordinator_status(
         Phase::Halted(Halt::Revoked) => ("halted", "revoked", 0),
         Phase::Halted(Halt::NotEntitled) => ("halted", "not_entitled", 0),
         Phase::Halted(Halt::Incompatible) => ("halted", "incompatible", 0),
+        Phase::Halted(Halt::Fork) => ("halted", "fork", 0),
         Phase::Halted(Halt::Locked) => ("halted", "locked", 0),
         Phase::Halted(Halt::Conflict { server_revision }) => {
             ("halted", "conflict", *server_revision)
@@ -908,7 +753,6 @@ pub async fn sync_now(
     if !coordinator.begin() {
         return sync_coordinator_status(coordinator).await;
     }
-
     let outcome = match run_one_transfer(&app, &state).await {
         Ok(outcome) => outcome,
         Err(message) => classify_transfer_failure(&message),
@@ -923,42 +767,36 @@ async fn run_one_transfer(
 ) -> Result<crate::sync::coordinator::Outcome, String> {
     use crate::sync::coordinator::Outcome;
 
+    let Some(local) = load_state(app)? else {
+        return Ok(Outcome::AlreadyCurrent);
+    };
     let client = SyncClient::connect(app).await?;
-    let current = client.download().await.map_err(present)?;
-    let state_file = crate::sync::state::state_path(&local_data_dir(app)?);
-    let base = crate::sync::state::read_protected(&state_file);
-
+    let server = client.state().await.map_err(present)?;
     let has_local_changes = {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session.as_ref().ok_or("sync_locked")?;
-        let payload = vault.open_payload()?;
-        let plaintext = serde_json::to_vec(&*payload)
-            .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-        base.as_ref()
-            .map(|entry| entry.has_local_changes(&plaintext))
-            .unwrap_or(false)
+        let unlocked = session.as_ref().ok_or("sync_locked")?;
+        let (plaintext, _) = local_payload_bytes(unlocked)?;
+        local.has_local_changes(&plaintext)
     };
-
-    match base.as_ref() {
-        // Never synced: joining is deliberate, with a master password, not background work.
-        None => Ok(Outcome::AlreadyCurrent),
-        Some(_) if has_local_changes => {
-            let result = sync_upload_vault(app.clone(), state.clone()).await?;
-            Ok(Outcome::Uploaded {
-                revision: result.revision,
-            })
-        }
-        Some(entry) if current.revision > entry.revision => {
-            let result = sync_download_vault(app.clone(), state.clone()).await?;
-            Ok(Outcome::Downloaded {
-                revision: result.revision,
-            })
-        }
-        Some(_) => Ok(Outcome::AlreadyCurrent),
+    if has_local_changes {
+        let result = sync_upload_vault(app.clone(), state.clone()).await?;
+        return Ok(Outcome::Uploaded {
+            revision: result.revision,
+        });
     }
+    if server.current_revision > local.head_revision() {
+        let result = sync_download_vault(app.clone(), state.clone()).await?;
+        return Ok(Outcome::Downloaded {
+            revision: result.revision,
+        });
+    }
+    let refreshed = refresh(&client, &local).await?;
+    record_checkpoint_if_due(app, &client, &local, &refreshed).await;
+    Ok(Outcome::AlreadyCurrent)
 }
 
+include!("sync_transfer_recovery.rs");
 include!("sync_transfer_coordinator.rs");

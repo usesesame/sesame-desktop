@@ -14,7 +14,7 @@
   <SetupProgress step={4} />
   <h2 id="beta-onboarding-heading">Your vault is ready</h2>
   <p id="beta-onboarding-description" class="beta-onboarding-intro">
-    Sesame is in public beta and keeps your vault on this device, with no cloud account. Three steps make it safe to rely on.
+    Sesame is still being tested. Your vault stays on this device unless you turn on Sync.
   </p>
 
   <ol class="beta-onboarding-steps">

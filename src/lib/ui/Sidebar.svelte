@@ -6,6 +6,7 @@
   export let navigation: NavigationGroup[]
   export let activeView: View
   export let preview = false
+  export let vaultLabel = 'Local vault'
   export let autoLockMinutes = 5
   export let onNavigate: (id: View) => void
   export let onLock: () => void
@@ -30,7 +31,7 @@
     <button type="button" class="lock-button" aria-label="Lock vault" title="Lock vault" on:click={onLock}><span class="nav-icon" aria-hidden="true"><Icon name="lock" size={15} /></span><span class="nav-text">Lock vault</span></button>
     <div class="sidebar-footer">
       <div class="sidebar-status">
-        <p><span class="status-dot" aria-hidden="true"></span>{preview ? 'Preview mode' : 'Local vault'}</p>
+        <p><span class="status-dot" aria-hidden="true"></span>{preview ? 'Preview mode' : vaultLabel}</p>
         <p>Auto-lock after {autoLockMinutes} min</p>
       </div>
       <p class="sidebar-build" aria-label={$appVersion ? `Sesame desktop version ${$appVersion}${$appChannel ? `, ${$appChannel}` : ''}` : 'Sesame desktop version loading'}><span>Sesame desktop</span><span>{$appVersion ? `v${$appVersion}` : 'Version loading'}{$appChannel ? ` · ${$appChannel}` : ''}</span></p>

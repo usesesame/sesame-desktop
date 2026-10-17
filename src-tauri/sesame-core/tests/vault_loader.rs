@@ -255,18 +255,18 @@ fn snapshots_use_only_the_supplied_protocol_context_and_preserve_authenticated_b
     let key = [17; 32];
     let aad = b"fictional signed snapshot context";
     let blob = encrypt_bytes(&key, authenticated.bytes(), aad).expect("snapshot");
-    let snapshot = VaultLoader::open_snapshot(2, &key, &blob, aad).expect("snapshot");
+    let snapshot = VaultLoader::open_snapshot(3, &key, &blob, aad).expect("snapshot");
     assert_eq!(snapshot.bytes(), authenticated.bytes());
     assert_eq!(
         snapshot.payload().vault_id,
         authenticated.payload().vault_id
     );
     assert_eq!(
-        VaultLoader::open_snapshot(2, &key, &blob, b"stale context").err(),
+        VaultLoader::open_snapshot(3, &key, &blob, b"stale context").err(),
         Some(LoadFailure::Authentication)
     );
     assert_eq!(
-        VaultLoader::open_snapshot(3, &key, &blob, aad).err(),
+        VaultLoader::open_snapshot(2, &key, &blob, aad).err(),
         Some(LoadFailure::InvalidStructure)
     );
     let malformed = CipherBlob {
@@ -274,7 +274,7 @@ fn snapshots_use_only_the_supplied_protocol_context_and_preserve_authenticated_b
         ciphertext: blob.ciphertext,
     };
     assert_eq!(
-        VaultLoader::open_snapshot(2, &key, &malformed, aad).err(),
+        VaultLoader::open_snapshot(3, &key, &malformed, aad).err(),
         Some(LoadFailure::InvalidStructure)
     );
 }

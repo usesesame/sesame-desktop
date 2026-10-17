@@ -24,15 +24,12 @@
     "desktop:coverage": "vitest run --coverage",
     "desktop:test": "npm run desktop:test:unit && npm run desktop:test:rust && npm run desktop:contracts",
     "desktop:test:rust": "npm run desktop:host:stage && cargo test --manifest-path src-tauri/Cargo.toml --locked",
-    "desktop:test:rust:sync": "npm run desktop:host:stage && cargo test --manifest-path src-tauri/Cargo.toml --features sync-preview --locked",
     "desktop:test:glib": "node tools/test-glib-patches.mjs",
     "desktop:ci:web": "npm run desktop:version:check && npm run desktop:lint:js && npm run desktop:dependency:admission && npm run desktop:contracts && npm run desktop:check && npm run desktop:build",
-    "desktop:ci": "npm run desktop:ci:web && npm run desktop:lint:rust && npm run desktop:test:rust && npm run desktop:test:rust:sync && npm run desktop:test:glib",
+    "desktop:ci": "npm run desktop:ci:web && npm run desktop:lint:rust && npm run desktop:test:rust && npm run desktop:test:glib",
     "desktop:boundary:verify": "node tools/verify-desktop-boundary.mjs --run",
     "browser:fixtures": "node tools/serve-browser-retail-fixtures.mjs",
     "desktop:bundle:prepare": "npm run desktop:build && npm run desktop:host:stage",
-    "sync:preview:desktop": "node tools/run-sync-preview-desktop.mjs",
-    "sync:preview:test": "cargo test --manifest-path src-tauri/Cargo.toml --lib --features sync-preview",
     "lint:js": "eslint .",
     "lint:all": "npm run lint:js && npm run desktop:lint:rust",
     "contracts": "npm run design:tokens:check && node --test \"tools/*-contracts.test.mjs\" tools/create-static-update-manifest.test.mjs",
@@ -64,7 +61,8 @@
     "desktop:linux:prerequisites": "node tools/check-linux-prerequisites.mjs",
     "desktop:linux:bundle-prerequisites": "node tools/check-linux-prerequisites.mjs --bundle",
     "desktop:linux:dev": "npm run desktop:linux:prerequisites && npm run tauri:dev:browser",
-    "types:generate": "node tools/generate-types.mjs"
+    "types:generate": "node tools/generate-types.mjs",
+    "desktop:test:rust:sync": "npm run desktop:test:rust"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

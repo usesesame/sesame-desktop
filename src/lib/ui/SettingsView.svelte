@@ -2,9 +2,9 @@
   import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
-  import SyncPreviewHost from './SyncPreviewHost.svelte'
+  import SyncPanel from './SyncPanel.svelte'
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
-  import { appVersion, SYNC_PREVIEW_AVAILABLE, SYNC_STATUS_URL } from '../app-meta'
+  import { appVersion } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
   import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
@@ -97,9 +97,7 @@
   export let browserIntegrationWorking = false
   export let onRefreshBrowserIntegration: () => void
   export let onRepairBrowserIntegration: () => void
-  export let onOpenWebsite: (url: string) => void
 
-  const syncStatusUrl = SYNC_STATUS_URL
 
   type TabId = 'general' | 'security' | 'connections' | 'data'
   const tabs: { id: TabId; label: string; icon: string }[] = [
@@ -361,26 +359,13 @@
             {#if !serviceConnection.serverAddress}
               <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
             {/if}
-            {#if SYNC_PREVIEW_AVAILABLE}<SyncPreviewHost />{/if}
-            <!-- Renders no Sync control and imports nothing from the Sync client. -->
-            {#if !SYNC_PREVIEW_AVAILABLE}
-              <article>
-                <div class="setting-copy">
-                  <strong>Sesame Sync</strong>
-                  {#if serviceConnection.syncAvailable}
-                    <p>Your account can use Sesame Sync. This version of Sesame cannot, so install a newer one before turning it on.</p>
-                  {:else}
-                    <p>An encrypted copy of your vault that your other devices can read and Sesame cannot. It is not open yet: the protocol needs an independent review first.</p>
-                  {/if}
-                </div>
-                <div class="diagnostic-actions">
-                  {#if syncStatusUrl}
-                    <button type="button" class="text-button" on:click={() => onOpenWebsite(syncStatusUrl)}>Check status</button>
-                  {/if}
-                  <span class="status-pill">{serviceConnection.syncAvailable ? 'Update needed' : 'Not available'}</span>
-                </div>
-              </article>
-            {/if}
+            <SyncPanel />
+          </div>
+        </section>
+        <section class="settings-group" aria-labelledby="settings-group-connections-server">
+          <h3 id="settings-group-connections-server">Connect to your own server</h3>
+          <div class="settings-list">
+            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
           </div>
         </section>
         <section class="settings-group" aria-labelledby="settings-group-connections-server">
@@ -395,14 +380,7 @@
         <section class="settings-group" aria-labelledby="settings-group-data-vault">
           <h3 id="settings-group-data-vault">Your vault</h3>
           <div class="settings-list">
-            {#if SYNC_PREVIEW_AVAILABLE}
-              <SyncVaultStorageRow />
-            {:else}
-              <article>
-                <div class="setting-copy"><strong>Local-only vault</strong><p>Your vault is stored on this device. Sesame has no cloud copy.</p></div>
-                <span class="status-pill">Active</span>
-              </article>
-            {/if}
+            <SyncVaultStorageRow />
             <article>
               <div class="setting-copy"><strong>Export and deletion</strong><p>Export a readable copy or remove Sesame data from this device.</p></div>
               <button type="button" class="secondary-button settings-manage" on:click={onManageData}>Manage</button>

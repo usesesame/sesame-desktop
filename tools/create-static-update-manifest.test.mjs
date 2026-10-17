@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import test from 'node:test'
 
 import { LINUX_RELEASE_WORKFLOW, RELEASE_REPOSITORY, RELEASE_WORKFLOW, SIGSTORE_ISSUER, releaseIdentity } from './release-evidence-lib.mjs'
-import { prepareReleaseSet, releaseSetSigningPayload, updateReceiptV3 } from './release-set.mjs'
+import { prepareReleaseSet, releaseSetSigningPayload, syncFloorPayload, updateReceiptV3 } from './release-set.mjs'
 
 const run = promisify(execFile)
 const script = resolve('tools/create-static-update-manifest.mjs')
@@ -303,4 +303,89 @@ test('static updater manifest refuses an update receipt signed by another key', 
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+const artifactURL = `https://github.com/usesesame/sesame-desktop/releases/download/v${version}/Sesame_${version}_x64-setup.exe`
+
+async function buildManifestWithFloor(floorFor) {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const floorPath = join(directory, 'sync-floor.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate, candidatePublicKey, privateKey } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    await writeFile(floorPath, JSON.stringify(floorFor(candidate, privateKey)))
+    await run(process.execPath, [script, candidatePath, outputPath], {
+      env: {
+        ...process.env,
+        SESAME_PUBLIC_UPDATE_ARTIFACT_URL: artifactURL,
+        SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey,
+        SESAME_SYNC_FLOOR_FILE: floorPath,
+      },
+    })
+    return JSON.parse(await readFile(outputPath, 'utf8'))
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+const signedFloor = (candidate, privateKey, payload = syncFloorPayload(candidate, '1.2.0')) => ({
+  payload,
+  signingKeyId: candidate.candidateSigningKeyId,
+  signature: sign(null, Buffer.from(payload), privateKey).toString('base64url'),
+})
+
+test('static updater manifest carries a verifying Sync floor and leaves the receipt untouched', async () => {
+  const manifest = await buildManifestWithFloor((candidate, privateKey) => signedFloor(candidate, privateKey))
+  const claims = manifest.syncFloor.payload.split('\n')
+  assert.deepEqual(claims.slice(0, 3), ['sesame-sync-floor-v1', version, '1.2.0'])
+  assert.equal(claims.length, 4)
+  assert.equal(manifest.syncFloor.signingKeyId, 'candidate-1')
+  assert.equal(manifest.candidateReceipt.payload.split('\n')[0], 'sesame-release-set-candidate-v1')
+  assert.equal(manifest.candidateReceipt.payload.split('\n').length, 17)
+})
+
+test('static updater manifest carries no Sync floor unless one is provided', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sesame-update-manifest-'))
+  try {
+    const candidatePath = join(directory, 'candidate.json')
+    const outputPath = join(directory, 'latest.json')
+    const { candidate, candidatePublicKey } = fictionalWindowsCandidate()
+    await writeFile(candidatePath, JSON.stringify(candidate))
+    await run(process.execPath, [script, candidatePath, outputPath], {
+      env: { ...process.env, SESAME_PUBLIC_UPDATE_ARTIFACT_URL: artifactURL, SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: candidatePublicKey, SESAME_SYNC_FLOOR_FILE: '' },
+    })
+    assert.equal('syncFloor' in JSON.parse(await readFile(outputPath, 'utf8')), false)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('static updater manifest refuses a Sync floor whose value was changed after signing', async () => {
+  await assert.rejects(buildManifestWithFloor((candidate, privateKey) => {
+    const floor = signedFloor(candidate, privateKey)
+    return { ...floor, payload: floor.payload.replace('1.2.0', '1.1.0') }
+  }), /Sync floor signature does not verify/)
+})
+
+test('static updater manifest refuses a Sync floor signed by another key or naming another release', async () => {
+  const other = generateKeyPairSync('ed25519').privateKey
+  await assert.rejects(buildManifestWithFloor((candidate) => signedFloor(candidate, other)), /Sync floor signature does not verify/)
+  await assert.rejects(buildManifestWithFloor((candidate, privateKey) => {
+    const payload = syncFloorPayload(candidate, '1.2.0').replace(version, '1.2.4')
+    return signedFloor(candidate, privateKey, payload)
+  }), /does not describe this release set/)
+  await assert.rejects(buildManifestWithFloor((candidate, privateKey) => ({
+    ...signedFloor(candidate, privateKey),
+    signingKeyId: 'candidate-2',
+  })), /does not describe this release set/)
+})
+
+test('a Sync floor above the release version cannot be produced', () => {
+  const { candidate } = fictionalWindowsCandidate()
+  assert.throws(() => syncFloorPayload(candidate, '1.2.4'), /cannot be above the release version/)
+  assert.throws(() => syncFloorPayload(candidate, '1.2'), /major\.minor\.patch/)
+  assert.throws(() => syncFloorPayload(candidate, '1.2.0-beta'), /major\.minor\.patch/)
+  assert.equal(syncFloorPayload(candidate, version).split('\n')[2], version)
 })

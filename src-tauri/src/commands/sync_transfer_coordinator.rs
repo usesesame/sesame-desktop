@@ -6,6 +6,7 @@ fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Outcome
         return Outcome::Halt(Halt::Conflict { server_revision: revision.parse().unwrap_or(0) });
     }
     if message == "sync_locked" || message.contains("Unlock Sesame") { return Outcome::Halt(Halt::Locked); }
+    if message.starts_with("sync_fork:") { return Outcome::Halt(Halt::Fork); }
     if message.contains("not approved") || message.contains("no longer") { return Outcome::Halt(Halt::Revoked); }
     if message.starts_with("sync_not_entitled:") { return Outcome::Halt(Halt::NotEntitled); }
     if message.contains("does not match the expected format") || message.contains("version") { return Outcome::Halt(Halt::Incompatible); }

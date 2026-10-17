@@ -7,6 +7,7 @@ const KEYS = {
   autoLock: 'sesame-auto-lock',
   clipboardClear: 'sesame-clipboard-clear',
   betaOnboarding: 'sesame-beta-onboarding-v1',
+  syncNotice: 'sesame-sync-notice-v1',
   recoveryVerified: 'sesame-recovery-verified-v1',
   keepInTray: 'sesame-keep-in-tray',
   panelWidths: 'sesame-panel-widths',
@@ -94,6 +95,14 @@ export function storeSortMode(mode: SortMode): void {
   write(KEYS.sortMode, mode)
 }
 
+export function readSyncNoticeSeen(): boolean {
+  return read(KEYS.syncNotice) === 'seen'
+}
+
+export function storeSyncNoticeSeen(): void {
+  write(KEYS.syncNotice, 'seen')
+}
+
 export function readBetaOnboardingDismissed(): boolean {
   return read(KEYS.betaOnboarding) === 'dismissed'
 }
@@ -113,6 +122,7 @@ export function storeRecoveryVerified(): void {
 
 export function resetOnboardingPreferences(): void {
   remove(KEYS.betaOnboarding)
+  remove(KEYS.syncNotice)
   remove(KEYS.recoveryVerified)
 }
 

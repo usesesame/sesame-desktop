@@ -35,7 +35,6 @@ impl ServiceTarget {
         }
     }
 
-    #[cfg(feature = "sync-preview")]
     pub fn is_custom(&self) -> bool {
         matches!(self, Self::Custom { .. })
     }

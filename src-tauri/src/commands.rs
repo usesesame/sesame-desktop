@@ -22,19 +22,16 @@ mod secure_notes;
 mod software_licenses;
 mod ssh_keys;
 mod support;
+pub mod sync;
+pub mod sync_adopt;
+pub mod sync_pairing;
+pub mod sync_transfer;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod tools;
 mod trash;
-mod wifi;
-// Compiled only under sync-preview and deliberately not registered: the webview cannot reach these.
-#[cfg(feature = "sync-preview")]
-pub mod sync;
-#[cfg(feature = "sync-preview")]
-pub mod sync_adopt;
-#[cfg(feature = "sync-preview")]
-pub mod sync_transfer;
 pub(crate) mod updater;
+mod wifi;
 
 pub(crate) use crate::adapters::network::account_api::*;
 pub(crate) use crate::adapters::platform::autotype::*;

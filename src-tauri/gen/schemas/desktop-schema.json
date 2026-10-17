@@ -405,10 +405,10 @@
           "markdownDescription": "The quick-access window's redacted status and search, the guarded native copy of one field, and opening an item in Sesame."
         },
         {
-          "description": "Compile-time-gated Sync preview commands for the main window only.",
+          "description": "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on.",
           "type": "string",
-          "const": "sync-preview",
-          "markdownDescription": "Compile-time-gated Sync preview commands for the main window only."
+          "const": "sync",
+          "markdownDescription": "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on."
         },
         {
           "description": "Item and folder mutation, deletion, restoration, and duplicate merging for the main window.",

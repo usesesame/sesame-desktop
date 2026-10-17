@@ -1,15 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { createSyncPreviewController } from '../controllers/sync-preview-controller'
-
-  const syncPreview = createSyncPreviewController()
-
-  onMount(() => {
-    void syncPreview.refresh()
-  })
+  import { syncController as syncPanel } from '../sync'
 
   // Nothing has been uploaded until another device approves this one.
-  $: syncing = $syncPreview.enrolled && $syncPreview.state === 'approved'
+  $: syncing = $syncPanel.enrolled && $syncPanel.state === 'approved'
 </script>
 
 <article>

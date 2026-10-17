@@ -9,8 +9,9 @@ mod commands;
 mod desktop_e2e;
 mod diagnostics;
 mod release;
-#[cfg(feature = "sync-preview")]
 mod sync;
+#[cfg(fuzzing)]
+pub use sync::fuzz_entry as sync_fuzz;
 mod vault;
 
 pub(crate) use adapters::network::website_icons;
@@ -29,7 +30,6 @@ use std::fs;
 #[allow(unused_imports)]
 use zeroize::{Zeroize, Zeroizing};
 
-/// Base commands plus `sync-preview`-only extras; release builds expose no Sync command.
 macro_rules! sesame_invoke_handler {
     ($($extra:path),* $(,)?) => {
         tauri::generate_handler![
@@ -175,76 +175,37 @@ macro_rules! sesame_invoke_handler {
             website_icons::get_website_icon,
             website_icons::clear_website_icon_cache,
             website_icons::get_website_icon_cache_status,
-            $($extra,)*
-        ]
-    };
-}
-
-/// Two macros because `generate_handler!`'s closure type is only inferable inline.
-#[cfg(feature = "sync-preview")]
-macro_rules! sesame_handler {
-    () => {
-        sesame_invoke_handler![
             commands::sync::sync_status,
-            commands::sync::sync_enroll_device,
-            commands::sync::sync_this_device_fingerprint,
+            commands::sync::sync_local_status,
+            commands::sync::sync_create_vault,
             commands::sync::sync_disable,
-            commands::sync::sync_prepare_approval,
-            commands::sync::sync_approve_prepared_device,
+            commands::sync::sync_reset_vault,
+            commands::sync_pairing::sync_pairing_code,
+            commands::sync_pairing::sync_cancel_pairing,
+            commands::sync_pairing::sync_approve_with_code,
+            commands::sync_pairing::sync_join_with_code,
             commands::sync_transfer::sync_upload_vault,
             commands::sync_transfer::sync_download_vault,
+            commands::sync_transfer::sync_take_new_key,
             commands::sync_transfer::sync_conflict_details,
             commands::sync_transfer::sync_resolve_conflict,
             commands::sync_transfer::sync_list_conflict_backups,
             commands::sync_transfer::sync_restore_conflict_backup,
             commands::sync_transfer::sync_remove_device,
-            commands::sync_transfer::sync_deny_device,
-            commands::sync_transfer::sync_activate_device,
-            commands::sync_transfer::sync_reset_vault,
             commands::sync_transfer::sync_coordinator_status,
             commands::sync_transfer::sync_now,
-            commands::sync_adopt::sync_adopt_vault,
+            $($extra,)*
         ]
     };
 }
 
-#[cfg(not(feature = "sync-preview"))]
 macro_rules! sesame_handler {
     () => {
         sesame_invoke_handler![]
     };
 }
 
-#[cfg(all(feature = "wdio", feature = "sync-preview"))]
-macro_rules! sesame_wdio_handler {
-    () => {
-        sesame_invoke_handler![
-            desktop_e2e::desktop_e2e_config,
-            commands::wdio_issue_file_choice,
-            commands::sync::sync_status,
-            commands::sync::sync_enroll_device,
-            commands::sync::sync_this_device_fingerprint,
-            commands::sync::sync_disable,
-            commands::sync::sync_prepare_approval,
-            commands::sync::sync_approve_prepared_device,
-            commands::sync_transfer::sync_upload_vault,
-            commands::sync_transfer::sync_download_vault,
-            commands::sync_transfer::sync_conflict_details,
-            commands::sync_transfer::sync_resolve_conflict,
-            commands::sync_transfer::sync_list_conflict_backups,
-            commands::sync_transfer::sync_restore_conflict_backup,
-            commands::sync_transfer::sync_remove_device,
-            commands::sync_transfer::sync_deny_device,
-            commands::sync_transfer::sync_activate_device,
-            commands::sync_transfer::sync_reset_vault,
-            commands::sync_transfer::sync_coordinator_status,
-            commands::sync_transfer::sync_now,
-            commands::sync_adopt::sync_adopt_vault,
-        ]
-    };
-}
-
-#[cfg(all(feature = "wdio", not(feature = "sync-preview")))]
+#[cfg(feature = "wdio")]
 macro_rules! sesame_wdio_handler {
     () => {
         sesame_invoke_handler![
@@ -358,7 +319,6 @@ pub fn run() {
         })
         .on_window_event(desktop_shell::handle_window_event);
 
-    #[cfg(feature = "sync-preview")]
     let builder = builder.manage(sync::coordinator::Coordinator::new());
 
     #[cfg(feature = "wdio")]
