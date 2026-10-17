@@ -92,7 +92,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 minisign-verify = "0.3.0"
 totp-rs = { version = "6", features = ["otpauth", "zeroize"] }
 url = "2.5"
