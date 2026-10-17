@@ -846,12 +846,12 @@ test('the vault key page fallback is reported once per installed key', () => {
       `${name} does not report a key page fallback`,
     )
   }
-  const adopt = syncAdopt.indexOf('fn sync_adopt_vault(')
-  assert.ok(adopt >= 0, 'sync_adopt_vault is missing from sync_adopt.rs')
+  const adopt = syncAdopt.indexOf('fn finish_adoption(')
+  assert.ok(adopt >= 0, 'finish_adoption is missing from sync_adopt.rs')
   assert.match(
     braceBody(syncAdopt, adopt),
     /report_key_page_fallback\(/,
-    'sync_adopt_vault does not report a key page fallback',
+    'finish_adoption does not report a key page fallback',
   )
 
   const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
