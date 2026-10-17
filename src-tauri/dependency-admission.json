@@ -225,11 +225,6 @@
       "reason": "In use before this gate was adopted."
     },
     {
-      "name": "tauri-plugin-clipboard-manager",
-      "version": "2",
-      "reason": "In use before this gate was adopted."
-    },
-    {
       "name": "tauri-plugin-dialog",
       "version": "2",
       "reason": "In use before this gate was adopted."

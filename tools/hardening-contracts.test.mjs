@@ -602,6 +602,29 @@ test('the restore gate redeems a Rust-issued file choice and never a raw path', 
   )
 })
 
+test('the webview has no clipboard plugin authority and the clipboard stack carries no image support', () => {
+  const cargo = read('src-tauri', 'Cargo.toml')
+  const rust = read('src-tauri', 'src', 'lib.rs')
+  const lockfile = read('src-tauri', 'Cargo.lock')
+
+  assert.doesNotMatch(cargo, /tauri-plugin-clipboard-manager/, 'the clipboard plugin returned to the manifest')
+  assert.doesNotMatch(rust, /tauri_plugin_clipboard_manager/, 'the clipboard plugin returned to the builder')
+  assert.doesNotMatch(lockfile, /name = "tauri-plugin-clipboard-manager"/, 'the clipboard plugin returned to the lockfile')
+  for (const capability of ['default.json', 'quick-access.json']) {
+    assert.doesNotMatch(
+      read('src-tauri', 'capabilities', capability),
+      /clipboard-manager:/,
+      `${capability} grants a clipboard plugin permission`,
+    )
+  }
+  const arboardLines = cargo.split('\n').filter((line) => line.startsWith('arboard'))
+  assert.equal(arboardLines.length, 2, 'arboard should be declared once for Linux and once for Windows')
+  for (const line of arboardLines) {
+    assert.match(line, /default-features = false/, `arboard regained default features: ${line}`)
+  }
+  assert.doesNotMatch(lockfile, /name = "image"/, 'the image decoder returned to the lockfile')
+})
+
 test('the installed-app test bridge is excluded from normal desktop builds', () => {
   const cargo = read('src-tauri', 'Cargo.toml')
   const rust = read('src-tauri', 'src', 'lib.rs')
