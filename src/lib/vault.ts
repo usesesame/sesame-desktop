@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -590,9 +590,9 @@ export async function cancelRecoveryReplacement(): Promise<void> {
   await invoke('cancel_recovery_replacement')
 }
 
-export async function completeRecoveryReplacement(): Promise<string> {
-  if (previewMode) return 'F9K4P-7XQ2M-T6V8C-H3R5W-J8L2N'
-  return invoke<string>('complete_recovery_replacement')
+export async function completeRecoveryReplacement(masterPassword: string, pruneBackups: boolean): Promise<RecoveryReplacementResult> {
+  if (previewMode) return { recoveryKit: 'F9K4P-7XQ2M-T6V8C-H3R5W-J8L2N', backupsRemaining: pruneBackups ? 0 : undefined }
+  return invoke<RecoveryReplacementResult>('complete_recovery_replacement', { masterPassword, pruneBackups })
 }
 
 export async function setNativeAutoLockMinutes(minutes: number): Promise<void> {
@@ -863,12 +863,23 @@ const emptyFidelityCounts = { imported: 0, transformed: 0, legacy: 0, malformed:
 
 export async function previewImportFile(token: string, source: ImportSource): Promise<ImportPreviewResult> {
   if (previewMode) {
+    const authenticator = source === 'otpauth-txt' || source === 'aegis-json' || source === '2fas-json'
+    const accounting: ImportAccounting = authenticator
+      ? { supplied: 6, accepted: 2, retained: 0, unsupported: 2, malformed: 2, reasons: [{ reason: 'counterBasedCode', count: 1 }, { reason: 'steamCode', count: 1 }, { reason: 'unknownAlgorithm', count: 1 }, { reason: 'unusableCode', count: 1 }] }
+      : { supplied: 4, accepted: 3, retained: 0, unsupported: 1, malformed: 0, reasons: [{ reason: 'unsupportedItemType', count: 1 }] }
     return {
       importId: 'preview-import',
-      preview: {
-        totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 1, passkeysNotImported: 2, intentionallyOmittedItems: 0,
-        fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts, imported: 2 }, passkeys: { ...emptyFidelityCounts, intentionallyOmitted: 2 }, unsupportedItems: { ...emptyFidelityCounts } },
-      },
+      preview: authenticator
+        ? {
+            totalEntries: 2, exactDuplicates: 0, accountConflicts: 0, duplicateEntries: 0, missingUrls: 2, invalidUrls: 0, noTotp: 0, invalidTotp: 0, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 0, passkeysNotImported: 0, intentionallyOmittedItems: 2,
+            accounting,
+            fidelity: { logins: { ...emptyFidelityCounts, imported: 4 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts }, passkeys: { ...emptyFidelityCounts }, unsupportedItems: { ...emptyFidelityCounts, intentionallyOmitted: 2 } },
+          }
+        : {
+            totalEntries: 3, exactDuplicates: 0, accountConflicts: 1, duplicateEntries: 0, missingUrls: 0, invalidUrls: 0, noTotp: 2, invalidTotp: 1, preservedLegacyFields: 0, secureNotes: 0, cards: 0, identities: 0, sshKeys: 1, passkeysNotImported: 2, intentionallyOmittedItems: 1,
+            accounting,
+            fidelity: { logins: { ...emptyFidelityCounts, imported: 3 }, secureNotes: { ...emptyFidelityCounts }, cards: { ...emptyFidelityCounts }, identities: { ...emptyFidelityCounts }, sshKeys: { ...emptyFidelityCounts, imported: 2 }, passkeys: { ...emptyFidelityCounts, intentionallyOmitted: 2 }, unsupportedItems: { ...emptyFidelityCounts, intentionallyOmitted: 1 } },
+          },
     }
   }
   return invoke<ImportPreviewResult>('preview_import', { token, source })
@@ -1317,6 +1328,11 @@ export async function grantPresence(secret: string): Promise<void> {
   await invoke('grant_presence', { secret })
 }
 
+export async function checkReleasePresence(): Promise<void> {
+  if (previewMode) return
+  await invoke('check_release_presence')
+}
+
 export async function revealLoginSecret(id: string): Promise<string> {
   if (previewMode) return 'fictional-preview-secret'
   return invoke<string>('reveal_login_secret', { id })
@@ -1356,6 +1372,16 @@ export async function setWebsiteIconsEnabled(enabled: boolean): Promise<void> {
   await invoke('set_website_icons_enabled', { enabled })
 }
 
+export async function getScreenCaptureAllowed(): Promise<boolean> {
+  if (previewMode) return false
+  return invoke<boolean>('get_screen_capture_allowed')
+}
+
+export async function setScreenCaptureAllowed(allowed: boolean): Promise<void> {
+  if (previewMode) return
+  await invoke('set_screen_capture_allowed', { allowed })
+}
+
 export async function clearWebsiteIconCache(): Promise<void> {
   if (previewMode) return
   await invoke('clear_website_icon_cache')
@@ -1376,9 +1402,19 @@ export async function linkDesktopService(code: string): Promise<ServiceConnectio
   return invoke<ServiceConnectionStatus>('link_desktop_service', { code })
 }
 
-export async function disconnectService(): Promise<void> {
-  if (previewMode) return
-  await invoke('disconnect_service')
+export async function inspectCustomServer(input: string): Promise<ServerInspection> {
+  if (previewMode) throw new Error('Pairing with your own server is available in the installed desktop app, not preview mode.')
+  return invoke<ServerInspection>('inspect_custom_server', { input })
+}
+
+export async function linkCustomServer(input: string, code: string, confirmedFingerprint: string): Promise<ServiceConnectionStatus> {
+  if (previewMode) throw new Error('Pairing with your own server is available in the installed desktop app, not preview mode.')
+  return invoke<ServiceConnectionStatus>('link_custom_server', { input, code, confirmedFingerprint })
+}
+
+export async function disconnectService(): Promise<DisconnectOutcome> {
+  if (previewMode) return { revokedOnServer: true }
+  return invoke<DisconnectOutcome>('disconnect_service')
 }
 
 export async function checkDesktopUpdate(): Promise<import('./types').DesktopUpdateStatus> {
@@ -1415,6 +1451,11 @@ export async function repairBrowserIntegration(): Promise<BrowserIntegrationStat
 export async function resolveBrowserFill(approvalId: string, loginId: string | null): Promise<void> {
   if (previewMode) return
   await invoke('resolve_browser_fill', { approvalId, loginId })
+}
+
+export async function getBrowserApprovalWait(): Promise<number> {
+  if (previewMode) return 0
+  return invoke<number>('get_browser_approval_wait')
 }
 
 export async function getPendingBrowserFill(): Promise<BrowserFillRequest | null> {

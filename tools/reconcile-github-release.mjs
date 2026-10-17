@@ -6,13 +6,16 @@ import { promisify } from 'node:util'
 
 import { fileSha256 } from './release-evidence-lib.mjs'
 import {
+  RELEASE_LIST_JQ,
   RELEASE_SET_DIGEST_LABEL,
   RELEASE_VISIBILITY_DRAFT,
   assertCandidateMatchesAssets,
   collectPublishAssets,
   linuxLaneAssetPatterns,
+  parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
+  selectReleaseForTag,
 } from './release-publish-reconcile.mjs'
 
 const [handoffDirectory, publicDirectory, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
@@ -37,13 +40,8 @@ const latest = JSON.parse(await readFile(assets.find((asset) => asset.role === '
 assertCandidateMatchesAssets(candidate, assets, { repository, tag, latest })
 
 const fetchRelease = async () => {
-  try {
-    const { stdout } = await gh(['api', `repos/${repository}/releases/tags/${tag}`])
-    return JSON.parse(stdout)
-  } catch (error) {
-    if (/HTTP 404/.test(error.stderr ?? '')) return null
-    throw error
-  }
+  const { stdout } = await gh(['api', '--paginate', `repos/${repository}/releases?per_page=100`, '--jq', RELEASE_LIST_JQ])
+  return selectReleaseForTag(parseReleaseList(stdout), tag)
 }
 
 const downloadAssets = async (remoteAssets) => {

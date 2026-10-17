@@ -90,7 +90,16 @@ jobs:
             patchelf \
             xdg-utils \
             rpm \
+            bubblewrap \
+            xdg-dbus-proxy \
             xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
 
       - run: npm ci
 
@@ -131,8 +140,12 @@ jobs:
 
       # Bundled libwayland-client and libwayland-cursor break WebKit's EGL
       # display creation on hosts with a newer Wayland stack, so the shipped
-      # AppImage must resolve them from the host.
-      - name: Strip the host-provided Wayland libraries from the AppImage
+      # AppImage must resolve them from the host. The bundled WebKit also
+      # carries build-relative tool paths for bwrap and xdg-dbus-proxy, so
+      # the tool points those at the system locations, and the AppRun hook
+      # adds the bundled usr directory to LD_LIBRARY_PATH so WebKit's sandbox
+      # binds the relative helper paths into the namespace.
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls release-packages/*.AppImage)"
 
       - name: Prove the shipped deb installs, launches, and unregisters
@@ -155,6 +168,20 @@ jobs:
             --format appimage \
             --package "$(ls release-packages/*.AppImage)" \
             --out linux-appimage-shipped-evidence
+
+      - name: Inventory the bundled AppImage libraries
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm run supply-chain:sbom:appimage -- \
+            --appimage "$(ls release-packages/*.AppImage)" \
+            --out "release-evidence/sesame-$version-appimage.cdx.json"
+
+      - name: Audit the locked SBOM and the AppImage inventory against OSV advisories
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm run supply-chain:sbom:audit -- \
+            --sbom "release-evidence/sesame-$version.cdx.json" \
+            --sbom "release-evidence/sesame-$version-appimage.cdx.json"
 
       # The shipped binary has no test bridge, so vault behavior is proven on
       # the test-featured package through the same installed-package layout.
@@ -211,7 +238,7 @@ jobs:
           path: release-handoff
 
       - name: Re-hash every downloaded package against the frozen manifest
-        run: node tools/verify-linux-handoff.mjs release-handoff "$(ls release-handoff/*.release.json)"
+        run: node tools/verify-linux-handoff.mjs release-handoff "$(basename "$(ls release-handoff/*.release.json)")"
 
       - name: Install the pinned Sigstore client
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2, Cosign v3.0.6
@@ -279,6 +306,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SESAME_RELEASE_VISIBILITY: draft
     steps:
+      - name: Record when this job started
+        run: echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -322,9 +352,14 @@ jobs:
       - name: Prove the release stays unpublished
         shell: bash
         run: |
-          draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+          read -r draft published_at < <(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,publishedAt --jq '[.isDraft, .publishedAt] | @tsv')
           if [ "$draft" != "true" ]; then
-            echo "The release is published; the unsigned packages must stay an unpublished draft until approval." >&2
+            if [[ "$published_at" < "$JOB_STARTED_AT" ]]; then
+              echo "Release $GITHUB_REF_NAME was published at $published_at, before this job started at $JOB_STARTED_AT, so this job did not publish it."
+              echo "Release $GITHUB_REF_NAME was already published by a maintainer. This job added files to it and did not publish it." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "This job published the release; the unsigned packages must stay an unpublished draft until approval." >&2
             exit 1
           fi
           manifest=$(ls release-handoff/*.release.json)

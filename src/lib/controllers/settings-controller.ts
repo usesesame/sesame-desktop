@@ -20,7 +20,7 @@ import {
   storeTheme,
 } from '../preferences'
 import type { AppStores } from '../stores/app-stores'
-import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
+import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServerInspection, ServiceConnectionStatus, Theme, WebsiteIconCacheStatus } from '../types'
 import {
   cancelRecoveryReplacement,
   changeMasterPassword,
@@ -37,12 +37,15 @@ import {
   getAutostartEnabled,
   getBrowserIntegrationStatus,
 	getDiagnosticStatus,
+  getScreenCaptureAllowed,
   getServiceConnectionStatus,
   getVaultStatus,
   getWebsiteIconCacheStatus,
   getWebsiteIconsEnabled,
   grantPresence,
   PRESENCE_REQUIRED,
+	inspectCustomServer,
+	linkCustomServer,
 	linkDesktopService,
 	onDesktopUpdateProgress,
   previewMode,
@@ -53,6 +56,7 @@ import {
   setClipboardClearSeconds as setVaultClipboardClearSeconds,
   setNativeAutoLockMinutes,
   setQuickAccessShortcut,
+  setScreenCaptureAllowed,
   setTrayEnabled,
   setUnlockPin,
   setWebsiteIconsEnabled,
@@ -99,6 +103,9 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     quickAccessShortcutWorking: false,
     autostartEnabled: false,
     autostartWorking: false,
+    screenCaptureAllowed: false,
+    screenCaptureKnown: false,
+    screenCaptureWorking: false,
     siteIconsWorking: false,
     siteIconsPresenceRequired: false,
     siteIconsPresencePassword: '',
@@ -109,8 +116,11 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     recoveryReplacement: null as RecoveryReplacementStatus | null,
     recoveryPresenceIntent: null as 'request-kit' | 'issue-kit' | null,
     recoveryPresencePassword: '',
+    recoveryPruneBackups: false,
     recoveryWorking: false,
     issuedRecoveryKit: '',
+    issuedBackupsPruned: false,
+    issuedBackupsRemaining: null as number | null,
     issuedRecoveryConfirmed: false,
     changeMasterPasswordStep: 'verify' as 'verify' | 'details',
     currentMasterPassword: '',
@@ -173,6 +183,16 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
 
   async function refreshAutostartStatus() {
     try { state.patch({ autostartEnabled: await getAutostartEnabled() }) } catch { /* leave the last known state on screen */ }
+  }
+
+  let screenCaptureToggles = 0
+
+  async function refreshScreenCaptureSetting() {
+    const startedAfterToggles = screenCaptureToggles
+    try {
+      const stored = await getScreenCaptureAllowed()
+      if (screenCaptureToggles === startedAfterToggles) state.patch({ screenCaptureAllowed: stored, screenCaptureKnown: true })
+    } catch { /* the window keeps hiding from capture and the switch stays off until a read succeeds */ }
   }
 
   async function refreshServiceConnection() {
@@ -286,6 +306,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       void refreshServiceConnection()
       void refreshBrowserIntegration()
       void refreshAutostartStatus()
+      void refreshScreenCaptureSetting()
       let listenersDisposed = false
       let stopUpdateProgress = () => {}
       void onDesktopUpdateProgress((progress) => state.patch({ updateProgress: progress }))
@@ -480,6 +501,22 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       }
     },
     refreshAutostartStatus,
+    async toggleScreenCapture() {
+      if (state.value().screenCaptureWorking) return
+      const next = !state.value().screenCaptureAllowed
+      state.patch({ screenCaptureWorking: true })
+      feedback.clearError()
+      try {
+        await setScreenCaptureAllowed(next)
+        screenCaptureToggles += 1
+        state.patch({ screenCaptureAllowed: next, screenCaptureKnown: true })
+        feedback.showNotice(next ? 'Screen capture allowed' : 'Screen capture blocked', next ? 'Screenshots, screen sharing and Windows Recall can now show Sesame. Turn this off after your support session.' : 'Windows will keep Sesame out of screenshots, screen sharing and Recall.')
+      } catch (error) {
+        feedback.setError(error)
+      } finally {
+        state.patch({ screenCaptureWorking: false })
+      }
+    },
     async toggleAutostart() {
       if (state.value().autostartWorking) return
       const next = !state.value().autostartEnabled
@@ -574,12 +611,12 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     },
     startRecoveryKitIssue() {
       feedback.clearError()
-      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '' })
+      state.patch({ recoveryPresenceIntent: 'issue-kit', recoveryPresencePassword: '', recoveryPruneBackups: false })
     },
     cancelRecoveryPresence() {
       if (state.value().recoveryWorking) return
       feedback.clearError()
-      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+      state.patch({ recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false })
     },
     async confirmRecoveryPresence() {
       const current = state.value()
@@ -593,8 +630,17 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
           state.patch({ recoveryReplacement: status, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
           feedback.showNotice('New recovery kit requested', 'It will be ready in 72 hours. Sesame shows a warning until then.')
         } else {
-          const kit = await completeRecoveryReplacement()
-          state.patch({ issuedRecoveryKit: kit, issuedRecoveryConfirmed: false, recoveryReplacement: { ready: false, timeConfirmed: true }, recoveryPresenceIntent: null, recoveryPresencePassword: '' })
+          const result = await completeRecoveryReplacement(current.recoveryPresencePassword, current.recoveryPruneBackups)
+          state.patch({
+            issuedRecoveryKit: result.recoveryKit, issuedRecoveryConfirmed: false, issuedBackupsPruned: current.recoveryPruneBackups,
+            issuedBackupsRemaining: result.backupsRemaining ?? null, recoveryReplacement: { ready: false, timeConfirmed: true },
+            recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false,
+          })
+          try {
+            vault.patch({ status: await getVaultStatus() })
+          } catch {
+            vault.patch({ status: { ...vault.value().status, pinUnlockAvailable: false, helloUnlockAvailable: false } })
+          }
         }
       } catch (error) {
         feedback.setError(error)
@@ -618,7 +664,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     },
     finishIssuedRecoveryKit() {
       if (!state.value().issuedRecoveryConfirmed) return
-      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false })
+      state.patch({ issuedRecoveryKit: '', issuedRecoveryConfirmed: false, issuedBackupsPruned: false, issuedBackupsRemaining: null })
       feedback.showNotice('New recovery kit saved', 'Your old recovery kit no longer opens this vault.')
     },
     finishMasterPasswordChange() {
@@ -659,13 +705,44 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
         state.patch({ serviceWorking: false })
       }
     },
+    async inspectServer(input: string): Promise<ServerInspection | null> {
+      state.patch({ serviceWorking: true })
+      feedback.clearError()
+      try {
+        return await inspectCustomServer(input)
+      } catch (error) {
+        feedback.setError(error)
+        return null
+      } finally {
+        state.patch({ serviceWorking: false })
+      }
+    },
+    async connectServer(input: string, code: string, fingerprint: string): Promise<boolean> {
+      state.patch({ serviceWorking: true })
+      feedback.clearError()
+      try {
+        state.patch({ serviceConnection: await linkCustomServer(input, code, fingerprint) })
+        feedback.showNotice('Server connected', 'This desktop is paired with your server. Sync is still unavailable.')
+        return true
+      } catch (error) {
+        feedback.setError(error)
+        return false
+      } finally {
+        state.patch({ serviceWorking: false })
+      }
+    },
     async unlinkService() {
       state.patch({ serviceWorking: true })
       feedback.clearError()
       try {
-        await disconnectService()
+        const ownServer = Boolean(state.value().serviceConnection.serverAddress)
+        const outcome = await disconnectService()
         state.patch({ serviceConnection: emptyService })
-        feedback.showNotice('Desktop disconnected', 'The account connection was removed from this device. Your vault is unchanged.')
+        if (outcome?.revokedOnServer === false) {
+          feedback.setErrorMessage(`This desktop was disconnected, but Sesame could not tell the server, so the device may still be linked on the server. ${ownServer ? 'Revoke it in the server console.' : 'Revoke it in your Sesame account.'}`)
+        } else {
+          feedback.showNotice('Desktop disconnected', 'The account connection was removed from this device. Your vault is unchanged.')
+        }
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -704,8 +781,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
         changeMasterPasswordStep: 'verify', currentMasterPassword: '', currentRecoveryKit: '', newMasterPassword: '',
         confirmNewMasterPassword: '', newRecoveryKit: '', newRecoveryConfirmed: false,
         changingMasterPassword: false,
-        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryWorking: false,
-        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, recoveryReplacement: null,
+        recoveryPresenceIntent: null, recoveryPresencePassword: '', recoveryPruneBackups: false, recoveryWorking: false,
+        issuedRecoveryKit: '', issuedRecoveryConfirmed: false, issuedBackupsPruned: false, issuedBackupsRemaining: null, recoveryReplacement: null,
       })
     },
   }

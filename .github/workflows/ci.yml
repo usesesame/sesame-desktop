@@ -82,11 +82,50 @@ jobs:
   # The desktop itself: the vault core, the interface, and a production
   # build. Windows because the core depends on windows-sys.
   #
+  # The work is split into independent jobs so the slowest one sets the
+  # wall-clock time. `desktop` and `desktop-linux` stay as the required
+  # checks and pass only when every job behind them passed.
+  #
   # clippy runs without `-D warnings` on purpose. The lints that must not
   # regress are `deny` in src-tauri/Cargo.toml, so clippy already fails this
   # job when one appears.
   # ---------------------------------------------------------------------
-  desktop:
+  windows-js:
+    needs: [lint, typecheck]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the version contract
+        run: npm run desktop:version:check
+
+      - name: Lint TypeScript and Svelte
+        run: npm run desktop:lint:js
+
+      - name: Check the dependency admission record
+        run: npm run desktop:dependency:admission
+
+      - name: Run the contract tests
+        run: npm run desktop:contracts
+
+      - name: Type check and unit test the desktop app
+        run: npm run desktop:check
+
+      - name: Build the frontend
+        run: npm run desktop:build
+
+  # Every cargo command that compiles the crate needs the staged native
+  # messaging host, because tauri-build validates the externalBin sidecar
+  # declared in tauri.conf.json. The `desktop:lint:rust` and `desktop:test:*`
+  # scripts stage it themselves.
+  windows-rust-lint:
     needs: [lint, typecheck]
     runs-on: windows-latest
     steps:
@@ -104,17 +143,97 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          key: lint
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: npm ci
 
-      # Version contract, lint, contracts, type check, frontend build, rustfmt,
-      # clippy, and the vault core tests with and without the Sync feature.
-      # This step stages the native messaging host itself, which every cargo
-      # command that compiles the crate needs: tauri-build validates the
-      # externalBin sidecar declared in tauri.conf.json.
-      - name: Run the desktop checks
-        run: npm run desktop:ci
+      - name: Build the frontend
+        run: npm run desktop:build
+
+      - name: Check formatting and run clippy
+        run: npm run desktop:lint:rust
+
+  windows-rust-test:
+    needs: [lint, typecheck]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: npm ci
+
+      - name: Build the frontend
+        run: npm run desktop:build
+
+      - name: Run the vault core tests
+        run: npm run desktop:test:rust
+
+  windows-rust-test-sync:
+    needs: [lint, typecheck]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: sync
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: npm ci
+
+      - name: Build the frontend
+        run: npm run desktop:build
+
+      - name: Run the vault core tests with Sync
+        run: npm run desktop:test:rust:sync
+
+  windows-installer:
+    needs: [lint, typecheck]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: installer
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - run: npm ci
 
       # Catches a production build or installer template that only breaks
       # under release settings. Unsigned, with no updater artifacts.
@@ -132,7 +251,21 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
           ./tools/test-windows-installer.ps1 -InstallerPath $installers[0].FullName
 
-  desktop-linux:
+  desktop:
+    needs: [windows-js, windows-rust-lint, windows-rust-test, windows-rust-test-sync, windows-installer]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Windows job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            test "$result" = "success"
+          done
+
+  linux-rust:
     needs: [lint, typecheck]
     runs-on: ubuntu-latest
     steps:
@@ -150,7 +283,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-          key: linux
+          key: linux-rust
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview and tray libraries
@@ -169,7 +302,16 @@ jobs:
             xdg-utils \
             rpm \
             dbus \
+            bubblewrap \
+            xdg-dbus-proxy \
             xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
 
       - run: npm ci
 
@@ -181,9 +323,6 @@ jobs:
             git status --porcelain -- src/lib/generated >&2
             exit 1
           fi
-
-      - name: Check Linux desktop prerequisites
-        run: npm run desktop:linux:bundle-prerequisites
 
       - name: Build the frontend
         run: npm run desktop:build
@@ -199,6 +338,62 @@ jobs:
       - name: Prove the browser host talks to the live desktop broker
         run: xvfb-run -a dbus-run-session -- node tools/test-browser-host-pipe.mjs
 
+  linux-bundles:
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: linux-bundles
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the webview and tray libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libdbus-1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsecret-tools \
+            patchelf \
+            xdg-utils \
+            rpm \
+            dbus \
+            bubblewrap \
+            xdg-dbus-proxy \
+            xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
+
+      - run: npm ci
+
+      - name: Check Linux desktop prerequisites
+        run: npm run desktop:linux:bundle-prerequisites
+
+      - name: Build the frontend
+        run: npm run desktop:build
+
       - name: Pin the Linux bundling tools by version and hash
         run: node tools/prepare-linux-bundle-tools.mjs
 
@@ -207,6 +402,14 @@ jobs:
           npm run tauri -- build --bundles deb,rpm,appimage
           --config '{"bundle":{"createUpdaterArtifacts":false,"useLocalToolsDir":true}}'
           -- --locked
+
+      # The test only has assertions on Linux, and the optimized build is the
+      # one it exists to check, so it runs against the release artifacts above.
+      - name: Check the vendored glib patches in an optimized build
+        run: npm run desktop:test:glib
+
+      - name: Strip host libraries and patch the sandbox paths from the AppImage
+        run: node tools/strip-appimage-host-libs.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
 
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
@@ -217,10 +420,66 @@ jobs:
 
       - name: Prove the shipped AppImage launches and refuses registration
         run: |
-          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
             --format appimage \
             --package "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" \
-            --out linux-appimage-shipped-evidence
+            --out linux-appimage-shipped-evidence; then
+            echo "--- launch log ---"
+            cat linux-appimage-shipped-evidence/linux-appimage-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-appimage-shipped-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
+
+  linux-installed:
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+          key: linux-installed
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the webview and tray libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libdbus-1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsecret-tools \
+            patchelf \
+            xdg-utils \
+            rpm \
+            dbus \
+            bubblewrap \
+            xdg-dbus-proxy \
+            xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
+
+      - run: npm ci
 
       # The shipped binary has no test bridge, so the package that installs
       # here is the test-featured build. It exercises the real deb layout,
@@ -229,6 +488,7 @@ jobs:
         env:
           VITE_SESAME_WDIO: 'true'
         run: |
+          npm run desktop:host:stage
           npx tauri build --features wdio --config src-tauri/tauri.wdio.conf.json --bundles deb -- --locked
           xvfb-run -a node tools/linux-installed-package-gate.mjs \
             --package "$(ls src-tauri/target/release/bundle/deb/Sesame_*_amd64.deb)" \
@@ -240,6 +500,20 @@ jobs:
           path: linux-package-evidence
           if-no-files-found: error
           retention-days: 30
+
+  desktop-linux:
+    needs: [linux-rust, linux-bundles, linux-installed]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Linux job to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            test "$result" = "success"
+          done
 
   # ---------------------------------------------------------------------
   # Supply chain. Independent of the product jobs, so a new advisory does

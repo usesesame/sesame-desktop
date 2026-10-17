@@ -57,9 +57,12 @@ export type { TotpRefresh } from './generated/TotpRefresh'
 export type { SaveLoginResult } from './generated/SaveLoginResult'
 export type { DeleteLoginResult } from './generated/DeleteLoginResult'
 export type { FidelityCounts } from './generated/FidelityCounts'
+export type { ImportAccounting } from './generated/ImportAccounting'
 export type { ImportFidelity } from './generated/ImportFidelity'
+export type { ImportItemReason } from './generated/ImportItemReason'
 export type { ImportPreview } from './generated/ImportPreview'
 export type { ImportPreviewResult } from './generated/ImportPreviewResult'
+export type { ImportReasonCount } from './generated/ImportReasonCount'
 export type { ImportResult } from './generated/ImportResult'
 export type { MergeCandidate } from './generated/MergeCandidate'
 export type { MergeFieldOption } from './generated/MergeFieldOption'
@@ -91,6 +94,8 @@ export type { RestoreHistoryVersionResult } from './generated/RestoreHistoryVers
 export type { VaultItemSummary } from './generated/VaultItemSummary'
 export type { SecuritySummary } from './generated/SecuritySummary'
 export type { ServiceConnectionStatus } from './generated/ServiceConnectionStatus'
+export type { DisconnectOutcome } from './generated/DisconnectOutcome'
+export type { ServerInspection } from './generated/ServerInspection'
 // Frontend name for backend's `VaultEntrySummary`: the frontend's own name
 // `VaultEntry` is not reused here on purpose, it would collide with the full
 // secret-bearing login record Rust also calls `VaultEntry` (password, TOTP,
@@ -135,6 +140,7 @@ export interface PasswordAnalysis {
 }
 
 export type { RecoveryHealth } from './generated/RecoveryHealth'
+export type { RecoveryReplacementResult } from './generated/RecoveryReplacementResult'
 export type { RecoveryReplacementStatus } from './generated/RecoveryReplacementStatus'
 export type { DiagnosticStatus } from './generated/DiagnosticStatus'
 export type { WebsiteIconCacheStatus } from './generated/WebsiteIconCacheStatus'

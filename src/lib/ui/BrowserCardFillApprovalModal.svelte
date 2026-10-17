@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
   import { useAppStores } from '../stores/app-stores'
   import type { BrowserCardFillRequest, CardFieldKey } from '../types'
@@ -40,7 +41,7 @@
       </label>
     {/each}
   </div>
-  <div class="browser-fill-footer"><span>{remaining > 0 ? `Expires in ${remaining}s` : 'Request expired'}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
+  <div class="browser-fill-footer"><span>{approvalFooterText(remaining, $approvalWait)}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
 </ModalShell>
 
 <style>

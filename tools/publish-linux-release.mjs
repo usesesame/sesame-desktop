@@ -6,10 +6,13 @@ import { promisify } from 'node:util'
 
 import { assertSafeReleaseFilename, fileSha256 } from './release-evidence-lib.mjs'
 import {
+  RELEASE_LIST_JQ,
   RELEASE_SET_DIGEST_LABEL,
   RELEASE_VISIBILITY_DRAFT,
+  parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
+  selectReleaseForTag,
   windowsLaneAssetPatterns,
 } from './release-publish-reconcile.mjs'
 import { assertCandidateArtifactsBindAssets, validateLinuxEvidenceDirectory } from './linux-release-evidence.mjs'
@@ -68,13 +71,8 @@ assertCandidateArtifactsBindAssets(candidate, assets, { repository, tag })
 
 const gh = async (args) => promisify(execFile)('gh', args, { env: process.env, maxBuffer: 16 * 1024 * 1024 })
 const fetchRelease = async () => {
-  try {
-    const { stdout } = await gh(['api', `repos/${repository}/releases/tags/${tag}`])
-    return JSON.parse(stdout)
-  } catch (error) {
-    if (/HTTP 404/.test(error.stderr ?? '')) return null
-    throw error
-  }
+  const { stdout } = await gh(['api', '--paginate', `repos/${repository}/releases?per_page=100`, '--jq', RELEASE_LIST_JQ])
+  return selectReleaseForTag(parseReleaseList(stdout), tag)
 }
 const downloadAssets = async (remoteAssets) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'sesame-linux-release-assets-'))

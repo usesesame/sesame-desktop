@@ -157,6 +157,30 @@ test('release build outputs reach the signing jobs as data, never as script text
   assert.match(publish, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*release-handoff\s*$/m, 'publish merges the candidate files into the handoff directory')
 })
 
+test('the Linux workflow passes plain manifest filenames to the handoff tools', () => {
+  const body = read('.github', 'workflows', 'release-linux-early-access.yml')
+  const calls = body.split('\n').filter((line) => /tools\/(verify-linux-handoff|verify-linux-release-evidence|create-linux-release-candidate|create-linux-sigstore-evidence)\.mjs\s+release-handoff/.test(line))
+  assert.ok(calls.length >= 1, 'the workflow must call a handoff tool on one line')
+  for (const line of calls) assert.match(line, /"\$\(basename /, `a handoff tool needs a bare filename: ${line.trim()}`)
+})
+
+test('a release a maintainer already published does not fail the stays-unpublished check', () => {
+  const cases = [
+    ['release-linux-early-access.yml', '\n  publish:\n', 'Prove the release stays unpublished'],
+    ['release-early-access.yml', '\n  publish-candidate:\n', 'Prove the release stays unpublished until signing'],
+  ]
+  for (const [file, jobStart, stepName] of cases) {
+    const body = read('.github', 'workflows', file)
+    const job = body.slice(body.indexOf(jobStart))
+    assert.match(job, /name: Record when this job started\n\s+run: echo "JOB_STARTED_AT=\$\(date -u [^\n]*>> "\$GITHUB_ENV"/, `${file} must record the job start before it publishes`)
+    const step = job.slice(job.indexOf(`name: ${stepName}`))
+    const block = step.slice(0, step.indexOf('\n      - name:', 10))
+    assert.match(block, /--json isDraft,publishedAt/, `${file} must read when the release was published`)
+    assert.match(block, /"\$published_at" < "\$JOB_STARTED_AT"\s*\]\]; then[\s\S]*?exit 0/, `${file} must pass when the release was published before this job started`)
+    assert.match(block, /This job published the release[^\n]*>&2\n\s+exit 1/, `${file} must still fail when this job published the release`)
+  }
+})
+
 test('every job a workflow depends on exists in that workflow', () => {
   for (const workflow of workflows) {
     const body = read(workflow)

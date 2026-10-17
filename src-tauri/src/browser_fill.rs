@@ -3,7 +3,7 @@ use std::{
     io,
     sync::{
         mpsc::{self, Receiver, SyncSender, TryRecvError},
-        Mutex,
+        Arc, Mutex,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -289,6 +289,7 @@ pub struct BrowserTotpRequestEvent {
     expires_at_unix_ms: u64,
 }
 
+include!("browser_fill_focus_delay.rs");
 include!("browser_fill_broker.rs");
 
 pub fn start(app: AppHandle) -> io::Result<()> {
@@ -302,7 +303,18 @@ pub fn start(app: AppHandle) -> io::Result<()> {
             diagnostics::record_browser_host_registration(&app, "pipe_server_started");
             let server_app = app.clone();
             if crate::browser_pipe::serve_forever(&expected_client, move |payload, peer| {
-                handle_pipe_payload(&server_app, payload, peer)
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle_pipe_payload(&server_app, payload, peer)
+                })) {
+                    Ok(response) => response,
+                    Err(_) => {
+                        diagnostics::record_browser_host_registration(
+                            &server_app,
+                            "pipe_handler_panicked",
+                        );
+                        zeroize::Zeroizing::new(Vec::new())
+                    }
+                }
             })
             .is_err()
             {
@@ -342,10 +354,12 @@ pub fn resolve_save(
             }
             Ok(())
         }
-        Err(_) => {
-            emit_approval_cancelled(app, ApprovalKind::Save, approval_id, "expired");
-            Err("That browser approval expired or is no longer available.".into())
-        }
+        Err(error) => Err(rejected_decision(
+            app,
+            ApprovalKind::Save,
+            approval_id,
+            error,
+        )),
     }
 }
 
@@ -404,11 +418,39 @@ pub fn resolve(
             }
             Ok(())
         }
-        Err(_) => {
-            emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "expired");
-            Err("That browser approval expired or is no longer available.".into())
-        }
+        Err(error) => Err(rejected_decision(
+            app,
+            ApprovalKind::Fill,
+            &approval_id,
+            error,
+        )),
     }
+}
+
+fn rejected_decision(
+    app: &AppHandle,
+    kind: ApprovalKind,
+    approval_id: &str,
+    error: &str,
+) -> String {
+    if error == APPROVAL_TOO_SOON {
+        return APPROVAL_TOO_SOON_MESSAGE.to_string();
+    }
+    emit_approval_cancelled(app, kind, approval_id, "expired");
+    "That browser approval expired or is no longer available.".to_string()
+}
+
+pub fn ensure_save_approval_ready(
+    state: &BrowserFillState,
+    approval_id: &str,
+) -> Result<(), String> {
+    state.require_ready(approval_id).map_err(|error| {
+        if error == APPROVAL_TOO_SOON {
+            APPROVAL_TOO_SOON_MESSAGE.to_string()
+        } else {
+            "That browser approval expired or is no longer available.".to_string()
+        }
+    })
 }
 
 pub fn pending(state: State<'_, BrowserFillState>) -> Option<BrowserFillRequestEvent> {
@@ -455,10 +497,12 @@ pub fn resolve_identity(
             }
             Ok(())
         }
-        Err(_) => {
-            emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "expired");
-            Err("That browser approval expired or is no longer available.".into())
-        }
+        Err(error) => Err(rejected_decision(
+            app,
+            ApprovalKind::Identity,
+            &approval_id,
+            error,
+        )),
     }
 }
 
@@ -490,10 +534,12 @@ pub fn resolve_card(
             }
             Ok(())
         }
-        Err(_) => {
-            emit_approval_cancelled(app, ApprovalKind::Card, &approval_id, "expired");
-            Err("That browser approval expired or is no longer available.".into())
-        }
+        Err(error) => Err(rejected_decision(
+            app,
+            ApprovalKind::Card,
+            &approval_id,
+            error,
+        )),
     }
 }
 
@@ -526,10 +572,12 @@ pub fn resolve_totp(
             }
             Ok(())
         }
-        Err(_) => {
-            emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "expired");
-            Err("That browser approval expired or is no longer available.".into())
-        }
+        Err(error) => Err(rejected_decision(
+            app,
+            ApprovalKind::Totp,
+            &approval_id,
+            error,
+        )),
     }
 }
 
@@ -732,6 +780,8 @@ fn identity_value(entry: &VaultEntry) -> String {
 
 fn bring_to_foreground(app: &AppHandle) {
     if let Some(window) = crate::desktop_shell::ensure_main_window(app) {
+        app.state::<BrowserFillState>()
+            .window_focus_changed(window.is_focused().unwrap_or(false));
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -1099,6 +1149,7 @@ fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
 
 #[cfg(test)]
 mod approval_tests {
+    use super::focus_delay_tests::{let_delay_pass, state_with_clock};
     use super::*;
 
     fn origin(value: &str) -> NormalizedOrigin {
@@ -1146,8 +1197,9 @@ mod approval_tests {
 
     #[test]
     fn a_card_approval_is_consumed_and_cannot_be_replayed() {
-        let state = BrowserFillState::default();
+        let (state, clock) = state_with_clock();
         let (approval_id, receiver) = begin_card(&state, "card-request-1");
+        let_delay_pass(&state, &clock);
 
         state
             .decide(
@@ -1174,8 +1226,9 @@ mod approval_tests {
 
     #[test]
     fn a_card_not_offered_for_approval_is_never_released() {
-        let state = BrowserFillState::default();
+        let (state, clock) = state_with_clock();
         let (approval_id, receiver) = begin_card(&state, "card-request-2");
+        let_delay_pass(&state, &clock);
 
         assert_eq!(
             state.decide(
@@ -1626,6 +1679,7 @@ mod origin_attacks {
 
 #[cfg(test)]
 mod totp_flow_tests {
+    use super::focus_delay_tests::{let_delay_pass, state_with_clock};
     use super::*;
     use crate::browser_protocol::TOTP_PROTOCOL_VERSION;
 
@@ -1749,8 +1803,9 @@ mod totp_flow_tests {
             vec!["login-valid"]
         );
 
-        let state = BrowserFillState::default();
+        let (state, clock) = state_with_clock();
         let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        let_delay_pass(&state, &clock);
         assert_eq!(
             state.decide(
                 &approval_id,
@@ -1767,8 +1822,9 @@ mod totp_flow_tests {
 
     #[test]
     fn a_totp_approval_is_consumed_and_cannot_be_replayed() {
-        let state = BrowserFillState::default();
+        let (state, clock) = state_with_clock();
         let (approval_id, receiver) = begin_totp(&state, "totp-1", 7);
+        let_delay_pass(&state, &clock);
         let event = BrowserTotpRequestEvent {
             approval_id: approval_id.clone(),
             origin: "https://example.test".to_string(),

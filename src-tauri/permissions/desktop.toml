@@ -20,6 +20,7 @@ commands.allow = [
   "disable_windows_hello",
   "unlock_with_windows_hello",
   "grant_presence",
+  "check_release_presence",
   "set_auto_lock_minutes",
   "lock_vault",
   "get_recovery_health",
@@ -124,9 +125,11 @@ commands.allow = [
 
 [[permission]]
 identifier = "account-service"
-description = "Optional desktop account linking and disconnection for the main window."
+description = "Optional desktop account and own-server linking and disconnection for the main window."
 commands.allow = [
   "link_desktop_service",
+  "inspect_custom_server",
+  "link_custom_server",
   "get_service_connection_status",
   "disconnect_service",
 ]
@@ -161,6 +164,7 @@ description = "Browser-helper status, repair, and approval lifecycle for the mai
 commands.allow = [
   "get_browser_integration_status",
   "repair_browser_integration",
+  "get_browser_approval_wait",
   "get_pending_browser_fill",
   "resolve_browser_fill",
   "get_pending_browser_save",
@@ -175,7 +179,7 @@ commands.allow = [
 
 [[permission]]
 identifier = "desktop-settings"
-description = "Tray, quick-access shortcut, autostart, and website icon settings for the main window."
+description = "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window."
 commands.allow = [
   "set_tray_enabled",
   "set_quick_access_shortcut",
@@ -184,6 +188,8 @@ commands.allow = [
   "get_platform_capabilities",
   "get_website_icons_enabled",
   "set_website_icons_enabled",
+  "get_screen_capture_allowed",
+  "set_screen_capture_allowed",
 ]
 
 [[permission]]

@@ -10,7 +10,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SESAME_RELEASE_CANDIDATE_KEY_ID");
     println!("cargo:rerun-if-env-changed=VITE_SESAME_SITE_ORIGIN");
     let local_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env.local");
-    println!("cargo:rerun-if-changed={}", local_config.display());
+    if std::env::var("PROFILE").as_deref() == Ok("debug") {
+        println!("cargo:rerun-if-changed={}", local_config.display());
+    }
 
     let configured = std::env::var("SESAME_API_BASE_URL").ok().or_else(|| {
         // A checked-in release build must be configured explicitly. The local
@@ -54,7 +56,20 @@ fn main() {
         // this is absent or malformed.
         println!("cargo:rustc-env=VITE_SESAME_SITE_ORIGIN={value}");
     }
-    let attributes = tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new());
+    let windows_msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+    let mut attributes =
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new());
+    if windows_msvc {
+        let manifest =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("windows-common-controls.manifest");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFESTUAC:NO");
+        attributes = attributes
+            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+    }
     if let Err(error) = tauri_build::try_build(attributes) {
         eprintln!("{error:#}");
         std::process::exit(1);

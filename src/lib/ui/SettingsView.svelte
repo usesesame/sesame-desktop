@@ -8,8 +8,9 @@
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
   import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
-  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServiceConnectionStatus, Theme } from '../types'
+  import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServerInspection, ServiceConnectionStatus, Theme } from '../types'
   import AccountConnectionSetting from './AccountConnectionSetting.svelte'
+  import CustomServerSetting from './CustomServerSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
@@ -34,8 +35,11 @@
   export let recoveryWorking = false
   export let recoveryPresenceIntent: 'request-kit' | 'issue-kit' | null = null
   export let recoveryPresencePassword = ''
+  export let recoveryPruneBackups = false
   export let issuedRecoveryKit = ''
   export let issuedRecoveryConfirmed = false
+  export let issuedBackupsPruned = false
+  export let issuedBackupsRemaining: number | null = null
   export let onRequestRecoveryKit: () => void = () => {}
   export let onIssueRecoveryKit: () => void = () => {}
   export let onCancelRecoveryRequest: () => void = () => {}
@@ -48,6 +52,10 @@
   export let autostartEnabled = false
   export let autostartWorking = false
   export let onToggleAutostart: () => void
+  export let screenCaptureAllowed = false
+  export let screenCaptureKnown = true
+  export let screenCaptureWorking = false
+  export let onToggleScreenCapture: () => void = () => {}
   export let quickAccessShortcut = 'Ctrl+Alt+S'
   export let quickAccessShortcutWorking = false
   export let onUpdateQuickAccessShortcut: (accelerator: string) => void
@@ -75,6 +83,8 @@
   export let serviceConnection: ServiceConnectionStatus = { state: 'disconnected', connected: false, online: false, syncAvailable: false, browserHelperAvailable: false }
   export let serviceWorking = false
   export let onLinkService: (code: string) => void
+  export let onInspectServer: (input: string) => Promise<ServerInspection | null>
+  export let onConnectServer: (input: string, code: string, fingerprint: string) => Promise<boolean>
   export let onDisconnectService: () => void
   export let onRefreshService: () => void
   export let serviceConnectionAvailable = true
@@ -290,6 +300,12 @@
               <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
             </article>
             {/if}
+            {#if $platformCapabilities.os === 'windows'}
+            <article>
+              <div class="setting-copy"><strong>Allow screen capture</strong><p>Sesame asks Windows to keep its windows out of screenshots, screen sharing and Recall. Turn this on only while someone helps you in a support session.</p></div>
+              <button type="button" class="switch" class:active={screenCaptureKnown && screenCaptureAllowed} role="switch" aria-checked={screenCaptureKnown ? screenCaptureAllowed : "mixed"} aria-label="Allow screen capture" disabled={screenCaptureWorking || !screenCaptureKnown} on:click={onToggleScreenCapture}><span></span></button>
+            </article>
+            {/if}
             <article>
               <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>
               <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay" use:slidingSelection>{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
@@ -308,10 +324,10 @@
                 <div class="setting-copy"><strong>Recovery kit</strong><p>The new recovery kit you requested on {formatMoment(recoveryReplacement.requestedAt)} is ready. Getting it replaces your current kit.</p></div>
                 <div class="diagnostic-actions"><button type="button" class="text-button" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button><button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onIssueRecoveryKit}>Get new kit</button></div>
               {:else if recoveryRequested}
-                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame checks the time with usesesame.app and github.com before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
+                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame needs two independent servers to agree on the time before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
                 <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button>
               {:else}
-                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with usesesame.app and github.com, not this computer's clock.</p></div>
+                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with servers on the internet, not this computer's clock, and it needs two of them to agree.</p></div>
                 <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onRequestRecoveryKit}>Request new kit</button>
               {/if}
             </article>
@@ -337,7 +353,9 @@
         <section class="settings-group" aria-labelledby="settings-group-connections-account">
           <h3 id="settings-group-connections-account">Sesame account</h3>
           <div class="settings-list">
-            <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
+            {#if !serviceConnection.serverAddress}
+              <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
+            {/if}
             {#if SYNC_PREVIEW_AVAILABLE}<SyncPreviewHost />{/if}
             <!-- Renders no Sync control and imports nothing from the Sync client. -->
             {#if !SYNC_PREVIEW_AVAILABLE}
@@ -358,6 +376,12 @@
                 </div>
               </article>
             {/if}
+          </div>
+        </section>
+        <section class="settings-group" aria-labelledby="settings-group-connections-server">
+          <h3 id="settings-group-connections-server">Connect to your own server</h3>
+          <div class="settings-list">
+            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
           </div>
         </section>
       </div>
@@ -432,10 +456,10 @@
 </section>
 
 {#if recoveryPresenceIntent}
-  <PasswordPresenceModal intent={recoveryPresenceIntent} bind:presenceSecret={recoveryPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmRecoveryPresence} onCancel={onCancelRecoveryPresence} />
+  <PasswordPresenceModal intent={recoveryPresenceIntent} bind:presenceSecret={recoveryPresencePassword} bind:pruneBackups={recoveryPruneBackups} errorMessage={errorMessage} onConfirm={onConfirmRecoveryPresence} onCancel={onCancelRecoveryPresence} />
 {/if}
 {#if issuedRecoveryKit}
-  <IssuedRecoveryKitModal recoveryKit={issuedRecoveryKit} bind:confirmed={issuedRecoveryConfirmed} onDone={onFinishIssuedRecoveryKit} />
+  <IssuedRecoveryKitModal recoveryKit={issuedRecoveryKit} bind:confirmed={issuedRecoveryConfirmed} backupsPruned={issuedBackupsPruned} backupsRemaining={issuedBackupsRemaining} onDone={onFinishIssuedRecoveryKit} />
 {/if}
 {#if siteIconsPresenceRequired}
   <PasswordPresenceModal intent="enable-icons" bind:presenceSecret={siteIconsPresencePassword} errorMessage={errorMessage} onConfirm={onConfirmSiteIconsPresence} onCancel={onCancelSiteIconsPresence} />

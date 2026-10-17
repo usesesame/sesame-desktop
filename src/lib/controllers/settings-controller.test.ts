@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ServiceConnectionStatus } from '../types'
 import { createAppStores } from '../stores/app-stores'
 import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
@@ -22,11 +23,14 @@ const vaultApi = vi.hoisted(() => ({
   getAutostartEnabled: vi.fn(),
   getBrowserIntegrationStatus: vi.fn(),
   getDiagnosticStatus: vi.fn(),
+  getScreenCaptureAllowed: vi.fn(),
   getServiceConnectionStatus: vi.fn(),
   getVaultStatus: vi.fn(),
   getWebsiteIconCacheStatus: vi.fn(),
   getWebsiteIconsEnabled: vi.fn(),
   grantPresence: vi.fn(),
+  inspectCustomServer: vi.fn(),
+  linkCustomServer: vi.fn(),
   linkDesktopService: vi.fn(),
   onDesktopUpdateProgress: vi.fn(),
   recordDiagnostic: vi.fn(),
@@ -36,6 +40,7 @@ const vaultApi = vi.hoisted(() => ({
   setClipboardClearSeconds: vi.fn(),
   setNativeAutoLockMinutes: vi.fn(),
   setQuickAccessShortcut: vi.fn(),
+  setScreenCaptureAllowed: vi.fn(),
   setTrayEnabled: vi.fn(),
   setUnlockPin: vi.fn(),
   setWebsiteIconsEnabled: vi.fn(),
@@ -72,6 +77,7 @@ beforeEach(() => {
   vaultApi.getBrowserIntegrationStatus.mockResolvedValue({ ready: true })
   vaultApi.getAutostartEnabled.mockResolvedValue(false)
   vaultApi.getWebsiteIconsEnabled.mockResolvedValue(false)
+  vaultApi.getScreenCaptureAllowed.mockResolvedValue(false)
   vaultApi.onDesktopUpdateProgress.mockResolvedValue(() => {})
   vaultApi.recordDiagnostic.mockResolvedValue(undefined)
   vaultApi.setTrayEnabled.mockResolvedValue(undefined)
@@ -268,7 +274,8 @@ describe('recovery kit replacement', () => {
   it('shows the issued kit and clears it only after it is saved', async () => {
     const { controller } = harness()
     vaultApi.grantPresence.mockResolvedValue(undefined)
-    vaultApi.completeRecoveryReplacement.mockResolvedValue('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+    vaultApi.getVaultStatus.mockResolvedValue({ exists: true, unlocked: true, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false })
+    vaultApi.completeRecoveryReplacement.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB' })
     controller.startRecoveryKitIssue()
     controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
 
@@ -282,6 +289,65 @@ describe('recovery kit replacement', () => {
     expect(controller.state.value().issuedRecoveryKit).toBe('')
   })
 
+  it('sends the master password with the issue request and keeps backups unless asked', async () => {
+    const { controller } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.getVaultStatus.mockResolvedValue({ exists: true, unlocked: true, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false })
+    vaultApi.completeRecoveryReplacement.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB' })
+    controller.startRecoveryKitIssue()
+    controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(vaultApi.completeRecoveryReplacement).toHaveBeenCalledWith('fictional master password', false)
+    expect(controller.state.value().issuedBackupsPruned).toBe(false)
+    expect(controller.state.value().recoveryPresencePassword).toBe('')
+  })
+
+  it('asks the core to delete local backups when the box is checked and reports what remains', async () => {
+    const { controller } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.getVaultStatus.mockResolvedValue({ exists: true, unlocked: true, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false })
+    vaultApi.completeRecoveryReplacement.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB', backupsRemaining: 2 })
+    controller.startRecoveryKitIssue()
+    controller.state.patch({ recoveryPresencePassword: 'fictional master password', recoveryPruneBackups: true })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(vaultApi.completeRecoveryReplacement).toHaveBeenCalledWith('fictional master password', true)
+    expect(controller.state.value().issuedBackupsPruned).toBe(true)
+    expect(controller.state.value().issuedBackupsRemaining).toBe(2)
+    expect(controller.state.value().recoveryPruneBackups).toBe(false)
+  })
+
+  it('keeps the issued kit on screen when the status refresh fails afterwards', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.getVaultStatus.mockRejectedValue(new Error('status unavailable'))
+    vaultApi.completeRecoveryReplacement.mockResolvedValue({ recoveryKit: 'FICTI-ONALN-EWKIT-AAAAA-BBBBB' })
+    controller.startRecoveryKitIssue()
+    controller.state.patch({ recoveryPresencePassword: 'fictional master password' })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(controller.state.value().issuedRecoveryKit).toBe('FICTI-ONALN-EWKIT-AAAAA-BBBBB')
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+
+  it('shows no kit when the core refuses the master password', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.completeRecoveryReplacement.mockRejectedValue(new Error('Your current master password is not correct.'))
+    controller.startRecoveryKitIssue()
+    controller.state.patch({ recoveryPresencePassword: 'fictional wrong password' })
+
+    await controller.confirmRecoveryPresence()
+
+    expect(controller.state.value().issuedRecoveryKit).toBe('')
+    expect(controller.state.value().recoveryPresenceIntent).toBe('issue-kit')
+    expect(feedback.state.value().errorMessage).toContain('not correct')
+  })
+
   it('cancels a pending request without a password', async () => {
     const { controller } = harness()
     vaultApi.cancelRecoveryReplacement.mockResolvedValue(undefined)
@@ -291,5 +357,220 @@ describe('recovery kit replacement', () => {
 
     expect(vaultApi.grantPresence).not.toHaveBeenCalled()
     expect(controller.state.value().recoveryReplacement?.requestedAt).toBeUndefined()
+  })
+})
+
+describe('screen capture setting', () => {
+  it('starts blocked and reads the stored choice from the desktop app', async () => {
+    const { controller } = harness()
+    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+
+    vaultApi.getScreenCaptureAllowed.mockResolvedValue(true)
+    const stop = controller.start()
+    await vi.waitFor(() => expect(controller.state.value().screenCaptureAllowed).toBe(true))
+    stop()
+  })
+
+  it('stays blocked when the stored choice cannot be read', async () => {
+    const { controller } = harness()
+    vaultApi.getScreenCaptureAllowed.mockRejectedValue(new Error('unavailable'))
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: false, screenCaptureKnown: false })
+    stop()
+  })
+
+  it('keeps the first read when a toggle made while it was pending is refused', async () => {
+    const { controller } = harness()
+    let finishRead: (value: boolean) => void = () => {}
+    vaultApi.getScreenCaptureAllowed.mockReturnValue(new Promise<boolean>((resolve) => { finishRead = resolve }))
+    vaultApi.setScreenCaptureAllowed.mockRejectedValue(new Error('Sesame could not save the desktop setting.'))
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+    await controller.toggleScreenCapture()
+    finishRead(true)
+
+    await vi.waitFor(() => expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: true, screenCaptureKnown: true }))
+    stop()
+  })
+
+  it('keeps a toggle made while the first read is still pending', async () => {
+    const { controller } = harness()
+    let finishRead: (value: boolean) => void = () => {}
+    vaultApi.getScreenCaptureAllowed.mockReturnValue(new Promise<boolean>((resolve) => { finishRead = resolve }))
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+
+    const stop = controller.start()
+    await vi.waitFor(() => expect(vaultApi.getScreenCaptureAllowed).toHaveBeenCalled())
+    await controller.toggleScreenCapture()
+    finishRead(false)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(controller.state.value().screenCaptureAllowed).toBe(true)
+    stop()
+  })
+
+  it('allows capture only after the desktop app accepts the change', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+
+    await controller.toggleScreenCapture()
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenCalledWith(true)
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: true, screenCaptureWorking: false })
+    expect(feedback.state.value().notice?.title).toBe('Screen capture allowed')
+  })
+
+  it('blocks capture again on the next toggle', async () => {
+    const { controller } = harness()
+    vaultApi.setScreenCaptureAllowed.mockResolvedValue(undefined)
+    await controller.toggleScreenCapture()
+
+    await controller.toggleScreenCapture()
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenLastCalledWith(false)
+    expect(controller.state.value().screenCaptureAllowed).toBe(false)
+  })
+
+  it('keeps capture blocked and shows the error when the desktop app refuses', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.setScreenCaptureAllowed.mockRejectedValue(new Error('Sesame could not save the desktop setting.'))
+
+    await controller.toggleScreenCapture()
+
+    expect(controller.state.value()).toMatchObject({ screenCaptureAllowed: false, screenCaptureWorking: false })
+    expect(feedback.state.value().errorMessage).toBe('Sesame could not save the desktop setting.')
+  })
+
+  it('ignores a second toggle while the first is still running', async () => {
+    const { controller } = harness()
+    let finish: () => void = () => {}
+    vaultApi.setScreenCaptureAllowed.mockReturnValue(new Promise<void>((resolve) => { finish = resolve }))
+
+    const first = controller.toggleScreenCapture()
+    await controller.toggleScreenCapture()
+    finish()
+    await first
+
+    expect(vaultApi.setScreenCaptureAllowed).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('own server pairing', () => {
+  const INSPECTION = { address: 'https://sesame.example.test', name: 'Home server', version: '1.0.0', fingerprint: 'a'.repeat(64), fingerprintInLink: true, codeInLink: true, plainHttp: false }
+  const CONNECTED = { state: 'connected', connected: true, online: true, deviceName: 'Linux desktop', syncAvailable: false, browserHelperAvailable: false, serverAddress: 'https://sesame.example.test', serverFingerprint: 'a'.repeat(64) }
+
+  it('returns the inspection without changing the stored connection', async () => {
+    const { controller } = harness()
+    vaultApi.inspectCustomServer.mockResolvedValue(INSPECTION)
+
+    const inspection = await controller.inspectServer('https://sesame.example.test/pair#code=x')
+
+    expect(inspection).toEqual(INSPECTION)
+    expect(vaultApi.inspectCustomServer).toHaveBeenCalledWith('https://sesame.example.test/pair#code=x')
+    expect(vaultApi.linkCustomServer).not.toHaveBeenCalled()
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('reports a refused server and returns nothing to confirm', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.inspectCustomServer.mockRejectedValue(new Error('The server\'s fingerprint does not match the pairing link. Do not pair with this server.'))
+
+    expect(await controller.inspectServer('https://sesame.example.test')).toBeNull()
+
+    expect(feedback.state.value().errorMessage).toContain('does not match the pairing link')
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('sends the confirmed fingerprint with the pairing and stores the result', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.linkCustomServer.mockResolvedValue(CONNECTED)
+
+    const paired = await controller.connectServer('https://sesame.example.test/pair#code=x', '', INSPECTION.fingerprint)
+
+    expect(paired).toBe(true)
+    expect(vaultApi.linkCustomServer).toHaveBeenCalledWith('https://sesame.example.test/pair#code=x', '', INSPECTION.fingerprint)
+    expect(controller.state.value().serviceConnection).toEqual(CONNECTED)
+    expect(feedback.state.value().notice?.title).toBe('Server connected')
+  })
+
+  it('keeps the disconnected state when the pairing is refused', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.linkCustomServer.mockRejectedValue(new Error('That desktop code is invalid, expired, or has already been used.'))
+
+    expect(await controller.connectServer('https://sesame.example.test', 'x', INSPECTION.fingerprint)).toBe(false)
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().errorMessage).toBe('That desktop code is invalid, expired, or has already been used.')
+    expect(feedback.state.value().notice).toBeNull()
+    expect(controller.state.value().serviceWorking).toBe(false)
+  })
+
+  it('clears an earlier error before it checks again', async () => {
+    const { controller, feedback } = harness()
+    feedback.setErrorMessage('An old error')
+    vaultApi.inspectCustomServer.mockResolvedValue(INSPECTION)
+
+    await controller.inspectServer('https://sesame.example.test')
+
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+})
+
+describe('disconnecting', () => {
+  const CONNECTED: ServiceConnectionStatus = { state: 'connected', connected: true, online: true, deviceName: 'Linux desktop', syncAvailable: false, browserHelperAvailable: false }
+  const OWN: ServiceConnectionStatus = { ...CONNECTED, serverAddress: 'https://sesame.example.test', serverFingerprint: 'a'.repeat(64) }
+
+  it('says the device is gone from the server when the revocation was sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: true })
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().notice?.title).toBe('Desktop disconnected')
+    expect(feedback.state.value().notice?.message).not.toMatch(/still be linked/)
+    expect(feedback.state.value().errorMessage).toBe('')
+  })
+
+  it('warns that an own server may still list the device when the revocation was not sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: false })
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(EMPTY_SERVICE)
+    expect(feedback.state.value().errorMessage).toMatch(/may still be linked on the server/)
+    expect(feedback.state.value().errorMessage).toMatch(/server console/)
+  })
+
+  it('points an account link at the account when the revocation was not sent', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: CONNECTED })
+    vaultApi.disconnectService.mockResolvedValue({ revokedOnServer: false })
+
+    await controller.unlinkService()
+
+    expect(feedback.state.value().errorMessage).toMatch(/may still be linked on the server/)
+    expect(feedback.state.value().errorMessage).toMatch(/account/)
+    expect(feedback.state.value().errorMessage).not.toMatch(/server console/)
+  })
+
+  it('keeps the connection on screen when the local removal fails', async () => {
+    const { controller, feedback } = harness()
+    controller.state.patch({ serviceConnection: OWN })
+    vaultApi.disconnectService.mockRejectedValue(new Error('Sesame could not remove the desktop account connection.'))
+
+    await controller.unlinkService()
+
+    expect(controller.state.value().serviceConnection).toEqual(OWN)
+    expect(feedback.state.value().errorMessage).toBe('Sesame could not remove the desktop account connection.')
   })
 })

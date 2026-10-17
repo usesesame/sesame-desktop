@@ -42,3 +42,11 @@ test('both release jobs verify the vendored tree in the shipping build', () => {
     assert.match(job, /node tools\/verify-glib-vendor\.mjs/, `${name} in ${file} does not run the verifier`)
   }
 })
+
+test('the Windows release job finds the Git patch tool before any other patch on the path', () => {
+  const workflow = read('.github', 'workflows', 'release-early-access.yml')
+  const step = workflow.slice(workflow.indexOf('name: Verify the vendored glib tree'))
+  const line = step.split('\n').find((candidate) => candidate.includes('$env:Path ='))
+  assert.ok(line, 'the step does not set the path')
+  assert.match(line, /\$env:Path\s*=\s*"\$env:ProgramFiles\\Git\\usr\\bin;\$env:Path"/, `Git usr\\bin must come first: ${line.trim()}`)
+})

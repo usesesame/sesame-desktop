@@ -429,8 +429,8 @@
     ] },
   ]
   const importSources: Array<{ value: ImportSource; label: string }> = [
+    { value: 'bitwarden-json', label: 'Bitwarden JSON (recommended)' },
     { value: 'bitwarden-csv', label: 'Bitwarden CSV' },
-    { value: 'bitwarden-json', label: 'Bitwarden JSON' },
     { value: 'dashlane-csv', label: 'Dashlane CSV' },
     { value: 'lastpass-csv', label: 'LastPass CSV' },
     { value: 'onepassword-csv', label: '1Password CSV' },
@@ -732,8 +732,11 @@
         recoveryWorking={$settingsState.recoveryWorking}
         recoveryPresenceIntent={$settingsState.recoveryPresenceIntent}
         bind:recoveryPresencePassword={$settingsState.recoveryPresencePassword}
+        bind:recoveryPruneBackups={$settingsState.recoveryPruneBackups}
         issuedRecoveryKit={$settingsState.issuedRecoveryKit}
         bind:issuedRecoveryConfirmed={$settingsState.issuedRecoveryConfirmed}
+        issuedBackupsPruned={$settingsState.issuedBackupsPruned}
+        issuedBackupsRemaining={$settingsState.issuedBackupsRemaining}
         onRequestRecoveryKit={settingsController.startRecoveryKitRequest}
         onIssueRecoveryKit={settingsController.startRecoveryKitIssue}
         onCancelRecoveryRequest={() => void settingsController.cancelRecoveryKitRequest()}
@@ -746,6 +749,10 @@
         autostartEnabled={$settingsState.autostartEnabled}
         autostartWorking={$settingsState.autostartWorking}
         onToggleAutostart={settingsController.toggleAutostart}
+        screenCaptureAllowed={$settingsState.screenCaptureAllowed}
+        screenCaptureKnown={$settingsState.screenCaptureKnown}
+        screenCaptureWorking={$settingsState.screenCaptureWorking}
+        onToggleScreenCapture={settingsController.toggleScreenCapture}
         quickAccessShortcut={$settings.quickAccessShortcut}
         quickAccessShortcutWorking={$settingsState.quickAccessShortcutWorking}
         onUpdateQuickAccessShortcut={settingsController.updateQuickAccessShortcut}
@@ -779,6 +786,8 @@
         onCheckForUpdate={() => settingsController.checkForUpdate(true)}
         onInstallUpdate={settingsController.installUpdate}
         onLinkService={settingsController.connectService}
+        onInspectServer={settingsController.inspectServer}
+        onConnectServer={settingsController.connectServer}
         onDisconnectService={settingsController.unlinkService}
         onRefreshService={settingsController.refreshServiceConnection}
         browserIntegration={$settingsState.browserIntegration}

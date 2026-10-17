@@ -131,6 +131,26 @@ export function assertCandidateMatchesAssets(candidate, assets, { repository, ta
   return latestReceiptBindsInstaller(latest, { version: candidate.version, url: updater.url, sha256: updater.sha256, bytes: installer.bytes })
 }
 
+export const RELEASE_LIST_JQ = '.[] | {id, tag_name, draft, body, assets: [.assets[] | {name, size}]} | tojson'
+
+export function parseReleaseList(stdout) {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line))
+}
+
+export function selectReleaseForTag(releases, tag) {
+  const matches = releases.filter((release) => release.tag_name === tag)
+  if (matches.length === 0) return null
+  if (matches.length > 1) {
+    const ids = matches.map((release) => `${release.id}${release.draft ? ' (draft)' : ''}`).join(', ')
+    throw new Error(`More than one release exists for ${tag}: ${ids}. Delete the extra release deliberately; nothing was changed.`)
+  }
+  return matches[0]
+}
+
 export function planReleasePublication({ release, expectedAssets, setDigest, foreignAssets = [], visibility = RELEASE_VISIBILITY_DRAFT }) {
   if (!release) {
     return {
@@ -161,6 +181,9 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
       conflicts.push(`${asset.name} exists with sha256 ${current.sha256} instead of ${asset.sha256}.`)
     }
   }
+  if (release.isDraft !== true && visibility === RELEASE_VISIBILITY_DRAFT && upload.length > 0) {
+    conflicts.push(`The existing release is already public but draft visibility was requested, so ${upload.length} missing ${upload.length === 1 ? 'asset was' : 'assets were'} not planned for upload: ${upload.join(', ')}. Delete or unpublish the release deliberately, or request published visibility.`)
+  }
   for (const name of remote.keys()) {
     if (expectedAssets.some((asset) => asset.name === name)) continue
     if (foreignAssets.some((pattern) => pattern.test(name))) continue
@@ -182,7 +205,7 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
   }
   return {
     action: conflicts.length > 0 ? 'conflict' : upload.length > 0 ? 'resume' : 'complete',
-    upload,
+    upload: conflicts.length > 0 ? [] : upload,
     conflicts,
     anchor,
     draft: release.isDraft === true,

@@ -345,10 +345,10 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Optional desktop account linking and disconnection for the main window.",
+          "description": "Optional desktop account and own-server linking and disconnection for the main window.",
           "type": "string",
           "const": "account-service",
-          "markdownDescription": "Optional desktop account linking and disconnection for the main window."
+          "markdownDescription": "Optional desktop account and own-server linking and disconnection for the main window."
         },
         {
           "description": "Import, backup, export, restore, verification, and local-vault deletion for the main window.",
@@ -375,10 +375,10 @@
           "markdownDescription": "Compile-time-gated desktop test bridge for the main window."
         },
         {
-          "description": "Tray, quick-access shortcut, autostart, and website icon settings for the main window.",
+          "description": "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window.",
           "type": "string",
           "const": "desktop-settings",
-          "markdownDescription": "Tray, quick-access shortcut, autostart, and website icon settings for the main window."
+          "markdownDescription": "Tray, quick-access shortcut, autostart, screen capture, and website icon settings for the main window."
         },
         {
           "description": "Deliberate public update checks and installation for the main window.",
@@ -519,6 +519,12 @@
           "markdownDescription": "Enables the default_window_icon command without any pre-configured scope."
         },
         {
+          "description": "Enables the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:allow-exit",
+          "markdownDescription": "Enables the exit command without any pre-configured scope."
+        },
+        {
           "description": "Enables the fetch_data_store_identifiers command without any pre-configured scope.",
           "type": "string",
           "const": "core:app:allow-fetch-data-store-identifiers",
@@ -607,6 +613,12 @@
           "type": "string",
           "const": "core:app:deny-default-window-icon",
           "markdownDescription": "Denies the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:deny-exit",
+          "markdownDescription": "Denies the exit command without any pre-configured scope."
         },
         {
           "description": "Denies the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -1869,6 +1881,12 @@
           "markdownDescription": "Enables the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:allow-set-fullscreen-on-monitor",
+          "markdownDescription": "Enables the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:allow-set-icon",
@@ -2335,6 +2353,12 @@
           "type": "string",
           "const": "core:window:deny-set-fullscreen",
           "markdownDescription": "Denies the set_fullscreen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:deny-set-fullscreen-on-monitor",
+          "markdownDescription": "Denies the set_fullscreen_on_monitor command without any pre-configured scope."
         },
         {
           "description": "Denies the set_icon command without any pre-configured scope.",

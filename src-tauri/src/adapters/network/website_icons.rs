@@ -1072,6 +1072,7 @@ mod tests {
             &settings,
             &desktop_settings::DesktopSettings {
                 website_icons_enabled: true,
+                ..desktop_settings::DesktopSettings::default()
             },
         )
         .expect("enable setting");
@@ -1080,6 +1081,7 @@ mod tests {
             &settings,
             &desktop_settings::DesktopSettings {
                 website_icons_enabled: false,
+                ..desktop_settings::DesktopSettings::default()
             },
         )
         .expect("disable setting");
@@ -1101,6 +1103,7 @@ mod tests {
             &settings,
             &desktop_settings::DesktopSettings {
                 website_icons_enabled: true,
+                ..desktop_settings::DesktopSettings::default()
             },
         )
         .expect("enable setting");

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "sync-preview-capability",
+  "description": "The Sync preview commands for the main window. Only the Sync preview build enables it.",
+  "windows": ["main"],
+  "permissions": ["sync-preview"]
+}

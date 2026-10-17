@@ -8,6 +8,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const boundary = JSON.parse(await readFile(path.join(root, 'desktop-boundary.json'), 'utf8'))
 const destination = await mkdtemp(path.join(tmpdir(), 'sesame-desktop-boundary-'))
 const runGate = process.argv.includes('--run')
+const scriptFlag = process.argv.indexOf('--script')
+const ownedScripts = (scriptFlag === -1 ? 'desktop:ci' : process.argv[scriptFlag + 1] ?? '').split(/\s+/).filter(Boolean)
+if (ownedScripts.length === 0 || !ownedScripts.every((name) => /^desktop:[a-z:-]+$/.test(name))) {
+  throw new Error('--script needs desktop npm script names separated by spaces.')
+}
 
 function gitFiles(paths) {
   const output = execFileSync(
@@ -47,8 +52,10 @@ try {
     const npmExecPath = process.env.npm_execpath
     if (!npmExecPath) throw new Error('Run this verifier through npm so it can reuse the locked npm CLI.')
     execFileSync(process.execPath, [npmExecPath, 'ci'], { cwd: destination, env, stdio: 'inherit' })
-    execFileSync(process.execPath, [npmExecPath, 'run', 'desktop:ci'], { cwd: destination, env, stdio: 'inherit' })
-    console.log('Standalone desktop boundary passed its owned CI command.')
+    for (const name of ownedScripts) {
+      execFileSync(process.execPath, [npmExecPath, 'run', name], { cwd: destination, env, stdio: 'inherit' })
+    }
+    console.log(`Standalone desktop boundary passed ${ownedScripts.join(', ')}.`)
   }
 } finally {
   await rm(destination, { recursive: true, force: true })

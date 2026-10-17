@@ -15,8 +15,10 @@ import {
   interpretCandidateSubmission,
   latestReceiptBindsInstaller,
   linuxLaneAssetPatterns,
+  parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
+  selectReleaseForTag,
   windowsLaneAssetPatterns,
 } from './release-publish-reconcile.mjs'
 
@@ -169,14 +171,77 @@ test('retrying after a GitHub success verifies every asset by digest and uploads
   }
 })
 
-test('retrying after a partial publish uploads exactly the missing assets', async () => {
+test('retrying after a partial publish uploads exactly the missing assets into the draft', async () => {
   const value = await publishFixture()
   try {
     const present = value.assets.slice(0, 8)
-    const plan = planReleasePublication({ release: releaseWith(present.map((asset) => remoteAsset(asset))), expectedAssets: value.assets, setDigest })
+    const plan = planReleasePublication({ release: releaseWith(present.map((asset) => remoteAsset(asset)), { isDraft: true }), expectedAssets: value.assets, setDigest })
     assert.equal(plan.action, 'resume')
     assert.deepEqual(plan.upload.sort(), value.assets.slice(8).map((asset) => asset.name).sort())
     assert.deepEqual(plan.conflicts, [])
+    assert.equal(plan.draft, true)
+  } finally {
+    await rm(value.evidence.root, { recursive: true, force: true })
+    await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('a public release is never planned for uploads while draft visibility is requested', async () => {
+  const value = await publishFixture()
+  try {
+    const present = value.assets.slice(0, 8)
+    const missing = value.assets.slice(8).map((asset) => asset.name)
+    for (const visibility of [undefined, RELEASE_VISIBILITY_DRAFT]) {
+      const plan = planReleasePublication({ release: releaseWith(present.map((asset) => remoteAsset(asset))), expectedAssets: value.assets, setDigest, visibility })
+      assert.equal(plan.action, 'conflict')
+      assert.deepEqual(plan.upload, [])
+      assert.equal(plan.draft, false)
+      assert.equal(plan.conflicts.length, 1)
+      assert.match(plan.conflicts[0], /already public but draft visibility was requested/)
+      for (const name of missing) assert.ok(plan.conflicts[0].includes(name), `the refusal does not name ${name}`)
+    }
+
+    const empty = planReleasePublication({ release: releaseWith([]), expectedAssets: value.assets, setDigest })
+    assert.equal(empty.action, 'conflict')
+    assert.deepEqual(empty.upload, [])
+
+    const unknownState = planReleasePublication({ release: { body: releaseWith([]).body, assets: [] }, expectedAssets: value.assets, setDigest })
+    assert.equal(unknownState.action, 'conflict')
+    assert.deepEqual(unknownState.upload, [])
+  } finally {
+    await rm(value.evidence.root, { recursive: true, force: true })
+    await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('an explicit published request may still complete a public release', async () => {
+  const value = await publishFixture()
+  try {
+    const present = value.assets.slice(0, 8)
+    const plan = planReleasePublication({
+      release: releaseWith(present.map((asset) => remoteAsset(asset))),
+      expectedAssets: value.assets,
+      setDigest,
+      visibility: RELEASE_VISIBILITY_PUBLISHED,
+    })
+    assert.equal(plan.action, 'resume')
+    assert.deepEqual(plan.upload.sort(), value.assets.slice(8).map((asset) => asset.name).sort())
+    assert.deepEqual(plan.conflicts, [])
+  } finally {
+    await rm(value.evidence.root, { recursive: true, force: true })
+    await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('a plan that reports a conflict never carries uploads', async () => {
+  const value = await publishFixture()
+  try {
+    const present = value.assets.slice(0, 8)
+    const installer = value.assets.find((asset) => asset.role === 'installer')
+    const remote = present.map((asset) => remoteAsset(asset, asset.name === installer.name ? { sha256: 'd'.repeat(64) } : {}))
+    const plan = planReleasePublication({ release: releaseWith(remote, { isDraft: true }), expectedAssets: value.assets, setDigest })
+    assert.equal(plan.action, 'conflict')
+    assert.deepEqual(plan.upload, [])
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
@@ -448,5 +513,35 @@ test('public evidence must match its handoff copy byte for byte', async () => {
   } finally {
     await rm(value.evidence.root, { recursive: true, force: true })
     await rm(value.publicRoot, { recursive: true, force: true })
+  }
+})
+
+test('a release lookup sees a draft and returns nothing when the tag has no release', () => {
+  const draft = { id: 11, tag_name: tag, draft: true, assets: [] }
+  const other = { id: 12, tag_name: 'v9.9.9', draft: false, assets: [] }
+  assert.equal(selectReleaseForTag([other, draft], tag), draft)
+  assert.equal(selectReleaseForTag([other], tag), null)
+  assert.equal(selectReleaseForTag([], tag), null)
+})
+
+test('a release lookup stops when two releases share the tag and changes nothing', () => {
+  const releases = [
+    { id: 21, tag_name: tag, draft: true, assets: [] },
+    { id: 22, tag_name: tag, draft: false, assets: [] },
+  ]
+  assert.throws(() => selectReleaseForTag(releases, tag), /More than one release exists for v1\.2\.3: 21 \(draft\), 22\. .*nothing was changed/)
+})
+
+test('the release list parser reads one compact object per line and ignores blank lines', () => {
+  const lines = [JSON.stringify({ id: 1, tag_name: 'a' }), '', JSON.stringify({ id: 2, tag_name: 'b' }), '']
+  assert.deepEqual(parseReleaseList(lines.join('\n')).map((release) => release.id), [1, 2])
+  assert.throws(() => parseReleaseList('not json'))
+})
+
+test('both publish tools look releases up through the list that includes drafts', async () => {
+  for (const file of ['reconcile-github-release.mjs', 'publish-linux-release.mjs']) {
+    const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8')
+    assert.match(source, /selectReleaseForTag\(parseReleaseList\(stdout\), tag\)/, `${file} must select from the full list`)
+    assert.doesNotMatch(source, /releases\/tags\//, `${file} must not use the lookup that hides drafts`)
   }
 })

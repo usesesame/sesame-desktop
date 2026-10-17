@@ -15,13 +15,13 @@
     },
     {
       "name": "@tauri-apps/api",
-      "version": "2.11",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
       "name": "@tauri-apps/cli",
-      "version": "2.11",
+      "version": "2.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -98,7 +98,7 @@
     },
     {
       "name": "eslint",
-      "version": "10.11",
+      "version": "10.12",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -116,7 +116,7 @@
     },
     {
       "name": "globals",
-      "version": "17.12",
+      "version": "17.13",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -145,6 +145,11 @@
       "name": "minisign-verify",
       "version": "0.3",
       "reason": "Verifies updater signatures. 0.3.0 replaces unsafe byte copies with safe slice copies and keeps the same API."
+    },
+    {
+      "name": "poly1305",
+      "version": "0.9",
+      "reason": "Enables the zeroize feature so the Poly1305 authenticator state is wiped on drop. It is already a locked transitive crate."
     },
     {
       "name": "psl",
@@ -262,7 +267,7 @@
     },
     {
       "name": "typescript-eslint",
-      "version": "8.70",
+      "version": "8.71",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
