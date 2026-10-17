@@ -195,11 +195,8 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     [
       'get_quick_access_status',
       'search_quick_access_items',
-      'get_quick_access_field',
-      'confirm_quick_access_field',
+      'copy_quick_access_field',
       'open_quick_access_item',
-      'copy_secret',
-      'clear_clipboard_if_unchanged',
     ],
   )
 
@@ -222,7 +219,8 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   assert.doesNotMatch(quickView, /WebsiteIcon/, 'the quick-access window renders a website icon it cannot fetch')
   assert.match(quickView, /getQuickAccessStatus/)
   assert.match(quickView, /searchQuickAccessItems/)
-  assert.match(quickView, /getQuickAccessField/)
+  assert.match(quickView, /copyQuickAccessField/)
+  assert.doesNotMatch(quickView, /copyToClipboard|getQuickAccessField/, 'the quick-access window holds a copied value')
   assert.match(quickView, /openQuickAccessItem/)
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs')
   assert.match(quickCommands, /window\.label\(\) == QUICK_ACCESS_WINDOW/)
@@ -389,7 +387,7 @@ function callerSuppliedBooleanGates(text) {
 test('the quick-access window cannot reach deliberate release or input-injection commands', () => {
   const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
   const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
-  const forbidden = ['reveal_login_secret', 'auto_type', 'export_backup', 'export_vault_csv', 'export_recovery_kit']
+  const forbidden = ['reveal_login_secret', 'auto_type', 'export_backup', 'export_vault_csv', 'export_recovery_kit', 'grant_presence', 'check_release_presence', 'release_item_field', 'copy_item_field', 'check_login_breach', 'copy_secret', 'clear_clipboard_if_unchanged']
 
   const permission = manifests['__app-acl__'].permissions['quick-access']
   assert.ok(permission, 'the generated ACL does not define the quick-access permission')
@@ -410,50 +408,81 @@ test('the quick-access window cannot reach deliberate release or input-injection
   )
 })
 
-test('only the quick-access permission hands out get_quick_access_field', () => {
+test('only the quick-access permission hands out copy_quick_access_field', () => {
   const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
   const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
 
   const holders = []
   for (const manifest of Object.values(manifests)) {
     for (const definition of Object.values(manifest.permissions ?? {})) {
-      if (definition.commands.allow.includes('get_quick_access_field')) holders.push(definition.identifier)
+      if (definition.commands.allow.includes('copy_quick_access_field')) holders.push(definition.identifier)
     }
   }
   assert.deepEqual(
     holders.sort(),
     ['quick-access'],
-    `get_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
+    `copy_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
   )
   assert.ok(
-    !capabilityCommands(manifests, capabilities, 'main-capability').has('get_quick_access_field'),
-    'the main window capability gained get_quick_access_field',
+    !capabilityCommands(manifests, capabilities, 'main-capability').has('copy_quick_access_field'),
+    'the main window capability gained copy_quick_access_field',
   )
 })
 
-test('only the quick-access permission hands out confirm_quick_access_field', () => {
-  const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
-  const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
+const SECRET_BEARING_TYPES = /\b(Card|WifiNetwork|SshKey|SoftwareLicense|DocumentMetadata|CustomRecord|VaultEntry|TaggedItem)\b/
 
-  const holders = []
-  for (const manifest of Object.values(manifests)) {
-    for (const definition of Object.values(manifest.permissions ?? {})) {
-      if (definition.commands.allow.includes('confirm_quick_access_field')) holders.push(definition.identifier)
+test('no command returns a secret-bearing record outside the gated release module', () => {
+  const offenders = []
+  for (const path of filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))) {
+    const text = readFileSync(path, 'utf8')
+    const file = relative(root, path)
+    for (const match of text.matchAll(/#\[tauri::command\]\s*pub(?:\(crate\))?\s+(?:async\s+)?fn\s+(\w+)/g)) {
+      const signature = text.slice(match.index, text.indexOf('{', text.indexOf(')', match.index + match[0].length)))
+      const returnType = signature.slice(signature.lastIndexOf('->') + 2)
+      if (!signature.includes('->') || !SECRET_BEARING_TYPES.test(returnType)) continue
+      if (file.endsWith('commands/secret_release.rs') && match[1] === 'get_item_for_edit') continue
+      offenders.push(`${file}: ${match[1]}`)
     }
   }
-  assert.deepEqual(
-    holders.sort(),
-    ['quick-access'],
-    `confirm_quick_access_field must stay confined to the quick-access permission, but the generated ACL grants it through: ${holders.join(', ')}`,
-  )
-  assert.ok(
-    capabilityCommands(manifests, capabilities, 'quick-access-capability').has('confirm_quick_access_field'),
-    'the quick-access window capability lost confirm_quick_access_field',
-  )
-  assert.ok(
-    !capabilityCommands(manifests, capabilities, 'main-capability').has('confirm_quick_access_field'),
-    'the main window capability gained confirm_quick_access_field',
-  )
+  assert.deepEqual(offenders, [], `commands return a record that can carry plaintext secrets:\n  ${offenders.join('\n  ')}`)
+})
+
+test('the record read macro redacts and the gated commands require presence', () => {
+  const macro = read('src-tauri', 'src', 'commands', 'record_commands.rs')
+  const getStart = macro.indexOf('pub fn $get_fn(')
+  assert.ok(getStart >= 0, 'the record read command is missing from the macro')
+  const getBody = macro.slice(getStart, macro.indexOf('#[tauri::command]', getStart))
+  assert.match(getBody, /RecordView<\$Item>/)
+  assert.match(getBody, /redacted_view\(item\.clone\(\)\)/)
+  assert.doesNotMatch(getBody, /Ok\(item\.clone\(\)\)/)
+
+  const release = read('src-tauri', 'src', 'commands', 'secret_release.rs').split('#[cfg(test)]')[0]
+  const field = release.slice(release.indexOf('pub(crate) fn item_field_in_state('), release.indexOf('#[tauri::command]'))
+  assert.match(field, /require_release_presence\(state, presence\)\?/)
+  for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach']) {
+    const start = release.indexOf(`fn ${name}(`)
+    assert.ok(start >= 0, `${name} is missing`)
+    assert.match(braceBody(release, start), /item_field_in_state\(/, `${name} does not go through the presence-checked release`)
+  }
+  assert.match(macro, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
+  const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs').split('#[cfg(test)]')[0]
+  assert.match(braceBody(quickCommands, quickCommands.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
+  for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach', 'copy_quick_access_field']) {
+    assert.match(read('src-tauri', 'src', 'lib.rs'), new RegExp(`commands::${name},`), `${name} is not registered`)
+  }
+})
+
+test('the window never keeps a secret value in a record view', () => {
+  const vault = read('src', 'lib', 'vault.ts')
+  const loader = vault.slice(vault.indexOf('async get(id: string): Promise<SecretView<TItem>>'), vault.indexOf('async getForEdit('))
+  assert.match(loader, /previewRedacted\(config\.kind, item\)/)
+  assert.match(loader, /invoke<SecretView<TItem>>\(`get_\$\{config\.kind\}`/)
+  const login = read('src', 'lib', 'controllers', 'login-controller.ts')
+  assert.doesNotMatch(login, /checkPasswordBreach/, 'the login breach check sends a revealed password through the window')
+  const copyPassword = login.slice(login.indexOf('async function copyPassword('), login.indexOf('async function copyLoginSecret('))
+  assert.doesNotMatch(copyPassword, /copyToClipboard|revealLoginSecret|readPassword/, 'the login password copy passes the value through the window')
+  const fields = read('src', 'lib', 'item-fields.ts')
+  assert.doesNotMatch(fields, /\{\s*secret:\s*true/, 'a detail field marks itself secret without going through secretField')
 })
 
 test('caller-supplied boolean gates on the command surface stay pinned', () => {
@@ -779,6 +808,12 @@ test('every diagnostic code the app can emit stays on the diagnostics allowlist'
         }
       }
     }
+    for (const site of callSites(text, 'record_vault_key_fallback', false)) {
+      const where = `${relative(root, path)}:${locationOf(text, site.index)}`
+      for (const code of stringLiterals(site.slice, false)) {
+        if (!allowedCode.has(code)) offenders.push(`${where} emits code ${code}`)
+      }
+    }
     for (const site of callSites(text, 'RegistrationError::new', false)) {
       const code = stringLiterals(firstArgument(site.slice, false), false)[0]
       if (code && !allowedBrowserHost.has(code)) {
@@ -788,6 +823,47 @@ test('every diagnostic code the app can emit stays on the diagnostics allowlist'
   }
 
   assert.deepEqual(offenders, [], `diagnostic codes emitted outside the allowlists are rejected and never written:\n  ${offenders.join('\n  ')}`)
+})
+
+test('the vault key page fallback is reported once per installed key', () => {
+  const vault = read('src-tauri', 'src', 'vault', 'mod.rs')
+  const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs')
+  const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
+  const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
+
+  assert.match(vault, /pub fn report_key_page_fallback\(app: &tauri::AppHandle, unlocked: &UnlockedVault\)/)
+  assert.match(vault, /if unlocked\.key_uses_page_fallback\(\) \{/)
+  assert.match(vault, /record_vault_key_fallback\(app, "key_page_fallback"\)/)
+  assert.match(diagnostics, /"key_page_fallback" => "warn"/)
+
+  for (const name of ['create_vault', 'install_unlocked_session', 'change_master_password']) {
+    const start = lifecycle.indexOf(`fn ${name}(`)
+    assert.ok(start >= 0, `${name} is missing from lifecycle.rs`)
+    assert.match(
+      braceBody(lifecycle, start),
+      /report_key_page_fallback\(/,
+      `${name} does not report a key page fallback`,
+    )
+  }
+  const adopt = syncAdopt.indexOf('fn sync_adopt_vault(')
+  assert.ok(adopt >= 0, 'sync_adopt_vault is missing from sync_adopt.rs')
+  assert.match(
+    braceBody(syncAdopt, adopt),
+    /report_key_page_fallback\(/,
+    'sync_adopt_vault does not report a key page fallback',
+  )
+
+  const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
+  assert.match(core, /pub fn uses_page_fallback\(&self\) -> bool \{/)
+})
+
+test('the vault key argument is wiped before a failed platform store can return early', () => {
+  const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
+  const start = core.indexOf('pub fn new(mut key: [u8; 32])')
+  assert.ok(start >= 0, 'VaultKey::new no longer takes the key as a mutable array')
+  const body = braceBody(core, start)
+  assert.doesNotMatch(body, /StoredKey::new\(key\)\s*\?/, 'a failed store would skip the wipe of the caller-side key')
+  assert.match(body, /StoredKey::new\(key\);\s*key\.zeroize\(\);/)
 })
 
 test('every allowlisted diagnostic code has an explicit severity classification', () => {

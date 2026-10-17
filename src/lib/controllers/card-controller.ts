@@ -1,14 +1,15 @@
-import type { Card, CardInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { Card, CardInput, SecretView } from '../types'
 import { deleteCard, getCard, saveCard } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyCardDraft(): CardInput {
-  return { title: '', cardholderName: '', number: '', expiryMonth: '', expiryYear: '', securityCode: '', brand: '', notes: '', tags: [] }
+  return { title: '', cardholderName: '', number: '', expiryMonth: '', expiryYear: '', securityCode: '', brand: '', notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(card: Card): CardInput {
+function draftFrom(card: SecretView<Card>): CardInput {
   const { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags } = card
-  return { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags: tags ?? [] }
+  return { id, title, cardholderName, number, expiryMonth, expiryYear, securityCode, brand, notes, tags: tags ?? [], keptSecrets: keptSecretKeys(card) }
 }
 
 export function createCardController(options: RecordControllerOptions) {

@@ -39,6 +39,7 @@ const cardDraft: CardInput = {
   brand: 'Visa',
   notes: '',
   tags: [],
+  keptSecrets: [],
 }
 
 const identityDraft: IdentityInput = {
@@ -57,6 +58,7 @@ const identityDraft: IdentityInput = {
 }
 
 const loginDraft: LoginInput = {
+  keepBackupCodes: false,
   id: 'login-a',
   title: 'Northwind',
   url: 'https://northwind.example.test',

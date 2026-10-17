@@ -151,6 +151,7 @@ fn severity(code: &str) -> &'static str {
         | "breach_scan_listener_failed"
         | "card_fill_listener_failed"
         | "totp_fill_listener_failed" => "error",
+        "key_page_fallback" => "warn",
         "fill_locked"
         | "fill_no_match"
         | "fill_denied"
@@ -234,6 +235,15 @@ pub fn record_browser_host_registration(app: &AppHandle, code: &'static str) {
     }
     if let Ok(path) = diagnostic_path(app) {
         let _ = append_event(&path, "browser_host", code);
+    }
+}
+
+pub fn record_vault_key_fallback(app: &AppHandle, code: &'static str) {
+    if !allowed_code(code) {
+        return;
+    }
+    if let Ok(path) = diagnostic_path(app) {
+        let _ = append_event(&path, "vault_open", code);
     }
 }
 
@@ -568,6 +578,7 @@ fn allowed_code(value: &str) -> bool {
             | "picker_cancelled"
             | "selection_verified"
             | "modal_refused"
+            | "key_page_fallback"
     )
 }
 

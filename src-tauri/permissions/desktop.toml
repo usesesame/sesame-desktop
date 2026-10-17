@@ -33,6 +33,9 @@ commands.allow = [
   "get_vault_snapshot",
   "get_login_card",
   "reveal_login_secret",
+  "check_login_breach",
+  "release_item_field",
+  "copy_item_field",
   "search_items",
   "suggest_field_values",
   "get_login_summary",
@@ -211,15 +214,12 @@ commands.allow = [
 
 [[permission]]
 identifier = "quick-access"
-description = "The quick-access window's redacted status/search, selected secret fetch, and guarded copy lifecycle."
+description = "The quick-access window's redacted status and search, the guarded native copy of one field, and opening an item in Sesame."
 commands.allow = [
   "get_quick_access_status",
   "search_quick_access_items",
-  "get_quick_access_field",
-  "confirm_quick_access_field",
+  "copy_quick_access_field",
   "open_quick_access_item",
-  "copy_secret",
-  "clear_clipboard_if_unchanged",
 ]
 
 [[permission]]

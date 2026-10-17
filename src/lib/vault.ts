@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, QuickAccessValue, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -256,6 +256,68 @@ const previewRecordStores: Record<string, Record<string, PreviewRecord>> = {
   custom_record: previewCustomRecords,
 }
 
+const previewSecretKeys: Record<string, string[]> = {
+  card: ['number', 'securityCode'],
+  wifi_network: ['password'],
+  ssh_key: ['privateKey', 'passphrase'],
+  software_license: ['licenseKey'],
+  document: ['documentNumber'],
+}
+
+type PreviewSecretSlot = { key: string; read(): string; write(value: string): void; blank(): void }
+
+function previewSecretSlots(kind: string, record: Record<string, unknown>): PreviewSecretSlot[] {
+  const slots: PreviewSecretSlot[] = (previewSecretKeys[kind] ?? []).map((key) => ({
+    key,
+    read: () => String(record[key] ?? ''),
+    write: (value: string) => { record[key] = value },
+    blank: () => { record[key] = '' },
+  }))
+  const collect = (list: unknown, prefix: string, isSecret: (entry: Record<string, unknown>) => boolean) => {
+    if (!Array.isArray(list)) return
+    list.forEach((entry, index) => {
+      const row = entry as Record<string, unknown>
+      if (isSecret(row)) slots.push({ key: `${prefix}:${index}`, read: () => String(row.value ?? ''), write: (value: string) => { row.value = value }, blank: () => { row.value = '' } })
+    })
+  }
+  if (kind === 'custom_record') collect(record.fields, 'field', (row) => row.kind === 'secret')
+  if (kind === 'identity' || kind === 'secure_note' || kind === 'card') collect(record.legacyFields, 'legacy', (row) => row.secret === true)
+  return slots
+}
+
+function previewRedacted<T>(kind: string, item: T): SecretView<T> {
+  const copy = structuredClone(item) as Record<string, unknown>
+  const secretFields: string[] = []
+  for (const slot of previewSecretSlots(kind, copy)) {
+    if (slot.read().trim()) secretFields.push(slot.key)
+    slot.blank()
+  }
+  return { ...(copy as T), secretFields }
+}
+
+function keepPreviewSecrets(kind: string, record: unknown, existing: unknown, kept: string[]): void {
+  const previous = previewSecretSlots(kind, structuredClone(existing) as Record<string, unknown>)
+  for (const slot of previewSecretSlots(kind, record as Record<string, unknown>)) {
+    if (slot.read() || !kept.includes(slot.key)) continue
+    const before = previous.find((candidate) => candidate.key === slot.key)
+    if (before) slot.write(before.read())
+  }
+}
+
+function previewSecretValue(kind: string, id: string, field: string): string {
+  if (kind === 'login') {
+    if (field === 'password' && previewCards[id]?.hasPassword) return 'preview-only-not-a-real-password'
+    if (field === 'backupCodes' && previewCards[id]?.backupCodeCount) return 'J8CJ-5TKJ\nKD8Q-3NZP\nHF9M-7QNR'
+    throw new Error('Nothing is saved in that field for this item.')
+  }
+  const record = previewRecordStores[kind]?.[id] as Record<string, unknown> | undefined
+  if (!record) throw new Error('That saved item no longer exists.')
+  const slot = previewSecretSlots(kind, structuredClone(record)).find((candidate) => candidate.key === field)
+  const value = slot?.read() ?? ''
+  if (!value) throw new Error('Nothing is saved in that field for this item.')
+  return value
+}
+
 function previewRecordTitle(kind: string, id: string): string | null {
   const record: PreviewRecord | undefined = kind === 'login' ? previewCards[id] : previewRecordStores[kind]?.[id]
   if (!record) return null
@@ -339,19 +401,20 @@ function createPreviewRecordApi<TItem extends TaggedRecord, TInput extends { id?
   config: PreviewRecordApiConfig<TItem, TInput>,
 ) {
   return {
-    async get(id: string): Promise<TItem> {
+    async get(id: string): Promise<SecretView<TItem>> {
       if (previewMode) {
         const item = config.store[id]
         if (!item) throw new Error(`That saved ${config.missingNoun} no longer exists.`)
-        return item
+        return previewRedacted(config.kind, item)
       }
-      return invoke<TItem>(`get_${config.kind}`, { id })
+      return invoke<SecretView<TItem>>(`get_${config.kind}`, { id })
     },
     async save(input: TInput): Promise<{ id: string; snapshot: VaultSnapshot }> {
       if (previewMode) {
         const id = input.id || `${config.idPrefix}${crypto.randomUUID()}`
         const existing = config.store[id]
         const record = config.buildRecord(input, id, existing)
+        if (existing) keepPreviewSecrets(config.kind, record, existing, (input as { keptSecrets?: string[] }).keptSecrets ?? [])
         if (input.id && existing) captureHistoryPreview(config.kind, id, config.titleOf(existing), existing)
         config.store[id] = record
         upsertPreviewItem(config.kind, id, config.titleOf(record), config.subtitleOf(record), record.tags)
@@ -523,13 +586,13 @@ const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>(
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodes: ['J8CJ-5TKJ', 'KD8Q-3NZP', 'HF9M-7QNR'], recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodeCount: 3, recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
   },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, recoveryNotApplicable: true, legacyFields: [] },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, legacyFields: [] },
 }
 
-const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
+const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, screenLockMonitoring: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
 
 export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
   if (previewMode) return previewCapabilities
@@ -720,7 +783,7 @@ export async function searchQuickAccessItems(query: string): Promise<QuickAccess
         subtitle: entry.site,
         initials: entry.initials,
         actions: [
-          { field: 'password', label: 'Copy password', guarded: false },
+          { field: 'password', label: 'Copy password', guarded: true },
           ...(previewCards[entry.id]?.totpCode ? [{ field: 'totp', label: 'Copy 2FA code', guarded: false }] : []),
         ],
       }))
@@ -728,17 +791,15 @@ export async function searchQuickAccessItems(query: string): Promise<QuickAccess
   return invoke<QuickAccessItem[]>('search_quick_access_items', { query })
 }
 
-export async function getQuickAccessField(id: string, field: string): Promise<QuickAccessValue> {
+export async function copyQuickAccessField(id: string, field: string): Promise<void> {
   if (previewMode) {
     const card = previewCards[id]
-    return { value: (field === 'totp' ? card?.totpCode : card?.hasPassword ? 'preview-only-not-a-real-password' : '') ?? '' }
+    const value = (field === 'totp' ? card?.totpCode : card?.hasPassword ? 'preview-only-not-a-real-password' : '') ?? ''
+    if (!value) throw new Error('Nothing is saved in that field for this item.')
+    await copyToClipboard(value)
+    return
   }
-  return invoke<QuickAccessValue>('get_quick_access_field', { id, field })
-}
-
-export async function confirmQuickAccessField(id: string, field: string): Promise<void> {
-  if (previewMode) return
-  await invoke('confirm_quick_access_field', { id, field })
+  await invoke('copy_quick_access_field', { id, field, clearAfterMs: clipboardClearMs })
 }
 
 export async function openQuickAccessItem(id: string): Promise<void> {
@@ -779,6 +840,11 @@ export async function checkPasswordStrength(password: string): Promise<PasswordA
 }
 
 // Sends only a 5-character hash prefix (k-anonymity); the full hash never leaves this function.
+export async function checkLoginBreach(id: string): Promise<BreachCheckResult> {
+  if (previewMode) return checkPasswordBreach(await revealLoginSecret(id))
+  return invoke<BreachCheckResult>('check_login_breach', { id })
+}
+
 export async function checkPasswordBreach(password: string): Promise<BreachCheckResult> {
   if (previewMode) {
     const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password))
@@ -916,7 +982,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       folder: input.folder.trim(),
       favourite: previewCards[id]?.favourite ?? false,
       hasTotp: Boolean(input.totp),
-      backupCodes: input.backupCodes.filter(Boolean),
+      backupCodeCount: input.backupCodes.filter(Boolean).length || (input.keepBackupCodes ? previewCards[id]?.backupCodeCount ?? 0 : 0),
       recoveryEmail: input.recoveryEmail.trim() || undefined,
       recoveryPhone: input.recoveryPhone.trim() || undefined,
       recoveryNotApplicable: input.recoveryNotApplicable,
@@ -1042,9 +1108,10 @@ export async function deleteLogin(id: string): Promise<DeleteLoginResult> {
   return invoke<DeleteLoginResult>('delete_login', { id })
 }
 
-export async function getIdentity(id: string): Promise<Identity> {
+export async function getIdentity(id: string): Promise<SecretView<Identity>> {
   return identityApi.get(id)
 }
+
 
 export async function saveIdentity(input: IdentityInput): Promise<SaveIdentityResult> {
   return identityApi.save(input)
@@ -1054,9 +1121,10 @@ export async function deleteIdentity(id: string): Promise<DeleteIdentityResult> 
   return identityApi.delete(id)
 }
 
-export async function getSecureNote(id: string): Promise<SecureNote> {
+export async function getSecureNote(id: string): Promise<SecretView<SecureNote>> {
   return secureNoteApi.get(id)
 }
+
 
 export async function saveSecureNote(input: SecureNoteInput): Promise<SaveSecureNoteResult> {
   return secureNoteApi.save(input)
@@ -1066,9 +1134,10 @@ export async function deleteSecureNote(id: string): Promise<DeleteSecureNoteResu
   return secureNoteApi.delete(id)
 }
 
-export async function getCard(id: string): Promise<Card> {
+export async function getCard(id: string): Promise<SecretView<Card>> {
   return cardApi.get(id)
 }
+
 
 export async function saveCard(input: CardInput): Promise<SaveCardResult> {
   return cardApi.save(input)
@@ -1078,9 +1147,10 @@ export async function deleteCard(id: string): Promise<DeleteCardResult> {
   return cardApi.delete(id)
 }
 
-export async function getWifiNetwork(id: string): Promise<WifiNetwork> {
+export async function getWifiNetwork(id: string): Promise<SecretView<WifiNetwork>> {
   return wifiNetworkApi.get(id)
 }
+
 
 export async function saveWifiNetwork(input: WifiNetworkInput): Promise<SaveWifiNetworkResult> {
   return wifiNetworkApi.save(input)
@@ -1090,9 +1160,10 @@ export async function deleteWifiNetwork(id: string): Promise<DeleteWifiNetworkRe
   return wifiNetworkApi.delete(id)
 }
 
-export async function getSshKey(id: string): Promise<SshKey> {
+export async function getSshKey(id: string): Promise<SecretView<SshKey>> {
   return sshKeyApi.get(id)
 }
+
 
 export async function saveSshKey(input: SshKeyInput): Promise<SaveSshKeyResult> {
   return sshKeyApi.save(input)
@@ -1102,9 +1173,10 @@ export async function deleteSshKey(id: string): Promise<DeleteSshKeyResult> {
   return sshKeyApi.delete(id)
 }
 
-export async function getSoftwareLicense(id: string): Promise<SoftwareLicense> {
+export async function getSoftwareLicense(id: string): Promise<SecretView<SoftwareLicense>> {
   return softwareLicenseApi.get(id)
 }
+
 
 export async function saveSoftwareLicense(input: SoftwareLicenseInput): Promise<SaveSoftwareLicenseResult> {
   return softwareLicenseApi.save(input)
@@ -1114,9 +1186,10 @@ export async function deleteSoftwareLicense(id: string): Promise<DeleteSoftwareL
   return softwareLicenseApi.delete(id)
 }
 
-export async function getDocument(id: string): Promise<DocumentMetadata> {
+export async function getDocument(id: string): Promise<SecretView<DocumentMetadata>> {
   return documentApi.get(id)
 }
+
 
 export async function saveDocument(input: DocumentMetadataInput): Promise<SaveDocumentMetadataResult> {
   return documentApi.save(input)
@@ -1164,9 +1237,10 @@ export async function deleteDocument(id: string): Promise<DeleteDocumentMetadata
   return documentApi.delete(id)
 }
 
-export async function getCustomRecord(id: string): Promise<CustomRecord> {
+export async function getCustomRecord(id: string): Promise<SecretView<CustomRecord>> {
   return customRecordApi.get(id)
 }
+
 
 export async function saveCustomRecord(input: CustomRecordInput): Promise<SaveCustomRecordResult> {
   return customRecordApi.save(input)
@@ -1174,6 +1248,19 @@ export async function saveCustomRecord(input: CustomRecordInput): Promise<SaveCu
 
 export async function deleteCustomRecord(id: string): Promise<DeleteCustomRecordResult> {
   return customRecordApi.delete(id)
+}
+
+export async function releaseItemField(kind: ItemKind, id: string, field: string): Promise<string> {
+  if (previewMode) return previewSecretValue(kind, id, field)
+  return invoke<string>('release_item_field', { id, kind, field })
+}
+
+export async function copyItemField(kind: ItemKind, id: string, field: string): Promise<void> {
+  if (previewMode) {
+    await copyToClipboard(previewSecretValue(kind, id, field))
+    return
+  }
+  await invoke<number>('copy_item_field', { id, kind, field, clearAfterMs: clipboardClearMs })
 }
 
 export async function previewTrashedItem(id: string): Promise<ItemPreview> {

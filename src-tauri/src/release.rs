@@ -55,6 +55,11 @@ impl ReleasePresence {
         verified
     }
 
+    #[cfg(test)]
+    pub(crate) fn grant_until(&self, epoch: u64, expires_at: Instant) {
+        *self.grant.lock().expect("grant lock") = Some(Grant { epoch, expires_at });
+    }
+
     pub fn revoke(&self) {
         if let Ok(mut grant) = self.grant.lock() {
             *grant = None;

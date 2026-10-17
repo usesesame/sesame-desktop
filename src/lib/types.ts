@@ -108,7 +108,6 @@ export type { PlatformCapabilities } from './generated/PlatformCapabilities'
 export type { QuickAccessStatus } from './generated/QuickAccessStatus'
 export type { QuickAccessAction } from './generated/QuickAccessAction'
 export type { QuickAccessItem } from './generated/QuickAccessItem'
-export type { QuickAccessValue } from './generated/QuickAccessValue'
 
 export type IssueKind = 'duplicate' | 'weak-password' | 'common-password' | 'reused-password' | 'compromised-pattern' | 'old-password' | 'url' | 'totp' | 'recovery'
 
@@ -119,6 +118,8 @@ export type { BreachScanReport } from './generated/BreachScanReport'
 export type { BreachVerdict } from './generated/BreachVerdict'
 export type { LoginBreachCheck } from './generated/LoginBreachCheck'
 export type { TwoFactorSiteLogin } from './generated/TwoFactorSiteLogin'
+
+export type SecretView<T> = T & { secretFields: string[] }
 
 export type ItemKind =
   | 'login'

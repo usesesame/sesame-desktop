@@ -145,6 +145,7 @@ pub async fn sync_adopt_vault(
         }
 
         let recovery_kit = adopt(vault, key, payload, &master_password)?;
+        crate::vault::report_key_page_fallback(&app, vault);
         // Epoch advances before lock release so a waiting approval cannot write into the adopted vault.
         state.advance_session_epoch();
         recovery_kit

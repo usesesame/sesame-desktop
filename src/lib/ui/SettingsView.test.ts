@@ -20,6 +20,7 @@ const linux = (overrides: Partial<PlatformCapabilities> = {}): PlatformCapabilit
   autoType: false,
   browserIntegration: false,
   sessionAutoLock: false,
+  screenLockMonitoring: false,
   quickAccessShortcut: false,
   accountLinking: false,
   desktopUpdates: false,
@@ -105,4 +106,24 @@ test('an update in progress blocks a second request and reports the download', (
   expect(screen.getByText(/Downloading verified update, 50% complete/)).toBeTruthy()
   const checking = screen.getByRole('button', { name: 'Checking…' }) as HTMLButtonElement
   expect(checking.disabled).toBe(true)
+})
+
+test('a Linux desktop that reports no screen lock source says the vault will not follow the screen lock', () => {
+  renderSettings({ tab: 'security' })
+
+  expect(screen.getByText(/Sesame cannot tell when this desktop locks its screen/)).toBeTruthy()
+})
+
+test('a Linux desktop that reports a screen lock source shows no screen lock warning', () => {
+  platformCapabilities.set(linux({ screenLockMonitoring: true }))
+  renderSettings({ tab: 'security' })
+
+  expect(screen.queryByText(/Sesame cannot tell when this desktop locks its screen/)).toBeNull()
+})
+
+test('Windows shows no screen lock warning', () => {
+  platformCapabilities.set(linux({ os: 'windows', screenLockMonitoring: true }))
+  renderSettings({ tab: 'security' })
+
+  expect(screen.queryByText(/Sesame cannot tell when this desktop locks its screen/)).toBeNull()
 })

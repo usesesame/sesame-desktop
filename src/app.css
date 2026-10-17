@@ -236,12 +236,12 @@ button.no-totp, .credential-button, .more-button {
 
 .beta-onboarding-backdrop { z-index: 118; }
 .beta-onboarding-modal { width: min(100%, 500px); }
-.beta-onboarding-icon { display: grid; width: 44px; height: 44px; place-items: center; margin-bottom: var(--space-4); border-radius: var(--radius-md); color: var(--chip-icon); background: var(--chip-bg); }
-.beta-onboarding-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.005em; }
+.beta-onboarding-modal h2 { margin: var(--space-3) 0 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.005em; }
 .beta-onboarding-intro { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.55; }
-.beta-onboarding-list { display: grid; gap: var(--space-3); margin: var(--space-5) 0 0; padding: 0; list-style: none; }
-.beta-onboarding-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: var(--space-2); color: var(--text); font-size: var(--type-2); line-height: 1.45; }
-.beta-onboarding-list svg { margin-top: 2px; color: var(--chip-icon); }
+.beta-onboarding-steps { display: grid; margin: var(--space-5) 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.beta-onboarding-steps li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
+.beta-onboarding-steps strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-bold); }
+.beta-onboarding-steps p { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.45; }
 .beta-onboarding-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
 
 .state-panel { display: grid; place-content: center; justify-items: center; gap: var(--space-2); padding: var(--space-5); text-align: center; }

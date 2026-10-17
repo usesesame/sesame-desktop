@@ -3,50 +3,93 @@
 
 #[cfg(any(windows, target_os = "linux"))]
 mod monitor {
-    use std::time::{Duration, SystemTime};
+    use std::time::{Duration, Instant, SystemTime};
 
     use tauri::{AppHandle, Emitter, Manager};
 
     pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
     pub(super) const WARNING_WINDOW: Duration = Duration::from_secs(30);
+    pub(super) const REDISCOVER_INTERVAL: Duration = Duration::from_secs(30);
 
-    pub(super) trait SessionMonitor: Send + 'static {
-        fn locked(&self) -> bool;
-        fn idle_for(&self) -> Option<Duration>;
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum LockState {
+        Locked,
+        Unlocked,
+        Unknown,
     }
 
-    pub(super) fn run<M: SessionMonitor>(app: AppHandle, monitor: M) {
-        let mut was_locked = monitor.locked();
+    pub(super) trait SessionMonitor: Send + 'static {
+        fn lock_state(&self) -> LockState;
+        fn idle_for(&self) -> Option<Duration>;
+        fn rediscover(&mut self) {}
+    }
+
+    #[derive(Default)]
+    pub(super) struct Blindness {
+        seen_signal: bool,
+        since: Option<Instant>,
+    }
+
+    impl Blindness {
+        pub(super) fn observe(
+            &mut self,
+            lock: LockState,
+            idle: Option<Duration>,
+            now: Instant,
+        ) -> Duration {
+            if lock != LockState::Unknown || idle.is_some() {
+                self.seen_signal = true;
+                self.since = None;
+                return Duration::ZERO;
+            }
+            if !self.seen_signal {
+                return Duration::ZERO;
+            }
+            now.duration_since(*self.since.get_or_insert(now))
+        }
+    }
+
+    pub(super) fn run<M: SessionMonitor>(app: AppHandle, mut monitor: M) {
         let mut warning_shown = false;
         let mut last_tick = SystemTime::now();
+        let mut last_discovery = Instant::now();
+        let mut blindness = Blindness::default();
         loop {
             std::thread::sleep(POLL_INTERVAL);
             let now = SystemTime::now();
             let asleep = asleep_for(last_tick, now);
             last_tick = now;
-            let locked = monitor.locked();
+            if last_discovery.elapsed() >= REDISCOVER_INTERVAL {
+                monitor.rediscover();
+                last_discovery = Instant::now();
+            }
+            let lock = monitor.lock_state();
+            let idle = monitor.idle_for();
+            let blind_for = blindness.observe(lock, idle, Instant::now());
             let timeout = Duration::from_secs(
                 app.state::<crate::vault::VaultState>()
                     .auto_lock_minutes()
                     .saturating_mul(60),
             );
-            if (locked && !was_locked) || slept_past(asleep, timeout) {
+            if lock == LockState::Locked
+                || past_delay(asleep, timeout)
+                || past_delay(blind_for, timeout)
+            {
                 crate::desktop_shell::lock_vault_if_unlocked(&app);
                 warning_shown = clear_warning(&app, warning_shown);
-            } else if !locked {
-                match monitor.idle_for() {
-                    Some(idle) if idle >= timeout => {
-                        crate::desktop_shell::lock_vault_if_unlocked(&app);
-                        warning_shown = clear_warning(&app, warning_shown);
-                    }
-                    Some(idle) => {
-                        warning_shown =
-                            update_warning(&app, timeout.saturating_sub(idle), warning_shown);
-                    }
-                    None => warning_shown = clear_warning(&app, warning_shown),
-                }
+                continue;
             }
-            was_locked = locked;
+            match idle {
+                Some(idle) if idle >= timeout => {
+                    crate::desktop_shell::lock_vault_if_unlocked(&app);
+                    warning_shown = clear_warning(&app, warning_shown);
+                }
+                Some(idle) => {
+                    warning_shown =
+                        update_warning(&app, timeout.saturating_sub(idle), warning_shown);
+                }
+                None => warning_shown = clear_warning(&app, warning_shown),
+            }
         }
     }
 
@@ -56,7 +99,7 @@ mod monitor {
             .saturating_sub(POLL_INTERVAL)
     }
 
-    pub(super) fn slept_past(asleep: Duration, timeout: Duration) -> bool {
+    pub(super) fn past_delay(asleep: Duration, timeout: Duration) -> bool {
         !timeout.is_zero() && asleep >= timeout
     }
 
@@ -107,10 +150,8 @@ pub fn start(app: tauri::AppHandle) {
     #[cfg(not(feature = "wdio"))]
     {
         let session = linux_session::Session::connect();
-        linux_session::record_idle_support(session.has_idle_source());
-        if session.is_usable() {
-            std::thread::spawn(move || monitor::run(app, session));
-        }
+        session.record_protections();
+        std::thread::spawn(move || monitor::run(app, session));
     }
 }
 
@@ -124,7 +165,22 @@ pub fn idle_auto_lock_available() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        linux_session::idle_supported()
+        linux_session::idle_reporting()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
+}
+
+pub fn screen_lock_monitoring_available() -> bool {
+    #[cfg(windows)]
+    {
+        true
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_session::screen_lock_reporting()
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
@@ -140,17 +196,17 @@ mod windows_session {
 
     impl super::monitor::SessionMonitor for Session {
         /// The input desktop cannot be opened on the lock screen or another secure desktop.
-        fn locked(&self) -> bool {
+        fn lock_state(&self) -> super::monitor::LockState {
             use windows_sys::Win32::System::StationsAndDesktops::{
                 CloseDesktop, OpenInputDesktop, DESKTOP_READOBJECTS,
             };
 
             let desktop = unsafe { OpenInputDesktop(0, 0, DESKTOP_READOBJECTS) };
             if desktop.is_null() {
-                true
+                super::monitor::LockState::Locked
             } else {
                 unsafe { CloseDesktop(desktop) };
-                false
+                super::monitor::LockState::Unlocked
             }
         }
 
@@ -174,15 +230,17 @@ mod windows_session {
     }
 }
 
-/// Each signal is probed once at startup and the source that answered is kept.
 /// A probe that cannot tell reports nothing rather than guessing.
 #[cfg(target_os = "linux")]
 mod linux_session {
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     use zbus::blocking::Connection;
     use zbus::zvariant::OwnedObjectPath;
+
+    use super::monitor::{LockState, SessionMonitor};
 
     const LOGIND: &str = "org.freedesktop.login1";
     const LOGIND_PATH: &str = "/org/freedesktop/login1";
@@ -195,16 +253,18 @@ mod linux_session {
     const MUTTER: &str = "org.gnome.Mutter.IdleMonitor";
     const MUTTER_PATH: &str = "/org/gnome/Mutter/IdleMonitor/Core";
 
-    static IDLE_SUPPORTED: AtomicBool = AtomicBool::new(false);
+    static IDLE_REPORTING: AtomicBool = AtomicBool::new(false);
+    static SCREEN_LOCK_REPORTING: AtomicBool = AtomicBool::new(false);
 
-    pub fn record_idle_support(supported: bool) {
-        IDLE_SUPPORTED.store(supported, Ordering::Release);
+    pub fn idle_reporting() -> bool {
+        IDLE_REPORTING.load(Ordering::Acquire)
     }
 
-    pub fn idle_supported() -> bool {
-        IDLE_SUPPORTED.load(Ordering::Acquire)
+    pub fn screen_lock_reporting() -> bool {
+        SCREEN_LOCK_REPORTING.load(Ordering::Acquire)
     }
 
+    #[derive(Clone, Copy)]
     enum Idle {
         /// Milliseconds.
         Mutter,
@@ -218,6 +278,7 @@ mod linux_session {
         logind: Option<OwnedObjectPath>,
         screensaver: Option<&'static str>,
         idle: Option<Idle>,
+        stale: Cell<bool>,
     }
 
     impl Session {
@@ -226,53 +287,98 @@ mod linux_session {
             let bus = Connection::session().ok();
             let logind = system.as_ref().and_then(logind_session_path);
             let screensaver = bus.as_ref().and_then(screensaver_path);
-            let idle = bus.as_ref().and_then(|bus| {
-                if mutter_idle(bus).is_some() {
-                    Some(Idle::Mutter)
-                } else if kde_idle(bus).is_some() {
-                    Some(Idle::Kde)
-                } else {
-                    None
-                }
-            });
+            let idle = bus.as_ref().and_then(idle_source);
             Session {
                 system,
                 bus,
                 logind,
                 screensaver,
                 idle,
+                stale: Cell::new(false),
             }
         }
 
-        pub fn has_idle_source(&self) -> bool {
-            self.idle.is_some()
+        pub fn record_protections(&self) {
+            let _ = self.lock_state();
+            let _ = self.idle_for();
         }
 
-        pub fn is_usable(&self) -> bool {
-            self.logind.is_some() || self.screensaver.is_some() || self.idle.is_some()
+        fn needs_rediscovery(&self) -> bool {
+            self.stale.get()
+                || self.logind.is_none()
+                || self.screensaver.is_none()
+                || self.idle.is_none()
+        }
+
+        fn logind_state(&self) -> Option<bool> {
+            let system = self.system.as_ref()?;
+            logind_locked_hint(system, self.logind.as_ref()?)
+        }
+
+        fn screensaver_state(&self) -> Option<bool> {
+            screensaver_active(self.bus.as_ref()?, self.screensaver?)
         }
     }
 
-    impl super::monitor::SessionMonitor for Session {
-        fn locked(&self) -> bool {
-            let logind = self.system.as_ref().and_then(|system| {
-                self.logind
-                    .as_ref()
-                    .and_then(|path| logind_locked_hint(system, path))
-            });
-            let screensaver = self.bus.as_ref().and_then(|bus| {
-                self.screensaver
-                    .and_then(|path| screensaver_active(bus, path))
-            });
-            lock_reported(logind, screensaver)
+    impl SessionMonitor for Session {
+        fn lock_state(&self) -> LockState {
+            let logind = self.logind_state();
+            let screensaver = self.screensaver_state();
+            let failed = (self.logind.is_some() && logind.is_none())
+                || (self.screensaver.is_some() && screensaver.is_none());
+            self.stale.set(self.stale.get() || failed);
+            SCREEN_LOCK_REPORTING
+                .store(logind.is_some() || screensaver.is_some(), Ordering::Release);
+            lock_state_from(logind, screensaver)
         }
 
         fn idle_for(&self) -> Option<Duration> {
-            let bus = self.bus.as_ref()?;
-            match self.idle.as_ref()? {
-                Idle::Mutter => mutter_idle(bus),
-                Idle::Kde => kde_idle(bus),
+            let idle = self
+                .bus
+                .as_ref()
+                .zip(self.idle)
+                .and_then(|(bus, idle)| match idle {
+                    Idle::Mutter => mutter_idle(bus),
+                    Idle::Kde => kde_idle(bus),
+                });
+            if self.idle.is_some() && idle.is_none() {
+                self.stale.set(true);
             }
+            IDLE_REPORTING.store(idle.is_some(), Ordering::Release);
+            idle
+        }
+
+        fn rediscover(&mut self) {
+            if !self.needs_rediscovery() {
+                return;
+            }
+            let fresh = Session::connect();
+            if fresh.system.is_some() {
+                self.system = fresh.system;
+            }
+            if fresh.bus.is_some() {
+                self.bus = fresh.bus;
+            }
+            if fresh.logind.is_some() {
+                self.logind = fresh.logind;
+            }
+            if fresh.screensaver.is_some() {
+                self.screensaver = fresh.screensaver;
+            }
+            if fresh.idle.is_some() {
+                self.idle = fresh.idle;
+            }
+            self.stale.set(false);
+        }
+    }
+
+    fn idle_source(bus: &Connection) -> Option<Idle> {
+        if mutter_idle(bus).is_some() {
+            Some(Idle::Mutter)
+        } else if kde_idle(bus).is_some() {
+            Some(Idle::Kde)
+        } else {
+            None
         }
     }
 
@@ -321,8 +427,14 @@ mod linux_session {
             .ok()
     }
 
-    pub(super) fn lock_reported(logind: Option<bool>, screensaver: Option<bool>) -> bool {
-        logind == Some(true) || screensaver == Some(true)
+    pub(super) fn lock_state_from(logind: Option<bool>, screensaver: Option<bool>) -> LockState {
+        if logind == Some(true) || screensaver == Some(true) {
+            LockState::Locked
+        } else if logind.is_some() || screensaver.is_some() {
+            LockState::Unlocked
+        } else {
+            LockState::Unknown
+        }
     }
 
     fn mutter_idle(bus: &Connection) -> Option<Duration> {
@@ -356,8 +468,10 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     use super::linux_session;
-    use super::monitor::{asleep_for, should_warn, slept_past, POLL_INTERVAL, WARNING_WINDOW};
-    use std::time::SystemTime;
+    use super::monitor::{
+        asleep_for, past_delay, should_warn, Blindness, LockState, POLL_INTERVAL, WARNING_WINDOW,
+    };
+    use std::time::{Instant, SystemTime};
 
     #[test]
     fn a_locked_vault_is_never_warned_about() {
@@ -387,8 +501,8 @@ mod tests {
         let five_minutes = Duration::from_secs(300);
         let asleep = asleep_for(before, before + POLL_INTERVAL + five_minutes);
         assert_eq!(asleep, five_minutes);
-        assert!(slept_past(asleep, five_minutes));
-        assert!(!slept_past(asleep, five_minutes + Duration::from_secs(1)));
+        assert!(past_delay(asleep, five_minutes));
+        assert!(!past_delay(asleep, five_minutes + Duration::from_secs(1)));
     }
 
     #[test]
@@ -399,16 +513,91 @@ mod tests {
             asleep_for(now, now - Duration::from_secs(3_600)),
             Duration::ZERO
         );
-        assert!(!slept_past(Duration::ZERO, Duration::from_secs(60)));
-        assert!(!slept_past(Duration::from_secs(600), Duration::ZERO));
+        assert!(!past_delay(Duration::ZERO, Duration::from_secs(60)));
+        assert!(!past_delay(Duration::from_secs(600), Duration::ZERO));
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn either_linux_lock_source_can_take_the_lock() {
-        assert!(linux_session::lock_reported(Some(true), Some(false)));
-        assert!(linux_session::lock_reported(Some(false), Some(true)));
-        assert!(linux_session::lock_reported(None, Some(true)));
-        assert!(!linux_session::lock_reported(Some(false), None));
+        assert_eq!(
+            linux_session::lock_state_from(Some(true), Some(false)),
+            LockState::Locked
+        );
+        assert_eq!(
+            linux_session::lock_state_from(Some(false), Some(true)),
+            LockState::Locked
+        );
+        assert_eq!(
+            linux_session::lock_state_from(None, Some(true)),
+            LockState::Locked
+        );
+        assert_eq!(
+            linux_session::lock_state_from(Some(false), None),
+            LockState::Unlocked
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn no_answering_source_is_unknown_and_never_unlocked() {
+        assert_eq!(
+            linux_session::lock_state_from(None, None),
+            LockState::Unknown
+        );
+    }
+
+    #[test]
+    fn a_session_that_never_reported_anything_is_not_treated_as_blind() {
+        let start = Instant::now();
+        let mut blindness = Blindness::default();
+        assert_eq!(
+            blindness.observe(LockState::Unknown, None, start),
+            Duration::ZERO
+        );
+        assert_eq!(
+            blindness.observe(LockState::Unknown, None, start + Duration::from_secs(900)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn losing_every_source_after_one_answered_counts_the_blind_time() {
+        let start = Instant::now();
+        let mut blindness = Blindness::default();
+        blindness.observe(LockState::Unlocked, None, start);
+        assert_eq!(
+            blindness.observe(LockState::Unknown, None, start + Duration::from_secs(10)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            blindness.observe(LockState::Unknown, None, start + Duration::from_secs(70)),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn one_answer_ends_the_blind_period() {
+        let start = Instant::now();
+        let mut blindness = Blindness::default();
+        blindness.observe(LockState::Unlocked, None, start);
+        blindness.observe(LockState::Unknown, None, start + Duration::from_secs(10));
+        blindness.observe(
+            LockState::Unknown,
+            Some(Duration::from_secs(3)),
+            start + Duration::from_secs(40),
+        );
+        assert_eq!(
+            blindness.observe(LockState::Unknown, None, start + Duration::from_secs(50)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn a_blind_period_locks_once_it_reaches_the_auto_lock_delay() {
+        let delay = Duration::from_secs(300);
+        assert!(!past_delay(Duration::from_secs(299), delay));
+        assert!(past_delay(delay, delay));
+        assert!(!past_delay(Duration::from_secs(900), Duration::ZERO));
     }
 }

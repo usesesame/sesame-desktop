@@ -64,7 +64,7 @@ test('the saved password is revealed only through a presence gate', () => {
   const start = logins.indexOf('pub fn reveal_login_secret(')
   assert.ok(start >= 0, 'reveal_login_secret does not exist')
   const body = logins.slice(start, logins.indexOf('\n#[cfg(test)]', start))
-  assert.match(body, /require_release_presence\(&state, &presence\)/)
+  assert.match(body, /require_release_presence\(&?state, &?presence\)/)
   const vault = read('src', 'lib', 'vault.ts')
   assert.match(vault, /invoke(<[^>]+>)?\('reveal_login_secret', \{ id \}\)/)
 })
@@ -112,4 +112,14 @@ test('a blank password on edit keeps the stored secret', () => {
     /payload_with_saved_login\(/,
     'save_login must write through the one vault-domain mutation',
   )
+})
+
+test('release notes written by the release workflows never describe the release as a draft', () => {
+  for (const workflow of ['release-early-access.yml', 'release-linux-early-access.yml']) {
+    const text = read('.github', 'workflows', workflow)
+    const end = text.indexOf('} > release-notes.md')
+    assert.ok(end > 0, `${workflow} no longer writes release-notes.md`)
+    const notes = text.slice(text.lastIndexOf('          {\n', end), end)
+    assert.doesNotMatch(notes, /draft/i, `${workflow} writes a draft claim into notes that outlive the draft`)
+  }
 })

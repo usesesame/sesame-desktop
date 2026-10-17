@@ -65,6 +65,7 @@ impl_record_commands! {
     from_input: software_license_from_input,
     get_fn: get_software_license,
     save_fn: save_software_license,
+    save_in_state_fn: save_software_license_in_state,
     delete_fn: delete_software_license,
     missing_noun: "licence",
     save_unlock_msg: "Unlock your vault before saving a licence.",

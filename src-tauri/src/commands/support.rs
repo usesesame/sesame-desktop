@@ -138,6 +138,7 @@ fn save_new_login(
         folder_id: None,
         totp: None,
         backup_codes: Vec::new(),
+        keep_backup_codes: false,
         recovery_email: String::new(),
         recovery_phone: String::new(),
         recovery_not_applicable: false,

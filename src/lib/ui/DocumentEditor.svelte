@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import Icon from '../Icon.svelte'
@@ -96,6 +97,7 @@
     <label>Name <span class="field-hint">How this document appears in your list, e.g. “Passport”</span><input name="document-title" bind:this={titleInput} bind:value={documentDraft.title} required maxlength="160" placeholder="e.g. Passport…" autocomplete="off" /></label>
     <label>Document type <span class="field-hint">Optional, e.g. Passport</span><input name="document-type" bind:value={documentDraft.documentType} maxlength="64" autocomplete="off" /></label>
     <label>Document number<input name="document-number" bind:value={documentDraft.documentNumber} maxlength="128" autocomplete="off" spellcheck="false" /></label>
+    <KeptSecret draft={documentDraft} key="documentNumber" typed={documentDraft.documentNumber} onChange={(next) => (documentDraft = { ...documentDraft, ...next })} />
     <label>Issuing authority <span class="field-hint">Optional</span><input name="document-issuer" bind:value={documentDraft.issuingAuthority} maxlength="256" autocomplete="off" /></label>
     <div class="editor-two-column">
       <label>Issue date <span class="field-hint">Optional</span><input name="document-issue-date" bind:value={documentDraft.issueDate} maxlength="32" autocomplete="off" /></label>

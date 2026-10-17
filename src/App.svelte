@@ -30,12 +30,14 @@
   import { createDocumentController } from './lib/controllers/document-controller'
   import { createCustomRecordController } from './lib/controllers/custom-record-controller'
   import { createItemController } from './lib/controllers/item-controller'
+  import { createPresenceController } from './lib/controllers/presence-controller'
   import { createTrashController } from './lib/controllers/trash-controller'
   import { createHistoryController } from './lib/controllers/history-controller'
   import { createModalController } from './lib/controllers/modal-controller'
   import { createOnboardingController } from './lib/controllers/onboarding-controller'
   import AppChrome from './lib/ui/AppChrome.svelte'
   import ModalHost from './lib/ui/ModalHost.svelte'
+  import PasswordPresenceModal from './lib/ui/PasswordPresenceModal.svelte'
   import WorkspaceShell from './lib/ui/WorkspaceShell.svelte'
   import UnlockScreen from './lib/ui/UnlockScreen.svelte'
   import WelcomeScreen from './lib/ui/WelcomeScreen.svelte'
@@ -92,6 +94,9 @@
   let onNativeVaultLocked = () => {}
   let onPinSetupFinished = () => {}
 
+  const presenceController = createPresenceController()
+  const presenceState = presenceController.state
+
   const modalController = createModalController({
     stores: appStores,
     feedback: feedbackController,
@@ -99,6 +104,7 @@
   const modalState = modalController.state
 
   const loginController = createLoginController({
+    presence: presenceController,
     stores: appStores,
     feedback: feedbackController,
     modal: modalController,
@@ -286,6 +292,7 @@
     stores: appStores,
     feedback: feedbackController,
     login: loginController,
+    presence: presenceController,
     editors: {
       identity: identityController,
       secure_note: secureNoteController,
@@ -350,6 +357,7 @@
     trashController.clearSecrets()
     historyController.clearSecrets()
     itemController.clearSecrets()
+    presenceController.clearSecrets()
     generator.clear()
     passphrase.clear()
     recentGenerations.clear()
@@ -601,6 +609,8 @@
         passwordPresenceIntent={$loginState.passwordPresenceIntent}
         onRevealPassword={() => loginController.togglePasswordReveal()}
         onCopyPassword={() => void loginController.copySelectedField('password')}
+        onCopyBackupCodes={loginController.copyBackupCodes}
+        onCopyLegacySecret={loginController.copyLegacySecret}
         onConfirmPasswordPresence={() => void loginController.confirmPasswordPresence()}
         onCancelPasswordPresence={loginController.cancelPasswordPresence}
         siteIconsEnabled={$settings.siteIconsEnabled}
@@ -630,6 +640,10 @@
         onDeleteItem={itemController.requestDelete}
         onMoveItem={(folderId) => $selection.activeItemId && void itemController.moveToFolder($selection.activeItemId, folderId)}
         onItemCopy={(value, label) => void itemController.copy(value, label)}
+        itemRevealed={$itemState.revealed}
+        onItemCopyField={(key, label) => void itemController.copyField(key, label)}
+        onItemReveal={(key) => void itemController.revealField(key)}
+        onItemHide={itemController.hideField}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
         recoveryActionWorking={$loginState.recoveryActionWorking}
         breachCheckOpen={$loginState.breachCheckOpen}
@@ -833,6 +847,10 @@
     <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} />
   {/if}
 
+  {#if $presenceState.open}
+    <PasswordPresenceModal intent={$presenceState.intent} bind:presenceSecret={$presenceState.secret} errorMessage={$presenceState.error} onConfirm={() => void presenceController.confirm()} onCancel={presenceController.cancel} />
+  {/if}
+
   <ModalHost active={$modalState.active} let:active>
     {#if active?.kind === 'pin-setup'}
       <PinSetupModal
@@ -931,6 +949,7 @@
         savingLogin={$loginState.savingLogin}
         focusUrl={$loginState.editorFocusUrl}
         hasTotp={$loginState.editorHasTotp}
+        backupCodeCount={$loginState.editorBackupCodeCount}
         onSubmit={loginController.submit}
         onClose={loginController.closeEditor}
         onDelete={loginController.requestCurrentDelete}
@@ -1118,6 +1137,16 @@
       onContinue={() => {
         settingsController.dismissOnboarding()
         onboardingController.dismiss()
+      }}
+      onImport={() => {
+        settingsController.dismissOnboarding()
+        onboardingController.dismiss()
+        importController.open()
+      }}
+      onAddLogin={() => {
+        settingsController.dismissOnboarding()
+        onboardingController.dismiss()
+        loginController.openNew()
       }}
       onOpenBackups={() => {
         settingsController.openBackupsFromOnboarding()

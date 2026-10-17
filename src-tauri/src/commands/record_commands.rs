@@ -31,6 +31,7 @@ macro_rules! impl_record_commands {
         from_input: $from_input:path,
         get_fn: $get_fn:ident,
         save_fn: $save_fn:ident,
+        save_in_state_fn: $save_in_state_fn:ident,
         delete_fn: $delete_fn:ident,
         missing_noun: $missing_noun:expr,
         save_unlock_msg: $save_unlock_msg:expr,
@@ -42,7 +43,7 @@ macro_rules! impl_record_commands {
         pub fn $get_fn(
             id: String,
             state: tauri::State<'_, crate::vault::VaultState>,
-        ) -> crate::vault::VaultResult<$Item> {
+        ) -> crate::vault::VaultResult<crate::commands::secret_release::RecordView<$Item>> {
             let session = state
                 .session
                 .lock()
@@ -50,7 +51,9 @@ macro_rules! impl_record_commands {
             let session = session.as_ref().ok_or("Unlock your vault first.")?;
             let item = session.open_item(&id)?;
             match &*item {
-                crate::vault::types::TaggedItem::$Variant(item) => Ok(item.clone()),
+                crate::vault::types::TaggedItem::$Variant(item) => {
+                    Ok(crate::commands::secret_release::redacted_view(item.clone()))
+                }
                 _ => Err(format!("That saved {} no longer exists.", $missing_noun)),
             }
         }
@@ -60,6 +63,14 @@ macro_rules! impl_record_commands {
             input: $Input,
             state: tauri::State<'_, crate::vault::VaultState>,
         ) -> crate::vault::VaultResult<$SaveResult> {
+            $save_in_state_fn(input, &state)
+        }
+
+        pub(crate) fn $save_in_state_fn(
+            input: $Input,
+            state: &crate::vault::VaultState,
+        ) -> crate::vault::VaultResult<$SaveResult> {
+            let kept = sesame_core::secret_fields::KeptSecrets::kept_secrets(&input);
             let mut item = $from_input(input)?;
             let item_id = item.id.clone();
             let mut session = state
@@ -82,6 +93,7 @@ macro_rules! impl_record_commands {
                     let extra_carry: fn(&mut $Item, &$Item) = $extra_carry;
                     extra_carry(&mut item, existing);
                 )?
+                sesame_core::secret_fields::SecretSlots::keep_secrets(&mut item, &*existing, &kept);
                 crate::vault::history::capture_history(
                     &mut next_payload,
                     crate::vault::types::TaggedItem::$Variant(std::mem::take(existing)),

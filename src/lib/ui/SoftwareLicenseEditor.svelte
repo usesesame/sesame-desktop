@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import type { SoftwareLicenseInput } from '../types'
@@ -55,6 +56,7 @@
     <label>Name <span class="field-hint">How this licence appears in your list, e.g. “Office suite”</span><input name="licence-title" bind:this={titleInput} bind:value={licenseDraft.title} required maxlength="160" placeholder="e.g. Office suite…" autocomplete="off" /></label>
     <label>Product<input name="licence-product" bind:value={licenseDraft.productName} maxlength="256" autocomplete="off" /></label>
     <label>Licence key<input name="licence-key" bind:value={licenseDraft.licenseKey} maxlength="512" autocomplete="off" class="monospace-field" spellcheck="false" /></label>
+    <KeptSecret draft={licenseDraft} key="licenseKey" typed={licenseDraft.licenseKey} onChange={(next) => (licenseDraft = { ...licenseDraft, ...next })} />
     <div class="editor-two-column">
       <label>Purchased from <span class="field-hint">Optional</span><input name="licence-vendor" bind:value={licenseDraft.purchasedFrom} maxlength="256" autocomplete="off" /></label>
       <label>Purchase date <span class="field-hint">Optional</span><input name="licence-purchase-date" bind:value={licenseDraft.purchaseDate} maxlength="32" autocomplete="off" /></label>

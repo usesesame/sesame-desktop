@@ -1,14 +1,16 @@
-import type { Attachment, Card, CustomRecord, DocumentMetadata, Identity, ItemKind, LegacyField, SecureNote, SoftwareLicense, SshKey, WifiNetwork } from './types'
+import type { Attachment, Card, CustomRecord, DocumentMetadata, Identity, ItemKind, LegacyField, SecretView, SecureNote, SoftwareLicense, SshKey, WifiNetwork } from './types'
 
 export type RecordKind = Exclude<ItemKind, 'login'>
 
 export type ItemRecord = Identity | SecureNote | Card | WifiNetwork | SshKey | SoftwareLicense | DocumentMetadata | CustomRecord
 
+export type ItemRecordView = SecretView<ItemRecord>
+
 export interface ItemField {
   label: string
   value: string
-  /** Concealed until revealed, and revealing it starts the hide timer. */
   secret: boolean
+  secretKey?: string
   multiline: boolean
   icon: string
 }
@@ -30,6 +32,11 @@ function field(label: string, value: string, icon: string, options: { secret?: b
   return { label, value, icon, secret: options.secret ?? false, multiline: options.multiline ?? false }
 }
 
+function secretField(label: string, key: string, icon: string, present: string[], options: { multiline?: boolean } = {}): ItemField | null {
+  if (!present.includes(key)) return null
+  return { label, value: '', secret: true, secretKey: key, multiline: options.multiline ?? false, icon }
+}
+
 function present(fields: (ItemField | null)[]): ItemField[] {
   return fields.filter((entry): entry is ItemField => entry !== null)
 }
@@ -48,45 +55,47 @@ function identityFields(identity: Identity): ItemField[] {
   ])
 }
 
-function cardFields(card: Card): ItemField[] {
+function cardFields(card: SecretView<Card>): ItemField[] {
   const expiry = [card.expiryMonth, card.expiryYear].filter(Boolean).join('/')
   return present([
     field('Cardholder', card.cardholderName, 'user'),
-    field('Card number', card.number, 'card', { secret: true }),
+    secretField('Card number', 'number', 'card', card.secretFields),
     field('Expiry', expiry, 'card'),
-    field('Security code', card.securityCode, 'key', { secret: true }),
+    secretField('Security code', 'securityCode', 'key', card.secretFields),
     field('Brand', card.brand, 'card'),
   ])
 }
 
-function customFields(record: CustomRecord): ItemField[] {
-  return present(record.fields.map((entry) => field(entry.label, entry.value, entry.kind === 'secret' ? 'key' : 'custom', { secret: entry.kind === 'secret' })))
+function customFields(record: SecretView<CustomRecord>): ItemField[] {
+  return present(record.fields.map((entry, index) => entry.kind === 'secret'
+    ? secretField(entry.label, `field:${index}`, 'key', record.secretFields)
+    : field(entry.label, entry.value, 'custom')))
 }
 
-export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
+export function itemDetail(kind: RecordKind, record: ItemRecordView): ItemDetail {
   const shared = { attachments: [] as Attachment[], legacyFields: [] as LegacyField[] }
   switch (kind) {
     case 'identity': {
-      const identity = record as Identity
+      const identity = record as SecretView<Identity>
       return { ...shared, title: identity.label, subtitle: identity.fullName || identity.email, fields: identityFields(identity), notes: '', tags: identity.tags ?? [], legacyFields: identity.legacyFields ?? [], favourite: identity.favourite, folderId: identity.folderId }
     }
     case 'secure_note': {
-      const note = record as SecureNote
+      const note = record as SecretView<SecureNote>
       return { ...shared, title: note.title, subtitle: '', fields: present([field('Content', note.content, 'note', { multiline: true })]), notes: '', tags: note.tags ?? [], legacyFields: note.legacyFields ?? [], favourite: note.favourite, folderId: note.folderId }
     }
     case 'card': {
-      const card = record as Card
+      const card = record as SecretView<Card>
       return { ...shared, title: card.title, subtitle: card.brand, fields: cardFields(card), notes: card.notes, tags: card.tags ?? [], legacyFields: card.legacyFields ?? [], favourite: card.favourite, folderId: card.folderId }
     }
     case 'wifi_network': {
-      const network = record as WifiNetwork
+      const network = record as SecretView<WifiNetwork>
       return {
         ...shared,
         title: network.title,
         subtitle: network.ssid,
         fields: present([
           field('Network name', network.ssid, 'wifi'),
-          field('Password', network.password, 'key', { secret: true }),
+          secretField('Password', 'password', 'key', network.secretFields),
           field('Security', network.securityType, 'shield'),
         ]),
         notes: network.notes,
@@ -96,7 +105,7 @@ export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
       }
     }
     case 'ssh_key': {
-      const key = record as SshKey
+      const key = record as SecretView<SshKey>
       return {
         ...shared,
         title: key.title,
@@ -104,8 +113,8 @@ export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
         fields: present([
           field('Key type', key.keyType, 'key'),
           field('Public key', key.publicKey, 'file-key', { multiline: true }),
-          field('Private key', key.privateKey, 'file-key', { secret: true, multiline: true }),
-          field('Passphrase', key.passphrase, 'key', { secret: true }),
+          secretField('Private key', 'privateKey', 'file-key', key.secretFields, { multiline: true }),
+          secretField('Passphrase', 'passphrase', 'key', key.secretFields),
         ]),
         notes: key.notes,
         tags: key.tags ?? [],
@@ -114,14 +123,14 @@ export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
       }
     }
     case 'software_license': {
-      const license = record as SoftwareLicense
+      const license = record as SecretView<SoftwareLicense>
       return {
         ...shared,
         title: license.title,
         subtitle: license.productName,
         fields: present([
           field('Product', license.productName, 'license'),
-          field('Licence key', license.licenseKey, 'key', { secret: true }),
+          secretField('Licence key', 'licenseKey', 'key', license.secretFields),
           field('Purchased from', license.purchasedFrom, 'globe'),
           field('Purchase date', license.purchaseDate, 'archive'),
         ]),
@@ -132,14 +141,14 @@ export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
       }
     }
     case 'document': {
-      const document = record as DocumentMetadata
+      const document = record as SecretView<DocumentMetadata>
       return {
         ...shared,
         title: document.title,
         subtitle: document.documentType,
         fields: present([
           field('Type', document.documentType, 'id-card'),
-          field('Number', document.documentNumber, 'id-card', { secret: true }),
+          secretField('Number', 'documentNumber', 'id-card', document.secretFields),
           field('Issuing authority', document.issuingAuthority, 'shield'),
           field('Issued', document.issueDate, 'archive'),
           field('Expires', document.expiryDate, 'archive'),
@@ -152,7 +161,7 @@ export function itemDetail(kind: RecordKind, record: ItemRecord): ItemDetail {
       }
     }
     case 'custom_record': {
-      const custom = record as CustomRecord
+      const custom = record as SecretView<CustomRecord>
       return { ...shared, title: custom.title, subtitle: '', fields: customFields(custom), notes: custom.notes, tags: custom.tags ?? [], favourite: custom.favourite, folderId: custom.folderId }
     }
   }

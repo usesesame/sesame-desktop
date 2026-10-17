@@ -288,6 +288,11 @@
               <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
             </article>
             {/if}
+            {#if $platformCapabilities.os === 'linux' && !$platformCapabilities.screenLockMonitoring}
+            <article>
+              <div class="setting-copy"><strong>Screen lock</strong><p>Sesame cannot tell when this desktop locks its screen, so lock the vault yourself before you step away.</p></div>
+            </article>
+            {/if}
             {#if $platformCapabilities.pinUnlock}
             <article>
               <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a PIN of {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits on this device. Your master password or recovery kit remains available.</p></div>

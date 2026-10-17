@@ -1,14 +1,15 @@
-import type { SoftwareLicense, SoftwareLicenseInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { SecretView, SoftwareLicense, SoftwareLicenseInput } from '../types'
 import { deleteSoftwareLicense, getSoftwareLicense, saveSoftwareLicense } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyLicenseDraft(): SoftwareLicenseInput {
-  return { title: '', licenseKey: '', productName: '', purchasedFrom: '', purchaseDate: '', notes: '', tags: [] }
+  return { title: '', licenseKey: '', productName: '', purchasedFrom: '', purchaseDate: '', notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(license: SoftwareLicense): SoftwareLicenseInput {
+function draftFrom(license: SecretView<SoftwareLicense>): SoftwareLicenseInput {
   const { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags } = license
-  return { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags: tags ?? [] }
+  return { id, title, licenseKey, productName, purchasedFrom, purchaseDate, notes, tags: tags ?? [], keptSecrets: keptSecretKeys(license) }
 }
 
 export function createSoftwareLicenseController(options: RecordControllerOptions) {

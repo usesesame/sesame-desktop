@@ -2,14 +2,15 @@
 //! Search results carry titles and non-secret detail only; a stored value
 //! crosses back solely for the field the person just chose.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
-
 use serde::Serialize;
+use sesame_core::secret_fields::secret_keys;
 use tauri::{AppHandle, Emitter, State, WebviewWindow};
+use zeroize::Zeroizing;
 
+use crate::adapters::platform::clipboard::{copy_secret_value, ClipboardGuard};
 use crate::adapters::platform::desktop_shell::show_main_window;
+use crate::commands::require_release_presence;
+use crate::release::ReleasePresence;
 use crate::vault::snapshot::current_totp;
 use crate::vault::storage::vault_path;
 use crate::vault::util::initials_for;
@@ -17,7 +18,6 @@ use crate::vault::{Identity, TaggedItem, VaultResult, VaultState};
 
 const QUICK_ACCESS_WINDOW: &str = "quick-access";
 const QUICK_ACCESS_RESULT_LIMIT: usize = 8;
-const QUICK_ACCESS_CONFIRMATION_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
@@ -33,7 +33,6 @@ pub struct QuickAccessStatus {
 pub struct QuickAccessAction {
     field: &'static str,
     label: &'static str,
-    /// Needs a second, deliberate confirmation before the value is produced.
     guarded: bool,
 }
 
@@ -53,51 +52,11 @@ pub struct QuickAccessItem {
     actions: Vec<QuickAccessAction>,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, optional_fields)]
-#[serde(rename_all = "camelCase")]
-pub struct QuickAccessValue {
-    value: String,
-}
-
 fn require_quick_access(window: &WebviewWindow) -> VaultResult<()> {
     if window.label() == QUICK_ACCESS_WINDOW {
         Ok(())
     } else {
         Err("That command is available only from quick access.".into())
-    }
-}
-
-#[derive(Default)]
-pub struct QuickAccessConfirmations(Mutex<HashMap<String, Instant>>);
-
-impl QuickAccessConfirmations {
-    fn key(window: &str, id: &str, field: &str) -> String {
-        format!("{window}\u{1f}{id}\u{1f}{field}")
-    }
-
-    fn lock(&self) -> VaultResult<MutexGuard<'_, HashMap<String, Instant>>> {
-        self.0
-            .lock()
-            .map_err(|_| "Sesame could not read this confirmation.".to_string())
-    }
-
-    pub fn record(&self, window: &str, id: &str, field: &str) -> VaultResult<()> {
-        self.prune()?;
-        self.lock()?
-            .insert(Self::key(window, id, field), Instant::now());
-        Ok(())
-    }
-
-    pub fn consume(&self, window: &str, id: &str, field: &str) -> VaultResult<bool> {
-        self.prune()?;
-        Ok(self.lock()?.remove(&Self::key(window, id, field)).is_some())
-    }
-
-    pub fn prune(&self) -> VaultResult<()> {
-        self.lock()?
-            .retain(|_, confirmed_at| confirmed_at.elapsed() < QUICK_ACCESS_CONFIRMATION_TTL);
-        Ok(())
     }
 }
 
@@ -153,43 +112,27 @@ pub fn search_quick_access_items(
 }
 
 #[tauri::command]
-pub fn get_quick_access_field(
+pub fn copy_quick_access_field(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<'_, VaultState>,
-    confirmations: State<'_, QuickAccessConfirmations>,
+    presence: State<'_, ReleasePresence>,
+    clipboard: State<'_, ClipboardGuard>,
     id: String,
     field: String,
-) -> VaultResult<QuickAccessValue> {
-    require_quick_access(&window)?;
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_ref()
-        .ok_or("Unlock your vault in Sesame first.")?;
-    let item = session.open_item(id.trim())?;
-    let action = quick_access_actions(&item)
-        .into_iter()
-        .find(|action| action.field == field.trim())
-        .ok_or("Quick access cannot copy that field for this item.")?;
-    if action.guarded && !confirmations.consume(window.label(), item.id(), action.field)? {
-        return Err("Confirm this copy in quick access first.".into());
-    }
-    let value = quick_access_value(&item, action.field)
-        .ok_or("Nothing is saved in that field for this item.")?;
-    Ok(QuickAccessValue { value })
-}
-
-#[tauri::command]
-pub fn confirm_quick_access_field(
-    window: WebviewWindow,
-    state: State<'_, VaultState>,
-    confirmations: State<'_, QuickAccessConfirmations>,
-    id: String,
-    field: String,
+    clear_after_ms: Option<u64>,
 ) -> VaultResult<()> {
     require_quick_access(&window)?;
+    let value = quick_access_field_in_state(&state, &presence, &id, &field)?;
+    copy_secret_value(app, &clipboard, value.to_string(), clear_after_ms).map(|_| ())
+}
+
+fn quick_access_field_in_state(
+    state: &VaultState,
+    presence: &ReleasePresence,
+    id: &str,
+    field: &str,
+) -> VaultResult<Zeroizing<String>> {
     let session = state
         .session
         .lock()
@@ -202,10 +145,12 @@ pub fn confirm_quick_access_field(
         .into_iter()
         .find(|action| action.field == field.trim())
         .ok_or("Quick access cannot copy that field for this item.")?;
-    if !action.guarded {
-        return Err("That quick-access field does not need a confirmation.".into());
+    if action.guarded {
+        require_release_presence(state, presence)?;
     }
-    confirmations.record(window.label(), item.id(), action.field)
+    quick_access_value(&item, action.field)
+        .map(Zeroizing::new)
+        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())
 }
 
 /// A note, document, or custom record opens in Sesame rather than exposing its
@@ -283,19 +228,11 @@ fn quick_access_matches(item: &TaggedItem, needle: &str) -> bool {
         .any(|field| field.to_lowercase().contains(needle))
 }
 
-fn action(field: &'static str, label: &'static str) -> QuickAccessAction {
+fn action(item: &TaggedItem, field: &'static str, label: &'static str) -> QuickAccessAction {
     QuickAccessAction {
         field,
         label,
-        guarded: false,
-    }
-}
-
-fn guarded_action(field: &'static str, label: &'static str) -> QuickAccessAction {
-    QuickAccessAction {
-        field,
-        label,
-        guarded: true,
+        guarded: secret_keys(item).iter().any(|key| key == field),
     }
 }
 
@@ -305,34 +242,34 @@ fn quick_access_actions(item: &TaggedItem) -> Vec<QuickAccessAction> {
     match item {
         TaggedItem::Login(entry) => {
             if !entry.password.is_empty() {
-                actions.push(action("password", "Copy password"));
+                actions.push(action(item, "password", "Copy password"));
             }
             if !entry.username.is_empty() {
-                actions.push(action("username", "Copy username"));
+                actions.push(action(item, "username", "Copy username"));
             }
             if entry.totp.as_deref().is_some_and(|totp| !totp.is_empty()) {
-                actions.push(action("totp", "Copy 2FA code"));
+                actions.push(action(item, "totp", "Copy 2FA code"));
             }
         }
         TaggedItem::Card(card) => {
             if !card.number.is_empty() {
-                actions.push(action("number", "Copy card number"));
+                actions.push(action(item, "number", "Copy card number"));
             }
             if !card.expiry_month.is_empty() || !card.expiry_year.is_empty() {
-                actions.push(action("expiry", "Copy expiry"));
+                actions.push(action(item, "expiry", "Copy expiry"));
             }
             if !card.security_code.is_empty() {
-                actions.push(action("securityCode", "Copy security code"));
+                actions.push(action(item, "securityCode", "Copy security code"));
             }
         }
         TaggedItem::WifiNetwork(network) => {
             if !network.password.is_empty() {
-                actions.push(action("password", "Copy Wi-Fi password"));
+                actions.push(action(item, "password", "Copy Wi-Fi password"));
             }
         }
         TaggedItem::SoftwareLicense(license) => {
             if !license.license_key.is_empty() {
-                actions.push(action("licenseKey", "Copy licence key"));
+                actions.push(action(item, "licenseKey", "Copy licence key"));
             }
         }
         TaggedItem::Identity(identity) => {
@@ -343,21 +280,21 @@ fn quick_access_actions(item: &TaggedItem) -> Vec<QuickAccessAction> {
                 ("address", "Copy address"),
             ] {
                 if identity_field(identity, field).is_some() {
-                    actions.push(action(field, label));
+                    actions.push(action(item, field, label));
                 }
             }
         }
         TaggedItem::SshKey(key) => {
             if !key.public_key.is_empty() {
-                actions.push(action("publicKey", "Copy public key"));
+                actions.push(action(item, "publicKey", "Copy public key"));
             }
             if !key.private_key.is_empty() {
-                actions.push(guarded_action("privateKey", "Copy private key"));
+                actions.push(action(item, "privateKey", "Copy private key"));
             }
         }
         // Contents stay in Sesame; a search window is the wrong place to read them.
         TaggedItem::SecureNote(_) | TaggedItem::Document(_) | TaggedItem::CustomRecord(_) => {
-            actions.push(action("open", "Open in Sesame"));
+            actions.push(action(item, "open", "Open in Sesame"));
         }
     }
     actions
@@ -413,7 +350,10 @@ fn quick_access_value(item: &TaggedItem, field: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::VaultEntry;
+    use crate::commands::test_support::TestVault;
+    use crate::release::PRESENCE_REQUIRED;
+    use crate::vault::{Card, SoftwareLicense, SshKey, VaultEntry, WifiNetwork};
+    use std::time::{Duration, Instant};
 
     fn login() -> TaggedItem {
         let mut entry = VaultEntry::default();
@@ -440,66 +380,208 @@ mod tests {
         assert!(!quick_access_matches(&login(), "secret-canary"));
     }
 
-    #[test]
-    fn a_quick_access_confirmation_is_consumed_once() {
-        let confirmations = QuickAccessConfirmations::default();
-        confirmations
-            .record("quick-access", "fictional-id", "privateKey")
-            .expect("recorded confirmation");
+    fn seeded_vault() -> TestVault {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        vault.seed(|payload| {
+            let mut card = Card::default();
+            card.id = "fictional-card".to_string();
+            card.title = "Fictional card".to_string();
+            card.number = "4000000000000002".to_string();
+            card.security_code = "123".to_string();
+            card.expiry_month = "04".to_string();
+            card.expiry_year = "2031".to_string();
+            payload.cards.push(card);
+            let mut network = WifiNetwork::default();
+            network.id = "fictional-wifi".to_string();
+            network.ssid = "Fictional network".to_string();
+            network.password = "fictional-wifi-secret".to_string();
+            payload.wifi_networks.push(network);
+            let mut license = SoftwareLicense::default();
+            license.id = "fictional-license".to_string();
+            license.title = "Fictional licence".to_string();
+            license.license_key = "fictional-license-key".to_string();
+            payload.software_licenses.push(license);
+            let mut key = SshKey::default();
+            key.id = "fictional-ssh".to_string();
+            key.title = "Fictional key".to_string();
+            key.public_key = "ssh-ed25519 FICTIONAL".to_string();
+            key.private_key = "fictional-private-key".to_string();
+            payload.ssh_keys.push(key);
+            payload.entries[0].totp = Some("JBSWY3DPEHPK3PXP".to_string());
+        });
+        vault
+    }
 
-        assert!(confirmations
-            .consume("quick-access", "fictional-id", "privateKey")
-            .expect("first consume"));
-        assert!(!confirmations
-            .consume("quick-access", "fictional-id", "privateKey")
-            .expect("second consume"));
+    fn grant(vault: &TestVault, presence: &ReleasePresence) {
+        let session = vault.state.session.lock().expect("session lock");
+        presence
+            .grant_with_password(
+                session.as_ref().expect("session"),
+                vault.state.session_epoch(),
+                "fictional master password",
+            )
+            .expect("granted presence");
+    }
+
+    const GUARDED_FIELDS: [(&str, &str); 6] = [
+        ("fictional-login", "password"),
+        ("fictional-card", "number"),
+        ("fictional-card", "securityCode"),
+        ("fictional-wifi", "password"),
+        ("fictional-ssh", "privateKey"),
+        ("fictional-license", "licenseKey"),
+    ];
+
+    #[test]
+    fn guarded_fields_need_a_master_password_grant() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+
+        for (id, field) in GUARDED_FIELDS {
+            let error = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .expect_err("no grant");
+            assert_eq!(error, PRESENCE_REQUIRED, "{id} {field}");
+        }
     }
 
     #[test]
-    fn mismatched_and_expired_quick_access_confirmations_are_refused() {
-        let confirmations = QuickAccessConfirmations::default();
-        confirmations
-            .record("quick-access", "fictional-id", "privateKey")
-            .expect("recorded confirmation");
+    fn guarded_fields_are_released_with_a_current_grant() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
 
-        assert!(!confirmations
-            .consume("quick-access", "fictional-other-id", "privateKey")
-            .expect("mismatched id"));
-        assert!(!confirmations
-            .consume("quick-access", "fictional-id", "publicKey")
-            .expect("mismatched field"));
-        assert!(!confirmations
-            .consume("other-window", "fictional-id", "privateKey")
-            .expect("mismatched window"));
-
-        confirmations.lock().expect("confirmation lock").insert(
-            QuickAccessConfirmations::key("quick-access", "fictional-id", "privateKey"),
-            Instant::now() - QUICK_ACCESS_CONFIRMATION_TTL - Duration::from_secs(1),
-        );
-        assert!(!confirmations
-            .consume("quick-access", "fictional-id", "privateKey")
-            .expect("expired confirmation"));
+        for (id, field) in GUARDED_FIELDS {
+            let released = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .unwrap_or_else(|error| panic!("{id} {field}: {error}"));
+            assert!(!released.is_empty(), "{id} {field}");
+        }
     }
 
     #[test]
-    fn pruning_quick_access_confirmations_drops_only_expired_entries() {
-        let confirmations = QuickAccessConfirmations::default();
-        confirmations
-            .record("quick-access", "fictional-id", "privateKey")
-            .expect("recorded confirmation");
-        confirmations.lock().expect("confirmation lock").insert(
-            QuickAccessConfirmations::key("quick-access", "fictional-stale-id", "privateKey"),
-            Instant::now() - QUICK_ACCESS_CONFIRMATION_TTL - Duration::from_secs(1),
+    fn an_expired_grant_releases_nothing() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        presence.grant_until(
+            vault.state.session_epoch(),
+            Instant::now() - Duration::from_secs(1),
         );
 
-        confirmations.prune().expect("pruned confirmations");
+        for (id, field) in GUARDED_FIELDS {
+            let error = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .expect_err("expired grant");
+            assert_eq!(error, PRESENCE_REQUIRED, "{id} {field}");
+        }
+    }
 
-        let remaining = confirmations.lock().expect("confirmation lock");
-        assert_eq!(remaining.len(), 1);
-        assert!(remaining.contains_key(&QuickAccessConfirmations::key(
-            "quick-access",
-            "fictional-id",
-            "privateKey"
-        )));
+    #[test]
+    fn a_grant_from_an_earlier_session_epoch_releases_nothing() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+        vault.state.advance_session_epoch();
+
+        for (id, field) in GUARDED_FIELDS {
+            let error = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .expect_err("stale epoch");
+            assert_eq!(error, PRESENCE_REQUIRED, "{id} {field}");
+        }
+    }
+
+    #[test]
+    fn a_revoked_grant_releases_nothing() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+        presence.revoke();
+
+        for (id, field) in GUARDED_FIELDS {
+            let error = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .expect_err("revoked grant");
+            assert_eq!(error, PRESENCE_REQUIRED, "{id} {field}");
+        }
+    }
+
+    #[test]
+    fn a_locked_vault_releases_nothing() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+        *vault.state.session.lock().expect("session lock") = None;
+
+        assert!(quick_access_field_in_state(
+            &vault.state,
+            &presence,
+            "fictional-login",
+            "password"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_field_the_item_does_not_offer_is_refused_even_with_a_grant() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+
+        assert!(
+            quick_access_field_in_state(&vault.state, &presence, "fictional-login", "notes")
+                .is_err()
+        );
+        assert!(
+            quick_access_field_in_state(&vault.state, &presence, "fictional-card", "password")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn fields_without_a_guard_stay_available_with_no_grant() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+
+        for (id, field) in [
+            ("fictional-login", "username"),
+            ("fictional-login", "totp"),
+            ("fictional-card", "expiry"),
+            ("fictional-ssh", "publicKey"),
+        ] {
+            let released = quick_access_field_in_state(&vault.state, &presence, id, field)
+                .unwrap_or_else(|error| panic!("{id} {field}: {error}"));
+            assert!(!released.is_empty(), "{id} {field}");
+        }
+    }
+
+    #[test]
+    fn every_secret_the_popup_offers_is_guarded_unless_listed_here() {
+        let vault = seeded_vault();
+        let session = vault.state.session.lock().expect("session lock");
+        let session = session.as_ref().expect("session");
+        let open_fields = [
+            "username",
+            "totp",
+            "expiry",
+            "publicKey",
+            "fullName",
+            "email",
+            "phone",
+            "address",
+            "open",
+        ];
+        for id in [
+            "fictional-login",
+            "fictional-card",
+            "fictional-wifi",
+            "fictional-ssh",
+            "fictional-license",
+        ] {
+            let item = session.open_item(id).expect("seeded item");
+            for action in quick_access_actions(&item) {
+                assert_eq!(
+                    action.guarded,
+                    !open_fields.contains(&action.field),
+                    "{id} {}",
+                    action.field
+                );
+            }
+        }
     }
 }

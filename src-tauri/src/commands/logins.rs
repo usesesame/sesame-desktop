@@ -203,6 +203,7 @@ pub fn save_login(input: LoginInput, state: State<'_, VaultState>) -> VaultResul
 
 fn save_login_in_state(input: LoginInput, state: &VaultState) -> VaultResult<SaveLoginResult> {
     let totp_input = input.totp.clone();
+    let keep_backup_codes = input.keep_backup_codes;
     let mut entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
     let mut session = state
@@ -232,6 +233,9 @@ fn save_login_in_state(input: LoginInput, state: &VaultState) -> VaultResult<Sav
         updated.favourite = previous.favourite;
         updated.last_used_at = previous.last_used_at;
         updated.totp = resolved_totp(totp_input, previous.totp.clone());
+        if keep_backup_codes && updated.backup_codes.is_empty() {
+            updated.backup_codes = previous.backup_codes.clone();
+        }
         let password = (!updated.password.is_empty()).then(|| updated.password.clone());
         next_payload =
             payload_with_saved_login(&next_payload, updated, password, unix_timestamp())?;
@@ -547,13 +551,21 @@ pub fn reveal_login_secret(
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    crate::commands::require_release_presence(&state, &presence)?;
+    reveal_login_secret_in_state(&id, &state, &presence)
+}
+
+fn reveal_login_secret_in_state(
+    id: &str,
+    state: &VaultState,
+    presence: &ReleasePresence,
+) -> VaultResult<String> {
+    crate::commands::require_release_presence(state, presence)?;
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let item = session.open_item(&id)?;
+    let item = session.open_item(id)?;
     let TaggedItem::Login(entry) = &*item else {
         return Err("That saved login no longer exists.".into());
     };
@@ -667,6 +679,85 @@ mod save_login_command_tests {
         let stored = vault.stored_login("login-a");
         assert_eq!(stored.password, "fictional-new-secret");
         assert_eq!(stored.revision, 8);
+    }
+
+    fn vault_with_backup_codes() -> TestVault {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        vault.seed(|payload| {
+            payload.entries[0].backup_codes = vec!["fictional-code-1".to_string()];
+        });
+        vault
+    }
+
+    #[test]
+    fn a_save_that_keeps_the_backup_codes_leaves_them_as_stored() {
+        let vault = vault_with_backup_codes();
+        let mut input = login_input(Some("login-a"), "https://northwind.example", "");
+        input.keep_backup_codes = true;
+
+        save_login_in_state(input, &vault.state).expect("saved login");
+
+        assert_eq!(
+            vault.stored_login("login-a").backup_codes,
+            vec!["fictional-code-1"]
+        );
+    }
+
+    #[test]
+    fn a_save_that_does_not_keep_blank_backup_codes_clears_them() {
+        let vault = vault_with_backup_codes();
+
+        save_login_in_state(
+            login_input(Some("login-a"), "https://northwind.example", ""),
+            &vault.state,
+        )
+        .expect("saved login");
+
+        assert!(vault.stored_login("login-a").backup_codes.is_empty());
+    }
+
+    #[test]
+    fn typed_backup_codes_replace_the_stored_ones_even_when_keeping_is_requested() {
+        let vault = vault_with_backup_codes();
+        let mut input = login_input(Some("login-a"), "https://northwind.example", "");
+        input.keep_backup_codes = true;
+        input.backup_codes = vec!["fictional-new-code".to_string()];
+
+        save_login_in_state(input, &vault.state).expect("saved login");
+
+        assert_eq!(
+            vault.stored_login("login-a").backup_codes,
+            vec!["fictional-new-code"]
+        );
+    }
+
+    #[test]
+    fn the_login_card_counts_backup_codes_and_blanks_secret_legacy_values() {
+        let mut entry = crate::vault::VaultEntry::default();
+        entry.backup_codes = vec![
+            "fictional-code-1".to_string(),
+            "fictional-code-2".to_string(),
+        ];
+        entry.legacy_fields = vec![
+            crate::vault::LegacyField {
+                label: "Old PIN".to_string(),
+                value: "fictional-legacy-secret".to_string(),
+                secret: true,
+            },
+            crate::vault::LegacyField {
+                label: "Old note".to_string(),
+                value: "fictional visible".to_string(),
+                secret: false,
+            },
+        ];
+
+        let card = crate::vault::snapshot::login_card_for(&[], &entry);
+        let json = serde_json::to_string(&card).expect("serialized card");
+
+        assert_eq!(card.backup_code_count, 2);
+        assert!(!json.contains("fictional-code"));
+        assert!(!json.contains("fictional-legacy-secret"));
+        assert!(json.contains("fictional visible"));
     }
 
     #[test]
@@ -863,6 +954,77 @@ mod merge_comparison_command_tests {
         assert_eq!(
             merge_comparison_in_state(ids(&["login-a", "login-b"]), &state).err(),
             Some("Unlock your vault first.".to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod reveal_login_secret_tests {
+    use super::*;
+    use crate::commands::test_support::TestVault;
+    use crate::release::PRESENCE_REQUIRED;
+    use std::time::{Duration, Instant};
+
+    fn grant(vault: &TestVault, presence: &ReleasePresence) {
+        let session = vault.state.session.lock().expect("session lock");
+        presence
+            .grant_with_password(
+                session.as_ref().expect("session"),
+                vault.state.session_epoch(),
+                "fictional master password",
+            )
+            .expect("granted presence");
+    }
+
+    #[test]
+    fn revealing_needs_a_grant() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        let error =
+            reveal_login_secret_in_state("login-a", &vault.state, &ReleasePresence::default())
+                .expect_err("no grant");
+
+        assert_eq!(error, PRESENCE_REQUIRED);
+    }
+
+    #[test]
+    fn revealing_works_with_a_current_grant() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+
+        let revealed =
+            reveal_login_secret_in_state("login-a", &vault.state, &presence).expect("revealed");
+
+        assert_eq!(revealed, "fictional-stored-secret");
+    }
+
+    #[test]
+    fn an_expired_stale_or_revoked_grant_reveals_nothing() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        let presence = ReleasePresence::default();
+
+        presence.grant_until(
+            vault.state.session_epoch(),
+            Instant::now() - Duration::from_secs(1),
+        );
+        assert_eq!(
+            reveal_login_secret_in_state("login-a", &vault.state, &presence),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+
+        grant(&vault, &presence);
+        vault.state.advance_session_epoch();
+        assert_eq!(
+            reveal_login_secret_in_state("login-a", &vault.state, &presence),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+
+        grant(&vault, &presence);
+        presence.revoke();
+        assert_eq!(
+            reveal_login_secret_in_state("login-a", &vault.state, &presence),
+            Err(PRESENCE_REQUIRED.to_string())
         );
     }
 }

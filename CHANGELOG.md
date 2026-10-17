@@ -6,6 +6,34 @@ release cannot be published without saying what changed in it.
 
 ## Unreleased
 
+### Lock and release
+
+- Quick access asks for your master password before it copies a login or
+  Wi-Fi password, a card number or security code, a licence key, or an SSH
+  private key, and the copy runs in native code. When the check is missing it
+  points you to Sesame, and one check covers the next two minutes. Usernames,
+  expiry dates, public keys and one-time codes still copy without it.
+- Card numbers and security codes, Wi-Fi passwords, SSH private keys and
+  passphrases, licence keys, document numbers, secret custom fields, secret
+  legacy values and login backup codes stay in Sesame's native code when you
+  open an item. Showing or copying one asks for your master password. Copying
+  a login password, backup codes or any of these runs in native code, so the
+  value never passes through the window, and neither does the login breach
+  check. The editors open with those fields blank and keep the saved value
+  unless you type a new one or choose Remove it, so editing an item no longer
+  needs the master password. Login one-time codes, secure note contents and
+  notes still show without the check.
+- The vault locks on every check that reports a locked screen, not only when
+  the screen first locks, so a vault unlocked or started behind a locked
+  screen closes. On Linux, Sesame looks for missing screen lock and idle
+  sources again every 30 seconds, and locks once the automatic-lock delay has
+  passed with every source silent after one had answered. Settings says so
+  when the desktop reports no screen lock source.
+- On Linux the diagnostics log records `key_page_fallback` when the system
+  refuses to lock the vault key into memory and Sesame keeps it in wiped
+  ordinary memory instead. A failed key store no longer skips wiping the copy
+  Sesame was handed.
+
 ### Import
 
 - The import preview counts every code or item in the file and says why each

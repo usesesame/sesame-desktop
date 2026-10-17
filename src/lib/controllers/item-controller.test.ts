@@ -3,14 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppStores } from '../stores/app-stores'
 import type { RecordKind } from '../item-fields'
 import type { VaultSnapshot } from '../types'
-import { searchItems } from '../vault'
+import { copyItemField, grantPresence, recordItemUse, releaseItemField, searchItems } from '../vault'
 import { createFeedbackController } from './feedback-controller'
-import { createItemController, SEARCH_DEBOUNCE_MS, type RecordEditor } from './item-controller'
+import { createItemController, SEARCH_DEBOUNCE_MS, SECRET_REVEAL_TIMEOUT_MS, type RecordEditor } from './item-controller'
+import { createPresenceController } from './presence-controller'
 import type { LoginController } from './login-controller'
 
 vi.mock('../vault', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../vault')>()
-  return { ...actual, searchItems: vi.fn() }
+  return {
+    ...actual,
+    searchItems: vi.fn(),
+    releaseItemField: vi.fn(),
+    copyItemField: vi.fn(),
+    grantPresence: vi.fn(),
+    recordItemUse: vi.fn(),
+  }
 })
 
 beforeEach(() => {
@@ -85,8 +93,10 @@ function harness() {
   }])) as Record<RecordKind, RecordEditor>
   const login = { openEditor: () => { calls.push('login:edit') }, openNew: () => {}, clearSelection: () => {}, selectEntry: async () => {} } as unknown as LoginController
   const stores = fakeStores()
-  const controller = createItemController({ stores, feedback: createFeedbackController(), login, editors })
-  return { controller, calls, stores }
+  const feedback = createFeedbackController()
+  const presence = createPresenceController()
+  const controller = createItemController({ stores, feedback, login, presence, editors })
+  return { controller, calls, stores, feedback, presence }
 }
 
 describe('context menu targets', () => {
@@ -304,5 +314,127 @@ describe('search debounce', () => {
 
     expect(searchItems).toHaveBeenCalledTimes(TYPED_QUERY.length)
     expect(decryptedRecords()).toBe(TYPED_QUERY.length * FICTIONAL_VAULT_RECORDS)
+  })
+})
+
+describe('secret fields', () => {
+  const presenceRequired = () => new Error('presenceRequired')
+
+  function openCard() {
+    const context = harness()
+    context.stores.selection.patch({ activeItemId: 'card-1', activeItemKind: 'card' })
+    context.stores.vault.patch({ status: { unlocked: true } } as never)
+    return context
+  }
+
+  beforeEach(() => {
+    vi.mocked(releaseItemField).mockReset()
+    vi.mocked(copyItemField).mockReset()
+    vi.mocked(grantPresence).mockReset()
+    vi.mocked(recordItemUse).mockReset()
+  })
+
+  it('holds a revealed value only until the hide timer fires', async () => {
+    const { controller } = openCard()
+    vi.mocked(releaseItemField).mockResolvedValue('fictional-card-number')
+
+    await controller.revealField('number')
+
+    expect(releaseItemField).toHaveBeenCalledWith('card', 'card-1', 'number')
+    expect(get(controller.state).revealed).toEqual({ number: 'fictional-card-number' })
+
+    await vi.advanceTimersByTimeAsync(SECRET_REVEAL_TIMEOUT_MS)
+
+    expect(get(controller.state).revealed).toEqual({})
+  })
+
+  it('hides a value when the person asks', async () => {
+    const { controller } = openCard()
+    vi.mocked(releaseItemField).mockResolvedValue('fictional-card-number')
+    await controller.revealField('number')
+
+    controller.hideField('number')
+
+    expect(get(controller.state).revealed).toEqual({})
+  })
+
+  it('asks for the master password when the host wants it and shows the value after the grant', async () => {
+    const { controller, presence } = openCard()
+    vi.mocked(releaseItemField)
+      .mockRejectedValueOnce(presenceRequired())
+      .mockResolvedValueOnce('fictional-card-number')
+    vi.mocked(grantPresence).mockResolvedValue(undefined)
+
+    await controller.revealField('number')
+
+    expect(get(presence.state)).toMatchObject({ open: true, intent: 'reveal-field' })
+    expect(get(controller.state).revealed).toEqual({})
+
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    expect(grantPresence).toHaveBeenCalledWith('fictional master password')
+    expect(get(presence.state).open).toBe(false)
+    expect(get(controller.state).revealed).toEqual({ number: 'fictional-card-number' })
+  })
+
+  it('keeps showing nothing when the master password is wrong', async () => {
+    const { controller, presence } = openCard()
+    vi.mocked(releaseItemField).mockRejectedValue(presenceRequired())
+    vi.mocked(grantPresence).mockRejectedValue(new Error('That master password does not open this vault.'))
+    await controller.revealField('number')
+
+    presence.state.patch({ secret: 'fictional wrong password' })
+    await presence.confirm()
+
+    expect(get(presence.state)).toMatchObject({ open: true, error: 'That master password does not open this vault.', secret: '' })
+    expect(get(controller.state).revealed).toEqual({})
+    expect(releaseItemField).toHaveBeenCalledTimes(1)
+  })
+
+  it('copies in the host and passes no value through the window', async () => {
+    const { controller, feedback } = openCard()
+    vi.mocked(copyItemField).mockResolvedValue(undefined)
+
+    await controller.copyField('securityCode', 'Security code')
+
+    expect(copyItemField).toHaveBeenCalledWith('card', 'card-1', 'securityCode')
+    expect(get(feedback.state).notice?.title).toBe('Security code copied')
+  })
+
+  it('asks for the master password before a copy and copies after the grant', async () => {
+    const { controller, presence } = openCard()
+    vi.mocked(copyItemField).mockRejectedValueOnce(presenceRequired()).mockResolvedValueOnce(undefined)
+    vi.mocked(grantPresence).mockResolvedValue(undefined)
+
+    await controller.copyField('number', 'Card number')
+    expect(get(presence.state)).toMatchObject({ open: true, intent: 'copy-field' })
+
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    expect(copyItemField).toHaveBeenCalledTimes(2)
+  })
+
+  it('drops every revealed value when secrets are cleared', async () => {
+    const { controller } = openCard()
+    vi.mocked(releaseItemField).mockResolvedValue('fictional-card-number')
+    await controller.revealField('number')
+
+    controller.clearSecrets()
+
+    expect(get(controller.state).revealed).toEqual({})
+  })
+
+  it('drops a value that arrives after the person selected another item', async () => {
+    const { controller, stores } = openCard()
+    vi.mocked(releaseItemField).mockImplementation(async () => {
+      stores.selection.patch({ activeItemId: 'card-2' })
+      return 'fictional-card-number'
+    })
+
+    await controller.revealField('number')
+
+    expect(get(controller.state).revealed).toEqual({})
   })
 })

@@ -1,14 +1,15 @@
-import type { SshKey, SshKeyInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { SecretView, SshKey, SshKeyInput } from '../types'
 import { deleteSshKey, getSshKey, saveSshKey } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyKeyDraft(): SshKeyInput {
-  return { title: '', keyType: '', privateKey: '', publicKey: '', passphrase: '', notes: '', tags: [] }
+  return { title: '', keyType: '', privateKey: '', publicKey: '', passphrase: '', notes: '', tags: [], keptSecrets: [] }
 }
 
-function draftFrom(key: SshKey): SshKeyInput {
+function draftFrom(key: SecretView<SshKey>): SshKeyInput {
   const { id, title, keyType, privateKey, publicKey, passphrase, notes, tags } = key
-  return { id, title, keyType, privateKey, publicKey, passphrase, notes, tags: tags ?? [] }
+  return { id, title, keyType, privateKey, publicKey, passphrase, notes, tags: tags ?? [], keptSecrets: keptSecretKeys(key) }
 }
 
 export function createSshKeyController(options: RecordControllerOptions) {

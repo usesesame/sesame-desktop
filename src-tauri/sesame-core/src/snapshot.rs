@@ -234,12 +234,12 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
         has_totp: entry.totp.as_deref().is_some_and(|seed| !seed.is_empty()),
         totp_code,
         totp_remaining,
-        backup_codes: (!entry.backup_codes.is_empty()).then(|| entry.backup_codes.clone()),
+        backup_code_count: entry.backup_codes.len(),
         recovery_email: entry.recovery_email.clone(),
         recovery_phone: entry.recovery_phone.clone(),
         recovery_not_applicable: entry.recovery_not_applicable,
         notes: entry.notes.clone(),
-        legacy_fields: entry.legacy_fields.clone(),
+        legacy_fields: crate::secret_fields::redacted_legacy(&entry.legacy_fields),
     }
 }
 
