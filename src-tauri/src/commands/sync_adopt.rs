@@ -68,7 +68,7 @@ pub(super) fn finish_adoption(
             &local,
             &stamp,
         )?;
-        crate::sync::conflict_backup::prune(&directory, &[written]);
+        crate::sync::conflict_backup::prune_and_report(app, &directory, &[written]);
         let _ = vault_id;
         let recovery_kit = adopt(vault, key, payload, master_password)?;
         crate::vault::report_key_page_fallback(app, vault);

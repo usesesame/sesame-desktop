@@ -613,7 +613,7 @@ pub async fn sync_resolve_conflict(
                 &directory, unlocked, side, revision, payload, &stamp,
             )?);
         }
-        crate::sync::conflict_backup::prune(&directory, &written);
+        crate::sync::conflict_backup::prune_and_report(&app, &directory, &written);
         let names: Vec<String> = written
             .into_iter()
             .map(|path| {

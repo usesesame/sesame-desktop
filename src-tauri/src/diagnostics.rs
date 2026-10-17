@@ -238,6 +238,12 @@ pub fn record_browser_host_registration(app: &AppHandle, code: &'static str) {
     }
 }
 
+pub fn record_backup_io_error(app: &AppHandle) {
+    if let Ok(path) = diagnostic_path(app) {
+        let _ = append_event(&path, "backup", "io_error");
+    }
+}
+
 pub fn record_vault_key_fallback(app: &AppHandle, code: &'static str) {
     if !allowed_code(code) {
         return;

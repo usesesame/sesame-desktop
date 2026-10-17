@@ -30,6 +30,6 @@ pub async fn sync_restore_conflict_backup(app: AppHandle, state: tauri::State<'_
         synced.payload_digest = String::new();
         save_state(&app, &synced)?;
     }
-    crate::sync::conflict_backup::prune(&directory, &[written]);
+    crate::sync::conflict_backup::prune_and_report(&app, &directory, &[written]);
     Ok(SyncTransferResult { revision: contents.revision, vault_epoch: 0, entry_count })
 }
