@@ -43,7 +43,6 @@
     "tools/command-surface-contracts.test.mjs",
     "tools/governance-contracts.test.mjs",
     "tools/hardening-contracts.test.mjs",
-    "tools/run-sync-preview-desktop.mjs",
     "tools/version-contract.mjs",
     "tools/dependency-admission.mjs",
     "tools/vault-compatibility-contracts.test.mjs",

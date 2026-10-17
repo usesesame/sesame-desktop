@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import { autoLockOptions, clipboardClearOptions } from './lib/preferences'
   import { isSortMode } from './lib/vault-collections'
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
-  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, openWebsite, previewMode, recordDiagnostic } from './lib/vault'
+  import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
   import { loadPlatformCapabilities } from './lib/platform'
   import type { ImportSource, NavigationGroup, View } from './lib/types'
   import { storeSortMode } from './lib/preferences'
@@ -66,6 +66,9 @@
   import HistoryView from './lib/ui/HistoryView.svelte'
   import SettingsView from './lib/ui/SettingsView.svelte'
   import BetaOnboarding from './lib/ui/BetaOnboarding.svelte'
+  import SyncNotice from './lib/ui/SyncNotice.svelte'
+  import { syncController } from './lib/sync'
+  import { describeSyncForChrome } from './lib/controllers/sync-controller'
   import BrowserFillApprovalModal from './lib/ui/BrowserFillApprovalModal.svelte'
   import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
   import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
@@ -449,6 +452,20 @@
     { value: '2fas-json', label: '2FAS JSON' },
   ]
 
+  $: syncChrome = $vault.status.unlocked ? describeSyncForChrome($syncController) : undefined
+  let stopSyncBackground: (() => void) | undefined
+  $: if ($vault.status.unlocked) {
+    stopSyncBackground ??= syncController.startBackground()
+  } else if (stopSyncBackground) {
+    stopSyncBackground()
+    stopSyncBackground = undefined
+  }
+  $: if ($vault.status.unlocked) {
+    void $allItems
+    syncController.vaultChanged()
+  }
+  onDestroy(() => stopSyncBackground?.())
+
   onMount(() => {
     let stopQuickAccessOpen = () => {}
     let quickAccessListenerDisposed = false
@@ -524,7 +541,7 @@
   <meta name="description" content="Local-first password and recovery vault." />
 </svelte:head>
 
-<AppChrome keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} recoveryRequestPending={$vault.status.unlocked && recoveryRequestPending($settingsState.recoveryReplacement)} onReviewRecoveryRequest={() => { settingsController.openRecoveryKitSettings(); navigate('settings') }} />
+<AppChrome syncStatusLabel={syncChrome?.label} syncTone={syncChrome?.tone ?? 'ok'} keepInTray={$settings.keepInTray} idleWarningSeconds={$unlockState.idleWarningSeconds} onStayUnlocked={unlockController.clearIdleWarning} preview={$vault.status.preview} recoveryRequestPending={$vault.status.unlocked && recoveryRequestPending($settingsState.recoveryReplacement)} onReviewRecoveryRequest={() => { settingsController.openRecoveryKitSettings(); navigate('settings') }} />
 
 {#if $unlockState.isWorking && !$vault.status.unlocked}
   <main class="loading-screen state-panel" aria-live="polite">
@@ -566,6 +583,7 @@
   <WorkspaceShell
     {navigation}
     preview={$vault.status.preview}
+    vaultLabel={syncChrome ? 'Synced vault' : 'Local vault'}
     duplicateReviewOpen={$cleanupState.duplicateReviewOpen}
     notice={$feedbackState.notice}
     errorMessage={$feedbackState.errorMessage}
@@ -794,7 +812,6 @@
         browserIntegrationWorking={$settingsState.browserIntegrationWorking}
         onRefreshBrowserIntegration={() => settingsController.refreshBrowserIntegration(true)}
         onRepairBrowserIntegration={settingsController.repairBrowserIntegration}
-        onOpenWebsite={(url) => void openWebsite(url)}
       />
     {/if}
   </WorkspaceShell>
@@ -1112,6 +1129,16 @@
       {/if}
     {/if}
   </ModalHost>
+
+  {#if $onboardingState.step === 'none' && $settingsState.betaOnboardingDismissed && $settingsState.preferenceLoaded && !$settingsState.syncNoticeSeen}
+    <SyncNotice
+      onKeepOff={settingsController.dismissSyncNotice}
+      onOpenSettings={() => {
+        settingsController.openSyncSettings()
+        navigate('settings')
+      }}
+    />
+  {/if}
 
   {#if $onboardingState.step === 'beta-warning'}
     <BetaOnboarding

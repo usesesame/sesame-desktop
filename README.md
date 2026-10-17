@@ -1,15 +1,16 @@
 # Sesame
 
-Sesame is a local-first password and recovery vault. The desktop app works
-without an account or Sesame server. You can create, unlock, search, import,
-back up, and export a vault locally.
+Sesame keeps your passwords and recovery details in a local vault. You can use
+the desktop without an account, and optional sync keeps an encrypted copy on
+the server you choose.
 
 The account service, public website, and browser extension are separate
-projects. They are outside the vault trust boundary. Sesame never receives a
-vault, master password, recovery kit, PIN, TOTP seed, or wrapping key.
+projects. The server receives encrypted vault data and has no key to read it,
+while your master password and recovery kit stay on your devices.
 
-Sesame is early software, and an independent security review has not finished
-yet. Do not rely on it for your only copy of important credentials for now.
+Sesame is early software, and no independent security review has happened yet,
+for the vault or for Sync. Do not rely on it for your only copy of important
+credentials for now.
 
 ## Repository shape
 
@@ -32,9 +33,9 @@ Other Sesame projects:
 - [sesame-website](https://github.com/usesesame/sesame-website): the static
   public site
 
-The desktop must work when hosted services are unavailable. Sync preview code
-is excluded from shipping builds. It remains unavailable until it passes its
-security gate.
+The desktop must work when hosted services are unavailable. Sync is optional
+and off until a person turns it on in Settings. It has not had an independent
+review, and the screen says so.
 
 Before changing vault, browser, or authentication code, read the security
 rules in [CONTRIBUTING.md](CONTRIBUTING.md).

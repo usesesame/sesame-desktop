@@ -1,8 +1,6 @@
 //! Wrapping the vault key to another device: a sealed box with an explicit sender.
 //! Ephemeral X25519 + HKDF bound to protocol, keys, and vault id; the service can do nothing with the package.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
@@ -188,12 +186,58 @@ pub fn open_vault_key(
     plaintext
 }
 
-pub fn encode_package(package: &[u8]) -> String {
-    URL_SAFE_NO_PAD.encode(package)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub fn decode_package(value: &str) -> VaultResult<Vec<u8>> {
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .map_err(|_| "This device key package could not be read.".to_string())
+    const VAULT: &str = "vault0000000000000001";
+
+    #[test]
+    fn a_sealed_vault_key_opens_only_for_its_recipient_and_vault() {
+        let recipient = EncryptionKeypair::generate().expect("keypair");
+        let other = EncryptionKeypair::generate().expect("keypair");
+        let key = [7u8; 32];
+        let package = seal_vault_key(&key, &recipient.public_key(), VAULT).expect("seal");
+        assert_eq!(
+            open_vault_key(&package, &recipient, VAULT).expect("open"),
+            key
+        );
+        assert!(open_vault_key(&package, &other, VAULT).is_err());
+        assert!(open_vault_key(&package, &recipient, "vault0000000000000002").is_err());
+    }
+
+    #[test]
+    fn a_changed_or_short_package_is_refused() {
+        let recipient = EncryptionKeypair::generate().expect("keypair");
+        let package = seal_vault_key(&[7u8; 32], &recipient.public_key(), VAULT).expect("seal");
+        for position in [0, X25519_KEY_BYTES, package.len() - 1] {
+            let mut damaged = package.clone();
+            damaged[position] ^= 1;
+            assert!(
+                open_vault_key(&damaged, &recipient, VAULT).is_err(),
+                "byte {position}"
+            );
+        }
+        assert!(open_vault_key(&package[..MIN_PACKAGE_BYTES - 1], &recipient, VAULT).is_err());
+        assert!(open_vault_key(&vec![0u8; MAX_KEY_PACKAGE_BYTES + 1], &recipient, VAULT).is_err());
+        assert!(open_vault_key(&[], &recipient, VAULT).is_err());
+    }
+
+    #[test]
+    fn a_low_order_recipient_key_is_refused_on_both_sides() {
+        assert!(seal_vault_key(&[7u8; 32], &[0u8; 32], VAULT).is_err());
+        let recipient = EncryptionKeypair::generate().expect("keypair");
+        let mut package = seal_vault_key(&[7u8; 32], &recipient.public_key(), VAULT).expect("seal");
+        package[..X25519_KEY_BYTES].fill(0);
+        assert!(open_vault_key(&package, &recipient, VAULT).is_err());
+        assert!(seal_vault_key(&[], &recipient.public_key(), VAULT).is_err());
+    }
+
+    #[test]
+    fn two_packages_of_one_key_differ() {
+        let recipient = EncryptionKeypair::generate().expect("keypair");
+        let first = seal_vault_key(&[7u8; 32], &recipient.public_key(), VAULT).expect("seal");
+        let second = seal_vault_key(&[7u8; 32], &recipient.public_key(), VAULT).expect("seal");
+        assert_ne!(first, second);
+    }
 }

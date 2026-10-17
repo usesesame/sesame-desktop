@@ -233,7 +233,6 @@ pub async fn link_desktop_service(
     code: String,
 ) -> VaultResult<ServiceConnectionStatus> {
     let code = validated_link_code(&code)?;
-    // A valid code is not sufficient when the signed capability document disables linking.
     require_desktop_linking().await?;
     let api_base_url = service_api_base_url()?;
     let client = service_client()?;

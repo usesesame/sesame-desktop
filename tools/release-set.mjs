@@ -84,6 +84,36 @@ export function updateReceiptV3(releaseSet) {
   ].join('\n')
 }
 
+const floorVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+
+function versionParts(value) {
+  const match = versionPattern.exec(value)
+  if (!match) throw new Error('A version must be major.minor.patch with an optional prerelease.')
+  const core = [Number(match[1]), Number(match[2]), Number(match[3])]
+  if (!core.every(Number.isSafeInteger)) throw new Error('A version number is too large.')
+  return { core, prerelease: value.includes('-') }
+}
+
+export function compareVersions(left, right) {
+  const a = versionParts(left)
+  const b = versionParts(right)
+  for (let index = 0; index < 3; index += 1) {
+    if (a.core[index] !== b.core[index]) return a.core[index] < b.core[index] ? -1 : 1
+  }
+  if (a.prerelease === b.prerelease) return 0
+  return a.prerelease ? -1 : 1
+}
+
+export function syncFloorPayload(releaseSet, minimumVersion) {
+  if (typeof minimumVersion !== 'string' || !floorVersionPattern.test(minimumVersion)) {
+    throw new Error('The minimum Sync version must be major.minor.patch.')
+  }
+  if (compareVersions(minimumVersion, releaseSet.version) > 0) {
+    throw new Error('The minimum Sync version cannot be above the release version.')
+  }
+  return ['sesame-sync-floor-v1', releaseSet.version, minimumVersion, releaseSet.setDigest].join('\n')
+}
+
 export function verifyReleaseSet(releaseSet) {
   if (releaseSet?.schemaVersion !== 3 || !versionPattern.test(releaseSet.version) || !channelSet.has(releaseSet.channel)) {
     throw new Error('Release set identity is invalid.')

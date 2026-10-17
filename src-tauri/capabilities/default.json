@@ -24,6 +24,7 @@
     "browser-approval",
     "desktop-settings",
     "website-icons",
-    "clipboard-guard"
+    "clipboard-guard",
+    "sync"
   ]
 }

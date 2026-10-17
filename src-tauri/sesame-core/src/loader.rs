@@ -310,7 +310,7 @@ impl VaultLoader {
         blob: &CipherBlob,
         aad: &[u8],
     ) -> LoadResult<AuthenticatedPayload> {
-        if version != 2 {
+        if version != 3 {
             return Err(LoadFailure::InvalidStructure);
         }
         validate_blob(blob)?;

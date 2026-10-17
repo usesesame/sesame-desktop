@@ -1,0 +1,248 @@
+{
+  "requests": {
+    "activate": {
+      "packageDigest": "packagedigest"
+    },
+    "approve": {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 2,
+        "previousDigest": "prevdigest",
+        "kind": "add",
+        "signerDeviceId": "deviceAAAAAAAAAAAA01",
+        "subjectDeviceId": "deviceBBBBBBBBBBBB01",
+        "subjectSigningKey": "signingkey",
+        "subjectPackageKey": "packagekey",
+        "sealedLabel": "sealed",
+        "epochAfter": 1,
+        "snapshotFloor": 4,
+        "signature": "signature"
+      },
+      "package": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "senderDeviceId": "deviceAAAAAAAAAAAA01",
+        "recipientDeviceId": "deviceBBBBBBBBBBBB01",
+        "vaultEpoch": 1,
+        "entryDigest": "entrydigest",
+        "ciphertext": "ciphertext",
+        "signature": "signature"
+      }
+    },
+    "beginPairing": {
+      "deviceId": "deviceBBBBBBBBBBBB01",
+      "signingKey": "signingkey",
+      "packageKey": "packagekey",
+      "message": "message"
+    },
+    "checkpoint": {
+      "checkpoint": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceAAAAAAAAAAAA01",
+        "deviceListIndex": 2,
+        "deviceListDigest": "listdigest",
+        "headerRevision": 5,
+        "headerDigest": "headerdigest",
+        "observedAt": 1800000000,
+        "signature": "signature"
+      }
+    },
+    "createVault": {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 2,
+        "previousDigest": "prevdigest",
+        "kind": "add",
+        "signerDeviceId": "deviceAAAAAAAAAAAA01",
+        "subjectDeviceId": "deviceBBBBBBBBBBBB01",
+        "subjectSigningKey": "signingkey",
+        "subjectPackageKey": "packagekey",
+        "sealedLabel": "sealed",
+        "epochAfter": 1,
+        "snapshotFloor": 4,
+        "signature": "signature"
+      }
+    },
+    "message": {
+      "message": "message"
+    },
+    "remove": {
+      "entry": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "index": 2,
+        "previousDigest": "prevdigest",
+        "kind": "add",
+        "signerDeviceId": "deviceAAAAAAAAAAAA01",
+        "subjectDeviceId": "deviceBBBBBBBBBBBB01",
+        "subjectSigningKey": "signingkey",
+        "subjectPackageKey": "packagekey",
+        "sealedLabel": "sealed",
+        "epochAfter": 1,
+        "snapshotFloor": 4,
+        "signature": "signature"
+      },
+      "packages": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "senderDeviceId": "deviceAAAAAAAAAAAA01",
+          "recipientDeviceId": "deviceBBBBBBBBBBBB01",
+          "vaultEpoch": 1,
+          "entryDigest": "entrydigest",
+          "ciphertext": "ciphertext",
+          "signature": "signature"
+        }
+      ]
+    },
+    "reset": {
+      "vaultEpoch": 2
+    },
+    "upload": {
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceAAAAAAAAAAAA01",
+        "revision": 5,
+        "vaultEpoch": 1,
+        "deviceListIndex": 2,
+        "deviceListDigest": "listdigest",
+        "previousDigest": "prevdigest",
+        "ciphertextDigest": "ciphertextdigest",
+        "ciphertextLength": 64,
+        "nonce": "nonce",
+        "signature": "signature"
+      },
+      "ciphertext": "ciphertext"
+    }
+  },
+  "responses": {
+    "checkpoints": {
+      "checkpoints": [
+        {
+          "version": 3,
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "deviceId": "deviceAAAAAAAAAAAA01",
+          "deviceListIndex": 2,
+          "deviceListDigest": "listdigest",
+          "headerRevision": 5,
+          "headerDigest": "headerdigest",
+          "observedAt": 1800000000,
+          "signature": "signature",
+          "acceptedAt": "2026-10-10T09:00:00Z"
+        }
+      ]
+    },
+    "deviceList": {
+      "entries": [
+        {
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "index": 2,
+          "previousDigest": "prevdigest",
+          "kind": "add",
+          "signerDeviceId": "deviceAAAAAAAAAAAA01",
+          "subjectDeviceId": "deviceBBBBBBBBBBBB01",
+          "subjectSigningKey": "signingkey",
+          "subjectPackageKey": "packagekey",
+          "sealedLabel": "sealed",
+          "epochAfter": 1,
+          "snapshotFloor": 4,
+          "signature": "signature"
+        }
+      ]
+    },
+    "devices": {
+      "devices": [
+        {
+          "deviceId": "deviceAAAAAAAAAAAA01",
+          "state": "approved",
+          "addedIndex": 1,
+          "activatedEpoch": 1
+        }
+      ],
+      "pairings": [
+        {
+          "deviceId": "deviceBBBBBBBBBBBB01",
+          "signingKey": "signingkey",
+          "packageKey": "packagekey",
+          "state": "offered",
+          "offer": "offer",
+          "answer": "",
+          "confirm": "",
+          "expiresAt": "2026-10-10T09:10:00Z"
+        }
+      ]
+    },
+    "headers": {
+      "headers": [
+        {
+          "version": 3,
+          "vaultId": "vaultAAAAAAAAAAAA01",
+          "deviceId": "deviceAAAAAAAAAAAA01",
+          "revision": 5,
+          "vaultEpoch": 1,
+          "deviceListIndex": 2,
+          "deviceListDigest": "listdigest",
+          "previousDigest": "prevdigest",
+          "ciphertextDigest": "ciphertextdigest",
+          "ciphertextLength": 64,
+          "nonce": "nonce",
+          "signature": "signature",
+          "digest": "digest",
+          "receipt": "receipt",
+          "acceptedAt": "2026-10-10T09:00:00Z"
+        }
+      ]
+    },
+    "keyPackage": {
+      "package": {
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "senderDeviceId": "deviceAAAAAAAAAAAA01",
+        "recipientDeviceId": "deviceBBBBBBBBBBBB01",
+        "vaultEpoch": 1,
+        "entryDigest": "entrydigest",
+        "ciphertext": "ciphertext",
+        "signature": "signature"
+      }
+    },
+    "pairingStatus": {
+      "state": "offered",
+      "answer": "",
+      "expiresAt": "2026-10-10T09:10:00Z"
+    },
+    "snapshot": {
+      "header": {
+        "version": 3,
+        "vaultId": "vaultAAAAAAAAAAAA01",
+        "deviceId": "deviceAAAAAAAAAAAA01",
+        "revision": 5,
+        "vaultEpoch": 1,
+        "deviceListIndex": 2,
+        "deviceListDigest": "listdigest",
+        "previousDigest": "prevdigest",
+        "ciphertextDigest": "ciphertextdigest",
+        "ciphertextLength": 64,
+        "nonce": "nonce",
+        "signature": "signature"
+      },
+      "digest": "digest",
+      "receipt": "receipt",
+      "acceptedAt": "2026-10-10T09:00:00Z",
+      "ciphertext": "ciphertext"
+    },
+    "state": {
+      "vaultId": "vaultAAAAAAAAAAAA01",
+      "vaultEpoch": 1,
+      "headIndex": 2,
+      "currentRevision": 5,
+      "instanceKey": "instancekey",
+      "deviceId": "deviceAAAAAAAAAAAA01",
+      "deviceState": "approved",
+      "activatedEpoch": 1
+    },
+    "upload": {
+      "revision": 5,
+      "digest": "digest",
+      "receipt": "receipt",
+      "acceptedAt": "2026-10-10T09:00:00Z"
+    }
+  }
+}
