@@ -1,7 +1,8 @@
 # Security policy
 
 Sesame is an early password manager. It has not had an independent
-security audit. If you find a way to read, alter, or leak vault data, we want
+security audit, and neither has Sesame Sync, the optional feature that copies
+an encrypted vault between your devices. If you find a way to read, alter, or leak vault data, we want
 to hear about it before anyone else does.
 
 ## Reporting a vulnerability
@@ -60,6 +61,9 @@ In scope:
 - The native-messaging host, local transport, and fill approval path under
   `src-tauri/src/bin/`, `src-tauri/src/adapters/platform/`, and
   `src-tauri/src/browser_fill*.rs`.
+- Sesame Sync in the desktop app: the signed device list, snapshot headers,
+  pairing, key packages, request signatures, and the minimum version check.
+  Report server findings in [sesame-server](https://github.com/usesesame/sesame-server).
 - The desktop release pipeline: artifact substitution, updater signature
   bypass, installer lifecycle, and rollback behaviour.
 
@@ -99,8 +103,9 @@ good-faith report that turns out to be out of scope is not held against you.
   PINs offline. Each extra PIN digit makes that search ten times longer.
 - A lost recovery kit cannot be recovered. A new one can only be issued with
   the master password after a 72-hour wait.
-- Sync is not enabled. Preview-only desktop code is gated by the
-  `sync-preview` Cargo feature, which shipping builds do not enable.
+- Sync is off until a person turns it on in Settings. The screen says that no
+  independent review has happened. A service that refuses to answer, and a
+  vault with a single device, are outside what Sync claims to prevent.
 - Sesame cannot protect an unlocked vault from software that controls your
   computer. Malware running as you, or as an administrator, can read the
   app's memory, drive its window, record your keystrokes, or capture the

@@ -1,7 +1,0 @@
-{
-  "app": {
-    "security": {
-      "capabilities": ["main-capability", "quick-access-capability", "sync-preview-capability"]
-    }
-  }
-}

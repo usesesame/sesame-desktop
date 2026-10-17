@@ -165,12 +165,12 @@ fn snapshot_opening_reports_typed_failures_instead_of_panics() {
             _ => "%%%".to_string(),
         };
         let blob = CipherBlob { nonce, ciphertext };
-        let result = VaultLoader::open_snapshot(2, &key, &blob, &mutator.random_bytes(16));
+        let result = VaultLoader::open_snapshot(3, &key, &blob, &mutator.random_bytes(16));
         if let Ok(authenticated) = result {
             let _ = authenticated.payload();
         }
     }
-    for version in [0_u32, 1, 3, u32::MAX] {
+    for version in [0_u32, 1, 2, u32::MAX] {
         let blob = CipherBlob {
             nonce: String::new(),
             ciphertext: String::new(),

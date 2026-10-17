@@ -2,7 +2,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 
-import { releaseSetSigningPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
+import { releaseSetSigningPayload, syncFloorPayload, updateReceiptV3, verifyReleaseSet } from './release-set.mjs'
 
 const [candidatePath, outputPath] = process.argv.slice(2)
 if (!candidatePath || !outputPath) {
@@ -102,6 +102,24 @@ if (receiptFile) {
   }
 }
 
+const floorFile = process.env.SESAME_SYNC_FLOOR_FILE?.trim()
+let syncFloor
+if (floorFile) {
+  const floor = JSON.parse(await readFile(resolve(floorFile), 'utf8'))
+  const minimum = typeof floor?.payload === 'string' ? floor.payload.split('\n')[2] : undefined
+  if (
+    typeof minimum !== 'string' || floor.payload !== syncFloorPayload(candidate, minimum) ||
+    floor.signingKeyId !== candidate.candidateSigningKeyId ||
+    typeof floor.signature !== 'string' || Buffer.from(floor.signature, 'base64url').length !== 64
+  ) {
+    throw new Error('The provided Sync floor does not describe this release set.')
+  }
+  if (!verify(null, Buffer.from(floor.payload), candidatePublicKey, Buffer.from(floor.signature, 'base64url'))) {
+    throw new Error('The Sync floor signature does not verify.')
+  }
+  syncFloor = { payload: floor.payload, signingKeyId: floor.signingKeyId, signature: floor.signature }
+}
+
 const target = `${candidate.platform}-${candidate.architecture}-${artifact.format}`
 const manifest = {
   version: candidate.version,
@@ -114,6 +132,7 @@ const manifest = {
     },
   },
   candidateReceipt,
+  ...(syncFloor ? { syncFloor } : {}),
 }
 
 await writeFile(resolve(outputPath), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')

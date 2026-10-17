@@ -8,8 +8,8 @@
   export let preview = false
   export let recoveryRequestPending = false
   export let onReviewRecoveryRequest: () => void = () => {}
-  /// Sync status text; undefined in every build where Sync is disabled.
   export let syncStatusLabel: string | undefined = undefined
+  export let syncTone: 'ok' | 'busy' | 'warn' = 'ok'
 
   $: contextLabel = syncStatusLabel ?? (preview ? 'Preview mode' : 'Local vault')
 </script>
@@ -19,7 +19,11 @@
     <img class="chrome-mark" src="/favicon.svg" alt="" />
     <span>Sesame</span>
     <span class="chrome-separator">/</span>
-    <span class="chrome-context">{contextLabel}</span>
+    {#if syncStatusLabel}
+      <span class="chrome-context chrome-sync" role="status" aria-live="polite"><span class="chrome-sync-dot {syncTone}" aria-hidden="true"></span>{contextLabel}</span>
+    {:else}
+      <span class="chrome-context">{contextLabel}</span>
+    {/if}
   </div>
   <div class="chrome-drag-space" data-tauri-drag-region></div>
   <!-- Only real input dismisses: the button defers the lock, no command behind it. See src-tauri/src/session_guard.rs. -->
