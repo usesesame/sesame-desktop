@@ -224,8 +224,10 @@ pub const MAX_BACKUP_BYTES: u64 = 256 * 1024 * 1024;
 /// Prunes oldest first; the copies for the resolution happening right now are protected.
 #[must_use]
 pub fn prune(directory: &Path, keep: &[PathBuf]) -> usize {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return 0;
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(_) => return 1,
     };
     let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = entries
         .flatten()
@@ -430,6 +432,23 @@ mod tests {
             .expect("restored directory");
         assert_eq!(failed, 2);
         assert_eq!(copies(&directory).len(), MAX_BACKUPS + 2);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_missing_directory_has_nothing_to_prune() {
+        let directory = scratch("missing-prune");
+        let missing = directory.join("not-created");
+        assert_eq!(prune(&missing, &[]), 0);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_listed_counts_as_a_pruning_failure() {
+        let directory = scratch("unlistable-prune");
+        let not_a_directory = directory.join("plain-file");
+        std::fs::write(&not_a_directory, b"x").expect("plain file");
+        assert_eq!(prune(&not_a_directory, &[]), 1);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
