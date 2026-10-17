@@ -229,27 +229,31 @@ pub fn prune(directory: &Path, keep: &[PathBuf]) -> usize {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return 0,
         Err(_) => return 1,
     };
-    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("sesame") {
-                return None;
-            }
-            let metadata = entry.metadata().ok()?;
-            Some((
+    let mut failed = 0_usize;
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            failed += 1;
+            continue;
+        };
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("sesame") {
+            continue;
+        }
+        match entry.metadata() {
+            Ok(metadata) => files.push((
                 metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
                 metadata.len(),
                 path,
-            ))
-        })
-        .collect();
+            )),
+            Err(_) => failed += 1,
+        }
+    }
     // Newest first, so draining from the end removes the oldest.
     files.sort_by(|left, right| right.0.cmp(&left.0));
 
     let mut kept = 0_usize;
     let mut bytes = 0_u64;
-    let mut failed = 0_usize;
     for (_, size, path) in files {
         let protected = keep.iter().any(|reserved| reserved == &path);
         kept += 1;
