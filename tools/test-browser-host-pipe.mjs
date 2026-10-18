@@ -12,6 +12,7 @@ const suffix = executableSuffix()
 const desktopExe = join(root, 'src-tauri', 'target', 'debug', `sesame${suffix}`)
 const hostExe = join(root, 'src-tauri', 'target', 'debug', `sesame-browser-host${suffix}`)
 const pinnedOrigin = 'chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg'
+const trustedOrigins = [`${pinnedOrigin}/`, 'chrome-extension://aodkkjabifjcbppgccgjidcmaiamddla/']
 const hostName = 'app.usesesame.browser'
 const firefoxExtensionId = 'sesame@usesesame.app'
 
@@ -90,8 +91,8 @@ function verifyChromiumManifest(location) {
   }
   if (
     !Array.isArray(manifest.allowed_origins)
-    || manifest.allowed_origins.length !== 1
-    || manifest.allowed_origins[0] !== `${pinnedOrigin}/`
+    || manifest.allowed_origins.length !== trustedOrigins.length
+    || trustedOrigins.some((origin, index) => manifest.allowed_origins[index] !== origin)
   ) {
     throw new Error(`${location} allows ${JSON.stringify(manifest.allowed_origins)}`)
   }

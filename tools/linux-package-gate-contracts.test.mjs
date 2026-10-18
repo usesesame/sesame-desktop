@@ -7,7 +7,7 @@ import test from 'node:test'
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
 import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
-import { chromeHostManifestMatches, pinnedChromeOrigin } from './desktop-e2e-bridge.mjs'
+import { chromeHostManifestMatches, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
 
@@ -152,18 +152,22 @@ test('the gate refuses non-Linux and non-deb inputs', async () => {
   assert.match(source, /sudo', \['-n', 'dpkg', '-i'/)
 })
 
-test('the shipped manifest check pins the host path, type, and single origin', () => {
+test('the shipped manifest check pins the host path, type, and the two trusted origins', () => {
   const manifest = {
     name: 'app.usesesame.browser',
     type: 'stdio',
     path: '/usr/bin/sesame-browser-host',
-    allowed_origins: [pinnedChromeOrigin],
+    allowed_origins: trustedChromeOrigins,
   }
   assert.equal(chromeHostManifestMatches(manifest, '/usr/bin/sesame-browser-host'), true)
   assert.equal(chromeHostManifestMatches({ ...manifest, path: '/tmp/sesame-browser-host' }, '/usr/bin/sesame-browser-host'), false)
   assert.equal(chromeHostManifestMatches({ ...manifest, type: 'ws' }, '/usr/bin/sesame-browser-host'), false)
   assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: ['chrome-extension://other/'] }, '/usr/bin/sesame-browser-host'), false)
   assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: [pinnedChromeOrigin, pinnedChromeOrigin] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: [pinnedChromeOrigin] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: [storeChromeOrigin] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: [...trustedChromeOrigins, 'chrome-extension://other/'] }, '/usr/bin/sesame-browser-host'), false)
+  assert.equal(chromeHostManifestMatches({ ...manifest, allowed_origins: ['chrome-extension://*/'] }, '/usr/bin/sesame-browser-host'), false)
   assert.equal(chromeHostManifestMatches({ ...manifest, name: 'app.other.browser' }, '/usr/bin/sesame-browser-host'), false)
   assert.equal(chromeHostManifestMatches({}, '/usr/bin/sesame-browser-host'), false)
 })
