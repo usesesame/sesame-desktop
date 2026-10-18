@@ -4,7 +4,7 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
-## 0.4.0
+## 0.4.1
 
 ### Sync
 

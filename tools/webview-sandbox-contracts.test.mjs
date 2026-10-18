@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -116,4 +116,17 @@ test('the deb and rpm depend on bubblewrap and xdg-dbus-proxy', () => {
 test('the runtime check is reachable from package.json', () => {
   const scripts = JSON.parse(read('package.json')).scripts
   assert.match(scripts['desktop:linux:webview:check'], /tools\/linux-webview-sandbox-check\.mjs/)
+})
+
+test('every workflow that runs the app under xvfb installs bubblewrap and allows user namespaces', () => {
+  const directory = join(root, '.github', 'workflows')
+  const runners = readdirSync(directory)
+    .filter((name) => name.endsWith('.yml'))
+    .map((name) => [name, readFileSync(join(directory, name), 'utf8')])
+    .filter(([, text]) => /xvfb-run/.test(text))
+  assert.ok(runners.length >= 3, 'the workflows that run the app under xvfb moved')
+  for (const [name, text] of runners) {
+    assert.match(text, /^\s+bubblewrap\s*\\?$/m, `${name} does not install bubblewrap before running the app`)
+    assert.match(text, /kernel\.apparmor_restrict_unprivileged_userns=0/, `${name} does not allow user namespaces for the web view sandbox`)
+  }
 })
