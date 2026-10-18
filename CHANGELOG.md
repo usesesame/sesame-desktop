@@ -97,6 +97,14 @@ release cannot be published without saying what changed in it.
   the side-loaded one. Update the desktop app before you install the store
   version, or it cannot connect.
 
+### Linux packaging
+
+- The AppImage bundles Ubuntu 24.04 libraries, and OSV lists open advisories for
+  twenty-eight of them, mostly in libsoup3, webkit2gtk and cups, with no fixed
+  version for 24.04. The release gate records each one with its reason. The deb
+  and rpm packages use your distribution's own libraries, so they get its
+  fixes. Prefer them if your distribution has one.
+
 ### Import
 
 - The import preview counts every code or item in the file and says why each
