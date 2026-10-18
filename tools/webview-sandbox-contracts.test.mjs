@@ -120,7 +120,7 @@ test('the runtime check is reachable from package.json', () => {
 
 function jobsOf(text) {
   const start = text.search(/^jobs:\s*$/m)
-  return text.slice(start).split(/^(?=  [A-Za-z0-9_-]+:\s*$)/m).slice(1)
+  return text.slice(start).split(/^(?= {2}[A-Za-z0-9_-]+:\s*$)/m).slice(1)
 }
 
 test('every job that runs the app under xvfb installs bubblewrap and allows user namespaces first', () => {
