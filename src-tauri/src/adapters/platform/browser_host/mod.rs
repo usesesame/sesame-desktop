@@ -9,7 +9,10 @@ use crate::browser_protocol::{
 };
 
 const HOST_NAME: &str = "app.usesesame.browser";
-const TRUSTED_CHROMIUM_EXTENSION_IDS: &[&str] = &["idbkfhhjnniibleeanchljhakfhecnlg"];
+const TRUSTED_CHROMIUM_EXTENSION_IDS: &[&str] = &[
+    "idbkfhhjnniibleeanchljhakfhecnlg",
+    "aodkkjabifjcbppgccgjidcmaiamddla",
+];
 const PINNED_FIREFOX_EXTENSION_ID: &str = "sesame@usesesame.app";
 
 #[cfg(target_os = "linux")]
@@ -548,6 +551,37 @@ mod launcher_tests {
             assert!(launcher_allowed(Some(OsStr::new(&bare)), None));
             assert!(launcher_allowed(
                 Some(OsStr::new(&format!("{bare}/"))),
+                None
+            ));
+        }
+    }
+
+    #[test]
+    fn the_side_loaded_and_the_store_extension_are_the_only_trusted_chromium_ids() {
+        let expected = [
+            "idbkfhhjnniibleeanchljhakfhecnlg",
+            "aodkkjabifjcbppgccgjidcmaiamddla",
+        ];
+        assert_eq!(TRUSTED_CHROMIUM_EXTENSION_IDS, &expected[..]);
+        for id in expected {
+            let bare = format!("chrome-extension://{id}");
+            assert!(launcher_allowed(Some(OsStr::new(&bare)), None));
+            assert!(launcher_allowed(
+                Some(OsStr::new(&format!("{bare}/"))),
+                None
+            ));
+        }
+    }
+
+    #[test]
+    fn an_unrelated_chromium_id_is_refused_even_with_the_right_shape() {
+        for id in [
+            "aaaabbbbccccddddeeeeffffgggghhhh",
+            "aodkkjabifjcbppgccgjidcmaiamddlb",
+            "bodkkjabifjcbppgccgjidcmaiamddla",
+        ] {
+            assert!(!launcher_allowed(
+                Some(OsStr::new(&format!("chrome-extension://{id}"))),
                 None
             ));
         }
