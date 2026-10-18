@@ -41,4 +41,7 @@ test = false
 doc = false
 bench = false
 
+[patch.crates-io]
+glib = { path = "../vendor/glib" }
+
 [workspace]
