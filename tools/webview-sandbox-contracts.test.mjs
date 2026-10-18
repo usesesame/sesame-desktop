@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -116,4 +116,25 @@ test('the deb and rpm depend on bubblewrap and xdg-dbus-proxy', () => {
 test('the runtime check is reachable from package.json', () => {
   const scripts = JSON.parse(read('package.json')).scripts
   assert.match(scripts['desktop:linux:webview:check'], /tools\/linux-webview-sandbox-check\.mjs/)
+})
+
+function jobsOf(text) {
+  const start = text.search(/^jobs:\s*$/m)
+  return text.slice(start).split(/^(?= {2}[A-Za-z0-9_-]+:\s*$)/m).slice(1)
+}
+
+test('every job that runs the app under xvfb installs bubblewrap and allows user namespaces first', () => {
+  const directory = join(root, '.github', 'workflows')
+  const runners = []
+  for (const name of readdirSync(directory).filter((file) => /\.ya?ml$/.test(file))) {
+    for (const job of jobsOf(readFileSync(join(directory, name), 'utf8'))) {
+      if (/xvfb-run/.test(job)) runners.push([`${name} ${job.split('\n')[0].trim()}`, job])
+    }
+  }
+  assert.ok(runners.length >= 4, 'the jobs that run the app under xvfb moved')
+  for (const [label, job] of runners) {
+    const before = job.slice(0, job.indexOf('xvfb-run'))
+    assert.match(before, /^\s+bubblewrap\s*\\?$/m, `${label} does not install bubblewrap before it runs the app`)
+    assert.match(before, /kernel\.apparmor_restrict_unprivileged_userns=0/, `${label} does not allow user namespaces before it runs the app`)
+  }
 })

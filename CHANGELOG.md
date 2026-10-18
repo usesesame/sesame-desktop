@@ -4,7 +4,7 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
-## 0.4.0
+## 0.4.1
 
 ### Sync
 
@@ -96,6 +96,14 @@ release cannot be published without saying what changed in it.
 - The desktop trusts the Chrome Web Store version of the extension as well as
   the side-loaded one. Update the desktop app before you install the store
   version, or it cannot connect.
+
+### Linux packaging
+
+- The AppImage bundles Ubuntu 24.04 libraries, and OSV lists open advisories for
+  twenty-eight of them, mostly in libsoup3, webkit2gtk and cups, with no fixed
+  version for 24.04. The release gate records each one with its reason. The deb
+  and rpm packages use your distribution's own libraries, so they get its
+  fixes. Prefer them if your distribution has one.
 
 ### Import
 
