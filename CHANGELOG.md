@@ -4,7 +4,28 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
-## Unreleased
+## 0.4.0
+
+### Sync
+
+- Sync is off until you turn it on. When you do, your vault syncs between your
+  devices through a server you run. A new device joins with a one-time code
+  from a device that already syncs, edits sync on their own, and the vault bar
+  shows the sync status. A join that was interrupted resumes with its saved
+  approval.
+- A desktop notices when a server offers an older copy than the one it already
+  applied, or a second history that does not match its own. The setup screen
+  explains the backup you need if every approved device is lost.
+- Sync has not had an independent security review, and the hosted Sesame
+  service does not offer it yet.
+
+### Your own server
+
+- Settings can pair the desktop with a server you run. Sesame shows the
+  server's key fingerprint before it sends any code, and it refuses the server
+  later if that key changes.
+- Pairing checks the device key store before it redeems a code.
+
 
 ### Lock and release
 
@@ -34,6 +55,48 @@ release cannot be published without saying what changed in it.
   ordinary memory instead. A failed key store no longer skips wiping the copy
   Sesame was handed.
 
+### Security
+
+- The merge dialog no longer receives the password, 2FA seed, notes and backup
+  codes of every selected login. It learns whether each field is present and
+  whether the values differ, shows one password at a time behind the master
+  password check, and merges at most 16 logins at once.
+- On Windows a copied secret stays out of clipboard history and out of Cloud
+  Clipboard sync. Both windows stay out of screenshots, screen sharing and
+  Recall, and Settings has a switch that allows capture for support sessions.
+  The editors also ask the browser not to autofill card, identity and login
+  fields.
+- Both windows refuse to leave the app's own address and cannot open new
+  windows, and the content security policy is stricter.
+- On Linux the web view runs in the WebKit sandbox. Sesame refuses to run it
+  when bubblewrap cannot start it, so the deb and rpm packages now depend on
+  bubblewrap and xdg-dbus-proxy. The JavaScript JIT is off in the web view on
+  both systems, and Linux release builds remove the WebKit automation and
+  inspector variables before the window starts.
+- A browser approval needs 750 milliseconds of focused time in the Sesame
+  window, so a click that lands as the window takes focus cannot approve a
+  fill. Auto-type rechecks the focused window before each group of eight
+  characters.
+- Replacing a recovery kit now rotates the vault key, so the old kit no longer
+  opens later versions of the vault, and the dialog offers to delete local
+  backups made before the change.
+- The vault file is padded before it is encrypted, so its size no longer shows
+  how long an edit was.
+- An update download is checked against the signed size, a stalled download is
+  stopped, and redirects only go to the release hosts. The vault locks after
+  the download passes its checks.
+- The connection between the browser helper and the desktop reads each message
+  under a time limit and keeps its folder private from the first moment. The
+  diagnostics log is created private and refuses symbolic links.
+- Two unused dependencies are gone, the updater plugin's zip support and the
+  clipboard plugin, which removes three advisories in the zip crate.
+
+### Browser integration
+
+- The desktop trusts the Chrome Web Store version of the extension as well as
+  the side-loaded one. Update the desktop app before you install the store
+  version, or it cannot connect.
+
 ### Import
 
 - The import preview counts every code or item in the file and says why each
@@ -44,6 +107,13 @@ release cannot be published without saying what changed in it.
 - Bitwarden CSV files keep every website address in a cell that lists several.
   The import chooser now recommends Bitwarden JSON, which also keeps custom
   fields, secure notes, cards, identities and SSH keys.
+
+### Speed and setup
+
+- Searching a large vault is faster. A search that matches every record takes
+  about a fifth of the time at 10,000 records.
+- The last setup screen offers to import your passwords, add a login and make
+  a backup with a restore check.
 
 ## 0.3.0
 
