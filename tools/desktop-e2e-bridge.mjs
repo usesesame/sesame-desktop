@@ -10,6 +10,8 @@ export const COMMAND_TIMEOUT_MS = 300_000
 
 export const browserHostName = 'app.usesesame.browser'
 export const pinnedChromeOrigin = 'chrome-extension://idbkfhhjnniibleeanchljhakfhecnlg/'
+export const storeChromeOrigin = 'chrome-extension://aodkkjabifjcbppgccgjidcmaiamddla/'
+export const trustedChromeOrigins = [pinnedChromeOrigin, storeChromeOrigin]
 
 const run = promisify(execFile)
 
@@ -186,8 +188,8 @@ export function chromeHostManifestMatches(manifest, expectedHost) {
     && typeof manifest.path === 'string'
     && path.resolve(manifest.path) === path.resolve(expectedHost)
     && Array.isArray(manifest.allowed_origins)
-    && manifest.allowed_origins.length === 1
-    && manifest.allowed_origins[0] === pinnedChromeOrigin
+    && manifest.allowed_origins.length === trustedChromeOrigins.length
+    && trustedChromeOrigins.every((origin, index) => manifest.allowed_origins[index] === origin)
 }
 
 export async function stopApp(child) {
