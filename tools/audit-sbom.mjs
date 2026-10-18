@@ -16,6 +16,10 @@ export const defaultSbomPath = (base = root) => {
 
 export const allowlistPath = path.join(root, 'tools', 'sbom-advisory-allowlist.json')
 
+const MAX_ALLOWLIST_DAYS = 90
+const isoDate = /^\d{4}-\d{2}-\d{2}$/
+const dayNumber = (value) => Date.parse(`${value}T00:00:00Z`) / 86_400_000
+
 export const loadAllowlist = (file = allowlistPath) => {
   const parsed = JSON.parse(readFileSync(file, 'utf8'))
   const entries = Array.isArray(parsed.entries) ? parsed.entries : []
@@ -26,6 +30,13 @@ export const loadAllowlist = (file = allowlistPath) => {
           `Every allowlist entry needs an id, a package, a reason and a reviewed date: ${JSON.stringify(entry)}`,
         )
       }
+    }
+    if (!isoDate.test(entry.reviewed) || !isoDate.test(entry.expires ?? '')) {
+      throw new Error(`Every allowlist entry needs a reviewed date and an expiry date as YYYY-MM-DD: ${JSON.stringify(entry)}`)
+    }
+    const days = dayNumber(entry.expires) - dayNumber(entry.reviewed)
+    if (!(days > 0 && days <= MAX_ALLOWLIST_DAYS)) {
+      throw new Error(`An allowlist entry must expire within ${MAX_ALLOWLIST_DAYS} days after it was reviewed: ${JSON.stringify(entry)}`)
     }
   }
   return entries
@@ -101,7 +112,12 @@ export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8
   }
 }
 
-export const collectSbomAdvisories = async (sources, { query = queryOsv, concurrency = 8, allowlist = [] } = {}) => {
+export const collectSbomAdvisories = async (
+  sources,
+  { query = queryOsv, concurrency = 8, allowlist: configured = [], today = new Date().toISOString().slice(0, 10) } = {},
+) => {
+  const expired = configured.filter((rule) => typeof rule.expires === 'string' && rule.expires < today)
+  const allowlist = configured.filter((rule) => !expired.includes(rule))
   const entries = []
   const summaries = []
   for (const [index, source] of sources.entries()) {
@@ -154,6 +170,7 @@ export const collectSbomAdvisories = async (sources, { query = queryOsv, concurr
     vulnerable: fatal.map(publicAdvisory),
     allowed: allowed.map(publicAdvisory),
     unused,
+    expired,
   }
 }
 
@@ -218,6 +235,11 @@ const main = async () => {
   for (const component of report.allowed) {
     process.stdout.write(
       `Allowed by review: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+    )
+  }
+  for (const rule of report.expired) {
+    process.stdout.write(
+      `Expired allowlist entry: ${rule.id} for ${rule.package} expired on ${rule.expires}, review it again.\n`,
     )
   }
   for (const rule of report.unused) {

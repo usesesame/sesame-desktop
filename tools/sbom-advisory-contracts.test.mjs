@@ -233,3 +233,33 @@ test('the shipped allowlist names the systemd advisory with a reason and a revie
   assert.ok(entry.reason.length > 20, 'the entry needs a reason a reviewer can check')
   assert.match(entry.reviewed, /^\d{4}-\d{2}-\d{2}$/)
 })
+
+test('an expired allowlist entry no longer suppresses its advisory', async () => {
+  const bom = { components: [{ name: 'systemd', version: '255', purl: 'pkg:deb/ubuntu/systemd@255' }] }
+  const query = async () => [{ id: 'UBUNTU-CVE-2026-40228' }]
+  const rule = { id: 'UBUNTU-CVE-2026-40228', package: 'systemd', reason: 'checked', reviewed: '2026-10-07', expires: '2026-11-17' }
+  const open = await collectSbomAdvisories([{ bom }], { query, allowlist: [rule], today: '2026-11-17' })
+  assert.equal(open.vulnerable.length, 0)
+  const lapsed = await collectSbomAdvisories([{ bom }], { query, allowlist: [rule], today: '2026-11-18' })
+  assert.equal(lapsed.vulnerable.length, 1)
+  assert.deepEqual(lapsed.expired.map((entry) => entry.id), ['UBUNTU-CVE-2026-40228'])
+})
+
+test('an allowlist entry must carry an expiry within ninety days of its review', () => {
+  const write = (entry) => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'allowlist-')), 'allowlist.json')
+    writeFileSync(file, JSON.stringify({ entries: [entry] }))
+    return file
+  }
+  const base = { id: 'X-1', package: 'p', reason: 'checked', reviewed: '2026-10-07' }
+  assert.throws(() => loadAllowlist(write(base)), /expiry date/)
+  assert.throws(() => loadAllowlist(write({ ...base, expires: '2027-06-01' })), /within 90 days/)
+  assert.throws(() => loadAllowlist(write({ ...base, expires: '2026-10-01' })), /within 90 days/)
+  assert.equal(loadAllowlist(write({ ...base, expires: '2026-12-01' })).length, 1)
+})
+
+test('every shipped allowlist entry expires within ninety days of its review', () => {
+  for (const entry of loadAllowlist()) {
+    assert.ok(entry.expires > entry.reviewed, entry.id)
+  }
+})
