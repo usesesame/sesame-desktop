@@ -1,3 +1,0 @@
-     Locking 2 packages to highest compatible versions
-      Adding glib v0.18.5 (/home/domka/Documents/Projects/Sesame/.worktrees/fuzz-glib-patch/src-tauri/vendor/glib)
-    Updating sesame v0.3.0 (/home/domka/Documents/Projects/Sesame/.worktrees/fuzz-glib-patch/src-tauri) -> v0.4.1
