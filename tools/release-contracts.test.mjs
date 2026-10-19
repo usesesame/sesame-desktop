@@ -69,7 +69,7 @@ test('the saved password is revealed only through a presence gate', () => {
   assert.match(vault, /invoke(<[^>]+>)?\('reveal_login_secret', \{ id \}\)/)
 })
 
-test('a tag keeps the unsigned release unpublished until signing', () => {
+test('a tag keeps the unsigned release unpublished until a maintainer publishes it', () => {
   for (const scriptPath of ['reconcile-github-release.mjs', 'publish-linux-release.mjs']) {
     const script = read('tools', scriptPath)
     assert.match(

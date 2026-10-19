@@ -592,7 +592,7 @@ jobs:
           } > release-notes.md
           node tools/reconcile-github-release.mjs release-handoff public-release-evidence "$MANIFEST" "$(ls release-handoff/*.candidate.json)" release-notes.md
 
-      - name: Prove the release stays unpublished until signing
+      - name: Prove the release stays unpublished
         env:
           GH_TOKEN: ${{ github.token }}
           MANIFEST: ${{ needs.sign-and-attest.outputs.manifest }}
@@ -605,7 +605,7 @@ jobs:
               echo "Release $GITHUB_REF_NAME was already published by a maintainer. This job added files to it and did not publish it." >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            echo "This job published the release; the unsigned installer must stay an unpublished draft until Authenticode signing and approval." >&2
+            echo "This job published the release; the unsigned installer must stay an unpublished draft until a maintainer publishes it." >&2
             exit 1
           fi
           installer=$(jq -r '.artifact.filename' "release-handoff/$MANIFEST")
@@ -617,7 +617,7 @@ jobs:
             fi
           done
           echo "Release $GITHUB_REF_NAME is an unpublished draft; $installer and latest.json are not publicly reachable."
-          echo "Release $GITHUB_REF_NAME is an unpublished draft. Public Windows downloads and the updater manifest stay off until Authenticode signing and an explicit publish by a maintainer." >> "$GITHUB_STEP_SUMMARY"
+          echo "Release $GITHUB_REF_NAME is an unpublished draft. Public Windows downloads and the updater manifest stay off until a maintainer publishes the release deliberately." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Submit the cryptographically verified candidate
         env:
