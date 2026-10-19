@@ -16,6 +16,8 @@ const TRUSTED_CHROMIUM_EXTENSION_IDS: &[&str] = &[
 const PINNED_FIREFOX_EXTENSION_ID: &str = "sesame@usesesame.app";
 
 #[cfg(target_os = "linux")]
+pub(crate) mod appimage;
+#[cfg(target_os = "linux")]
 mod linux;
 #[cfg(not(any(windows, target_os = "linux")))]
 mod unsupported;
@@ -137,8 +139,12 @@ pub fn locations() -> Result<RegistrationLocations, RegistrationError> {
         return Err(unsupported_error());
     }
     let plan = plan()?;
+    #[allow(unused_mut)]
+    let mut manifests = manifest_paths(&plan);
+    #[cfg(target_os = "linux")]
+    manifests.extend(appimage::staged_files());
     Ok(RegistrationLocations {
-        manifests: manifest_paths(&plan),
+        manifests,
         registry_keys: registry_keys().to_vec(),
     })
 }
@@ -146,6 +152,10 @@ pub fn locations() -> Result<RegistrationLocations, RegistrationError> {
 fn install_registration() -> Result<BrowserIntegrationStatus, RegistrationError> {
     if !is_supported() {
         return Err(unsupported_error());
+    }
+    #[cfg(target_os = "linux")]
+    if appimage::running_from_appimage() {
+        appimage::stage_running_app()?;
     }
     let plan = plan()?;
     if !plan.host.is_file() {

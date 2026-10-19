@@ -221,12 +221,12 @@ test('the rpm shipped record requires a real install and native-host cleanup', (
   assert.throws(() => validateLinuxRpmShippedEvidence({ ...rpmRecord(), schema: SHIPPED_RUN_SCHEMA }), /wrong schema/)
 })
 
-test('the AppImage shipped record requires an extracted payload and no registration', () => {
+test('the AppImage shipped record requires an extracted payload and a staged registration', () => {
   const evidence = appimageRecord()
   assert.equal(validateLinuxAppImageShippedEvidence(evidence), evidence)
   const missing = appimageRecord()
-  missing.steps = missing.steps.filter((step) => step.name !== 'browser.registration_refused')
-  assert.throws(() => validateLinuxAppImageShippedEvidence(missing), /did not pass browser\.registration_refused/)
+  missing.steps = missing.steps.filter((step) => step.name !== 'browser.registration_staged')
+  assert.throws(() => validateLinuxAppImageShippedEvidence(missing), /did not pass browser\.registration_staged/)
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ schema: RPM_RUN_SCHEMA })), /wrong schema/)
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ binarySha256: 'nope' })), /package and binary digests/)
   assert.ok(!requiredAppImageSteps.includes('package.uninstall'), 'the AppImage gate must not require an uninstall step that only deletes its own staging directory')
@@ -253,7 +253,7 @@ test('the gate exercises rpm installs, AppImage extraction, and both cleanup pat
   assert.match(source, /--appimage-extract/)
   assert.match(source, /APPIMAGE_EXTRACT_AND_RUN/)
   assert.ok(requiredRpmSteps.includes('browser.registration_removed'))
-  assert.ok(requiredAppImageSteps.includes('browser.registration_refused'))
+  assert.ok(requiredAppImageSteps.includes('browser.registration_staged'))
 })
 
 test('the release lane gates every shipped format before freezing evidence', async () => {

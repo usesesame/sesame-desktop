@@ -1,16 +1,13 @@
-use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use super::{plan_registration, RegistrationError, RegistrationPlan, RegistrationState, HOST_NAME};
+use super::{
+    appimage, plan_registration, RegistrationError, RegistrationPlan, RegistrationState, HOST_NAME,
+};
 
 pub const HOST_FILE_NAME: &str = "sesame-browser-host";
 
 pub fn is_supported() -> bool {
-    linux_install_supported(std::env::var_os("APPIMAGE").as_deref())
-}
-
-fn linux_install_supported(appimage: Option<&OsStr>) -> bool {
-    appimage.is_none()
+    true
 }
 
 pub fn unsupported_error() -> RegistrationError {
@@ -21,14 +18,23 @@ pub fn unsupported_error() -> RegistrationError {
 }
 
 pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
-    let host = std::env::current_exe()
-        .map(|executable| executable.with_file_name(HOST_FILE_NAME))
-        .map_err(|_| {
+    let host = if appimage::running_from_appimage() {
+        appimage::staged_host().ok_or_else(|| {
             RegistrationError::new(
-                "registration_host_missing",
-                "Sesame could not locate its browser helper.",
+                "registration_manifest_failed",
+                "Sesame could not locate your home directory.",
             )
-        })?;
+        })?
+    } else {
+        std::env::current_exe()
+            .map(|executable| executable.with_file_name(HOST_FILE_NAME))
+            .map_err(|_| {
+                RegistrationError::new(
+                    "registration_host_missing",
+                    "Sesame could not locate its browser helper.",
+                )
+            })?
+    };
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
         RegistrationError::new(
             "registration_manifest_failed",
@@ -81,6 +87,9 @@ pub fn launch_desktop_app() -> bool {
     let Ok(host_executable) = std::env::current_exe() else {
         return false;
     };
+    if let Some(app_image) = appimage::launch_target_beside(&host_executable) {
+        return std::process::Command::new(app_image).spawn().is_ok();
+    }
     let app_executable = host_executable.with_file_name("sesame");
     app_executable.is_file() && std::process::Command::new(app_executable).spawn().is_ok()
 }
@@ -91,14 +100,6 @@ mod tests {
     use std::fs;
 
     use super::super::{manifest_matches, write_plan_manifests};
-
-    #[test]
-    fn an_appimage_mount_is_not_registered_as_a_persistent_browser_host() {
-        assert!(linux_install_supported(None));
-        assert!(!linux_install_supported(Some(OsStr::new(
-            "/tmp/Sesame.AppImage"
-        ))));
-    }
 
     fn scratch_plan(name: &str, host_file: &str) -> RegistrationPlan {
         let root =

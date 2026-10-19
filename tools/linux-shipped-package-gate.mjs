@@ -46,7 +46,7 @@ export const requiredAppImageSteps = [
   'package.browser_host',
   'app.launch',
   'app.stop',
-  'browser.registration_refused',
+  'browser.registration_staged',
 ]
 
 export const evidenceFilenameByFormat = {
@@ -174,16 +174,20 @@ function elfMachine(bytes) {
   return bytes[5] === 1 ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18)
 }
 
-async function registrationRefused(environment, appIdentifier) {
-  const manifestCleared = await registrationRemoved(environment)
-  const diagnostics = await readFile(path.join(environment.XDG_DATA_HOME, appIdentifier, 'logs', 'sesame-diagnostics.jsonl'), 'utf8').catch(() => '')
-  const refusalRecorded = diagnostics.includes('"code":"registration_unsupported"')
+async function registrationStaged(environment, binarySha256) {
+  const stage = path.join(environment.XDG_DATA_HOME, 'sesame', 'browser-host')
+  const stagedHost = path.join(stage, 'sesame-browser-host')
+  const manifest = readChromeHostManifest(environment)
+  const manifestMatches = chromeHostManifestMatches(manifest, stagedHost)
+  const hostStaged = await executableFile(stagedHost)
+  const record = JSON.parse(await readFile(path.join(stage, 'app.json'), 'utf8').catch(() => 'null'))
+  const appRecorded = record?.appSha256 === binarySha256
   return {
-    ok: manifestCleared && refusalRecorded,
-    value: { manifestCleared, refusalRecorded },
-    error: manifestCleared
-      ? (refusalRecorded ? undefined : 'The AppImage did not record a refused browser registration.')
-      : 'The AppImage registered a persistent native-host manifest.',
+    ok: manifestMatches && hostStaged && appRecorded,
+    value: { host: manifest.path ?? null, hostStaged, appRecorded },
+    error: manifestMatches
+      ? (hostStaged && appRecorded ? undefined : 'The AppImage did not stage its browser helper beside a record of the app.')
+      : 'The AppImage did not register a Chrome native-host manifest for its staged browser helper.',
   }
 }
 
@@ -364,7 +368,7 @@ async function runRpmGate(context) {
 }
 
 async function runAppImageGate(context) {
-  const { staging, environment, appIdentifier, platform, architecture, version, expectedElfMachine, expectedAppImageArchitecture, packagePath, packageBytes, packageSha256, steps, startedAt } = context
+  const { staging, environment, platform, architecture, version, expectedElfMachine, expectedAppImageArchitecture, packagePath, packageBytes, packageSha256, steps, startedAt } = context
   const filename = path.basename(packagePath)
   await command(packagePath, ['--appimage-extract'], { cwd: staging })
   const appDir = path.join(staging, 'squashfs-root')
@@ -389,8 +393,8 @@ async function runAppImageGate(context) {
   const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The AppImage exited before the launch window closed.')
   record(steps, 'app.stop', true)
-  const refused = await registrationRefused(environment, appIdentifier)
-  record(steps, 'browser.registration_refused', refused.ok, refused.value, refused.error)
+  const staged = await registrationStaged(environment, binarySha256)
+  record(steps, 'browser.registration_staged', staged.ok, staged.value, staged.error)
 
   return buildRecord({
     schema: APPIMAGE_RUN_SCHEMA,
@@ -472,8 +476,6 @@ async function main() {
   if (platform !== 'linux') throw new Error('The shipped-package gate only runs on Linux.')
   const architecture = architectureName()
   const version = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version
-  const appIdentifier = JSON.parse(await readFile(path.join(repo, 'src-tauri', 'tauri.conf.json'), 'utf8')).identifier
-  if (typeof appIdentifier !== 'string' || appIdentifier.length === 0) throw new Error('The Tauri configuration has no application identifier.')
   const startedAt = new Date().toISOString()
 
   const workRoot = await mkdtemp(path.join(tmpdir(), 'sesame-shipped-package-'))
@@ -496,7 +498,6 @@ async function main() {
     expectedRpmArchitecture: architecture,
     expectedElfMachine: elMachines[architecture],
     expectedAppImageArchitecture: architecture === 'x86_64' ? 'amd64' : 'aarch64',
-    appIdentifier,
     packagePath,
     packageBytes,
     packageSha256,
