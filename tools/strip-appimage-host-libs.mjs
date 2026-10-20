@@ -16,7 +16,7 @@ export function planStrippedLibraries(fileNames) {
   return fileNames.filter((name) => hostProvidedLibraryPatterns.some((pattern) => pattern.test(name)))
 }
 
-export const unusedGioModulePatterns = [/^libgiognutls\.so$/]
+export const unusedGioModulePatterns = [/^libgio(gnutls|openssl|gnomeproxy|libproxy|environmentproxy)\.so$/]
 
 export function planRemovedGioModules(fileNames) {
   return fileNames.filter((name) => unusedGioModulePatterns.some((pattern) => pattern.test(name)))
