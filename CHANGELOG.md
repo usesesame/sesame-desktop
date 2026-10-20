@@ -4,6 +4,33 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.4.2
+
+### Browser
+
+- Browser fill works again from installed Linux builds. Release builds hid the
+  app and the browser helper from each other, so the helper refused every
+  connection. The helper now leaves its own executable readable so the app can
+  check it, and it trusts the Sesame process of yours that owns the private
+  socket. The app still hides its memory from other programs.
+- The AppImage now sets up browser fill. It copies its browser helper to
+  `~/.local/share/sesame/browser-host` and registers that copy, and the app
+  checks the copy by the contents of its executable.
+- Sesame registers its browser helper for Helium as well as Chrome, Chromium
+  and Edge on Linux.
+
+### Linux packaging
+
+- The AppImage uses your system's GLib instead of bundling its own, so GLib
+  security fixes reach it through normal system updates. It needs GLib 2.80
+  or newer.
+- The AppImage no longer bundles the GnuTLS module from glib-networking, which
+  nothing in Sesame used.
+
+### Settings
+
+- The Connections tab shows the server connection once instead of twice.
+
 ## 0.4.1
 
 ### Sync
