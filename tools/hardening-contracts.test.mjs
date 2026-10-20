@@ -99,6 +99,8 @@ test('release Linux builds scrub WebKit inspection variables before the Tauri bu
     'WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS',
     'WEBKIT_ENABLE_DEBUG_PERMISSIONS_IN_SANDBOX',
     'WEBKIT_INJECTED_BUNDLE_PATH',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
   ]) {
     assert.match(module, new RegExp(`"${variable}"`), `${variable} is not scrubbed`)
   }
