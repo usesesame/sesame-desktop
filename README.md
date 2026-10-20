@@ -119,6 +119,9 @@ On Linux:
 - PIN unlock and account linking need a Secret Service wallet. Sesame starts
   `gnome-keyring-daemon` or `ksecretd` when none is running. On Arch, install
   `gnome-keyring` or `kwallet` if the desktop has neither.
+- The AppImage uses your system's GLib instead of bundling its own, so GLib
+  security fixes reach it through normal system updates. It needs GLib 2.80
+  or newer.
 - The AppImage has no stable path, so it copies its browser helper to
   `~/.local/share/sesame/browser-host` and registers that copy. Start the
   AppImage once after an update to refresh the copy. Unlike the deb and rpm,

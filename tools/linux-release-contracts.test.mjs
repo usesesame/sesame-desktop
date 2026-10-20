@@ -9,7 +9,7 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
-import { addHelperAlias, appRunHookWithLibraryPath, patchSandboxPaths, planStrippedLibraries, webkitHelperAlias } from './strip-appimage-host-libs.mjs'
+import { addHelperAlias, appRunHookWithLibraryPath, patchSandboxPaths, planRemovedGioModules, planStrippedLibraries, removedPathsStillListed, webkitHelperAlias } from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -208,6 +208,14 @@ test('the Linux release workflow publishes only after both installed-package gat
 
 test('the AppImage keeps host-provided Wayland libraries out of the bundle', () => {
   assert.deepEqual(planStrippedLibraries(['libwayland-client.so.0', 'libwayland-cursor.so.0', 'libwayland-egl.so.1', 'libwayland-server.so.0', 'libxkbcommon.so.0', 'libgtk-3.so.0']), ['libwayland-client.so.0', 'libwayland-cursor.so.0'])
+  assert.deepEqual(
+    planStrippedLibraries(['libglib-2.0.so.0', 'libgio-2.0.so', 'libgio-2.0.so.0.8000.0', 'libgobject-2.0.so.0', 'libgmodule-2.0.so.0', 'libgthread-2.0.so.0', 'libglibmm-2.4.so.1', 'libgiognutls.so', 'libgdk-3.so.0']),
+    ['libglib-2.0.so.0', 'libgio-2.0.so', 'libgio-2.0.so.0.8000.0', 'libgobject-2.0.so.0', 'libgmodule-2.0.so.0', 'libgthread-2.0.so.0'],
+  )
+  assert.deepEqual(planRemovedGioModules(['libgiognutls.so', 'libgiognutls.so.old', 'libdconfsettings.so', 'libgvfsdbus.so']), ['libgiognutls.so'])
+  const listing = ['squashfs-root/usr/lib/gio/modules', 'squashfs-root/usr/lib/gio/modules/libgiognutls.so.old', 'squashfs-root/usr/lib/libglib-2.0.so.0.8000.0'].join('\n')
+  assert.deepEqual(removedPathsStillListed(listing, ['libglib-2.0.so.0'], ['libgiognutls.so']), [])
+  assert.deepEqual(removedPathsStillListed(`${listing}\nsquashfs-root/usr/lib/gio/modules/libgiognutls.so`, [], ['libgiognutls.so']), ['squashfs-root/usr/lib/gio/modules/libgiognutls.so'])
 })
 
 test('the Linux release lane strips the AppImage before the gates bind its bytes', async () => {
