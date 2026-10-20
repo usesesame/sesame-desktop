@@ -15,6 +15,12 @@ export function planStrippedLibraries(fileNames) {
   return fileNames.filter((name) => hostProvidedLibraryPatterns.some((pattern) => pattern.test(name)))
 }
 
+export const unusedGioModulePatterns = [/^libgiognutls\.so$/]
+
+export function planRemovedGioModules(fileNames) {
+  return fileNames.filter((name) => unusedGioModulePatterns.some((pattern) => pattern.test(name)))
+}
+
 export const webkitHelperAlias = '_s'
 
 export const sandboxPathReplacements = [
@@ -91,6 +97,8 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const libDirectory = path.join(tree, 'usr', 'lib')
     const libNames = await readdir(libDirectory)
     const planned = planStrippedLibraries(libNames)
+    const gioModuleDirectory = path.join(libDirectory, 'gio', 'modules')
+    const removedModules = planRemovedGioModules(await readdir(gioModuleDirectory).catch(() => []))
     let patched = 0
     for (const entry of await readdir(libDirectory, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.startsWith('libwebkit2gtk-4.1.so.0')) continue
@@ -112,11 +120,14 @@ export async function stripAppImageHostLibraries(appImagePath) {
     } catch {
       hookPatched = false
     }
-    if (planned.length === 0 && patched === 0 && !hookPatched) {
-      return { appImage, stripped: [], patched: 0, hookPatched: false, unchanged: true }
+    if (planned.length === 0 && removedModules.length === 0 && patched === 0 && !hookPatched) {
+      return { appImage, stripped: [], removedModules: [], patched: 0, hookPatched: false, unchanged: true }
     }
     for (const name of planned) {
       await rm(path.join(libDirectory, name), { force: true })
+    }
+    for (const name of removedModules) {
+      await rm(path.join(gioModuleDirectory, name), { force: true })
     }
     const rebuiltSquashfs = path.join(workspace, 'rebuilt.squashfs')
     await run('mksquashfs', [
@@ -130,7 +141,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
       '-quiet',
     ])
     const { stdout: listing } = await run('unsquashfs', ['-ls', rebuiltSquashfs])
-    for (const name of planned) {
+    for (const name of [...planned, ...removedModules]) {
       if (listing.includes(name)) throw new Error(`The rebuilt AppImage still contains ${name}.`)
     }
     const finalBytes = Buffer.concat([appImageBytes.subarray(0, offset), await readFile(rebuiltSquashfs)])
@@ -146,7 +157,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     await chmod(replacement, 0o755)
     await rename(replacement, appImage)
     const size = await stat(appImage)
-    return { appImage, stripped: planned, patched, hookPatched, unchanged: false, bytes: size.size }
+    return { appImage, stripped: planned, removedModules, patched, hookPatched, unchanged: false, bytes: size.size }
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
@@ -160,11 +171,12 @@ async function main() {
   for (const input of inputs) {
     const result = await stripAppImageHostLibraries(input)
     if (result.unchanged) {
-      console.log(`${result.appImage}: no host-provided Wayland libraries or sandbox paths needed changes; left unchanged.`)
+      console.log(`${result.appImage}: no host-provided Wayland libraries, unused GIO modules or sandbox paths needed changes; left unchanged.`)
       continue
     }
     const changes = []
     if (result.stripped.length > 0) changes.push(`removed bundled ${result.stripped.join(', ')}`)
+    if (result.removedModules.length > 0) changes.push(`removed the unused GIO module ${result.removedModules.join(', ')}`)
     if (result.patched > 0) changes.push(`patched ${result.patched} sandbox path${result.patched === 1 ? '' : 's'}`)
     if (result.hookPatched) changes.push('patched the AppRun library path')
     console.log(`${result.appImage}: ${changes.join(' and ')} (${result.bytes} bytes).`)
