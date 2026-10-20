@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -453,7 +453,7 @@ async function runAppImageGate(context) {
   const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' }, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The AppImage exited before the launch window closed.')
   record(steps, 'app.stop', true)
-  const staged = await registrationStaged(environment, packagePath)
+  const staged = await registrationStaged(environment, await realpath(packagePath))
   record(steps, 'browser.registration_staged', staged.ok, staged.value, staged.error)
   record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
 
