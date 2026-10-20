@@ -22,6 +22,23 @@ export function planRemovedGioModules(fileNames) {
   return fileNames.filter((name) => unusedGioModulePatterns.some((pattern) => pattern.test(name)))
 }
 
+export function removedPathsStillListed(listing, libraries, gioModules) {
+  const listed = new Set(listing.split('\n').map((line) => line.trim()))
+  return [
+    ...libraries.map((name) => `squashfs-root/usr/lib/${name}`),
+    ...gioModules.map((name) => `squashfs-root/usr/lib/gio/modules/${name}`),
+  ].filter((entry) => listed.has(entry))
+}
+
+async function readdirIfPresent(directory) {
+  try {
+    return await readdir(directory)
+  } catch (error) {
+    if (error.code === 'ENOENT') return []
+    throw error
+  }
+}
+
 export const webkitHelperAlias = '_s'
 
 export const sandboxPathReplacements = [
@@ -99,7 +116,7 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const libNames = await readdir(libDirectory)
     const planned = planStrippedLibraries(libNames)
     const gioModuleDirectory = path.join(libDirectory, 'gio', 'modules')
-    const removedModules = planRemovedGioModules(await readdir(gioModuleDirectory).catch(() => []))
+    const removedModules = planRemovedGioModules(await readdirIfPresent(gioModuleDirectory))
     let patched = 0
     for (const entry of await readdir(libDirectory, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.startsWith('libwebkit2gtk-4.1.so.0')) continue
@@ -142,9 +159,8 @@ export async function stripAppImageHostLibraries(appImagePath) {
       '-quiet',
     ])
     const { stdout: listing } = await run('unsquashfs', ['-ls', rebuiltSquashfs])
-    for (const name of [...planned, ...removedModules]) {
-      if (listing.includes(name)) throw new Error(`The rebuilt AppImage still contains ${name}.`)
-    }
+    const remaining = removedPathsStillListed(listing, planned, removedModules)
+    if (remaining.length > 0) throw new Error(`The rebuilt AppImage still contains ${remaining.join(', ')}.`)
     const finalBytes = Buffer.concat([appImageBytes.subarray(0, offset), await readFile(rebuiltSquashfs)])
     const rebuilt = path.join(workspace, 'rebuilt.AppImage')
     await writeFile(rebuilt, finalBytes)

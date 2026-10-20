@@ -121,7 +121,7 @@ On Linux:
   `gnome-keyring` or `kwallet` if the desktop has neither.
 - The AppImage uses your system's GLib instead of bundling its own, so GLib
   security fixes reach it through normal system updates. It needs GLib 2.80
-  or newer, which every system with the glibc the AppImage needs has.
+  or newer.
 - The AppImage has no stable path, so it copies its browser helper to
   `~/.local/share/sesame/browser-host` and registers that copy. Start the
   AppImage once after an update to refresh the copy. Unlike the deb and rpm,
