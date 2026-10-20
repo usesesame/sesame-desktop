@@ -59,12 +59,11 @@
 <article class="settings-server-row">
   {#if !available}
     <div class="setting-copy">
-      <strong>Your own server</strong>
       <p>Pairing with your own server is available in the installed desktop app.</p>
     </div>
   {:else if custom}
     <div class="setting-copy">
-      <strong>{connection.serverName || 'Your own server'}</strong>
+      <strong>{connection.serverName || 'Paired server'}</strong>
       <p>Connected to <span class="server-address">{connection.serverAddress}</span> as {connection.deviceName || 'this desktop'}.</p>
       {#if problem}<p class="server-problem">{problem}</p>{/if}
       {#if connection.serverFingerprint}
@@ -82,7 +81,6 @@
     </div>
   {:else if accountLinked}
     <div class="setting-copy">
-      <strong>Your own server</strong>
       <p>This desktop is linked to a Sesame account. Disconnect it before pairing with a server you run.</p>
     </div>
   {:else if inspection}
@@ -114,7 +112,6 @@
     </div>
   {:else}
     <form class="setting-copy server-form" on:submit|preventDefault={check}>
-      <strong>Your own server</strong>
       <p>Paste the pairing link from your server's console, or enter its address and a one-time code. Sesame shows you the server before it sends anything but a read of its public settings.</p>
       {#if endedNote}<p class="server-problem">{endedNote}</p>{/if}
       <label for="own-server-input">Pairing link or server address</label>

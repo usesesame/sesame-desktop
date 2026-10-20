@@ -368,12 +368,6 @@
             <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
           </div>
         </section>
-        <section class="settings-group" aria-labelledby="settings-group-connections-server">
-          <h3 id="settings-group-connections-server">Connect to your own server</h3>
-          <div class="settings-list">
-            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
-          </div>
-        </section>
       </div>
     {:else}
       <div class="settings-groups">

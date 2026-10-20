@@ -127,3 +127,10 @@ test('Windows shows no screen lock warning', () => {
 
   expect(screen.queryByText(/Sesame cannot tell when this desktop locks its screen/)).toBeNull()
 })
+
+test('the Connections tab shows the server connection group once', () => {
+  renderSettings({ tab: 'connections' })
+
+  expect(screen.getAllByRole('heading', { name: 'Connect to your own server' })).toHaveLength(1)
+  expect(screen.getAllByText('Pairing link or server address')).toHaveLength(1)
+})

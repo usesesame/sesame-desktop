@@ -167,3 +167,17 @@ test('after a removed link the form says why the desktop was disconnected', () =
   renderSetting({ connection: { ...DISCONNECTED, state: 'expired' } })
   expect(screen.getByText(/expired/)).toBeTruthy()
 })
+
+test('the row does not repeat the settings group title', () => {
+  renderSetting()
+  expect(screen.queryByText('Your own server')).toBeNull()
+  cleanup()
+  renderSetting({ available: false })
+  expect(screen.queryByText('Your own server')).toBeNull()
+  cleanup()
+  renderSetting({ connection: { ...DISCONNECTED, state: 'connected', connected: true, online: true, deviceName: 'Linux desktop' } })
+  expect(screen.queryByText('Your own server')).toBeNull()
+  cleanup()
+  renderSetting({ connection: { ...DISCONNECTED, state: 'connected', connected: true, online: true, serverAddress: 'https://sesame.example.test', serverFingerprint: FINGERPRINT } })
+  expect(screen.queryByText('Your own server')).toBeNull()
+})
