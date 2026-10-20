@@ -281,13 +281,6 @@
       "expires": "2026-11-17"
     },
     {
-      "id": "UBUNTU-CVE-2026-86469",
-      "package": "glib2.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-18",
-      "expires": "2026-11-17"
-    },
-    {
       "id": "UBUNTU-CVE-2026-67693",
       "package": "gnutls28",
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",

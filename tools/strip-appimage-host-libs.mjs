@@ -9,6 +9,7 @@ const run = promisify(execFile)
 export const hostProvidedLibraryPatterns = [
   /^libwayland-client\.so\./,
   /^libwayland-cursor\.so\./,
+  /^lib(glib|gio|gobject|gmodule|gthread)-2\.0\.so(\.|$)/,
 ]
 
 export function planStrippedLibraries(fileNames) {
@@ -171,7 +172,7 @@ async function main() {
   for (const input of inputs) {
     const result = await stripAppImageHostLibraries(input)
     if (result.unchanged) {
-      console.log(`${result.appImage}: no host-provided Wayland libraries, unused GIO modules or sandbox paths needed changes; left unchanged.`)
+      console.log(`${result.appImage}: no host-provided libraries, unused GIO modules or sandbox paths needed changes; left unchanged.`)
       continue
     }
     const changes = []
