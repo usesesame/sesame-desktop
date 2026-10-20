@@ -167,7 +167,7 @@ test('the Linux workflow passes plain manifest filenames to the handoff tools', 
 test('a release a maintainer already published does not fail the stays-unpublished check', () => {
   const cases = [
     ['release-linux-early-access.yml', '\n  publish:\n', 'Prove the release stays unpublished'],
-    ['release-early-access.yml', '\n  publish-candidate:\n', 'Prove the release stays unpublished until signing'],
+    ['release-early-access.yml', '\n  publish-candidate:\n', 'Prove the release stays unpublished'],
   ]
   for (const [file, jobStart, stepName] of cases) {
     const body = read('.github', 'workflows', file)

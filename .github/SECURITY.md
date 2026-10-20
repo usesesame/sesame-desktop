@@ -120,6 +120,11 @@ good-faith report that turns out to be out of scope is not held against you.
   within a minute or so.
 - Malware that controls your browser profile can act as the extension. The
   approval prompt in the Sesame window is the last check before a fill.
+- On Linux the browser helper trusts whichever program of yours owns its
+  private socket, because Sesame hides its own executable from other
+  programs. A program running as you that starts before Sesame could receive
+  what the helper relays, such as a login you ask Sesame to save. The app
+  still checks the helper's executable before it answers.
 - Changing the master password or getting a new recovery kit cannot reach
   copies made before the change: exported backups, readable exports,
   operating system backups, cloud-synced folders, and data left on an SSD. A

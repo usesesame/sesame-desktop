@@ -1,15 +1,17 @@
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
 use super::MAX_PIPE_MESSAGE_BYTES;
+use crate::browser_host::appimage::{self, ExecutableIdentity};
 
 const IO_TIMEOUT: Duration = Duration::from_millis(1_500);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -17,6 +19,16 @@ const MAX_ACCEPT_RETRIES: u32 = 150;
 const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(200);
 const SOCKET_DIRECTORY_MODE: u32 = 0o700;
 const SOCKET_MODE: u32 = 0o600;
+
+enum PeerIdentity {
+    SameUser,
+    Path(PathBuf),
+    Contents(ExecutableIdentity),
+}
+
+type VerifiedProcess = (u32, u64, u64, u64, u64, [u8; 32]);
+
+static VERIFIED_CONTENTS: Mutex<Option<VerifiedProcess>> = Mutex::new(None);
 
 pub struct PipePeer {
     pid: u32,
@@ -30,13 +42,12 @@ impl PipePeer {
 }
 
 pub fn request(payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {
-    let expected_server = fs::canonicalize(std::env::current_exe()?.with_file_name("sesame"))?;
-    request_at(&socket_path()?, &expected_server, payload)
+    request_at(&socket_path()?, &PeerIdentity::SameUser, payload)
 }
 
 fn request_at(
     path: &Path,
-    expected_server: &Path,
+    expected_server: &PeerIdentity,
     payload: &[u8],
 ) -> io::Result<Zeroizing<Vec<u8>>> {
     validate_payload_size(payload)?;
@@ -53,14 +64,18 @@ pub fn serve_forever<F>(expected_client: &Path, handler: F) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &PipePeer) -> Zeroizing<Vec<u8>>,
 {
-    serve_at(&socket_path()?, expected_client, handler)
+    let expected_client = if appimage::running_from_appimage() {
+        PeerIdentity::Contents(ExecutableIdentity::of_file(expected_client)?)
+    } else {
+        PeerIdentity::Path(fs::canonicalize(expected_client)?)
+    };
+    serve_at(&socket_path()?, &expected_client, handler)
 }
 
-fn serve_at<F>(path: &Path, expected_client: &Path, handler: F) -> io::Result<()>
+fn serve_at<F>(path: &Path, expected_client: &PeerIdentity, handler: F) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &PipePeer) -> Zeroizing<Vec<u8>>,
 {
-    let expected_client = fs::canonicalize(expected_client)?;
     let listener = bind_exclusive(path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))?;
 
@@ -87,7 +102,7 @@ where
         {
             continue;
         }
-        let Ok(peer) = verify_peer(&stream, &expected_client) else {
+        let Ok(peer) = verify_peer(&stream, expected_client) else {
             continue;
         };
         let Ok(request) = read_frame(&mut stream, Instant::now() + IO_TIMEOUT) else {
@@ -137,7 +152,7 @@ fn socket_path() -> io::Result<PathBuf> {
     Ok(base.join("sesame").join("browser.sock"))
 }
 
-fn verify_peer(stream: &UnixStream, expected: &Path) -> io::Result<PipePeer> {
+fn verify_peer(stream: &UnixStream, expected: &PeerIdentity) -> io::Result<PipePeer> {
     let (uid, pid) = peer_credentials(stream)?;
     // SAFETY: geteuid cannot fail and touches no memory.
     if uid != unsafe { libc::geteuid() } {
@@ -159,14 +174,44 @@ fn verify_peer(stream: &UnixStream, expected: &Path) -> io::Result<PipePeer> {
             "browser socket peer is no longer running",
         )
     })?;
-    let executable = fs::canonicalize(format!("/proc/{pid}/exe"))?;
-    if executable != expected {
+    let accepted = match expected {
+        PeerIdentity::SameUser => true,
+        PeerIdentity::Path(path) => fs::canonicalize(format!("/proc/{pid}/exe"))? == *path,
+        PeerIdentity::Contents(identity) => contents_match(identity, pid, start_time)?,
+    };
+    if !accepted {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
             "browser socket peer executable rejected",
         ));
     }
     Ok(PipePeer { pid, start_time })
+}
+
+fn contents_match(identity: &ExecutableIdentity, pid: u32, start_time: u64) -> io::Result<bool> {
+    let file = fs::File::open(format!("/proc/{pid}/exe"))?;
+    let metadata = file.metadata()?;
+    let (bytes, sha256) = identity.key();
+    let key = (
+        pid,
+        start_time,
+        metadata.dev(),
+        metadata.ino(),
+        bytes,
+        sha256,
+    );
+    let mut verified = VERIFIED_CONTENTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *verified == Some(key) {
+        return Ok(true);
+    }
+    let matched = identity.matches_file(file)?;
+    if matched && process_start_time(pid) == Some(start_time) {
+        *verified = Some(key);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn peer_credentials(stream: &UnixStream) -> io::Result<(u32, u32)> {
@@ -301,7 +346,11 @@ mod tests {
         path
     }
 
-    fn serve_in_background(socket: &Path, expected_client: PathBuf) {
+    fn path_identity(path: &Path) -> PeerIdentity {
+        PeerIdentity::Path(fs::canonicalize(path).expect("an existing executable"))
+    }
+
+    fn serve_in_background(socket: &Path, expected_client: PeerIdentity) {
         let served = socket.to_path_buf();
         std::thread::spawn(move || {
             let _ = serve_at(&served, &expected_client, |request, _peer| {
@@ -321,9 +370,10 @@ mod tests {
     fn a_peer_running_the_expected_executable_is_served() {
         let socket = scratch_socket("accepts");
         let this = std::env::current_exe().expect("this test binary");
-        serve_in_background(&socket, this.clone());
+        serve_in_background(&socket, path_identity(&this));
 
-        let response = request_at(&socket, &this, b"round trip").expect("a served response");
+        let response =
+            request_at(&socket, &path_identity(&this), b"round trip").expect("a served response");
         assert_eq!(response.as_slice(), b"round trip");
     }
 
@@ -333,16 +383,53 @@ mod tests {
     fn a_peer_running_another_executable_is_refused() {
         let socket = scratch_socket("refuses");
         let this = std::env::current_exe().expect("this test binary");
-        serve_in_background(&socket, PathBuf::from("/bin/sh"));
+        serve_in_background(&socket, path_identity(Path::new("/bin/sh")));
 
-        assert!(request_at(&socket, &this, b"round trip").is_err());
+        assert!(request_at(&socket, &path_identity(&this), b"round trip").is_err());
+    }
+
+    fn this_executable_contents() -> PeerIdentity {
+        PeerIdentity::Contents(
+            ExecutableIdentity::of_file(Path::new("/proc/self/exe")).expect("an identity"),
+        )
+    }
+
+    #[test]
+    fn a_same_user_server_is_trusted_without_reading_its_executable() {
+        let socket = scratch_socket("same-user");
+        let this = std::env::current_exe().expect("this test binary");
+        serve_in_background(&socket, path_identity(&this));
+
+        let response =
+            request_at(&socket, &PeerIdentity::SameUser, b"round trip").expect("a served response");
+        assert_eq!(response.as_slice(), b"round trip");
+    }
+
+    #[test]
+    fn a_peer_with_the_expected_executable_contents_is_served_by_contents_alone() {
+        let socket = scratch_socket("contents-accepts");
+        serve_in_background(&socket, this_executable_contents());
+
+        let response = request_at(&socket, &this_executable_contents(), b"round trip")
+            .expect("a served response");
+        assert_eq!(response.as_slice(), b"round trip");
+    }
+
+    #[test]
+    fn a_peer_whose_executable_contents_differ_is_refused() {
+        let socket = scratch_socket("contents-refuses");
+        let other = ExecutableIdentity::of_file(Path::new("/bin/sh")).expect("an identity");
+        serve_in_background(&socket, PeerIdentity::Contents(other.clone()));
+
+        assert!(request_at(&socket, &this_executable_contents(), b"round trip").is_err());
+        assert!(request_at(&socket, &PeerIdentity::Contents(other), b"round trip").is_err());
     }
 
     #[test]
     fn the_server_refuses_a_socket_another_server_still_owns() {
         let socket = scratch_socket("exclusive");
         let this = std::env::current_exe().expect("this test binary");
-        serve_in_background(&socket, this);
+        serve_in_background(&socket, path_identity(&this));
 
         let second = bind_exclusive(&socket);
         assert!(second.is_err());
@@ -394,8 +481,9 @@ mod tests {
         let socket = root.join(".cache").join("sesame").join("browser.sock");
         let this = std::env::current_exe().expect("this test binary");
         let umask = UmaskGuard::permissive();
-        serve_in_background(&socket, this.clone());
-        let response = request_at(&socket, &this, b"round trip").expect("a served response");
+        serve_in_background(&socket, path_identity(&this));
+        let response =
+            request_at(&socket, &path_identity(&this), b"round trip").expect("a served response");
         assert_eq!(response.as_slice(), b"round trip");
         drop(umask);
 
@@ -408,7 +496,7 @@ mod tests {
     fn a_dribbled_frame_is_dropped_at_the_frame_deadline() {
         let socket = scratch_socket("dribble");
         let this = std::env::current_exe().expect("this test binary");
-        serve_in_background(&socket, this);
+        serve_in_background(&socket, path_identity(&this));
 
         let mut stream = UnixStream::connect(&socket).expect("a connection");
         stream
@@ -449,7 +537,7 @@ mod tests {
         let socket = scratch_socket("panic");
         let this = std::env::current_exe().expect("this test binary");
         let served = socket.clone();
-        let client = this.clone();
+        let client = path_identity(&this);
         std::thread::spawn(move || {
             let panicked = std::sync::atomic::AtomicBool::new(false);
             let _ = serve_at(&served, &client, move |request, _peer| {
@@ -466,9 +554,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        assert!(request_at(&socket, &this, b"first").is_err());
-        let second =
-            request_at(&socket, &this, b"second").expect("the broker survives a handler panic");
+        assert!(request_at(&socket, &path_identity(&this), b"first").is_err());
+        let second = request_at(&socket, &path_identity(&this), b"second")
+            .expect("the broker survives a handler panic");
         assert_eq!(second.as_slice(), b"second");
     }
 }
