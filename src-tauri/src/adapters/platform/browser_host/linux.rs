@@ -48,7 +48,11 @@ pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
     let chromium = |vendor: &str| config.join(vendor).join("NativeMessagingHosts").join(&file);
     Ok(RegistrationPlan {
         host,
-        chrome: vec![chromium("google-chrome"), chromium("chromium")],
+        chrome: vec![
+            chromium("google-chrome"),
+            chromium("chromium"),
+            chromium("net.imput.helium"),
+        ],
         edge: vec![chromium("microsoft-edge")],
         firefox: vec![home
             .join(".mozilla")
@@ -121,6 +125,17 @@ mod tests {
                 .join("native-messaging-hosts")
                 .join(&manifest)],
         }
+    }
+
+    #[test]
+    fn the_plan_registers_chrome_chromium_and_helium() {
+        let plan = plan().expect("a registration plan");
+        let vendors: Vec<_> = plan
+            .chrome
+            .iter()
+            .filter_map(|path| path.parent()?.parent()?.file_name())
+            .collect();
+        assert_eq!(vendors, ["google-chrome", "chromium", "net.imput.helium"]);
     }
 
     #[test]

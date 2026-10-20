@@ -156,6 +156,7 @@ function registrationPaths(environment) {
   return [
     path.join(environment.XDG_CONFIG_HOME, 'google-chrome', 'NativeMessagingHosts', manifest),
     path.join(environment.XDG_CONFIG_HOME, 'chromium', 'NativeMessagingHosts', manifest),
+    path.join(environment.XDG_CONFIG_HOME, 'net.imput.helium', 'NativeMessagingHosts', manifest),
     path.join(environment.XDG_CONFIG_HOME, 'microsoft-edge', 'NativeMessagingHosts', manifest),
     path.join(environment.HOME, '.mozilla', 'native-messaging-hosts', manifest),
   ]
