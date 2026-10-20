@@ -1,12 +1,14 @@
 use std::ffi::{OsStr, OsString};
 
-const BLOCKED_VARIABLES: [&str; 6] = [
+const BLOCKED_VARIABLES: [&str; 8] = [
     "TAURI_WEBVIEW_AUTOMATION",
     "WEBKIT_INSPECTOR_SERVER",
     "WEBKIT_INSPECTOR_HTTP_SERVER",
     "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS",
     "WEBKIT_ENABLE_DEBUG_PERMISSIONS_IN_SANDBOX",
     "WEBKIT_INJECTED_BUNDLE_PATH",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
 ];
 
 const BLOCKED_PREFIXES: [&str; 1] = ["JSC_"];
@@ -47,6 +49,8 @@ mod tests {
             ("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1"),
             ("WEBKIT_ENABLE_DEBUG_PERMISSIONS_IN_SANDBOX", "1"),
             ("WEBKIT_INJECTED_BUNDLE_PATH", "/tmp/fictional-bundle"),
+            ("SSL_CERT_FILE", "/tmp/fictional-ca.pem"),
+            ("SSL_CERT_DIR", "/tmp/fictional-certs"),
             ("JSC_useDollarVM", "true"),
             ("JSC_dumpOptions", "2"),
             ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
@@ -55,6 +59,8 @@ mod tests {
             ("HOME", "/home/fictional"),
             ("PATH", "/usr/bin"),
             ("SESAME_DESKTOP_E2E_PORT", "4444"),
+            ("SSL_CERT_DIRECTORY", "kept"),
+            ("SSL_CERT_FILE_BACKUP", "kept"),
             ("TAURI_WEBVIEW_AUTOMATION_NOTES", "kept"),
             ("jsc_lowercase", "kept"),
         ]
@@ -89,6 +95,14 @@ mod tests {
     }
 
     #[test]
+    fn certificate_override_variables_are_absent_after_the_scrub() {
+        let environment = scrubbed(fictional_environment());
+        for name in ["SSL_CERT_FILE", "SSL_CERT_DIR"] {
+            assert!(!environment.contains_key(OsStr::new(name)), "{name}");
+        }
+    }
+
+    #[test]
     fn unrelated_variables_and_rendering_workarounds_stay() {
         let environment = scrubbed(fictional_environment());
         let kept: Vec<&str> = environment
@@ -101,6 +115,8 @@ mod tests {
                 "HOME",
                 "PATH",
                 "SESAME_DESKTOP_E2E_PORT",
+                "SSL_CERT_DIRECTORY",
+                "SSL_CERT_FILE_BACKUP",
                 "TAURI_WEBVIEW_AUTOMATION_NOTES",
                 "WEBKIT_DISABLE_COMPOSITING_MODE",
                 "WEBKIT_DISABLE_DMABUF_RENDERER",
@@ -108,6 +124,15 @@ mod tests {
                 "jsc_lowercase",
             ]
         );
+    }
+
+    #[test]
+    fn only_the_exact_certificate_override_names_are_matched() {
+        assert!(is_blocked(OsStr::new("SSL_CERT_FILE")));
+        assert!(is_blocked(OsStr::new("SSL_CERT_DIR")));
+        assert!(!is_blocked(OsStr::new("ssl_cert_file")));
+        assert!(!is_blocked(OsStr::new("SSL_CERT_FILE_BACKUP")));
+        assert!(!is_blocked(OsStr::new("SSL_CERT_DIRECTORY")));
     }
 
     #[test]
@@ -129,6 +154,9 @@ mod tests {
         std::env::set_var("TAURI_WEBVIEW_AUTOMATION", "true");
         std::env::set_var("WEBKIT_INSPECTOR_SERVER", "127.0.0.1:9222");
         std::env::set_var("JSC_useDollarVM", "true");
+        std::env::set_var("SSL_CERT_FILE", "/tmp/fictional-ca.pem");
+        std::env::set_var("SSL_CERT_DIR", "/tmp/fictional-certs");
+        std::env::set_var("SSL_CERT_FILE_BACKUP", "kept");
         std::env::set_var("SESAME_WEBVIEW_ENVIRONMENT_TEST_KEEP", "kept");
 
         remove_inspection_variables();
@@ -136,10 +164,14 @@ mod tests {
         assert!(std::env::var_os("TAURI_WEBVIEW_AUTOMATION").is_none());
         assert!(std::env::var_os("WEBKIT_INSPECTOR_SERVER").is_none());
         assert!(std::env::var_os("JSC_useDollarVM").is_none());
+        assert!(std::env::var_os("SSL_CERT_FILE").is_none());
+        assert!(std::env::var_os("SSL_CERT_DIR").is_none());
+        assert_eq!(std::env::var("SSL_CERT_FILE_BACKUP").as_deref(), Ok("kept"));
         assert_eq!(
             std::env::var("SESAME_WEBVIEW_ENVIRONMENT_TEST_KEEP").as_deref(),
             Ok("kept")
         );
+        std::env::remove_var("SSL_CERT_FILE_BACKUP");
         std::env::remove_var("SESAME_WEBVIEW_ENVIRONMENT_TEST_KEEP");
     }
 }
