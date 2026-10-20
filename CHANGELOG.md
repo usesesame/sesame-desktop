@@ -4,7 +4,7 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
-## 0.4.2
+## 0.4.3
 
 ### Browser
 
@@ -24,8 +24,8 @@ release cannot be published without saying what changed in it.
 - The AppImage uses your system's GLib instead of bundling its own, so GLib
   security fixes reach it through normal system updates. It needs GLib 2.80
   or newer.
-- The AppImage no longer bundles the GnuTLS module from glib-networking, which
-  nothing in Sesame used.
+- The AppImage no longer bundles the GnuTLS and proxy modules from
+  glib-networking, which nothing in Sesame used.
 
 ### Settings
 

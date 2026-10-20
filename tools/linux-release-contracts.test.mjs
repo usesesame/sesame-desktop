@@ -206,13 +206,20 @@ test('the Linux release workflow publishes only after both installed-package gat
   assert.doesNotMatch(build, /id-token/, 'the Linux build job must not be able to mint an OIDC token')
 })
 
-test('the AppImage keeps host-provided Wayland libraries out of the bundle', () => {
+test('the AppImage keeps host-provided Wayland libraries out of the bundle', async () => {
   assert.deepEqual(planStrippedLibraries(['libwayland-client.so.0', 'libwayland-cursor.so.0', 'libwayland-egl.so.1', 'libwayland-server.so.0', 'libxkbcommon.so.0', 'libgtk-3.so.0']), ['libwayland-client.so.0', 'libwayland-cursor.so.0'])
   assert.deepEqual(
     planStrippedLibraries(['libglib-2.0.so.0', 'libgio-2.0.so', 'libgio-2.0.so.0.8000.0', 'libgobject-2.0.so.0', 'libgmodule-2.0.so.0', 'libgthread-2.0.so.0', 'libglibmm-2.4.so.1', 'libgiognutls.so', 'libgdk-3.so.0']),
     ['libglib-2.0.so.0', 'libgio-2.0.so', 'libgio-2.0.so.0.8000.0', 'libgobject-2.0.so.0', 'libgmodule-2.0.so.0', 'libgthread-2.0.so.0'],
   )
-  assert.deepEqual(planRemovedGioModules(['libgiognutls.so', 'libgiognutls.so.old', 'libdconfsettings.so', 'libgvfsdbus.so']), ['libgiognutls.so'])
+  assert.deepEqual(
+    planRemovedGioModules(['libgiognutls.so', 'libgiognutls.so.old', 'libgiognomeproxy.so', 'libgiolibproxy.so', 'libgioenvironmentproxy.so', 'libdconfsettings.so', 'libgvfsdbus.so']),
+    ['libgiognutls.so', 'libgiognomeproxy.so', 'libgiolibproxy.so', 'libgioenvironmentproxy.so'],
+  )
+  const ci = await readFile(path.join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8')
+  const stripStep = ci.indexOf('strip-appimage-host-libs.mjs')
+  const auditStep = ci.indexOf('supply-chain:sbom:audit -- --sbom appimage-sbom/')
+  assert.ok(stripStep > 0 && auditStep > stripStep, 'pull requests do not audit the stripped AppImage')
   const listing = ['squashfs-root/usr/lib/gio/modules', 'squashfs-root/usr/lib/gio/modules/libgiognutls.so.old', 'squashfs-root/usr/lib/libglib-2.0.so.0.8000.0'].join('\n')
   assert.deepEqual(removedPathsStillListed(listing, ['libglib-2.0.so.0'], ['libgiognutls.so']), [])
   assert.deepEqual(removedPathsStillListed(`${listing}\nsquashfs-root/usr/lib/gio/modules/libgiognutls.so`, [], ['libgiognutls.so']), ['squashfs-root/usr/lib/gio/modules/libgiognutls.so'])

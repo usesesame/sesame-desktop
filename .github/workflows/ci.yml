@@ -430,6 +430,14 @@ jobs:
             exit 1
           fi
 
+      - name: Audit the bundled AppImage libraries against OSV advisories
+        run: |
+          mkdir -p appimage-sbom
+          npm run supply-chain:sbom:appimage -- \
+            --appimage "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)" \
+            --out appimage-sbom/sesame-appimage.cdx.json
+          npm run supply-chain:sbom:audit -- --sbom appimage-sbom/sesame-appimage.cdx.json
+
   linux-installed:
     needs: [lint, typecheck]
     runs-on: ubuntu-latest
