@@ -166,7 +166,7 @@ jobs:
             --package "$(ls release-packages/*.rpm)" \
             --out linux-rpm-shipped-evidence
 
-      - name: Prove the shipped AppImage launches and refuses registration
+      - name: Prove the shipped AppImage launches and stages its browser helper
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \
             --format appimage \

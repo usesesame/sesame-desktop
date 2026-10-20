@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -24,6 +24,7 @@ export const requiredShippedSteps = [
   'app.launch',
   'app.stop',
   'browser.registration',
+  'browser.host_reaches_app',
   'package.uninstall',
   'browser.registration_removed',
 ]
@@ -36,6 +37,7 @@ export const requiredRpmSteps = [
   'app.launch',
   'app.stop',
   'browser.registration',
+  'browser.host_reaches_app',
   'package.uninstall',
   'browser.registration_removed',
 ]
@@ -47,6 +49,7 @@ export const requiredAppImageSteps = [
   'app.launch',
   'app.stop',
   'browser.registration_staged',
+  'browser.host_reaches_app',
 ]
 
 export const evidenceFilenameByFormat = {
@@ -174,28 +177,79 @@ function elfMachine(bytes) {
   return bytes[5] === 1 ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18)
 }
 
-async function registrationStaged(environment, binarySha256) {
+async function registrationStaged(environment, appImage) {
   const stage = path.join(environment.XDG_DATA_HOME, 'sesame', 'browser-host')
   const stagedHost = path.join(stage, 'sesame-browser-host')
   const manifest = readChromeHostManifest(environment)
   const manifestMatches = chromeHostManifestMatches(manifest, stagedHost)
   const hostStaged = await executableFile(stagedHost)
   const record = JSON.parse(await readFile(path.join(stage, 'app.json'), 'utf8').catch(() => 'null'))
-  const appRecorded = record?.appSha256 === binarySha256
+  const appRecorded = record?.appImage === appImage
   return {
     ok: manifestMatches && hostStaged && appRecorded,
     value: { host: manifest.path ?? null, hostStaged, appRecorded },
     error: manifestMatches
-      ? (hostStaged && appRecorded ? undefined : 'The AppImage did not stage its browser helper beside a record of the app.')
+      ? (hostStaged && appRecorded ? undefined : 'The AppImage did not stage its browser helper beside a record of the AppImage.')
       : 'The AppImage did not register a Chrome native-host manifest for its staged browser helper.',
   }
 }
 
-async function launchAndStop(binary, { launchSeconds, logPath, environment, extraEnv = {} }) {
+async function capabilitiesRequest(repo) {
+  const vectors = JSON.parse(await readFile(path.join(repo, 'src-tauri', 'contracts', 'browser', 'v6', 'vectors.json'), 'utf8'))
+  return vectors.requestCases.find((entry) => entry.valid && entry.message.type === 'capabilities').message
+}
+
+function nativeExchange(host, args, message, environment) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(host, args, { env: { ...process.env, ...environment }, stdio: ['pipe', 'pipe', 'ignore'] })
+    const chunks = []
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error('The browser helper did not answer in time.'))
+    }, 10_000)
+    child.stdout.on('data', (chunk) => chunks.push(chunk))
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      const bytes = Buffer.concat(chunks)
+      if (bytes.length < 4) return reject(new Error('The browser helper closed without answering.'))
+      try {
+        resolve(JSON.parse(bytes.subarray(4, 4 + bytes.readUInt32LE(0)).toString('utf8')))
+      } catch (error) {
+        reject(error)
+      }
+    })
+    const body = Buffer.from(JSON.stringify(message))
+    const header = Buffer.alloc(4)
+    header.writeUInt32LE(body.length)
+    child.stdin.end(Buffer.concat([header, body]))
+  })
+}
+
+async function hostReachesApp(environment, request) {
+  const manifest = readChromeHostManifest(environment)
+  const origin = manifest.allowed_origins?.[0]
+  if (!manifest.path || !origin) return { ok: false, error: 'No Chrome native-host manifest names a browser helper to ask.' }
+  const answer = await nativeExchange(manifest.path, [origin], request, environment).catch((error) => ({ error: error.message }))
+  const ok = answer.type === 'capabilities' && answer.desktopAvailable === true
+  return {
+    ok,
+    value: { host: manifest.path, desktopAvailable: answer.desktopAvailable ?? null },
+    error: ok ? undefined : (answer.error ?? 'The registered browser helper could not reach the running app.'),
+  }
+}
+
+const appNotRunning = { ok: false, error: 'The app was not running when the browser helper was asked.' }
+
+async function launchAndStop(binary, { launchSeconds, logPath, environment, extraEnv = {}, whileRunning }) {
   const log = []
   const child = launchApp({ binary, root: path.dirname(logPath), bridge: { port: 0, token: 'shipped-package-gate' }, log, env: { ...environment, ...extraEnv } })
   await new Promise((resolve) => setTimeout(resolve, launchSeconds * 1000))
   const alive = child.exitCode === null
+  if (alive && whileRunning) await whileRunning()
   await stopApp(child)
   await writeFile(logPath, log.join(''))
   return alive
@@ -266,11 +320,13 @@ async function runDebGate(context) {
     record(steps, 'upgrade.candidate_launch', candidateAlive, undefined, candidateAlive ? undefined : 'The candidate exited before the launch window closed.')
   }
 
-  const alive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log'), environment })
+  let reach = appNotRunning
+  const alive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The installed app exited before the launch window closed.')
   record(steps, 'app.stop', true)
   const registration = browserRegistration(binary, environment)
   record(steps, 'browser.registration', registration.ok, registration.value, registration.error)
+  record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
 
   if (options.installKind === 'dpkg') {
     await command('sudo', ['-n', 'env', ...registrationEnvironment(environment), 'dpkg', '-r', metadata.name])
@@ -334,11 +390,13 @@ async function runRpmGate(context) {
   record(steps, 'package.browser_host', await executableFile(host))
   const binarySha256 = sha256(await readFile(binary))
 
-  const alive = await launchAndStop(binary, { launchSeconds: context.options.launchSeconds, logPath: path.join(out, 'linux-rpm-launch.log'), environment })
+  let reach = appNotRunning
+  const alive = await launchAndStop(binary, { launchSeconds: context.options.launchSeconds, logPath: path.join(out, 'linux-rpm-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The installed app exited before the launch window closed.')
   record(steps, 'app.stop', true)
   const registration = browserRegistration(binary, environment)
   record(steps, 'browser.registration', registration.ok, registration.value, registration.error)
+  record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
 
   await command('sudo', ['-n', 'env', ...registrationEnvironment(environment), 'rpm', '--dbpath', rpmDatabase, '-e', '--nodeps', name])
   let stillInstalled = true
@@ -390,11 +448,13 @@ async function runAppImageGate(context) {
   const binarySha256 = sha256(binaryBytes)
 
   await removeBrowserRegistration(environment)
-  const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' } })
+  let reach = appNotRunning
+  const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' }, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The AppImage exited before the launch window closed.')
   record(steps, 'app.stop', true)
-  const staged = await registrationStaged(environment, binarySha256)
+  const staged = await registrationStaged(environment, packagePath)
   record(steps, 'browser.registration_staged', staged.ok, staged.value, staged.error)
+  record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
 
   return buildRecord({
     schema: APPIMAGE_RUN_SCHEMA,
@@ -501,6 +561,7 @@ async function main() {
     packagePath,
     packageBytes,
     packageSha256,
+    capabilitiesRequest: await capabilitiesRequest(repo),
     startedAt,
     steps: [],
   }
