@@ -254,6 +254,10 @@ test('the gate exercises rpm installs, AppImage extraction, and both cleanup pat
   assert.match(source, /APPIMAGE_EXTRACT_AND_RUN/)
   assert.ok(requiredRpmSteps.includes('browser.registration_removed'))
   assert.ok(requiredAppImageSteps.includes('browser.registration_staged'))
+  for (const steps of [requiredShippedSteps, requiredRpmSteps, requiredAppImageSteps]) {
+    assert.ok(steps.includes('browser.host_reaches_app'), 'a shipped format does not prove its browser helper reaches the running app')
+  }
+  assert.match(source, /hostReachesApp\(environment, context\.capabilitiesRequest\)/)
 })
 
 test('the release lane gates every shipped format before freezing evidence', async () => {

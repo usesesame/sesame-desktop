@@ -21,6 +21,7 @@ const SOCKET_DIRECTORY_MODE: u32 = 0o700;
 const SOCKET_MODE: u32 = 0o600;
 
 enum PeerIdentity {
+    SameUser,
     Path(PathBuf),
     Contents(ExecutableIdentity),
 }
@@ -41,12 +42,7 @@ impl PipePeer {
 }
 
 pub fn request(payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {
-    let host = std::env::current_exe()?;
-    let expected_server = match appimage::staged_app_beside(&host)? {
-        Some(staged) => PeerIdentity::Contents(staged.identity),
-        None => PeerIdentity::Path(fs::canonicalize(host.with_file_name("sesame"))?),
-    };
-    request_at(&socket_path()?, &expected_server, payload)
+    request_at(&socket_path()?, &PeerIdentity::SameUser, payload)
 }
 
 fn request_at(
@@ -179,6 +175,7 @@ fn verify_peer(stream: &UnixStream, expected: &PeerIdentity) -> io::Result<PipeP
         )
     })?;
     let accepted = match expected {
+        PeerIdentity::SameUser => true,
         PeerIdentity::Path(path) => fs::canonicalize(format!("/proc/{pid}/exe"))? == *path,
         PeerIdentity::Contents(identity) => contents_match(identity, pid, start_time)?,
     };
@@ -395,6 +392,17 @@ mod tests {
         PeerIdentity::Contents(
             ExecutableIdentity::of_file(Path::new("/proc/self/exe")).expect("an identity"),
         )
+    }
+
+    #[test]
+    fn a_same_user_server_is_trusted_without_reading_its_executable() {
+        let socket = scratch_socket("same-user");
+        let this = std::env::current_exe().expect("this test binary");
+        serve_in_background(&socket, path_identity(&this));
+
+        let response =
+            request_at(&socket, &PeerIdentity::SameUser, b"round trip").expect("a served response");
+        assert_eq!(response.as_slice(), b"round trip");
     }
 
     #[test]

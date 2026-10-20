@@ -346,6 +346,7 @@ pub fn run_browser_host() {
     if dll_search::harden_process().is_err() {
         std::process::exit(1);
     }
+    #[cfg(windows)]
     if crash_protection::harden_process().is_err() {
         std::process::exit(1);
     }
