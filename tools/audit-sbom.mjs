@@ -43,14 +43,29 @@ export const loadAllowlist = (file = allowlistPath) => {
 }
 
 export const queryOsv = async (purl) => {
-  const response = await fetch(osvEndpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ package: { purl } }),
-  })
-  if (!response.ok) throw new Error(`OSV query for ${purl} failed with HTTP ${response.status}`)
-  const body = await response.json()
-  return body.vulns ?? []
+  const vulnerabilities = []
+  const seenTokens = new Set()
+  let pageToken
+  do {
+    const request = { package: { purl } }
+    if (pageToken) request.page_token = pageToken
+    const response = await fetch(osvEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!response.ok) throw new Error(`OSV query for ${purl} failed with HTTP ${response.status}`)
+    const body = await response.json()
+    vulnerabilities.push(...(body.vulns ?? []))
+    pageToken = body.next_page_token
+    if (pageToken) {
+      if (seenTokens.has(pageToken)) {
+        throw new Error(`OSV query for ${purl} returned a repeated continuation token`)
+      }
+      seenTokens.add(pageToken)
+    }
+  } while (pageToken)
+  return vulnerabilities
 }
 
 const purlType = (purl) => purl.slice('pkg:'.length).split('/')[0]
