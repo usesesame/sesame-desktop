@@ -189,8 +189,15 @@ mod tests {
         }
 
         fn executable(&self, name: &str, body: &str) -> PathBuf {
+            let source = self.0.join(format!("{name}.sh"));
+            std::fs::write(&source, format!("#!/bin/sh\n{body}\n")).expect("script");
             let path = self.0.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("script");
+            let copied = std::process::Command::new("cp")
+                .arg(&source)
+                .arg(&path)
+                .status()
+                .expect("copy");
+            assert!(copied.success(), "copy");
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("mode");
             path
         }

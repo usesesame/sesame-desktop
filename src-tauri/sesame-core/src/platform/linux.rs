@@ -550,9 +550,18 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
         fs::create_dir_all(&directory)
             .map_err(|_| "could not create the fake tool directory".to_string())?;
-        let binary = directory.join("secret-tool");
-        fs::write(&binary, format!("#!/bin/sh\n{script}\n"))
+        let source = directory.join("secret-tool.sh");
+        fs::write(&source, format!("#!/bin/sh\n{script}\n"))
             .map_err(|_| "could not write the fake tool".to_string())?;
+        let binary = directory.join("secret-tool");
+        let copied = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(&binary)
+            .status()
+            .map_err(|_| "could not copy the fake tool".to_string())?;
+        if !copied.success() {
+            return Err("could not copy the fake tool".into());
+        }
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
             .map_err(|_| "could not mark the fake tool executable".to_string())?;
         Ok(binary)
