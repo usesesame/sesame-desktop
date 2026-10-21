@@ -6,7 +6,7 @@ use crate::crypto::{default_kdf_params, derive_key, encrypt_bytes, serialize_pay
 use crate::loader::{Credential, MigrationPlan, VaultLoader};
 use crate::migration::fresh_vault_id;
 use crate::types::{Folder, VaultEntry, VaultFile, VaultPayload};
-use crate::util::{fill_random, generate_recovery_kit};
+use crate::util::{fill_secret, generate_recovery_kit};
 use crate::{
     payload_aad_for_file, VaultResult, PENDING_SETUP_PAYLOAD_AAD, RECOVERY_WRAP_AAD,
     VAULT_FORMAT_VERSION, WRAP_AAD,
@@ -69,12 +69,12 @@ pub fn open_vault_bytes(bytes: &[u8], secret: &str) -> VaultResult<OpenedVault> 
 pub fn create_vault(password: &str, vault_name: &str) -> VaultResult<(OpenedVault, String)> {
     crate::password_analysis::check_new_master_password(password)?;
     let mut vault_key = Zeroizing::new([0_u8; 32]);
-    fill_random(&mut *vault_key);
+    fill_secret(&mut *vault_key)?;
     let kdf = default_kdf_params();
     let wrapping_key = Zeroizing::new(derive_key(password, &kdf)?);
     let key_wrap = encrypt_bytes(&wrapping_key, &*vault_key, WRAP_AAD)?;
 
-    let recovery_kit = Zeroizing::new(generate_recovery_kit());
+    let recovery_kit = Zeroizing::new(generate_recovery_kit()?);
     let recovery_kit_for_display = recovery_kit.to_string();
     let recovery_kdf = default_kdf_params();
     let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);

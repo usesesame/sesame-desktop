@@ -403,7 +403,7 @@ async fn rekey_without(
     }
     let entry = remove_entry(&identity, list, subject).map_err(present_proof)?;
     let mut new_key = [0u8; 32];
-    crate::vault::util::fill_random(&mut new_key);
+    crate::vault::util::fill_secret(&mut new_key)?;
     let excluded = [subject, identity.device_id.as_str()];
     let packages = survivor_packages(
         &identity,

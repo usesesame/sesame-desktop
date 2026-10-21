@@ -396,7 +396,7 @@ test('removing a device rotates the vault key and leaving does the same', () => 
   const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   const rekey = transfer.match(/async fn rekey_without\([\s\S]*?\n}\n/)
   assert.ok(rekey, 'rekey_without is no longer one function this test can read')
-  assert.match(rekey[0], /fill_random\(&mut new_key\)/)
+  assert.match(rekey[0], /fill_secret\(&mut new_key\)/)
   assert.match(rekey[0], /remove_entry\(/)
   assert.match(rekey[0], /survivor_packages\(/)
   assert.match(rekey[0], /verify_master_password\(/)

@@ -233,12 +233,11 @@ fn read_linux_device_key(secret_tool: &Path) -> VaultResult<Option<zeroize::Zero
 
 fn create_linux_device_key(secret_tool: &Path) -> VaultResult<zeroize::Zeroizing<[u8; 32]>> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-    use rand::Rng;
     use std::io::Write;
     use std::process::{Command, Stdio};
 
     let mut key = zeroize::Zeroizing::new([0_u8; 32]);
-    rand::rng().fill_bytes(key.as_mut());
+    crate::util::fill_secret(key.as_mut())?;
     let mut encoded = URL_SAFE_NO_PAD.encode(key.as_slice());
     let mut child = Command::new(secret_tool)
         .args([

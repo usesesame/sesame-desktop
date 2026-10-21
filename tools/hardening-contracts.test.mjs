@@ -1181,3 +1181,43 @@ test('no webview may open a new window and the rebuilt main window denies it exp
   assert.match(shell, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/)
   assert.equal([...shell.matchAll(/WebviewWindowBuilder::new/g)].length, 1)
 })
+
+test('vault key material is drawn from the system random source', () => {
+  const util = read('src-tauri', 'sesame-core', 'src', 'util.rs')
+  assert.match(
+    util,
+    /pub fn fill_secret\(bytes: &mut \[u8\]\) -> VaultResult<\(\)> \{\s*rand::rngs::SysRng\s*\.try_fill_bytes\(bytes\)/,
+    'fill_secret no longer reads from SysRng',
+  )
+  assert.match(
+    util,
+    /pub fn fill_random\(bytes: &mut \[u8\]\) \{\s*rand::rng\(\)\.fill_bytes\(bytes\)/,
+    'fill_random no longer reads from the thread generator',
+  )
+
+  const secretSites = [
+    ['src-tauri/sesame-core/src/api.rs', 'create_vault'],
+    ['src-tauri/sesame-core/src/storage.rs', 'resume_recovery_setup_for_session'],
+    ['src-tauri/sesame-core/src/storage.rs', 'rotate_vault_key'],
+    ['src-tauri/sesame-core/src/storage.rs', 'set_pin_for_session'],
+    ['src-tauri/sesame-core/src/platform/linux.rs', 'create_linux_device_key'],
+    ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
+    ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
+    ['src-tauri/src/commands/sync_transfer.rs', 'rekey_without'],
+    ['src-tauri/src/commands/sync_adopt.rs', 'adopt'],
+  ]
+  const offenders = []
+  for (const [path, name] of secretSites) {
+    const source = read(...path.split('/'))
+    const start = source.indexOf(`fn ${name}(`)
+    assert.ok(start >= 0, `${path} does not define ${name}`)
+    const body = braceBody(source, start)
+    if (!/(?:fill_secret|generate_recovery_kit)\(/.test(body)) {
+      offenders.push(`${path}:${name} does not draw from the system source`)
+    }
+    if (/fill_random\(/.test(body)) {
+      offenders.push(`${path}:${name} draws from the thread generator`)
+    }
+  }
+  assert.deepEqual(offenders, [], `secret material sources regressed:\n  ${offenders.join('\n  ')}`)
+})

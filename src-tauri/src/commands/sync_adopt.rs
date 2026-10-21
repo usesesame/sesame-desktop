@@ -93,7 +93,7 @@ pub(super) fn adopt(
     let wrapping_key = zeroize::Zeroizing::new(derive_key(master_password, &kdf)?);
     let key_wrap = encrypt_bytes(&wrapping_key, &key, WRAP_AAD)?;
 
-    let mut recovery_kit = generate_recovery_kit();
+    let mut recovery_kit = generate_recovery_kit()?;
     let shown = recovery_kit.clone();
     let recovery_kdf = default_kdf_params();
     let recovery_wrapping_key = zeroize::Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);

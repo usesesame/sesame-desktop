@@ -24,7 +24,7 @@ use crate::{
 };
 use crate::{
     types::*,
-    util::{fill_random, generate_recovery_kit, random_id, unix_timestamp},
+    util::{fill_secret, generate_recovery_kit, random_id, unix_timestamp},
 };
 
 /// A PIN-enabled vault always has one; absence reads as tampering.
@@ -206,7 +206,7 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
         return Err("This unfinished vault contains data and cannot restart setup safely.".into());
     }
 
-    let recovery_kit = Zeroizing::new(generate_recovery_kit());
+    let recovery_kit = Zeroizing::new(generate_recovery_kit()?);
     let recovery_kit_for_display = recovery_kit.to_string();
     let recovery_kdf = default_kdf_params();
     let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
@@ -391,13 +391,13 @@ pub fn rotate_master_password_for_session(
 
 fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<String> {
     let mut new_vault_key = Zeroizing::new([0_u8; 32]);
-    fill_random(&mut *new_vault_key);
+    fill_secret(&mut *new_vault_key)?;
 
     let new_kdf = default_kdf_params();
     let new_wrapping_key = Zeroizing::new(derive_key(password, &new_kdf)?);
     let new_key_wrap = encrypt_bytes(&new_wrapping_key, &*new_vault_key, WRAP_AAD)?;
 
-    let mut recovery_kit = generate_recovery_kit();
+    let mut recovery_kit = generate_recovery_kit()?;
     let recovery_kit_for_display = recovery_kit.clone();
     let new_recovery_kdf = default_kdf_params();
     let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &new_recovery_kdf)?);
@@ -434,7 +434,7 @@ pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResul
     validate_new_unlock_pin(pin)?;
 
     let mut pepper = [0_u8; 32];
-    fill_random(&mut pepper);
+    fill_secret(&mut pepper)?;
     ensure_device_protection()?;
     let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&pepper)?);
     let kdf = default_kdf_params();
