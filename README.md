@@ -116,6 +116,10 @@ On Linux:
   records `key_page_fallback`.
 - Wayland has no global-hotkey protocol. Use the tray icon, or start Sesame
   with `GDK_BACKEND=x11`.
+- The AppImage sets `GDK_BACKEND=x11`, so on a Wayland desktop its window runs
+  through XWayland. Other X11 programs can then observe that window's keyboard
+  input and clipboard, which Wayland otherwise isolates. The deb and rpm
+  packages do not set this.
 - PIN unlock and account linking need a Secret Service wallet. Sesame starts
   `gnome-keyring-daemon` or `ksecretd` when none is running. On Arch, install
   `gnome-keyring` or `kwallet` if the desktop has neither.

@@ -11,6 +11,7 @@ import {
   collectSbomAdvisories,
   defaultSbomPath,
   loadAllowlist,
+  queryOsv,
 } from './audit-sbom.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -262,4 +263,62 @@ test('every shipped allowlist entry expires within ninety days of its review', (
   for (const entry of loadAllowlist()) {
     assert.ok(entry.expires > entry.reviewed, entry.id)
   }
+})
+
+test('OSV pagination collects advisories from every response', async (t) => {
+  const requests = []
+  const pages = [
+    { vulns: [{ id: 'GHSA-fictional-first' }], next_page_token: 'fictional-page-two' },
+    { next_page_token: 'fictional-page-three' },
+    { vulns: [{ id: 'GHSA-fictional-last' }] },
+  ]
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    requests.push(JSON.parse(options.body))
+    return { ok: true, json: async () => pages.shift() }
+  })
+  const purl = 'pkg:npm/fictional-package@1.0.0'
+  const vulnerabilities = await queryOsv(purl)
+  assert.deepEqual(
+    vulnerabilities.map((vulnerability) => vulnerability.id),
+    ['GHSA-fictional-first', 'GHSA-fictional-last'],
+  )
+  assert.deepEqual(requests, [
+    { package: { purl } },
+    { package: { purl }, page_token: 'fictional-page-two' },
+    { package: { purl }, page_token: 'fictional-page-three' },
+  ])
+})
+
+test('an OSV continuation with no advisories cannot hide a later finding', async (t) => {
+  const pages = [
+    { next_page_token: 'fictional-page-two' },
+    { vulns: [{ id: 'GHSA-fictional-hidden' }] },
+  ]
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => pages.shift() }))
+  await assert.rejects(
+    auditSbom({ components: [component('fictional-package', '1.0.0', 'pkg:npm/fictional-package@1.0.0')] }),
+    /GHSA-fictional-hidden/,
+  )
+})
+
+test('a failed OSV continuation refuses the audit', async (t) => {
+  let calls = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls += 1
+    return calls === 1
+      ? { ok: true, json: async () => ({ next_page_token: 'fictional-page-two' }) }
+      : { ok: false, status: 503 }
+  })
+  await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0'), /HTTP 503/)
+  assert.equal(calls, 2)
+})
+
+test('a repeated OSV continuation token refuses the audit', async (t) => {
+  let calls = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls += 1
+    return { ok: true, json: async () => ({ next_page_token: 'fictional-repeated-page' }) }
+  })
+  await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0'), /repeated continuation token/)
+  assert.equal(calls, 2)
 })

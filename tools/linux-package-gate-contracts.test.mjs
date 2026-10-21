@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { chromeHostManifestMatches, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
@@ -230,6 +230,20 @@ test('the AppImage shipped record requires an extracted payload and a staged reg
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ schema: RPM_RUN_SCHEMA })), /wrong schema/)
   assert.throws(() => validateLinuxAppImageShippedEvidence(appimageRecord({ binarySha256: 'nope' })), /package and binary digests/)
   assert.ok(!requiredAppImageSteps.includes('package.uninstall'), 'the AppImage gate must not require an uninstall step that only deletes its own staging directory')
+})
+
+test('the AppImage gate keeps the documented display backend trade', async () => {
+  assert.equal(apprunHooksForceX11(['export GDK_BACKEND=x11\n']), true)
+  assert.equal(apprunHooksForceX11(['export GTK_THEME=dark\n', 'export GDK_BACKEND=x11\n']), true)
+  assert.equal(apprunHooksForceX11(['export GDK_BACKEND=wayland\n']), false)
+  assert.equal(apprunHooksForceX11([]), false)
+  assert.ok(requiredAppImageSteps.includes('package.display_backend'))
+  const missing = appimageRecord()
+  missing.steps = missing.steps.filter((step) => step.name !== 'package.display_backend')
+  assert.throws(() => validateLinuxAppImageShippedEvidence(missing), /did not pass package\.display_backend/)
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /apprun-hooks/, 'the AppImage gate does not read the apprun hooks')
+  assert.match(source, /apprunHooksForceX11/, 'the AppImage gate does not assert the x11 hook')
 })
 
 test('the shipped evidence filenames and format inference stay stable', () => {

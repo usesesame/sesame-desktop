@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -46,6 +46,7 @@ export const requiredAppImageSteps = [
   'package.install',
   'package.desktop_entry',
   'package.browser_host',
+  'package.display_backend',
   'app.launch',
   'app.stop',
   'browser.registration_staged',
@@ -64,6 +65,10 @@ export function formatForPackage(packagePath) {
   if (name.endsWith('.rpm')) return 'rpm'
   if (name.endsWith('.AppImage')) return 'appimage'
   throw new Error(`Unsupported Linux package: ${name}`)
+}
+
+export function apprunHooksForceX11(hookContents) {
+  return hookContents.some((content) => /^export GDK_BACKEND=x11\b/m.test(content))
 }
 
 function parseArguments(argv) {
@@ -446,6 +451,11 @@ async function runAppImageGate(context) {
   const icon = await stat(path.join(appDir, 'usr/share/icons/hicolor/512x512/apps/sesame.png')).catch(() => null)
   record(steps, 'package.desktop_entry', /^Exec=.*\bsesame\b/m.test(desktopEntry) && desktopEntry.includes('Icon=sesame') && icon?.isFile() === true)
   record(steps, 'package.browser_host', await executableFile(host))
+  const hooksDirectory = path.join(appDir, 'apprun-hooks')
+  const hookNames = await readdir(hooksDirectory).catch(() => [])
+  const hookContents = await Promise.all(hookNames.map((name) => readFile(path.join(hooksDirectory, name), 'utf8').catch(() => '')))
+  const displayBackendPinned = apprunHooksForceX11(hookContents)
+  record(steps, 'package.display_backend', displayBackendPinned, { hooks: hookNames }, displayBackendPinned ? undefined : 'The AppImage apprun-hooks no longer export GDK_BACKEND=x11; update README.md and .github/SECURITY.md or drop the documented trade.')
   const binarySha256 = sha256(binaryBytes)
 
   await removeBrowserRegistration(environment)

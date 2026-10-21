@@ -735,6 +735,47 @@ struct ErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::network::server_address::ServerAddress;
+    use crate::adapters::network::server_trust::parse_instance;
+    use crate::adapters::network::test_server::{FakeSesame, Recorded, Reply, TestServer};
+
+    fn custom(server: &TestServer, pinned: &FakeSesame) -> ServiceTarget {
+        let pin = parse_instance(&serde_json::to_vec(&pinned.instance()).unwrap(), "0.3.0")
+            .unwrap()
+            .pin();
+        ServiceTarget::Custom {
+            address: ServerAddress::parse(&server.base()).unwrap(),
+            pin,
+        }
+    }
+
+    fn sync_enabled(fake: &FakeSesame) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
+        let inner = fake.handler();
+        let mut payload = fake.capability_payload();
+        payload["features"]["sync"] = serde_json::json!(true);
+        let capabilities = fake.signed(&payload);
+        move |request| {
+            if request.path == "/v1/capabilities" {
+                Reply::json(200, &capabilities)
+            } else {
+                inner(request)
+            }
+        }
+    }
+
+    fn connect(target: &ServiceTarget) -> VaultResult<SyncClient> {
+        tauri::async_runtime::block_on(SyncClient::for_target(
+            target,
+            "fictional-device-token".to_string(),
+        ))
+    }
+
+    fn sent_the_token(server: &TestServer) -> bool {
+        server.requests().iter().any(|request| {
+            request.headers.get("authorization").map(String::as_str)
+                == Some("Sesame fictional-device-token")
+        })
+    }
 
     fn fixture() -> serde_json::Value {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -862,5 +903,77 @@ mod tests {
                 serde_json::to_value(self).expect("serialize")
             }
         }
+    }
+
+    #[test]
+    fn a_pinned_server_is_checked_before_it_gets_the_token() {
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(sync_enabled(&fake));
+        let client = connect(&custom(&server, &fake)).unwrap();
+        assert_eq!(
+            server.paths(),
+            vec![
+                "/v1/instance".to_string(),
+                "/v1/capabilities".to_string(),
+                "/v1/capabilities".to_string()
+            ]
+        );
+        assert!(!sent_the_token(&server));
+        let _ = tauri::async_runtime::block_on(client.devices());
+        assert!(sent_the_token(&server));
+    }
+
+    #[test]
+    fn a_server_with_a_rotated_key_is_refused_before_any_token_is_sent() {
+        let pinned = FakeSesame::new(1);
+        let rotated = FakeSesame::new(2);
+        let server = TestServer::start(rotated.handler());
+        let error = connect(&custom(&server, &pinned)).err().unwrap();
+        assert!(error.contains("different key"), "{error}");
+        assert!(!sent_the_token(&server));
+        assert_eq!(server.paths(), vec!["/v1/instance".to_string()]);
+    }
+
+    #[test]
+    fn a_server_that_only_repeats_the_pinned_key_is_refused() {
+        let pinned = FakeSesame::new(1);
+        let instance = pinned.instance();
+        let mut payload = pinned.capability_payload();
+        payload["features"]["sync"] = serde_json::json!(true);
+        let mut forged = FakeSesame::new(2).signed(&payload);
+        forged["keyId"] = serde_json::json!(pinned.key_id);
+        let server = TestServer::start(move |request| match request.path.as_str() {
+            "/v1/instance" => Reply::json(200, &instance),
+            _ => Reply::json(200, &forged),
+        });
+        assert!(connect(&custom(&server, &pinned)).is_err());
+        assert!(!sent_the_token(&server));
+    }
+
+    #[test]
+    fn an_unreachable_pinned_server_gets_no_token() {
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(fake.handler());
+        let target = custom(&server, &fake);
+        drop(server);
+        assert!(connect(&target).is_err());
+    }
+
+    #[test]
+    fn a_self_hosted_server_is_never_asked_for_an_entitlement() {
+        let body = br#"{"error":{"code":"sync_not_entitled"}}"#;
+        let fake = FakeSesame::new(1);
+        let server = TestServer::start(sync_enabled(&fake));
+        let own = connect(&custom(&server, &fake)).unwrap();
+        assert!(matches!(
+            own.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            SyncError::Unavailable(_)
+        ));
+        let mut official = SyncClient::for_tests(&server.base(), "fictional-device-token", "key");
+        official.entitlement_enforced = true;
+        assert!(matches!(
+            official.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            SyncError::NotEntitled
+        ));
     }
 }
