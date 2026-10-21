@@ -37,6 +37,15 @@ test('every window uses the browser arguments that the code passes to the main w
   assert.match(shell, /\.additional_browser_args\(WEBVIEW2_BROWSER_ARGUMENTS\)/)
 })
 
+test('every window turns the WebView2 general autofill off', () => {
+  for (const window of config().app.windows) {
+    assert.strictEqual(window.generalAutofillEnabled, false, `window ${window.label} must turn general autofill off`)
+  }
+  const shell = platform('desktop_shell.rs')
+  assert.equal([...shell.matchAll(/\.general_autofill_enabled\(false\)/g)].length, 1)
+  assert.doesNotMatch(shell, /\.general_autofill_enabled\(true\)/)
+})
+
 test('the browser arguments keep the wry defaults and turn the JIT off once', () => {
   const expected = rustBrowserArguments()
   const wryDefaults = '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required'

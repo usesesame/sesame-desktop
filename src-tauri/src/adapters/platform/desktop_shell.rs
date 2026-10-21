@@ -277,6 +277,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .decorations(false)
         .visible(false)
         .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
+        .general_autofill_enabled(false)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
