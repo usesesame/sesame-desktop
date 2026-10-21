@@ -46,6 +46,14 @@ test('every window turns the WebView2 general autofill off', () => {
   assert.doesNotMatch(shell, /\.general_autofill_enabled\(true\)/)
 })
 
+test('the release web view turns the browser accelerator keys off', () => {
+  const shell = platform('desktop_shell.rs')
+  const hardening = shell.slice(shell.indexOf('fn harden_release_webview(window'))
+  assert.match(hardening, /cast::<ICoreWebView2Settings3>\(\)/)
+  assert.match(hardening, /SetAreBrowserAcceleratorKeysEnabled\(false\)/)
+  assert.doesNotMatch(hardening, /SetAreBrowserAcceleratorKeysEnabled\(true\)/)
+})
+
 test('the browser arguments keep the wry defaults and turn the JIT off once', () => {
   const expected = rustBrowserArguments()
   const wryDefaults = '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required'

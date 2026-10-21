@@ -341,6 +341,9 @@ fn set_display_affinity(_window: &WebviewWindow, _affinity: DisplayAffinity) -> 
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn harden_release_webview(window: &WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows_core::Interface;
+
     let _ = window.with_webview(|platform| {
         // SAFETY: WebView2 owns these COM interfaces for the platform handle's lifetime.
         unsafe {
@@ -352,6 +355,9 @@ fn harden_release_webview(window: &WebviewWindow) {
             };
             let _ = settings.SetAreDefaultContextMenusEnabled(false);
             let _ = settings.SetAreDevToolsEnabled(false);
+            if let Ok(settings) = settings.cast::<ICoreWebView2Settings3>() {
+                let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+            }
         }
     });
 }

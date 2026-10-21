@@ -3929,6 +3929,8 @@ dependencies = [
  "ts-rs",
  "unicode-security",
  "url",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.61.2",
  "x25519-dalek",
  "zbus",
