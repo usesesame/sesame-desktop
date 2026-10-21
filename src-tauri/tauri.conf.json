@@ -21,7 +21,8 @@
         "resizable": true,
         "decorations": false,
         "visible": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless",
+        "generalAutofillEnabled": false
       },
       {
         "label": "quick-access",
@@ -38,7 +39,8 @@
         "skipTaskbar": true,
         "center": true,
         "shadow": true,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --js-flags=--jitless",
+        "generalAutofillEnabled": false
       }
     ],
     "security": {
