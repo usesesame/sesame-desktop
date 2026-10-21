@@ -514,6 +514,11 @@ pub fn change_master_password(
 }
 
 #[tauri::command]
+pub fn record_activity() {
+    crate::session_guard::record_activity();
+}
+
+#[tauri::command]
 pub fn set_auto_lock_minutes(minutes: u64, state: State<'_, VaultState>) -> VaultResult<()> {
     if !(1..=60).contains(&minutes) {
         return Err("Choose an automatic lock delay between 1 and 60 minutes.".into());

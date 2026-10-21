@@ -22,6 +22,7 @@ commands.allow = [
   "grant_presence",
   "check_release_presence",
   "set_auto_lock_minutes",
+  "record_activity",
   "lock_vault",
   "get_recovery_health",
 ]

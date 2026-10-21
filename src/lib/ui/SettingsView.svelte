@@ -282,7 +282,7 @@
           <div class="settings-list">
             {#if $platformCapabilities.sessionAutoLock}
             <article>
-              <div class="setting-copy"><strong>Automatic lock</strong><p>Lock the vault after a period without keyboard or pointer activity.</p></div>
+              <div class="setting-copy"><strong>Automatic lock</strong><p>{$platformCapabilities.systemIdle ? 'Lock the vault after a period without keyboard or pointer activity.' : 'Lock the vault after a period without keyboard or pointer activity in Sesame. This desktop does not report when you are idle, so work in other programs does not count.'}</p></div>
               <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
             </article>
             {/if}

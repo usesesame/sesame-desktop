@@ -1,6 +1,35 @@
 //! Clears the unlocked vault when the desktop session locks or the user is inactive.
 //! Runs on system input independent of the webview: throttling or a suspended renderer cannot keep a vault open.
 
+mod activity {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+    #[cfg(any(windows, target_os = "linux"))]
+    use std::time::Duration;
+    use std::time::Instant;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+    static LAST_MILLIS: AtomicU64 = AtomicU64::new(0);
+
+    fn elapsed_millis() -> u64 {
+        u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    pub fn record() {
+        LAST_MILLIS.store(elapsed_millis(), Ordering::Release);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    pub fn idle_for() -> Duration {
+        Duration::from_millis(elapsed_millis().saturating_sub(LAST_MILLIS.load(Ordering::Acquire)))
+    }
+}
+
+/// Input in the Sesame window, reported by the interface. It stands in for the desktop's idle time only where the desktop reports none.
+pub fn record_activity() {
+    activity::record();
+}
+
 #[cfg(any(windows, target_os = "linux"))]
 mod monitor {
     use std::time::{Duration, Instant, SystemTime};
@@ -49,8 +78,17 @@ mod monitor {
         }
     }
 
+    pub(super) fn effective_idle(
+        reported: Option<Duration>,
+        session_open: bool,
+        app_idle: Duration,
+    ) -> Option<Duration> {
+        reported.or_else(|| session_open.then_some(app_idle))
+    }
+
     pub(super) fn run<M: SessionMonitor>(app: AppHandle, mut monitor: M) {
         let mut warning_shown = false;
+        let mut was_open = false;
         let mut last_tick = SystemTime::now();
         let mut last_discovery = Instant::now();
         let mut blindness = Blindness::default();
@@ -64,8 +102,14 @@ mod monitor {
                 last_discovery = Instant::now();
             }
             let lock = monitor.lock_state();
-            let idle = monitor.idle_for();
-            let blind_for = blindness.observe(lock, idle, Instant::now());
+            let reported_idle = monitor.idle_for();
+            let blind_for = blindness.observe(lock, reported_idle, Instant::now());
+            let open = session_is_open(&app);
+            if open && !was_open {
+                super::activity::record();
+            }
+            was_open = open;
+            let idle = effective_idle(reported_idle, open, super::activity::idle_for());
             let timeout = Duration::from_secs(
                 app.state::<crate::vault::VaultState>()
                     .auto_lock_minutes()
@@ -159,6 +203,10 @@ pub fn start(app: tauri::AppHandle) {
 pub fn start(_app: tauri::AppHandle) {}
 
 pub fn idle_auto_lock_available() -> bool {
+    cfg!(any(windows, target_os = "linux"))
+}
+
+pub fn system_idle_reporting() -> bool {
     #[cfg(windows)]
     {
         true
@@ -469,9 +517,47 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::linux_session;
     use super::monitor::{
-        asleep_for, past_delay, should_warn, Blindness, LockState, POLL_INTERVAL, WARNING_WINDOW,
+        asleep_for, effective_idle, past_delay, should_warn, Blindness, LockState, POLL_INTERVAL,
+        WARNING_WINDOW,
     };
     use std::time::{Instant, SystemTime};
+
+    #[test]
+    fn a_desktop_that_reports_idle_time_is_always_believed() {
+        let reported = Some(Duration::from_secs(40));
+        assert_eq!(
+            effective_idle(reported, true, Duration::from_secs(900)),
+            reported
+        );
+        assert_eq!(
+            effective_idle(reported, false, Duration::from_secs(900)),
+            reported
+        );
+    }
+
+    #[test]
+    fn a_desktop_without_idle_time_falls_back_to_window_activity_while_unlocked() {
+        assert_eq!(
+            effective_idle(None, true, Duration::from_secs(61)),
+            Some(Duration::from_secs(61))
+        );
+    }
+
+    #[test]
+    fn a_locked_vault_has_no_fallback_idle_time_to_warn_about() {
+        assert_eq!(effective_idle(None, false, Duration::from_secs(61)), None);
+    }
+
+    #[test]
+    fn the_fallback_idle_time_reaches_the_lock_delay_and_resets_on_activity() {
+        let timeout = Duration::from_secs(60);
+        let idle = effective_idle(None, true, Duration::from_secs(60)).unwrap();
+        assert!(idle >= timeout);
+        super::record_activity();
+        let fresh = effective_idle(None, true, super::activity::idle_for()).unwrap();
+        assert!(fresh < Duration::from_secs(5));
+        assert!(fresh < timeout);
+    }
 
     #[test]
     fn a_locked_vault_is_never_warned_about() {

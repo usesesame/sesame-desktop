@@ -154,3 +154,8 @@ good-faith report that turns out to be out of scope is not held against you.
   Where the system permits a same-user process to attach to that web process,
   that process can read displayed secrets. This waits on the renderer
   isolation work.
+- On a Linux desktop that reports no idle time, the automatic lock counts
+  activity in the Sesame window, which the interface reports to the app. Code
+  running inside the window can report activity and keep the lock from firing,
+  but that code can already read everything the window shows. Where GNOME or
+  KDE reports idle time, that time is used and the window reports nothing.

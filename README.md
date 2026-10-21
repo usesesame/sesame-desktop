@@ -103,8 +103,9 @@ also needs `patchelf`, `dpkg-deb`, and `rpmbuild`.
 
 On Linux:
 
-- Idle time comes from GNOME or KDE. The automatic-lock delay is hidden on
-  other desktops.
+- Idle time comes from GNOME or KDE. On other desktops Sesame locks after the
+  automatic-lock delay without keyboard or pointer activity in its own window,
+  so work in other programs does not keep the vault open, and Settings says so.
 - Screen lock comes from systemd logind or the screen saver service. When
   neither answers, Settings says the vault will not follow the screen lock.
   Sesame looks for missing sources again every 30 seconds and locks the vault

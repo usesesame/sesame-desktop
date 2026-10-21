@@ -51,6 +51,7 @@ macro_rules! sesame_invoke_handler {
             commands::disable_windows_hello,
             commands::unlock_with_windows_hello,
             commands::set_auto_lock_minutes,
+            commands::record_activity,
             commands::get_vault_snapshot,
             commands::get_quick_access_status,
             commands::search_quick_access_items,
