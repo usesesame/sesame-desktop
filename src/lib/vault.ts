@@ -592,7 +592,7 @@ const previewCards: Record<string, LoginCard> = {
   notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, legacyFields: [] },
 }
 
-const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, screenLockMonitoring: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
+const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, systemIdle: true, screenLockMonitoring: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
 
 export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
   if (previewMode) return previewCapabilities
@@ -661,6 +661,11 @@ export async function completeRecoveryReplacement(masterPassword: string, pruneB
 export async function setNativeAutoLockMinutes(minutes: number): Promise<void> {
   if (previewMode) return
   await invoke('set_auto_lock_minutes', { minutes })
+}
+
+export async function recordActivity(): Promise<void> {
+  if (previewMode) return
+  await invoke('record_activity')
 }
 
 export async function unlockWithRecovery(recoveryKit: string): Promise<VaultSnapshot> {

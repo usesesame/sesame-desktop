@@ -5,6 +5,7 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
+  import { startActivityReports } from './lib/activity'
   import { loadPlatformCapabilities } from './lib/platform'
   import type { ImportSource, NavigationGroup, View } from './lib/types'
   import { storeSortMode } from './lib/preferences'
@@ -493,6 +494,7 @@
     const stopCardFill = cardFillController.start()
     const stopTotpFill = totpFillController.start()
     const stopBrowserSave = browserSaveController.start()
+    const stopActivityReports = startActivityReports()
     void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
     void unlockController.loadStatus()
     const onRendererError = () => { void recordDiagnostic('renderer', 'unhandled_exception'); void settingsController.refreshDiagnosticStatus() }
@@ -522,6 +524,7 @@
       stopQuickAccessOpen()
       stopIdleWarning()
       stopIdleCleared()
+      stopActivityReports()
       window.removeEventListener('error', onRendererError)
       window.removeEventListener('unhandledrejection', onUnhandledRejection)
       clearSessionState()
