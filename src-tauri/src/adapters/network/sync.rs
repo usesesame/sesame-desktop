@@ -771,10 +771,10 @@ mod tests {
     }
 
     fn sent_the_token(server: &TestServer) -> bool {
-        server
-            .requests()
-            .iter()
-            .any(|request| request.headers.contains_key("authorization"))
+        server.requests().iter().any(|request| {
+            request.headers.get("authorization").map(String::as_str)
+                == Some("Sesame fictional-device-token")
+        })
     }
 
     fn fixture() -> serde_json::Value {
@@ -938,7 +938,10 @@ mod tests {
     fn a_server_that_only_repeats_the_pinned_key_is_refused() {
         let pinned = FakeSesame::new(1);
         let instance = pinned.instance();
-        let forged = FakeSesame::new(2).signed(&pinned.capability_payload());
+        let mut payload = pinned.capability_payload();
+        payload["features"]["sync"] = serde_json::json!(true);
+        let mut forged = FakeSesame::new(2).signed(&payload);
+        forged["keyId"] = serde_json::json!(pinned.key_id);
         let server = TestServer::start(move |request| match request.path.as_str() {
             "/v1/instance" => Reply::json(200, &instance),
             _ => Reply::json(200, &forged),
