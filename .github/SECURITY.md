@@ -142,3 +142,15 @@ good-faith report that turns out to be out of scope is not held against you.
   password and keeps access for 72 hours can complete it, and software that
   can add trusted certificates could forge the time. The warning on every
   unlock is the check against both.
+- The AppImage sets `GDK_BACKEND=x11`, so on a Wayland desktop its window runs
+  through XWayland. Other X11 programs can then observe that window's keyboard
+  input and clipboard, which Wayland otherwise isolates. The deb and rpm
+  packages do not set this. The setting is kept because the WebKitGTK Wayland
+  backend crashed in earlier testing, and it has not been retested on a Wayland
+  session.
+- The process hardening in Sesame makes the main process non-dumpable and
+  refuses to run it with a tracer attached. Linux resets that setting on exec,
+  so the WebKit web process that renders decrypted records runs without it.
+  Where the system permits a same-user process to attach to that web process,
+  that process can read displayed secrets. This waits on the renderer
+  isolation work.
