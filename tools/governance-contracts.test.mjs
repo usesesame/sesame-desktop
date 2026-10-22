@@ -159,7 +159,7 @@ test('release build outputs reach the signing jobs as data, never as script text
 
 test('the Windows release signs a Sync floor from the committed minimum version', () => {
   const minimum = readFileSync(join(root, 'release', 'sync-minimum-version.txt'), 'utf8')
-  assert.match(minimum, /^\d+\.\d+\.\d+\n$/, 'the minimum Sync version must be one major.minor.patch line')
+  assert.match(minimum, /^\d+\.\d+\.\d+\r?\n$/, 'the minimum Sync version must be one major.minor.patch line')
   const body = readFileSync(join(root, '.github', 'workflows', 'release-early-access.yml'), 'utf8')
   const receipt = jobBlock(body, 'candidate-receipt')
   assert.match(receipt, /SESAME_SYNC_MINIMUM_VERSION = \(Get-Content -Raw -LiteralPath release\/sync-minimum-version\.txt\)\.Trim\(\)\s+node tools\/create-updater-artifacts\.mjs --sign/, 'the floor is signed with the committed minimum version')
