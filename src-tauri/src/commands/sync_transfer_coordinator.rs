@@ -5,6 +5,9 @@ fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Outcome
     if message == crate::sync::floor::REFUSAL {
         return Outcome::Halt(Halt::Incompatible);
     }
+    if message == crate::sync::floor::DAMAGED_REFUSAL {
+        return Outcome::Halt(Halt::FloorDamaged);
+    }
     if let Some(revision) = message.strip_prefix("sync_conflict:") {
         return Outcome::Halt(Halt::Conflict { server_revision: revision.parse().unwrap_or(0) });
     }
@@ -50,6 +53,14 @@ mod coordinator_classification_tests {
         assert_eq!(
             classify_transfer_failure(crate::sync::floor::REFUSAL),
             Outcome::Halt(Halt::Incompatible)
+        );
+    }
+
+    #[test]
+    fn a_damaged_floor_file_halts_with_its_own_reason_and_not_as_an_old_version() {
+        assert_eq!(
+            classify_transfer_failure(crate::sync::floor::DAMAGED_REFUSAL),
+            Outcome::Halt(Halt::FloorDamaged)
         );
     }
 

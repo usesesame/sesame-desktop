@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use super::account_service::read_limited;
 use super::ensure_crypto_provider;
 use super::public_updates::{candidate_trust, configured_endpoint};
-use crate::sync::floor::{floor_path, record_manifest_floor, require_allowed};
+use crate::sync::floor::{confirmed_at, floor_path, record_manifest_floor, require_allowed};
 use crate::vault::VaultResult;
 
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
@@ -101,7 +101,12 @@ async fn refresh(data_dir: &Path) {
 
 pub(crate) async fn require_sync_allowed(data_dir: &Path) -> VaultResult<()> {
     refresh(data_dir).await;
-    require_allowed(env!("CARGO_PKG_VERSION"), &floor_path(data_dir))
+    let can_fetch = configured_endpoint().is_ok() && candidate_trust().is_ok();
+    require_allowed(env!("CARGO_PKG_VERSION"), &floor_path(data_dir), can_fetch)
+}
+
+pub(crate) fn floor_confirmed_at(data_dir: &Path) -> Option<u64> {
+    confirmed_at(&floor_path(data_dir))
 }
 
 #[cfg(test)]

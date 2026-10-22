@@ -281,6 +281,10 @@ pub fn read_protected(path: &Path) -> Option<SyncState> {
     Some(state)
 }
 
+pub(crate) fn tagged_files_exist(path: &Path) -> bool {
+    path.exists() || tag_path(path).exists() || next_path(path).exists()
+}
+
 pub fn forget_protected(path: &Path) -> VaultResult<()> {
     forget(path)?;
     forget(&next_path(path))?;

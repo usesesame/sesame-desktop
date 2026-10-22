@@ -21,6 +21,7 @@ export interface SyncControllerState {
   alarm: string
   confirmedAt: number
   peerChecksSkipped: boolean
+  floorCheckedAt: number
   devices: SyncDeviceView[]
   pairingCode: string
   pairingSecondsLeft: number
@@ -80,6 +81,7 @@ interface SyncStatusView {
   needsNewKey: boolean
   alarm: string | null
   confirmedAt: number | null
+  floorConfirmedAt?: number | null
   peerChecksSkipped?: boolean
 }
 
@@ -106,6 +108,7 @@ const initialState: SyncControllerState = {
   needsNewKey: false,
   alarm: '',
   confirmedAt: 0,
+  floorCheckedAt: 0,
   peerChecksSkipped: false,
   devices: [],
   pairingCode: '',
@@ -167,6 +170,50 @@ function readableMessage(error: unknown, fallback: string) {
 }
 
 export type SyncChromeTone = 'ok' | 'busy' | 'warn'
+
+export function describeCoordinatorState(state: {
+  phase: string
+  halt: string
+  consecutiveFailures: number
+  lastSuccessRevision: number
+}): string {
+  if (state.phase === 'paused') return 'Sync is paused while the vault is locked.'
+  if (state.phase === 'halted') {
+    switch (state.halt) {
+      case 'revoked':
+        return 'This device was removed from the vault. Turn Sync off here and join again with a code.'
+      case 'not_entitled':
+        return 'Your subscription does not cover Sesame Sync. You can still download and remove devices.'
+      case 'incompatible':
+        return 'Sesame Sync needs a newer version of this app.'
+      case 'floor_damaged':
+        return 'Sesame could not read its Sync version file. It repairs the file at the next update check. If Sync stays refused, close Sesame and delete sync-floor.json, sync-floor.json.tag and sync-floor.json.next in its local data folder.'
+      case 'fork':
+        return 'Your devices disagree about this vault. Sync is paused and nothing was changed here.'
+      case 'conflict':
+        return 'Two devices changed this vault. Choose which version to keep.'
+      case 'locked':
+        return 'Unlock Sesame to keep syncing.'
+      default:
+        return 'Sesame Sync stopped.'
+    }
+  }
+  if (state.phase === 'gave_up') {
+    return 'Sesame could not reach your sync server after several tries. It tries again every 30 minutes, and Sync now tries right away.'
+  }
+  if (state.phase === 'retrying') {
+    return `Could not reach Sesame Sync. Trying again (${state.consecutiveFailures}).`
+  }
+  if (state.phase === 'working') return 'Syncing…'
+  if (state.lastSuccessRevision > 0) return `Up to date at version ${state.lastSuccessRevision}.`
+  return ''
+}
+
+export function describeFloorCheck(state: string, floorCheckedAt: number): string {
+  if (state !== 'approved') return ''
+  if (floorCheckedAt === 0) return 'Sesame has not yet checked the minimum Sync version.'
+  return `Sesame last checked the minimum Sync version on ${new Date(floorCheckedAt * 1000).toLocaleString()}.`
+}
 
 export function describeSyncForChrome(state: Pick<SyncControllerState, 'enrolled' | 'state' | 'activity' | 'alarm' | 'needsNewKey'>): { label: string; tone: SyncChromeTone } | undefined {
   if (!state.enrolled || state.state !== 'approved') return undefined
@@ -277,6 +324,7 @@ export function createSyncController() {
         needsNewKey: status.needsNewKey,
         alarm: status.alarm ?? '',
         confirmedAt: status.confirmedAt ?? 0,
+        floorCheckedAt: status.floorConfirmedAt ?? 0,
         peerChecksSkipped: status.peerChecksSkipped ?? false,
         devices: status.devices,
         error: '',

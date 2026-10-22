@@ -38,6 +38,7 @@ pub struct SyncStatusView {
     pub alarm: Option<String>,
     pub confirmed_at: Option<u64>,
     pub peer_checks_skipped: bool,
+    pub floor_confirmed_at: Option<u64>,
 }
 
 pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
@@ -308,6 +309,7 @@ fn status(state: &str) -> SyncStatusView {
         alarm: None,
         confirmed_at: None,
         peer_checks_skipped: false,
+        floor_confirmed_at: None,
     }
 }
 
@@ -426,6 +428,8 @@ pub async fn sync_status(
     view.enrolled = true;
     view.vault_epoch = server.vault_epoch;
     view.revision = server.current_revision;
+    view.floor_confirmed_at =
+        crate::adapters::network::sync_floor::floor_confirmed_at(&local_data_dir(&app)?);
     let (list, state) = match refresh(&client, &local).await {
         Ok(refreshed) => {
             view.confirmed_at = refreshed.confirmed_at;

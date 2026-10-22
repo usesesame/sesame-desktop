@@ -843,6 +843,7 @@ pub async fn sync_coordinator_status(
         Phase::Halted(Halt::Revoked) => ("halted", "revoked", 0),
         Phase::Halted(Halt::NotEntitled) => ("halted", "not_entitled", 0),
         Phase::Halted(Halt::Incompatible) => ("halted", "incompatible", 0),
+        Phase::Halted(Halt::FloorDamaged) => ("halted", "floor_damaged", 0),
         Phase::Halted(Halt::Fork) => ("halted", "fork", 0),
         Phase::Halted(Halt::Locked) => ("halted", "locked", 0),
         Phase::Halted(Halt::Conflict { server_revision }) => {
