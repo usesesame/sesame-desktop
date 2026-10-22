@@ -18,6 +18,7 @@
   export let onDelete: () => void
   export let onMove: (folderId?: string) => void
   export let onShowTag: (tag: string) => void
+  export let onSetLock: (locked: boolean) => void = () => {}
 
   type DetailField = ItemDetail['fields'][number]
 
@@ -134,6 +135,16 @@
     {#each detail.legacyFields as field, index (index)}
       <p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button type="button" class="text-button" on:click={() => (field.secret ? onCopyField(`legacy:${index}`, field.label) : onCopy(field.value, field.label))}>Copy</button></p>
     {/each}
+  </section>
+{/if}
+
+{#if kind === 'secure_note'}
+  <section class="details-section">
+    <div class="section-heading"><h3>Protection</h3></div>
+    <div class="item-collection-row">
+      <p class="field-hint">{detail.locked ? 'Opening this note asks for your master password.' : 'This note shows whenever Sesame is unlocked.'}</p>
+      <button type="button" class="secondary-button" on:click={() => onSetLock(!detail.locked)}>{detail.locked ? 'Remove the lock' : 'Lock with master password'}</button>
+    </div>
   </section>
 {/if}
 

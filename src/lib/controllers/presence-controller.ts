@@ -2,7 +2,7 @@ import { grantPresence, PRESENCE_REQUIRED } from '../vault'
 import { controllerStore } from './controller-store'
 import { messageFor } from './feedback-controller'
 
-export type PresenceIntent = 'reveal-field' | 'copy-field' | 'check-password'
+export type PresenceIntent = 'reveal-field' | 'copy-field' | 'check-password' | 'unlock-note'
 
 export function createPresenceController() {
   const state = controllerStore({

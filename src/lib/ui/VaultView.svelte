@@ -75,6 +75,7 @@
   export let passwordPresenceSecret = ''
   export let passwordPresenceError = ''
   export let passwordPresenceIntent: 'reveal' | 'copy' | 'autotype' = 'reveal'
+  export let onSetNoteLock: (locked: boolean) => void = () => {}
   export let onRevealPassword: () => Promise<void>
   export let onCopyPassword: () => void
   export let onConfirmPasswordPresence: () => void
@@ -577,6 +578,7 @@
             onDelete={onDeleteItem}
             onMove={onMoveItem}
             onShowTag={(tag) => onShowCollection(tagFilter(tag))}
+            onSetLock={onSetNoteLock}
           />
         {:else}
           <div class="select-entry state-panel" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item'}</h2><p>Its details will appear here.</p></div>
