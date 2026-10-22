@@ -304,6 +304,16 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "webview2-com",
+      "version": "0.39",
+      "reason": "The versioned WebView2 settings interface that turns off the browser accelerator keys is not re-exported by tauri, tauri-runtime-wry or wry. It is already locked through wry at 0.39.1, so naming it directly adds no crate or version."
+    },
+    {
+      "name": "windows-core",
+      "version": "0.62",
+      "reason": "The Interface trait casts the WebView2 settings object to the versioned settings interface. It is already locked through webview2-com at 0.62.2, so naming it directly adds no crate or version."
+    },
+    {
       "name": "windows-sys",
       "version": "0.61",
       "reason": "In use before this gate was adopted."
