@@ -21,6 +21,7 @@ export interface SyncControllerState {
   alarm: string
   confirmedAt: number
   peerChecksSkipped: boolean
+  floorCheckedAt: number
   devices: SyncDeviceView[]
   pairingCode: string
   pairingSecondsLeft: number
