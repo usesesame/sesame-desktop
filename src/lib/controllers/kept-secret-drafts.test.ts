@@ -5,6 +5,7 @@ import { createCardController } from './card-controller'
 import { createCustomRecordController } from './custom-record-controller'
 import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
+import { createSecureNoteController } from './secure-note-controller'
 import { createSshKeyController } from './ssh-key-controller'
 
 const vaultApi = vi.hoisted(() => ({
@@ -14,6 +15,9 @@ const vaultApi = vi.hoisted(() => ({
   deleteCustomRecord: vi.fn(),
   getCustomRecord: vi.fn(),
   saveCustomRecord: vi.fn(),
+  deleteSecureNote: vi.fn(),
+  getSecureNote: vi.fn(),
+  saveSecureNote: vi.fn(),
   deleteSshKey: vi.fn(),
   getSshKey: vi.fn(),
   saveSshKey: vi.fn(),
@@ -52,6 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vaultApi.saveCard.mockResolvedValue(saved)
   vaultApi.saveSshKey.mockResolvedValue(saved)
+  vaultApi.saveSecureNote.mockResolvedValue(saved)
   vaultApi.saveCustomRecord.mockResolvedValue(saved)
 })
 
@@ -163,5 +168,25 @@ describe('editing a record never loads its saved secrets', () => {
     await controller.save()
 
     expect(vaultApi.saveCustomRecord.mock.calls[0][0].keptSecrets).toEqual([])
+  })
+
+  it('opens a locked note with a blank body, keeps it by name and saves the lock', async () => {
+    vaultApi.getSecureNote.mockResolvedValue({ id: 'note-a', title: 'Fictional note', content: '', locked: true, tags: [], legacyFields: [], secretFields: ['content'] })
+    const controller = createSecureNoteController(options())
+
+    await controller.openEditor('note-a')
+
+    expect(get(controller.state).draft).toMatchObject({ content: '', locked: true, keptSecrets: ['content'] })
+    await controller.save()
+    expect(vaultApi.saveSecureNote).toHaveBeenCalledWith(expect.objectContaining({ id: 'note-a', content: '', locked: true, keptSecrets: ['content'] }))
+  })
+
+  it('opens an open note with its body and no kept secrets', async () => {
+    vaultApi.getSecureNote.mockResolvedValue({ id: 'note-b', title: 'Fictional note', content: 'fictional open body', tags: [], legacyFields: [], secretFields: [] })
+    const controller = createSecureNoteController(options())
+
+    await controller.openEditor('note-b')
+
+    expect(get(controller.state).draft).toMatchObject({ content: 'fictional open body', locked: false, keptSecrets: [] })
   })
 })

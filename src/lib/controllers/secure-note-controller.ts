@@ -1,14 +1,15 @@
-import type { SecureNote, SecureNoteInput } from '../types'
+import { keptSecretKeys } from '../kept-secrets'
+import type { SecretView, SecureNote, SecureNoteInput } from '../types'
 import { deleteSecureNote, getSecureNote, saveSecureNote } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
 function emptyNoteDraft(): SecureNoteInput {
-  return { title: '', content: '', tags: [] }
+  return { title: '', content: '', locked: false, tags: [], keptSecrets: [] }
 }
 
-function draftFrom(note: SecureNote): SecureNoteInput {
+function draftFrom(note: SecretView<SecureNote>): SecureNoteInput {
   const { id, title, content, tags } = note
-  return { id, title, content, tags: tags ?? [] }
+  return { id, title, content, locked: Boolean(note.locked), tags: tags ?? [], keptSecrets: keptSecretKeys(note) }
 }
 
 export function createSecureNoteController(options: RecordControllerOptions) {
