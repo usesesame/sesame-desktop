@@ -63,6 +63,8 @@ pub struct RestoreBackupRequest {
     #[serde(default)]
     pub source: Option<String>,
     pub secret: String,
+    #[serde(default)]
+    pub confirm_older: bool,
 }
 
 #[derive(Deserialize)]

@@ -1,11 +1,14 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
   import { describeBackupCompatibility } from '../backup-compatibility'
+  import type { OlderBackup } from '../older-backup'
   import type { BackupSelection } from '../types'
   import ModalShell from './ModalShell.svelte'
 
   export let restoreSelection: BackupSelection | null
   export let restoreConfirmed = false
+  export let olderBackup: OlderBackup | null = null
+  export let olderConfirmed = false
   export let restoreSecret = ''
   export let restoringBackup = false
   export let replacesVault = true
@@ -44,7 +47,11 @@
           {/if}
           {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
           {#if replacesVault}<label class="restore-confirm"><input name="confirm-vault-replacement" type="checkbox" bind:checked={restoreConfirmed} disabled={restoringBackup} /><span>I understand that the active vault will be replaced.</span></label>{/if}
-          <div class="restore-actions"><button type="button" class="secondary-button" disabled={restoringBackup} on:click={onClose}>Cancel</button><button type="submit" class="danger-button" disabled={restoringBackup || (presenceRequired ? !presencePassword : !restoreSecret) || (replacesVault && !restoreConfirmed)}>{restoringBackup ? 'Restoring…' : presenceRequired ? 'Confirm and restore' : 'Restore backup'}</button></div>
+          {#if olderBackup}
+            <p class="restore-warning" role="alert">This backup is at revision {olderBackup.restoredRevision} and your vault is at revision {olderBackup.currentRevision}. Restoring it goes back in time and drops every change made since.</p>
+            <label class="restore-confirm"><input name="confirm-older-backup" type="checkbox" bind:checked={olderConfirmed} disabled={restoringBackup} /><span>Restore the older backup anyway.</span></label>
+          {/if}
+          <div class="restore-actions"><button type="button" class="secondary-button" disabled={restoringBackup} on:click={onClose}>Cancel</button><button type="submit" class="danger-button" disabled={restoringBackup || (presenceRequired ? !presencePassword : !restoreSecret) || (replacesVault && !restoreConfirmed) || (olderBackup !== null && !olderConfirmed)}>{restoringBackup ? 'Restoring…' : presenceRequired ? 'Confirm and restore' : 'Restore backup'}</button></div>
         </form>
       {:else}
         <p class="restore-next-action" role="status">{formatCopy.nextAction}</p>
