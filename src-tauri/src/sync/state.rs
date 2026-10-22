@@ -27,6 +27,55 @@ pub struct PostedCheckpoint {
     pub at: u64,
 }
 
+/// An upload this device built and signed and was about to send, recorded before the request
+/// so a crash or a lost response can be told apart from an upload that never reached the service.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingUpload {
+    pub header: Header,
+    pub payload_digest: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingOutcome {
+    Landed,
+    NotLanded,
+    Diverged,
+}
+
+/// The service names exactly the header this device signed as its head, so the upload landed.
+pub fn pending_outcome(
+    pending: &PendingUpload,
+    base_revision: u64,
+    server_revision: u64,
+    server_head_digest: Option<&str>,
+) -> PendingOutcome {
+    if server_revision == pending.header.revision
+        && server_head_digest == Some(pending.header.digest().as_str())
+    {
+        PendingOutcome::Landed
+    } else if server_revision == base_revision {
+        PendingOutcome::NotLanded
+    } else {
+        PendingOutcome::Diverged
+    }
+}
+
+pub fn landed_state(
+    base: &SyncState,
+    pending: &PendingUpload,
+    entries: Vec<DeviceListEntry>,
+    receipt: StoredReceipt,
+) -> SyncState {
+    let mut next = base.clone();
+    next.entries = entries;
+    next.head = Some(pending.header.clone());
+    next.payload_digest = pending.payload_digest.clone();
+    next.receipt = Some(receipt);
+    next.pending_upload = None;
+    next
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SyncState {
@@ -45,6 +94,8 @@ pub struct SyncState {
     pub pending_join: Option<crate::sync::pairing::ApproverIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_confirmation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_upload: Option<PendingUpload>,
 }
 
 pub const STATE_VERSION: u8 = 3;
@@ -83,6 +134,7 @@ impl SyncState {
             last_checkpoint: None,
             pending_join: None,
             pending_confirmation: None,
+            pending_upload: None,
         }
     }
 
@@ -128,6 +180,10 @@ fn tag_path(path: &Path) -> PathBuf {
     path.with_extension("json.tag")
 }
 
+fn next_path(path: &Path) -> PathBuf {
+    path.with_extension("json.next")
+}
+
 const STATE_TAG_LABEL: &[u8] = b"sesame-sync-state-tag-v1";
 
 fn tag_for(label: &[u8], body: &[u8]) -> Vec<u8> {
@@ -170,25 +226,41 @@ pub(crate) fn write_tagged(path: &Path, label: &[u8], body: &[u8]) -> VaultResul
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
     let protected = protect(&tag_for(label, body))?;
+    let next = next_path(path);
+    crate::vault::storage::atomic_replace(&next, body)?;
     crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
-    crate::vault::storage::atomic_replace(path, body)
+    crate::vault::storage::atomic_replace(path, body)?;
+    let _ = std::fs::remove_file(&next);
+    Ok(())
 }
 
-pub(crate) fn read_tagged(path: &Path, label: &[u8]) -> Option<Vec<u8>> {
-    let body = std::fs::read(path).ok()?;
-    let protected = std::fs::read(tag_path(path)).ok()?;
-    let expected = unprotect(&protected).ok()?;
-    let actual = tag_for(label, &body);
-    if actual.len() != expected.len()
-        || actual
+fn matches_tag(label: &[u8], body: &[u8], expected: &[u8]) -> bool {
+    let actual = tag_for(label, body);
+    actual.len() == expected.len()
+        && actual
             .iter()
             .zip(expected.iter())
             .fold(0_u8, |differences, (left, right)| {
                 differences | (left ^ right)
             })
-            != 0
-    {
+            == 0
+}
+
+pub(crate) fn read_tagged(path: &Path, label: &[u8]) -> Option<Vec<u8>> {
+    let protected = std::fs::read(tag_path(path)).ok()?;
+    let expected = unprotect(&protected).ok()?;
+    if let Ok(body) = std::fs::read(path) {
+        if matches_tag(label, &body, &expected) {
+            return Some(body);
+        }
+    }
+    let next = next_path(path);
+    let body = std::fs::read(&next).ok()?;
+    if !matches_tag(label, &body, &expected) {
         return None;
+    }
+    if crate::vault::storage::atomic_replace(path, &body).is_ok() {
+        let _ = std::fs::remove_file(&next);
     }
     Some(body)
 }
@@ -211,6 +283,7 @@ pub fn read_protected(path: &Path) -> Option<SyncState> {
 
 pub fn forget_protected(path: &Path) -> VaultResult<()> {
     forget(path)?;
+    forget(&next_path(path))?;
     forget(&tag_path(path))
 }
 
@@ -256,6 +329,165 @@ mod tests {
         state.payload_digest = payload_digest(b"payload-bytes");
         state.floor = revision;
         state
+    }
+
+    fn signed_header(revision: u64, signature: &str) -> Header {
+        Header {
+            version: 3,
+            vault_id: "vault-1-0000000000000".to_string(),
+            device_id: "device-1-000000000000".to_string(),
+            revision,
+            vault_epoch: 1,
+            device_list_index: 1,
+            device_list_digest: "list-digest".to_string(),
+            previous_digest: "previous-digest".to_string(),
+            ciphertext_digest: "ciphertext-digest".to_string(),
+            ciphertext_length: 64,
+            nonce: "nonce".to_string(),
+            signature: signature.to_string(),
+        }
+    }
+
+    fn pending(revision: u64) -> PendingUpload {
+        PendingUpload {
+            header: signed_header(revision, "signature-a"),
+            payload_digest: payload_digest(b"uploaded-payload"),
+        }
+    }
+
+    #[test]
+    fn a_state_without_a_pending_upload_is_stored_exactly_as_before() {
+        let value = serde_json::to_value(sample_base(3)).unwrap();
+        assert!(value.get("pendingUpload").is_none());
+
+        let mut with_pending = sample_base(3);
+        with_pending.pending_upload = Some(pending(4));
+        let round_trip: SyncState =
+            serde_json::from_slice(&serde_json::to_vec(&with_pending).unwrap()).unwrap();
+        assert_eq!(round_trip, with_pending);
+    }
+
+    #[test]
+    fn an_upload_the_service_names_as_its_head_is_reported_as_landed() {
+        let upload = pending(4);
+        let digest = upload.header.digest();
+        assert_eq!(
+            pending_outcome(&upload, 3, 4, Some(&digest)),
+            PendingOutcome::Landed
+        );
+    }
+
+    #[test]
+    fn an_upload_that_never_reached_the_service_is_reported_as_not_landed() {
+        let upload = pending(4);
+        assert_eq!(
+            pending_outcome(&upload, 3, 3, None),
+            PendingOutcome::NotLanded
+        );
+        assert_eq!(
+            pending_outcome(&upload, 3, 3, Some("some-other-digest")),
+            PendingOutcome::NotLanded
+        );
+    }
+
+    #[test]
+    fn another_device_at_the_same_revision_or_beyond_is_never_taken_for_our_upload() {
+        let upload = pending(4);
+        let theirs = signed_header(4, "signature-of-another-device").digest();
+        assert_eq!(
+            pending_outcome(&upload, 3, 4, Some(&theirs)),
+            PendingOutcome::Diverged
+        );
+        assert_eq!(
+            pending_outcome(&upload, 3, 6, Some(&upload.header.digest())),
+            PendingOutcome::Diverged
+        );
+    }
+
+    #[test]
+    fn a_landed_upload_becomes_the_new_base_and_clears_the_pending_record() {
+        let mut base = sample_base(3);
+        base.pending_upload = Some(pending(4));
+        let upload = pending(4);
+        let receipt = StoredReceipt {
+            signature: "receipt-signature".to_string(),
+            accepted_at: 1_800_000_000,
+        };
+
+        let next = landed_state(&base, &upload, Vec::new(), receipt.clone());
+
+        assert_eq!(next.head, Some(upload.header));
+        assert_eq!(next.payload_digest, upload.payload_digest);
+        assert_eq!(next.receipt, Some(receipt));
+        assert_eq!(next.pending_upload, None);
+        assert_eq!(next.vault_id, base.vault_id);
+        assert_eq!(next.device_id, base.device_id);
+    }
+
+    #[test]
+    fn a_save_interrupted_after_the_tag_still_reads_the_new_state() {
+        let dir = dir_for("interrupted-after-tag");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(3)).unwrap();
+
+        let next = sample_base(4);
+        let body = serde_json::to_vec(&next).unwrap();
+        crate::vault::storage::atomic_replace(&next_path(&path), &body).unwrap();
+        crate::vault::storage::atomic_replace(
+            &tag_path(&path),
+            &protect(&tag_for(STATE_TAG_LABEL, &body)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(read_protected(&path), Some(next.clone()));
+        assert_eq!(read_protected(&path), Some(next));
+        assert!(!next_path(&path).exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_save_interrupted_before_the_tag_keeps_the_old_state_and_ignores_the_leftover() {
+        let dir = dir_for("interrupted-before-tag");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        let old = sample_base(3);
+        write_protected(&path, &old).unwrap();
+
+        let body = serde_json::to_vec(&sample_base(4)).unwrap();
+        crate::vault::storage::atomic_replace(&next_path(&path), &body).unwrap();
+
+        assert_eq!(read_protected(&path), Some(old));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_leftover_next_file_that_does_not_match_the_tag_is_never_adopted() {
+        let dir = dir_for("forged-next");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(3)).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        let forged = serde_json::to_vec(&sample_base(9)).unwrap();
+        std::fs::write(next_path(&path), forged).unwrap();
+
+        assert_eq!(read_protected(&path), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_completed_save_leaves_no_next_file_and_forgetting_removes_it() {
+        let dir = dir_for("no-leftover");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(3)).unwrap();
+        assert!(!next_path(&path).exists());
+
+        std::fs::write(next_path(&path), b"leftover").unwrap();
+        forget_protected(&path).unwrap();
+        assert!(!next_path(&path).exists());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

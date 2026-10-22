@@ -11,19 +11,52 @@ use crate::vault::VaultResult;
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_REDIRECTS: usize = 5;
 
-static LAST_ATTEMPT: Mutex<Option<Instant>> = Mutex::new(None);
+#[derive(Clone, Copy)]
+struct Attempt {
+    at: Instant,
+    reached: bool,
+}
+
+static LAST_ATTEMPT: Mutex<Option<Attempt>> = Mutex::new(None);
+
+fn due(last: Option<Attempt>, now: Instant) -> bool {
+    match last {
+        None => true,
+        Some(attempt) => {
+            let wait = if attempt.reached {
+                REFRESH_INTERVAL
+            } else {
+                RETRY_INTERVAL
+            };
+            now.saturating_duration_since(attempt.at) >= wait
+        }
+    }
+}
 
 fn attempt_due() -> bool {
     let Ok(mut last) = LAST_ATTEMPT.lock() else {
         return false;
     };
-    let due = last.is_none_or(|at| at.elapsed() >= REFRESH_INTERVAL);
-    if due {
-        *last = Some(Instant::now());
+    let now = Instant::now();
+    let is_due = due(*last, now);
+    if is_due {
+        *last = Some(Attempt {
+            at: now,
+            reached: false,
+        });
     }
-    due
+    is_due
+}
+
+fn mark_reached() {
+    if let Ok(mut last) = LAST_ATTEMPT.lock() {
+        if let Some(attempt) = last.as_mut() {
+            attempt.reached = true;
+        }
+    }
 }
 
 fn unix_now() -> u64 {
@@ -62,10 +95,43 @@ async fn refresh(data_dir: &Path) {
     let Some(manifest) = fetch_manifest(endpoint).await else {
         return;
     };
+    mark_reached();
     let _ = record_manifest_floor(&floor_path(data_dir), &manifest, key, key_id, unix_now());
 }
 
 pub(crate) async fn require_sync_allowed(data_dir: &Path) -> VaultResult<()> {
     refresh(data_dir).await;
     require_allowed(env!("CARGO_PKG_VERSION"), &floor_path(data_dir))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attempt(at: Instant, reached: bool) -> Option<Attempt> {
+        Some(Attempt { at, reached })
+    }
+
+    #[test]
+    fn the_first_check_is_always_due() {
+        assert!(due(None, Instant::now()));
+    }
+
+    #[test]
+    fn a_confirmed_floor_is_checked_again_after_an_hour_and_not_before() {
+        let start = Instant::now();
+        assert!(!due(
+            attempt(start, true),
+            start + Duration::from_secs(59 * 60)
+        ));
+        assert!(due(attempt(start, true), start + REFRESH_INTERVAL));
+    }
+
+    #[test]
+    fn a_failed_fetch_is_retried_in_minutes_and_not_blocked_for_an_hour() {
+        let start = Instant::now();
+        assert!(!due(attempt(start, false), start + Duration::from_secs(60)));
+        assert!(due(attempt(start, false), start + RETRY_INTERVAL));
+        assert!(RETRY_INTERVAL < REFRESH_INTERVAL);
+    }
 }

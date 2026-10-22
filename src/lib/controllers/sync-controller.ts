@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SyncConflictSide } from '../types'
 import { controllerStore } from './controller-store'
 
-export type SyncActivity = 'idle' | 'pending' | 'syncing' | 'synced' | 'offline' | 'attention'
+export type SyncActivity = 'idle' | 'pending' | 'syncing' | 'synced' | 'offline' | 'failing' | 'attention'
 
 export interface SyncControllerState {
   activity: SyncActivity
@@ -20,6 +20,7 @@ export interface SyncControllerState {
   needsNewKey: boolean
   alarm: string
   confirmedAt: number
+  peerChecksSkipped: boolean
   devices: SyncDeviceView[]
   pairingCode: string
   pairingSecondsLeft: number
@@ -79,6 +80,7 @@ interface SyncStatusView {
   needsNewKey: boolean
   alarm: string | null
   confirmedAt: number | null
+  peerChecksSkipped?: boolean
 }
 
 const emptySide: SyncConflictSide = {
@@ -104,6 +106,7 @@ const initialState: SyncControllerState = {
   needsNewKey: false,
   alarm: '',
   confirmedAt: 0,
+  peerChecksSkipped: false,
   devices: [],
   pairingCode: '',
   pairingSecondsLeft: 0,
@@ -127,6 +130,13 @@ const initialState: SyncControllerState = {
 
 const CACHE_KEY = 'sesame-sync-cache-v1'
 const BACKGROUND_INTERVAL_MS = 5 * 60 * 1000
+const BACKOFF_FIRST_MS = 60 * 1000
+const BACKOFF_MAX_MS = 30 * 60 * 1000
+
+export function autoSyncBackoffMs(failures: number): number {
+  if (failures <= 0) return 0
+  return Math.min(BACKOFF_FIRST_MS * 2 ** (failures - 1), BACKOFF_MAX_MS)
+}
 const CHANGE_DELAY_MS = 600
 
 function readCache(): Pick<SyncControllerState, 'enrolled' | 'state'> | null {
@@ -169,6 +179,8 @@ export function describeSyncForChrome(state: Pick<SyncControllerState, 'enrolled
       return { label: 'Synced vault · Syncing…', tone: 'busy' }
     case 'offline':
       return { label: 'Synced vault · Offline, will retry', tone: 'warn' }
+    case 'failing':
+      return { label: 'Synced vault · Could not sync, will retry', tone: 'warn' }
     case 'attention':
       return { label: 'Synced vault · Needs attention', tone: 'warn' }
     case 'synced':
@@ -265,6 +277,7 @@ export function createSyncController() {
         needsNewKey: status.needsNewKey,
         alarm: status.alarm ?? '',
         confirmedAt: status.confirmedAt ?? 0,
+        peerChecksSkipped: status.peerChecksSkipped ?? false,
         devices: status.devices,
         error: '',
         working: false,
@@ -283,6 +296,7 @@ export function createSyncController() {
   let countdown: ReturnType<typeof setInterval> | undefined
   let changeTimer: ReturnType<typeof setTimeout> | undefined
   let rerun = false
+  let lastAutoAttemptAt = 0
 
   function activityFor(status: SyncCoordinatorView): SyncActivity {
     switch (status.phase) {
@@ -290,6 +304,10 @@ export function createSyncController() {
         return 'syncing'
       case 'retrying':
         return 'offline'
+      case 'gave_up':
+        return 'failing'
+      case 'paused':
+        return 'idle'
       case 'halted':
         return 'attention'
       default:
@@ -447,6 +465,9 @@ export function createSyncController() {
       if (current.working || current.state !== 'approved' || current.needsNewKey || halted || current.alarm) {
         return
       }
+      const wait = autoSyncBackoffMs(current.coordinator.consecutiveFailures)
+      if (wait > 0 && Date.now() - lastAutoAttemptAt < wait) return
+      lastAutoAttemptAt = Date.now()
       store.patch({ activity: 'syncing' })
       try {
         const status = await invoke<SyncCoordinatorView>('sync_now')
@@ -477,10 +498,16 @@ export function createSyncController() {
       void loadLocal().then(() => api.autoSync())
       const timer = setInterval(() => void api.autoSync(), BACKGROUND_INTERVAL_MS)
       const onFocus = () => void api.autoSync()
+      const onOnline = () => {
+        lastAutoAttemptAt = 0
+        void api.autoSync()
+      }
       window.addEventListener('focus', onFocus)
+      window.addEventListener('online', onOnline)
       return () => {
         clearInterval(timer)
         window.removeEventListener('focus', onFocus)
+        window.removeEventListener('online', onOnline)
         if (changeTimer !== undefined) clearTimeout(changeTimer)
         changeTimer = undefined
       }
@@ -497,7 +524,7 @@ export function createSyncController() {
     async syncNow() {
       store.patch({ working: true, error: '' })
       try {
-        const status = await invoke<SyncCoordinatorView>('sync_now')
+        const status = await invoke<SyncCoordinatorView>('sync_now', { manual: true })
         store.patch({ working: false, coordinator: status })
         if (status.halt === 'conflict') {
           store.patch({
@@ -566,16 +593,18 @@ export function createSyncController() {
       }
       store.patch({ working: true, error: '' })
       try {
-        const result = await invoke<{ recoveryCopies: string[] }>('sync_resolve_conflict', {
+        const result = await invoke<{ recoveryCopies: string[]; removedOldCopies?: number }>('sync_resolve_conflict', {
           keep: choice,
         })
+        const removed = result.removedOldCopies ?? 0
+        const base =
+          result.recoveryCopies.length === 2
+            ? 'Resolved. A recovery copy of each vault is saved on this device.'
+            : 'Resolved.'
         store.patch({
           working: false,
           conflictOpen: false,
-          lastTransfer:
-            result.recoveryCopies.length === 2
-              ? 'Resolved. A recovery copy of each vault is saved on this device.'
-              : 'Resolved.',
+          lastTransfer: removed > 0 ? `${base} Sesame removed ${removed} older recovery ${removed === 1 ? 'copy' : 'copies'} to stay within its limit.` : base,
         })
         await refresh()
       } catch (error) {

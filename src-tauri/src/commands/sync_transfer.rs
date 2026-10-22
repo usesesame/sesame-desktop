@@ -111,6 +111,12 @@ async fn upload_on(
     let nonce = decode_bytes(&blob.nonce)?;
     let ciphertext = decode_bytes(&blob.ciphertext)?;
     let header = build_header(&identity, &plan, &nonce, &ciphertext);
+    let mut staged = base.clone();
+    staged.pending_upload = Some(crate::sync::state::PendingUpload {
+        header: header.clone(),
+        payload_digest: plaintext_digest.clone(),
+    });
+    save_state(app, &staged)?;
     let accepted = client
         .upload(&identity, &header, &ciphertext)
         .await
@@ -125,6 +131,7 @@ async fn upload_on(
     )
     .map_err(present_proof)?;
     let mut next = base.clone();
+    next.pending_upload = None;
     next.entries = refreshed.update.entries;
     next.head = Some(header.clone());
     next.payload_digest = plaintext_digest;
@@ -137,13 +144,76 @@ async fn upload_on(
     ))
 }
 
+const ALREADY_SYNCING: &str = "Sesame is already syncing. Try again in a moment.";
+
 #[tauri::command]
 pub async fn sync_upload_vault(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
+) -> Result<SyncTransferResult, String> {
+    let _run = coordinator
+        .begin_manual()
+        .ok_or_else(|| ALREADY_SYNCING.to_string())?;
+    upload_vault(app, state).await
+}
+
+/// An earlier upload may have reached the service while its answer was lost or the app stopped.
+/// This settles that before anything is compared, so the upload is not mistaken for a conflict.
+async fn reconcile_pending_upload(
+    app: &AppHandle,
+    client: &SyncClient,
+    local: SyncState,
+) -> Result<SyncState, String> {
+    use crate::sync::state::{landed_state, pending_outcome, PendingOutcome};
+
+    let Some(pending) = local.pending_upload.clone() else {
+        return Ok(local);
+    };
+    let refreshed = refresh(client, &local).await?;
+    let head_digest = refreshed.update.head.as_ref().map(Header::digest);
+    let outcome = pending_outcome(
+        &pending,
+        local.head_revision(),
+        refreshed.server.current_revision,
+        head_digest.as_deref(),
+    );
+    if outcome == PendingOutcome::Landed {
+        let served = client
+            .headers(pending.header.revision.saturating_sub(1))
+            .await
+            .map_err(present)?;
+        let item = served
+            .into_iter()
+            .find(|item| item.header.revision == pending.header.revision)
+            .ok_or("The service did not list the upload this device made.")?;
+        let receipt = verify_accepted(
+            &pending.header,
+            &item.digest,
+            item.header.revision,
+            &item.receipt,
+            &item.accepted_at,
+            client.instance_key(),
+        )
+        .map_err(present_proof)?;
+        let next = landed_state(&local, &pending, refreshed.update.entries, receipt);
+        save_state(app, &next)?;
+        return Ok(next);
+    }
+    let mut next = local;
+    next.pending_upload = None;
+    next.entries = refreshed.update.entries;
+    save_state(app, &next)?;
+    Ok(next)
+}
+
+async fn upload_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let local = reconcile_pending_upload(&app, &client, local).await?;
     let refreshed = refresh(&client, &local).await?;
     require_activated(&refreshed)?;
     match crate::sync::state::decide_upload(
@@ -207,6 +277,17 @@ async fn fetch_remote(client: &SyncClient, local: &SyncState) -> Result<Remote, 
 
 #[tauri::command]
 pub async fn sync_download_vault(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
+) -> Result<SyncTransferResult, String> {
+    let _run = coordinator
+        .begin_manual()
+        .ok_or_else(|| ALREADY_SYNCING.to_string())?;
+    download_vault(app, state).await
+}
+
+async fn download_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
@@ -565,10 +646,25 @@ pub struct SyncResolutionResult {
     pub vault_epoch: i64,
     pub entry_count: usize,
     pub recovery_copies: Vec<String>,
+    pub removed_old_copies: usize,
 }
 
 #[tauri::command]
 pub async fn sync_resolve_conflict(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
+    keep: String,
+) -> Result<SyncResolutionResult, String> {
+    let _run = coordinator
+        .begin_manual()
+        .ok_or_else(|| ALREADY_SYNCING.to_string())?;
+    let resolved = resolve_conflict(app, state, keep).await?;
+    coordinator.resume();
+    Ok(resolved)
+}
+
+async fn resolve_conflict(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
     keep: String,
@@ -584,6 +680,7 @@ pub async fn sync_resolve_conflict(
     require_activated(&remote.refreshed)?;
     let data_dir = local_data_dir(&app)?;
 
+    let mut removed_old_copies = 0_usize;
     let (local_plaintext, remote_authenticated, local_entries, remote_entries, recovery_copies) = {
         let session = state
             .session
@@ -613,7 +710,8 @@ pub async fn sync_resolve_conflict(
                 &directory, unlocked, side, revision, payload, &stamp,
             )?);
         }
-        crate::sync::conflict_backup::prune_and_report(&app, &directory, &written);
+        removed_old_copies =
+            crate::sync::conflict_backup::prune_and_report(&app, &directory, &written);
         let names: Vec<String> = written
             .into_iter()
             .map(|path| {
@@ -654,6 +752,7 @@ pub async fn sync_resolve_conflict(
             vault_epoch: result.vault_epoch,
             entry_count: local_entries,
             recovery_copies,
+            removed_old_copies,
         });
     }
 
@@ -684,6 +783,7 @@ pub async fn sync_resolve_conflict(
         vault_epoch: signed_revision(remote.header.vault_epoch),
         entry_count: remote_entries,
         recovery_copies,
+        removed_old_copies,
     })
 }
 
@@ -725,6 +825,8 @@ pub async fn sync_coordinator_status(
         Phase::Idle => ("idle", "", 0),
         Phase::Working => ("working", "", 0),
         Phase::Retrying { .. } => ("retrying", "", 0),
+        Phase::GaveUp => ("gave_up", "", 0),
+        Phase::Paused => ("paused", "locked", 0),
         Phase::Halted(Halt::Revoked) => ("halted", "revoked", 0),
         Phase::Halted(Halt::NotEntitled) => ("halted", "not_entitled", 0),
         Phase::Halted(Halt::Incompatible) => ("halted", "incompatible", 0),
@@ -749,7 +851,11 @@ pub async fn sync_now(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
     coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
+    manual: Option<bool>,
 ) -> Result<SyncCoordinatorView, String> {
+    if manual.unwrap_or(false) {
+        coordinator.retry_after_user_action();
+    }
     if !coordinator.begin() {
         return sync_coordinator_status(coordinator).await;
     }
@@ -771,6 +877,7 @@ async fn run_one_transfer(
         return Ok(Outcome::AlreadyCurrent);
     };
     let client = SyncClient::connect(app).await?;
+    let local = reconcile_pending_upload(app, &client, local).await?;
     let server = client.state().await.map_err(present)?;
     let has_local_changes = {
         let session = state
@@ -782,13 +889,13 @@ async fn run_one_transfer(
         local.has_local_changes(&plaintext)
     };
     if has_local_changes {
-        let result = sync_upload_vault(app.clone(), state.clone()).await?;
+        let result = upload_vault(app.clone(), state.clone()).await?;
         return Ok(Outcome::Uploaded {
             revision: result.revision,
         });
     }
     if server.current_revision > local.head_revision() {
-        let result = sync_download_vault(app.clone(), state.clone()).await?;
+        let result = download_vault(app.clone(), state.clone()).await?;
         return Ok(Outcome::Downloaded {
             revision: result.revision,
         });

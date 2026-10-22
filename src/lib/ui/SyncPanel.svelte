@@ -39,10 +39,11 @@
   let showBackups = false
 
   $: coordinatorNote = describeCoordinator($syncPanel.coordinator)
-  $: confirmation = describeConfirmation($syncPanel.state, $syncPanel.confirmedAt, others.length)
+  $: confirmation = describeConfirmation($syncPanel.state, $syncPanel.confirmedAt, others.length, $syncPanel.peerChecksSkipped)
 
-  function describeConfirmation(state: string, confirmedAt: number, peers: number): string {
+  function describeConfirmation(state: string, confirmedAt: number, peers: number, skipped: boolean): string {
     if (state !== 'approved' || peers === 0) return ''
+    if (skipped) return 'Sesame could not check what your other devices last saw, so it could not rule out an old copy of this vault. It checks again on the next sync.'
     if (confirmedAt === 0) return 'No other device has confirmed this vault yet.'
     return `Another device last confirmed this vault on ${new Date(confirmedAt * 1000).toLocaleString()}.`
   }
@@ -53,6 +54,7 @@
     consecutiveFailures: number
     lastSuccessRevision: number
   }): string {
+    if (state.phase === 'paused') return 'Sync is paused while the vault is locked.'
     if (state.phase === 'halted') {
       switch (state.halt) {
         case 'revoked':
@@ -70,6 +72,9 @@
         default:
           return 'Sesame Sync stopped.'
       }
+    }
+    if (state.phase === 'gave_up') {
+      return 'Sesame could not reach your sync server after several tries. It tries again every 30 minutes, and Sync now tries right away.'
     }
     if (state.phase === 'retrying') {
       return `Could not reach Sesame Sync. Trying again (${state.consecutiveFailures}).`
