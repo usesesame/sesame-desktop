@@ -351,6 +351,7 @@ fn searchable_fields(item: &TaggedItem) -> Vec<&str> {
             identity.city.as_str(),
             identity.country.as_str(),
         ],
+        TaggedItem::SecureNote(note) if note.locked => vec![""],
         TaggedItem::SecureNote(note) => vec![note.content.as_str()],
         TaggedItem::Card(card) => vec![
             card.brand.as_str(),
@@ -427,6 +428,29 @@ mod tests {
     #[test]
     fn search_does_not_match_secret_fields() {
         assert!(!item_matches_search(&[], &login(), "secret-canary"));
+    }
+
+    #[test]
+    fn search_reads_an_open_note_body_and_never_a_locked_one() {
+        use crate::vault::SecureNote;
+        let mut note = SecureNote::default();
+        note.id = "fictional-note".to_string();
+        note.title = "Fictional note".to_string();
+        note.content = "fictional-hidden-phrase".to_string();
+
+        assert!(item_matches_search(
+            &[],
+            &TaggedItem::SecureNote(note.clone()),
+            "hidden-phrase"
+        ));
+
+        note.locked = true;
+        let locked = TaggedItem::SecureNote(note);
+        assert!(!item_matches_search(&[], &locked, "hidden-phrase"));
+        assert!(item_matches_search(&[], &locked, "fictional note"));
+        assert!(searchable_fields(&locked)
+            .iter()
+            .all(|field| field.is_empty()));
     }
 
     fn entry(
