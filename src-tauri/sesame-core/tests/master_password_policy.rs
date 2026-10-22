@@ -42,6 +42,14 @@ fn a_guessable_master_password_is_refused_even_when_long_enough() {
 }
 
 #[test]
+fn a_refusal_never_states_a_length_the_policy_does_not_enforce() {
+    for refused in ["abcdefghijkl", "fictionalpwd", "Abcdefgh123!", "aaaabbbbcccc"] {
+        let error = check_new_master_password(refused).expect_err("refused password");
+        assert!(!error.contains("16"), "{refused}: {error}");
+    }
+}
+
+#[test]
 fn creating_a_vault_applies_the_policy() {
     assert!(create_vault("fictionalpwd", "Fictional vault").is_err());
     assert!(create_vault("fictional master password", "Fictional vault").is_ok());
