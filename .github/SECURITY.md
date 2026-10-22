@@ -112,6 +112,13 @@ good-faith report that turns out to be out of scope is not held against you.
 - Sync is off until a person turns it on in Settings. The screen says that no
   independent review has happened. A service that refuses to answer, and a
   vault with a single device, are outside what Sync claims to prevent.
+- Sync device key transfer adds a post-quantum key exchange, ML-KEM-768
+  combined with X25519, when a device advertises a hybrid key. Nobody
+  independent has reviewed it, and Sesame is not quantum safe. A transfer
+  recorded before both devices moved to hybrid keys keeps the older protection
+  until the vault key changes, device signatures stay Ed25519, and the pairing
+  code exchange is unchanged. You can allow the older key exchange for one
+  pairing, and that pairing then has only the older protection.
 - Sesame cannot protect an unlocked vault from software that controls your
   computer. Malware running as you, or as an administrator, can read the
   app's memory, drive its window, record your keystrokes, or capture the
@@ -128,8 +135,12 @@ good-faith report that turns out to be out of scope is not held against you.
   window has to display them, and a one-time code expires within a minute or
   so. Locked notes are left out of search, and a vault that holds a locked
   note does not open in a Sesame version that predates the lock.
-- Malware that controls your browser profile can act as the extension. The
-  approval prompt in the Sesame window is the last check before a fill.
+- Any program running as you can start the browser helper with the
+  extension's origin and ask for a fill, because the helper takes that origin
+  from whoever starts it and cannot check it. The approval prompt in the
+  Sesame window shows the requesting site and is the only check before a fill,
+  and it needs the vault to be unlocked. Malware that controls your browser
+  profile can do the same.
 - On Linux the browser helper trusts whichever program of yours owns its
   private socket, because Sesame hides its own executable from other
   programs. A program running as you that starts before Sesame could receive
@@ -144,7 +155,7 @@ good-faith report that turns out to be out of scope is not held against you.
   that PIN and this device's key, until you change the master password or get
   a new recovery kit.
 - Anyone who can write to the vault folder can put back an older vault file.
-  Sesame does not yet detect that rollback.
+  Sesame warns about it only where the revision record described above exists.
 - A master password or recovery kit that someone else learns opens any copy
   of your vault file. Keep the recovery kit offline.
 - The 72-hour wait for a new recovery kit uses HTTPS time from usesesame.app
