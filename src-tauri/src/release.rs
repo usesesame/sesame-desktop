@@ -55,6 +55,18 @@ impl ReleasePresence {
         verified
     }
 
+    pub fn grant_after_unlock(&self, epoch: u64) {
+        if let Ok(mut grant) = self.grant.lock() {
+            *grant = Some(Grant {
+                epoch,
+                expires_at: Instant::now() + PRESENCE_TTL,
+            });
+        }
+        if let Ok(mut failures) = self.failures.lock() {
+            *failures = 0;
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn grant_until(&self, epoch: u64, expires_at: Instant) {
         *self.grant.lock().expect("grant lock") = Some(Grant { epoch, expires_at });
@@ -136,6 +148,29 @@ mod tests {
             expires_at: Instant::now() - Duration::from_secs(1),
         });
         assert_eq!(presence.require(7), Err(PRESENCE_REQUIRED.to_string()));
+    }
+
+    #[test]
+    fn an_unlock_grant_covers_its_epoch_and_ends_when_revoked() {
+        let presence = ReleasePresence::default();
+        presence.grant_after_unlock(7);
+        assert!(presence.require(7).is_ok());
+        assert_eq!(presence.require(8), Err(PRESENCE_REQUIRED.to_string()));
+        presence.revoke();
+        assert_eq!(presence.require(7), Err(PRESENCE_REQUIRED.to_string()));
+    }
+
+    #[test]
+    fn an_unlock_grant_replaces_an_expired_one_and_clears_failures() {
+        let presence = ReleasePresence::default();
+        presence.grant_until(7, Instant::now() - Duration::from_secs(1));
+        *presence.failures.lock().expect("failures lock") = 2;
+        assert_eq!(presence.require(7), Err(PRESENCE_REQUIRED.to_string()));
+
+        presence.grant_after_unlock(7);
+
+        assert!(presence.require(7).is_ok());
+        assert_eq!(*presence.failures.lock().expect("failures lock"), 0);
     }
 
     #[test]

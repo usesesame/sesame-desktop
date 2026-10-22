@@ -1255,6 +1255,10 @@ pub struct DeleteIdentityResult {
     pub snapshot: VaultSnapshot,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Serialize, Deserialize, Clone, Default, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1263,6 +1267,8 @@ pub struct SecureNote {
     pub title: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -1291,7 +1297,11 @@ pub struct SecureNoteInput {
     #[serde(default)]
     pub content: String,
     #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub kept_secrets: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]

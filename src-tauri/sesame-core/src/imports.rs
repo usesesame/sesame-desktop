@@ -689,6 +689,7 @@ fn bitwarden_json_secure_note(
         id: random_id(),
         title: non_empty(title).unwrap_or_else(|| "Imported note".to_string()),
         content,
+        locked: false,
         tags: Vec::new(),
         legacy_fields,
         created_at: now,

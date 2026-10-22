@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppStores } from '../stores/app-stores'
 import type { RecordKind } from '../item-fields'
 import type { VaultSnapshot } from '../types'
-import { copyItemField, grantPresence, recordItemUse, releaseItemField, searchItems } from '../vault'
+import { copyItemField, grantPresence, recordItemUse, releaseItemField, searchItems, setSecureNoteLock } from '../vault'
 import { createFeedbackController } from './feedback-controller'
 import { createItemController, SEARCH_DEBOUNCE_MS, SECRET_REVEAL_TIMEOUT_MS, type RecordEditor } from './item-controller'
 import { createPresenceController } from './presence-controller'
@@ -18,6 +18,7 @@ vi.mock('../vault', async (importOriginal) => {
     copyItemField: vi.fn(),
     grantPresence: vi.fn(),
     recordItemUse: vi.fn(),
+    setSecureNoteLock: vi.fn(),
   }
 })
 
@@ -438,3 +439,56 @@ describe('secret fields', () => {
     expect(get(controller.state).revealed).toEqual({})
   })
 })
+
+describe('note lock', () => {
+  const presenceRequired = () => new Error('presenceRequired')
+
+  function openNote() {
+    const context = harness()
+    context.stores.selection.patch({ activeItemId: 'note-1', activeItemKind: 'secure_note' })
+    context.stores.vault.patch({ status: { unlocked: true } } as never)
+    return context
+  }
+
+  beforeEach(() => {
+    vi.mocked(setSecureNoteLock).mockReset()
+    vi.mocked(grantPresence).mockReset()
+  })
+
+  it('locks a note without asking for the master password', async () => {
+    const { controller, presence } = openNote()
+    vi.mocked(setSecureNoteLock).mockResolvedValue({ id: 'note-1', snapshot: { items: [], folders: [] } as never })
+
+    await controller.setNoteLock(true)
+
+    expect(setSecureNoteLock).toHaveBeenCalledWith('note-1', true)
+    expect(get(presence.state).open).toBe(false)
+  })
+
+  it('asks for the master password before it removes a lock and retries once it is given', async () => {
+    const { controller, presence } = openNote()
+    vi.mocked(setSecureNoteLock)
+      .mockRejectedValueOnce(presenceRequired())
+      .mockResolvedValueOnce({ id: 'note-1', snapshot: { items: [], folders: [] } as never })
+    vi.mocked(grantPresence).mockResolvedValue(undefined)
+
+    await controller.setNoteLock(false)
+
+    expect(get(presence.state)).toMatchObject({ open: true, intent: 'unlock-note' })
+
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    expect(grantPresence).toHaveBeenCalledWith('fictional master password')
+    expect(setSecureNoteLock).toHaveBeenCalledTimes(2)
+    expect(get(presence.state).open).toBe(false)
+  })
+
+  it('ignores a lock request when the open item is not a note', async () => {
+    const { controller } = harness()
+    await controller.setNoteLock(true)
+
+    expect(setSecureNoteLock).not.toHaveBeenCalled()
+  })
+})
+
