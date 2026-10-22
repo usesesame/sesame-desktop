@@ -74,7 +74,7 @@ pub fn check_new_master_password(password: &str) -> crate::VaultResult<()> {
         return Err("That master password follows a pattern attackers try first. Choose another one, or use a generated passphrase.".into());
     }
     if analysis.score < MIN_MASTER_PASSWORD_SCORE {
-        return Err("That master password is too easy to guess. Use 16 or more characters, or a generated passphrase.".into());
+        return Err("That master password is too easy to guess. Add more words or characters, or use a generated passphrase.".into());
     }
     Ok(())
 }

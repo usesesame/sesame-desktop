@@ -12,8 +12,9 @@ pub const FLOOR_FILE_NAME: &str = "sync-floor.json";
 const PAYLOAD_LABEL: &str = "sesame-sync-floor-v1";
 const TAG_LABEL: &[u8] = b"sesame-sync-floor-tag-v1";
 const MANIFEST_RECEIPT_SET_LABEL: &str = "sesame-release-set-candidate-v1";
-const REFUSAL: &str =
+pub(crate) const REFUSAL: &str =
     "This version of Sesame can no longer use Sync. Update Sesame to keep syncing.";
+pub(crate) const DAMAGED_REFUSAL: &str = "Sesame could not read its Sync version file. It repairs the file at the next update check. If Sync stays refused, close Sesame and delete sync-floor.json, sync-floor.json.tag and sync-floor.json.next in its local data folder.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
@@ -202,9 +203,31 @@ pub fn record_manifest_floor(
     }
 }
 
-pub fn require_allowed(build_version: &str, path: &Path) -> Result<(), String> {
-    let Some(stored) = read_floor(path) else {
-        return Ok(());
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FloorState {
+    Absent,
+    Present(StoredFloor),
+    Damaged,
+}
+
+pub fn floor_state(path: &Path) -> FloorState {
+    match read_floor(path) {
+        Some(stored) => FloorState::Present(stored),
+        None if crate::sync::state::tagged_files_exist(path) => FloorState::Damaged,
+        None => FloorState::Absent,
+    }
+}
+
+pub fn confirmed_at(path: &Path) -> Option<u64> {
+    read_floor(path).map(|stored| stored.confirmed_at)
+}
+
+pub fn require_allowed(build_version: &str, path: &Path, can_fetch: bool) -> Result<(), String> {
+    let stored = match floor_state(path) {
+        FloorState::Absent => return Ok(()),
+        FloorState::Damaged if can_fetch => return Err(DAMAGED_REFUSAL.to_string()),
+        FloorState::Damaged => return Ok(()),
+        FloorState::Present(stored) => stored,
     };
     let minimum = Version::parse_floor(&stored.minimum).ok_or_else(|| REFUSAL.to_string())?;
     match Version::parse_build(build_version) {
@@ -355,18 +378,18 @@ mod tests {
     fn a_build_below_the_stored_floor_refuses_and_a_build_at_it_passes() {
         let path = scratch("below");
         raise_floor(&path, "0.4.0", 100).unwrap();
-        assert!(require_allowed("0.3.9", &path).is_err());
-        assert!(require_allowed("0.4.0-beta.1", &path).is_err());
-        assert!(require_allowed("0.4.0", &path).is_ok());
-        assert!(require_allowed("0.10.0", &path).is_ok());
-        assert!(require_allowed("not-a-version", &path).is_err());
+        assert!(require_allowed("0.3.9", &path, true).is_err());
+        assert!(require_allowed("0.4.0-beta.1", &path, true).is_err());
+        assert!(require_allowed("0.4.0", &path, true).is_ok());
+        assert!(require_allowed("0.10.0", &path, true).is_ok());
+        assert!(require_allowed("not-a-version", &path, true).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
     fn nothing_stored_means_no_floor() {
         let path = scratch("none");
-        assert!(require_allowed("0.0.1", &path).is_ok());
+        assert!(require_allowed("0.0.1", &path, true).is_ok());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -379,7 +402,7 @@ mod tests {
         assert_eq!(after_older.confirmed_at, 200);
         let after_newer = raise_floor(&path, "0.5.0", 300).unwrap();
         assert_eq!(after_newer.minimum, "0.5.0");
-        assert!(require_allowed("0.4.9", &path).is_err());
+        assert!(require_allowed("0.4.9", &path, true).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -399,7 +422,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_floor(&path).unwrap().minimum, "1.2.0");
-        assert!(require_allowed("1.1.9", &path).is_err());
+        assert!(require_allowed("1.1.9", &path, true).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -440,5 +463,91 @@ mod tests {
         assert_eq!(Version::parse_build("1.0"), None);
         assert_eq!(Version::parse_build("1.0.0.0"), None);
         assert_eq!(Version::parse_build("99999999999999999999.0.0"), None);
+    }
+    #[test]
+    fn the_refusal_names_all_three_files_that_a_manual_reset_removes() {
+        for name in [
+            "sync-floor.json",
+            "sync-floor.json.tag",
+            "sync-floor.json.next",
+        ] {
+            assert!(DAMAGED_REFUSAL.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn removing_all_three_files_resets_a_damaged_floor_and_removing_only_one_does_not() {
+        let path = scratch("manual-reset");
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        std::fs::write(path.with_extension("json.next"), b"leftover").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        std::fs::remove_file(path.with_extension("json.next")).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        std::fs::remove_file(path.with_extension("json.tag")).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Absent);
+        assert!(require_allowed("0.1.0", &path, true).is_ok());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_damaged_floor_file_refuses_sync_where_a_floor_can_be_fetched() {
+        let path = scratch("damaged");
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        assert_eq!(
+            require_allowed("9.9.9", &path, true),
+            Err(DAMAGED_REFUSAL.to_string())
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_damaged_floor_file_changes_nothing_where_no_floor_can_be_fetched() {
+        let path = scratch("damaged-offline");
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        assert!(require_allowed("0.1.0", &path, false).is_ok());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_lost_body_with_a_surviving_tag_counts_as_damaged_and_no_files_as_absent() {
+        let path = scratch("lost-body");
+        assert_eq!(floor_state(&path), FloorState::Absent);
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        assert!(require_allowed("0.1.0", &path, true).is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_verified_manifest_repairs_a_damaged_floor_file() {
+        let path = scratch("repair");
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        record_manifest_floor(&path, &signed_manifest("1.2.0"), &public_key(), KEY_ID, 300)
+            .unwrap();
+        assert_eq!(
+            floor_state(&path),
+            FloorState::Present(StoredFloor {
+                minimum: "1.2.0".into(),
+                confirmed_at: 300
+            })
+        );
+        assert!(require_allowed("1.2.0", &path, true).is_ok());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_confirmation_time_is_read_back_and_absent_before_any_confirmation() {
+        let path = scratch("confirmed");
+        assert_eq!(confirmed_at(&path), None);
+        raise_floor(&path, "0.4.0", 123).unwrap();
+        assert_eq!(confirmed_at(&path), Some(123));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
