@@ -17,6 +17,7 @@ import {
   recordDiagnostic,
   recordItemUse,
   releaseItemField,
+  setSecureNoteLock,
   searchItems,
   setItemFavourite,
 } from '../vault'
@@ -189,6 +190,21 @@ export function createItemController({ stores, feedback, login, presence, editor
     }
   }
 
+  async function setNoteLock(locked: boolean): Promise<void> {
+    const active = activeRecord()
+    if (!active || active.kind !== 'secure_note') return
+    try {
+      const result = await setSecureNoteLock(active.id, locked)
+      clearDetail()
+      vault.patch({ snapshot: result.snapshot })
+      await select(active.id, 'secure_note')
+      feedback.showNotice(locked ? 'Note locked' : 'Lock removed', locked ? 'Opening this note now asks for your master password.' : 'This note shows without asking for your master password.')
+    } catch (error) {
+      if (presence.required(error)) presence.ask('unlock-note', () => setNoteLock(locked))
+      else feedback.setError(error)
+    }
+  }
+
   function detailKey(id: string): string {
     const summary = vault.value().snapshot?.items.find((item) => item.id === id)
     return summary ? `${summary.id}:${summary.updatedAt}` : ''
@@ -254,6 +270,7 @@ export function createItemController({ stores, feedback, login, presence, editor
     copyField,
     revealField,
     hideField,
+    setNoteLock,
     openNew(kind: ItemKind) {
       state.patch({ addMenuOpen: false })
       if (kind === 'login') {
