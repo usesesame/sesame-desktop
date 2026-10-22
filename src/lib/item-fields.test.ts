@@ -75,7 +75,7 @@ describe('itemDetail', () => {
   })
 
   it('shows an open note body in the detail and a locked note as a concealed field', () => {
-    const open = itemDetail('secure_note', { ...base, title: 'Fictional note', content: 'fictional open body', tags: [], secretFields: [] } as ItemRecordView)
+    const open = itemDetail('secure_note', { ...base, title: 'Fictional note', content: 'fictional open body', locked: false, tags: [], secretFields: [] } as ItemRecordView)
     expect(open.locked).toBe(false)
     expect(open.fields.map((field) => [field.label, field.secret, field.value])).toEqual([['Content', false, 'fictional open body']])
 

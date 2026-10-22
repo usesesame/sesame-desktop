@@ -21,6 +21,7 @@ const detail: ItemDetailShape = {
   attachments: [],
   legacyFields: [{ label: 'Old PIN', value: '', secret: true }],
   favourite: false,
+  locked: false,
 }
 
 function renderDetail(overrides: Record<string, unknown> = {}) {
