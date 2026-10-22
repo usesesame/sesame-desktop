@@ -680,8 +680,14 @@ async fn resolve_conflict(
     require_activated(&remote.refreshed)?;
     let data_dir = local_data_dir(&app)?;
 
-    let mut removed_old_copies = 0_usize;
-    let (local_plaintext, remote_authenticated, local_entries, remote_entries, recovery_copies) = {
+    let (
+        local_plaintext,
+        remote_authenticated,
+        local_entries,
+        remote_entries,
+        recovery_copies,
+        removed_old_copies,
+    ) = {
         let session = state
             .session
             .lock()
@@ -710,7 +716,7 @@ async fn resolve_conflict(
                 &directory, unlocked, side, revision, payload, &stamp,
             )?);
         }
-        removed_old_copies =
+        let removed_old_copies =
             crate::sync::conflict_backup::prune_and_report(&app, &directory, &written);
         let names: Vec<String> = written
             .into_iter()
@@ -720,7 +726,14 @@ async fn resolve_conflict(
                     .unwrap_or_default()
             })
             .collect();
-        (local_bytes, decrypted, local_count, remote_count, names)
+        (
+            local_bytes,
+            decrypted,
+            local_count,
+            remote_count,
+            names,
+            removed_old_copies,
+        )
     };
     let captured = payload_digest(&local_plaintext);
 

@@ -229,11 +229,6 @@ pub struct Pruned {
 
 /// Prunes oldest first; the copies for the resolution happening right now are protected.
 #[must_use]
-pub fn prune(directory: &Path, keep: &[PathBuf]) -> usize {
-    prune_counting(directory, keep).failed
-}
-
-#[must_use]
 pub fn prune_counting(directory: &Path, keep: &[PathBuf]) -> Pruned {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
@@ -474,7 +469,7 @@ mod tests {
             return;
         }
 
-        let failed = prune(&directory, &[]);
+        let failed = prune_counting(&directory, &[]).failed;
 
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755))
             .expect("restored directory");
@@ -487,7 +482,7 @@ mod tests {
     fn a_missing_directory_has_nothing_to_prune() {
         let directory = scratch("missing-prune");
         let missing = directory.join("not-created");
-        assert_eq!(prune(&missing, &[]), 0);
+        assert_eq!(prune_counting(&missing, &[]).failed, 0);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -496,7 +491,7 @@ mod tests {
         let directory = scratch("unlistable-prune");
         let not_a_directory = directory.join("plain-file");
         std::fs::write(&not_a_directory, b"x").expect("plain file");
-        assert_eq!(prune(&not_a_directory, &[]), 1);
+        assert_eq!(prune_counting(&not_a_directory, &[]).failed, 1);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
