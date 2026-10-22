@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { get } from 'svelte/store'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { autoSyncBackoffMs, createSyncController, describeFloorCheck, describeSyncForChrome } from './sync-controller'
+import { autoSyncBackoffMs, createSyncController, describeCoordinatorState, describeFloorCheck, describeSyncForChrome } from './sync-controller'
 
 const core = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => core)
@@ -268,6 +268,14 @@ describe('syncing without being asked', () => {
     expect(describeFloorCheck('approved', 1_800_000_000)).toMatch(/^Sesame last checked the minimum Sync version on .+\.$/)
     expect(describeFloorCheck('not_enrolled', 0)).toBe('')
     expect(describeFloorCheck('joining', 1_800_000_000)).toBe('')
+  })
+
+  it('tells the person what to do when the Sync version file is damaged and keeps the old version message for a real old build', () => {
+    const state = (halt: string) => ({ phase: 'halted', halt, consecutiveFailures: 0, lastSuccessRevision: 0 })
+    const damaged = describeCoordinatorState(state('floor_damaged'))
+    expect(damaged).toContain('Sync version file')
+    for (const name of ['sync-floor.json', 'sync-floor.json.tag', 'sync-floor.json.next']) expect(damaged).toContain(name)
+    expect(describeCoordinatorState(state('incompatible'))).toBe('Sesame Sync needs a newer version of this app.')
   })
 
   it('keeps the note that peer checks were skipped until a sync completes them', async () => {

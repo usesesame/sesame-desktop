@@ -171,6 +171,44 @@ function readableMessage(error: unknown, fallback: string) {
 
 export type SyncChromeTone = 'ok' | 'busy' | 'warn'
 
+export function describeCoordinatorState(state: {
+  phase: string
+  halt: string
+  consecutiveFailures: number
+  lastSuccessRevision: number
+}): string {
+  if (state.phase === 'paused') return 'Sync is paused while the vault is locked.'
+  if (state.phase === 'halted') {
+    switch (state.halt) {
+      case 'revoked':
+        return 'This device was removed from the vault. Turn Sync off here and join again with a code.'
+      case 'not_entitled':
+        return 'Your subscription does not cover Sesame Sync. You can still download and remove devices.'
+      case 'incompatible':
+        return 'Sesame Sync needs a newer version of this app.'
+      case 'floor_damaged':
+        return 'Sesame could not read its Sync version file. It repairs the file at the next update check. If Sync stays refused, close Sesame and delete sync-floor.json, sync-floor.json.tag and sync-floor.json.next in its local data folder.'
+      case 'fork':
+        return 'Your devices disagree about this vault. Sync is paused and nothing was changed here.'
+      case 'conflict':
+        return 'Two devices changed this vault. Choose which version to keep.'
+      case 'locked':
+        return 'Unlock Sesame to keep syncing.'
+      default:
+        return 'Sesame Sync stopped.'
+    }
+  }
+  if (state.phase === 'gave_up') {
+    return 'Sesame could not reach your sync server after several tries. It tries again every 30 minutes, and Sync now tries right away.'
+  }
+  if (state.phase === 'retrying') {
+    return `Could not reach Sesame Sync. Trying again (${state.consecutiveFailures}).`
+  }
+  if (state.phase === 'working') return 'Syncing…'
+  if (state.lastSuccessRevision > 0) return `Up to date at version ${state.lastSuccessRevision}.`
+  return ''
+}
+
 export function describeFloorCheck(state: string, floorCheckedAt: number): string {
   if (state !== 'approved') return ''
   if (floorCheckedAt === 0) return 'Sesame has not yet checked the minimum Sync version.'

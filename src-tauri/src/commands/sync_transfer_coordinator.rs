@@ -2,8 +2,11 @@
 fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Outcome {
     use crate::sync::coordinator::{Halt, Outcome};
 
-    if message == crate::sync::floor::REFUSAL || message == crate::sync::floor::DAMAGED_REFUSAL {
+    if message == crate::sync::floor::REFUSAL {
         return Outcome::Halt(Halt::Incompatible);
+    }
+    if message == crate::sync::floor::DAMAGED_REFUSAL {
+        return Outcome::Halt(Halt::FloorDamaged);
     }
     if let Some(revision) = message.strip_prefix("sync_conflict:") {
         return Outcome::Halt(Halt::Conflict { server_revision: revision.parse().unwrap_or(0) });
@@ -47,15 +50,18 @@ mod coordinator_classification_tests {
 
     #[test]
     fn the_kill_switch_refusal_halts_as_incompatible_and_never_as_a_removed_device() {
-        for refusal in [
-            crate::sync::floor::REFUSAL,
-            crate::sync::floor::DAMAGED_REFUSAL,
-        ] {
-            assert_eq!(
-                classify_transfer_failure(refusal),
-                Outcome::Halt(Halt::Incompatible)
-            );
-        }
+        assert_eq!(
+            classify_transfer_failure(crate::sync::floor::REFUSAL),
+            Outcome::Halt(Halt::Incompatible)
+        );
+    }
+
+    #[test]
+    fn a_damaged_floor_file_halts_with_its_own_reason_and_not_as_an_old_version() {
+        assert_eq!(
+            classify_transfer_failure(crate::sync::floor::DAMAGED_REFUSAL),
+            Outcome::Halt(Halt::FloorDamaged)
+        );
     }
 
     #[test]

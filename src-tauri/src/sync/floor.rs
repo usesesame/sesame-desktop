@@ -14,7 +14,7 @@ const TAG_LABEL: &[u8] = b"sesame-sync-floor-tag-v1";
 const MANIFEST_RECEIPT_SET_LABEL: &str = "sesame-release-set-candidate-v1";
 pub(crate) const REFUSAL: &str =
     "This version of Sesame can no longer use Sync. Update Sesame to keep syncing.";
-pub(crate) const DAMAGED_REFUSAL: &str = "Sesame could not read its Sync version file. It repairs the file at the next update check. If Sync stays refused, close Sesame and delete sync-floor.json in its local data folder.";
+pub(crate) const DAMAGED_REFUSAL: &str = "Sesame could not read its Sync version file. It repairs the file at the next update check. If Sync stays refused, close Sesame and delete sync-floor.json, sync-floor.json.tag and sync-floor.json.next in its local data folder.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
@@ -464,6 +464,33 @@ mod tests {
         assert_eq!(Version::parse_build("1.0.0.0"), None);
         assert_eq!(Version::parse_build("99999999999999999999.0.0"), None);
     }
+    #[test]
+    fn the_refusal_names_all_three_files_that_a_manual_reset_removes() {
+        for name in [
+            "sync-floor.json",
+            "sync-floor.json.tag",
+            "sync-floor.json.next",
+        ] {
+            assert!(DAMAGED_REFUSAL.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn removing_all_three_files_resets_a_damaged_floor_and_removing_only_one_does_not() {
+        let path = scratch("manual-reset");
+        raise_floor(&path, "0.4.0", 100).unwrap();
+        std::fs::write(&path, b"damaged").unwrap();
+        std::fs::write(path.with_extension("json.next"), b"leftover").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        std::fs::remove_file(path.with_extension("json.next")).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Damaged);
+        std::fs::remove_file(path.with_extension("json.tag")).unwrap();
+        assert_eq!(floor_state(&path), FloorState::Absent);
+        assert!(require_allowed("0.1.0", &path, true).is_ok());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
     #[test]
     fn a_damaged_floor_file_refuses_sync_where_a_floor_can_be_fetched() {
         let path = scratch("damaged");

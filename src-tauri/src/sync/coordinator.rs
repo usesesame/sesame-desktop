@@ -5,6 +5,7 @@ pub enum Halt {
     Revoked,
     NotEntitled,
     Incompatible,
+    FloorDamaged,
     Fork,
     Conflict { server_revision: i64 },
     Locked,
@@ -148,7 +149,9 @@ impl Coordinator {
         };
         if matches!(
             state.status.phase,
-            Phase::Halted(Halt::NotEntitled) | Phase::Halted(Halt::Incompatible)
+            Phase::Halted(Halt::NotEntitled)
+                | Phase::Halted(Halt::Incompatible)
+                | Phase::Halted(Halt::FloorDamaged)
         ) {
             state.status.phase = Phase::Idle;
             state.status.pending = false;
@@ -279,6 +282,7 @@ mod tests {
             Halt::Revoked,
             Halt::NotEntitled,
             Halt::Incompatible,
+            Halt::FloorDamaged,
             Halt::Fork,
             Halt::Conflict { server_revision: 3 },
         ] {
@@ -302,6 +306,7 @@ mod tests {
         for (halt, retried) in [
             (Halt::NotEntitled, true),
             (Halt::Incompatible, true),
+            (Halt::FloorDamaged, true),
             (Halt::Revoked, false),
             (Halt::Fork, false),
             (Halt::Conflict { server_revision: 3 }, false),
