@@ -106,12 +106,35 @@ pub async fn sync_cancel_pairing() -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) const CLASSICAL_KEY_REFUSAL: &str = "This device only supports the older key exchange, and this vault already uses the newer one. Update Sesame on the new device, or allow the older key exchange and try again.";
+
+fn refuse_classical_downgrade<'a>(
+    offered_package_key: &str,
+    member_package_keys: impl Iterator<Item = &'a str>,
+    allow_classical: bool,
+) -> Result<(), String> {
+    let length = |encoded: &str| {
+        URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_or(0, |bytes| bytes.len())
+    };
+    let offered_is_classical = length(offered_package_key) == crate::sync::keys::X25519_KEY_BYTES;
+    let vault_has_hybrid = member_package_keys
+        .into_iter()
+        .any(|key| length(key) == crate::sync::xwing::PUBLIC_KEY_BYTES);
+    if offered_is_classical && vault_has_hybrid && !allow_classical {
+        return Err(CLASSICAL_KEY_REFUSAL.to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sync_approve_with_code(
     app: AppHandle,
     vault: tauri::State<'_, VaultState>,
+    allow_classical: Option<bool>,
 ) -> Result<ApprovedDeviceView, String> {
-    let outcome = approve(&app, &vault).await;
+    let outcome = approve(&app, &vault, allow_classical.unwrap_or(false)).await;
     clear_shown_code();
     outcome
 }
@@ -119,6 +142,7 @@ pub async fn sync_approve_with_code(
 async fn approve(
     app: &AppHandle,
     vault: &tauri::State<'_, VaultState>,
+    allow_classical: bool,
 ) -> Result<ApprovedDeviceView, String> {
     let code = take_shown_code()?;
     let started = Instant::now();
@@ -157,6 +181,16 @@ async fn approve(
         }
         pause().await;
     };
+    if let Err(refusal) = refuse_classical_downgrade(
+        &offered.package_key,
+        list.current()
+            .iter()
+            .map(|member| member.package_key.as_str()),
+        allow_classical,
+    ) {
+        let _ = client.cancel_pairing(&identity, &offered.device_id).await;
+        return Err(refusal);
+    }
     let offer = URL_SAFE_NO_PAD
         .decode(&offered.offer)
         .map_err(|_| "The pairing message could not be read.".to_string())?;
@@ -935,5 +969,53 @@ mod join_transaction_tests {
             );
             std::fs::remove_dir_all(directory).expect("remove fixture");
         }
+    }
+}
+
+#[cfg(test)]
+mod downgrade_tests {
+    use super::*;
+
+    fn key(length: usize) -> String {
+        URL_SAFE_NO_PAD.encode(vec![5u8; length])
+    }
+
+    #[test]
+    fn a_classical_key_is_refused_once_the_vault_holds_a_hybrid_key() {
+        let members = [key(32), key(1216)];
+        let result =
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), false);
+        assert_eq!(result, Err(CLASSICAL_KEY_REFUSAL.to_string()));
+    }
+
+    #[test]
+    fn the_person_can_allow_the_older_key_exchange() {
+        let members = [key(1216)];
+        assert!(
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), true).is_ok()
+        );
+    }
+
+    #[test]
+    fn a_classical_key_is_fine_while_no_member_has_a_hybrid_key() {
+        let members = [key(32), key(32)];
+        assert!(
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), false).is_ok()
+        );
+    }
+
+    #[test]
+    fn a_hybrid_key_is_never_refused() {
+        let members = [key(1216)];
+        assert!(
+            refuse_classical_downgrade(&key(1216), members.iter().map(String::as_str), false)
+                .is_ok()
+        );
+        assert!(refuse_classical_downgrade(
+            &key(1216),
+            [key(32)].iter().map(String::as_str),
+            false
+        )
+        .is_ok());
     }
 }

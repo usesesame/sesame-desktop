@@ -83,6 +83,7 @@ impl DeviceIdentity {
         self.signing.verifying_key().to_bytes()
     }
 
+    #[cfg(test)]
     pub fn encryption_public_key(&self) -> [u8; X25519_KEY_BYTES] {
         self.encryption.public_key()
     }
@@ -94,6 +95,7 @@ impl DeviceIdentity {
         }
     }
 
+    #[cfg(test)]
     pub fn has_hybrid_key(&self) -> bool {
         self.hybrid.is_some()
     }
