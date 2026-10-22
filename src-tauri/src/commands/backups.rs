@@ -9,7 +9,7 @@ use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
     apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, inspect_backup_file,
-    managed_vault_paths, prepare_backup_for_restore, restore_revision_delta,
+    json_export_bytes, managed_vault_paths, prepare_backup_for_restore, restore_revision_delta,
     stage_managed_vault_files, verify_backup_file,
 };
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
@@ -166,6 +166,54 @@ pub fn export_vault_csv(
     }
 
     Ok(written)
+}
+
+fn require_json_extension(destination: &std::path::Path) -> VaultResult<()> {
+    if destination
+        .extension()
+        .and_then(|extension| extension.to_str())
+        != Some("json")
+    {
+        return Err("Save the complete export with a .json extension.".into());
+    }
+    Ok(())
+}
+
+/// One JSON file with every item kind, secrets included; the caller must show that it is not encrypted.
+#[tauri::command]
+pub fn export_vault_json(
+    token: Option<String>,
+    destination: Option<String>,
+    state: State<'_, VaultState>,
+    selection: State<'_, FileSelectionState>,
+    presence: State<'_, ReleasePresence>,
+) -> VaultResult<String> {
+    require_release_presence(&state, &presence)?;
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session
+        .as_ref()
+        .ok_or("Unlock your vault before exporting it.")?;
+    let destination = resolve_path(
+        &selection,
+        token.as_deref(),
+        destination.as_deref(),
+        FilePurpose::JsonExport,
+        true,
+    )?;
+    require_json_extension(&destination)?;
+    let parent = destination
+        .parent()
+        .ok_or("Choose a valid location for the export.")?;
+    if !parent.exists() {
+        return Err("The selected export folder no longer exists.".into());
+    }
+    let payload = session.open_payload()?;
+    let bytes = json_export_bytes(&payload)?;
+    write_export_file(&destination, &bytes)?;
+    backup_file_name(&destination)
 }
 
 /// `sesame-export.csv` becomes `sesame-export-identities.csv`, beside it.
@@ -458,4 +506,25 @@ pub fn get_recovery_health(
         .transpose()?
         .and_then(|payload| payload.vault_id.clone());
     recovery_health::get_health(&app, current_id.as_deref())
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::require_json_extension;
+    use std::path::Path;
+
+    #[test]
+    fn the_complete_export_needs_a_json_name() {
+        assert!(require_json_extension(Path::new("/tmp/fictional-export.json")).is_ok());
+        for refused in [
+            "/tmp/fictional-export.csv",
+            "/tmp/fictional-export",
+            "/tmp/fictional-export.json.exe",
+        ] {
+            assert!(
+                require_json_extension(Path::new(refused)).is_err(),
+                "{refused}"
+            );
+        }
+    }
 }

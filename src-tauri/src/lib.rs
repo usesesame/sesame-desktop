@@ -121,6 +121,8 @@ macro_rules! sesame_invoke_handler {
             commands::export_backup,
             commands::choose_csv_export_destination,
             commands::export_vault_csv,
+            commands::choose_json_export_destination,
+            commands::export_vault_json,
             commands::choose_recovery_kit_destination,
             commands::export_recovery_kit,
             commands::delete_local_vault,

@@ -1363,6 +1363,13 @@ export async function exportVaultCsv(): Promise<string[] | null> {
   return invoke<string[]>('export_vault_csv', { token: chosen.token })
 }
 
+export async function exportVaultJson(): Promise<string | null> {
+  if (previewMode) return 'sesame-vault-export-preview.json'
+  const chosen = await invoke<ChosenFile | null>('choose_json_export_destination')
+  if (!chosen) return null
+  return invoke<string>('export_vault_json', { token: chosen.token })
+}
+
 export async function deleteLocalVault(masterPassword: string): Promise<void> {
   if (previewMode) {
     previewUnlocked = false

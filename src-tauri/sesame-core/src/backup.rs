@@ -166,6 +166,52 @@ where
     Ok(StagedVaultFiles { staging_dir })
 }
 
+pub const READABLE_EXPORT_FORMAT: &str = "sesame-export";
+pub const READABLE_EXPORT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadableExport<'a> {
+    format: &'static str,
+    version: u32,
+    exported_at: u64,
+    vault_name: &'a str,
+    folders: &'a [crate::types::Folder],
+    logins: &'a [crate::types::VaultEntry],
+    identities: &'a [crate::types::Identity],
+    secure_notes: &'a [crate::types::SecureNote],
+    cards: &'a [crate::types::Card],
+    wifi_networks: &'a [crate::types::WifiNetwork],
+    ssh_keys: &'a [crate::types::SshKey],
+    software_licenses: &'a [crate::types::SoftwareLicense],
+    documents: &'a [crate::types::DocumentMetadata],
+    custom_records: &'a [crate::types::CustomRecord],
+    trash: &'a [crate::types::TrashedItem],
+}
+
+pub fn json_export_bytes(payload: &VaultPayload) -> VaultResult<Zeroizing<Vec<u8>>> {
+    let document = ReadableExport {
+        format: READABLE_EXPORT_FORMAT,
+        version: READABLE_EXPORT_VERSION,
+        exported_at: unix_timestamp(),
+        vault_name: &payload.vault_name,
+        folders: &payload.folders,
+        logins: &payload.entries,
+        identities: &payload.identities,
+        secure_notes: &payload.secure_notes,
+        cards: &payload.cards,
+        wifi_networks: &payload.wifi_networks,
+        ssh_keys: &payload.ssh_keys,
+        software_licenses: &payload.software_licenses,
+        documents: &payload.documents,
+        custom_records: &payload.custom_records,
+        trash: &payload.trash,
+    };
+    serde_json::to_vec_pretty(&document)
+        .map(Zeroizing::new)
+        .map_err(|_| "Sesame could not write the readable export.".to_string())
+}
+
 pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
     let mut writer = csv::Writer::from_writer(Vec::new());
     writer
