@@ -52,6 +52,7 @@ test('the release web view turns the browser accelerator keys off', () => {
   assert.match(hardening, /cast::<ICoreWebView2Settings3>\(\)/)
   assert.match(hardening, /SetAreBrowserAcceleratorKeysEnabled\(false\)/)
   assert.doesNotMatch(hardening, /SetAreBrowserAcceleratorKeysEnabled\(true\)/)
+  assert.equal(config().bundle.windows.minimumWebview2Version, '1.0.864.35', 'ICoreWebView2Settings3 needs this runtime or newer')
 })
 
 test('the browser arguments keep the wry defaults and turn the JIT off once', () => {

@@ -68,6 +68,7 @@
     },
     "windows": {
       "allowDowngrades": false,
+      "minimumWebview2Version": "1.0.864.35",
       "webviewInstallMode": {
         "type": "embedBootstrapper",
         "silent": true
