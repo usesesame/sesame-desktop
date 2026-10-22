@@ -3,6 +3,7 @@
   "directories": [
     "design",
     "public",
+    "release",
     "src",
     "src-tauri"
   ],

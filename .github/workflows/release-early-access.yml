@@ -487,6 +487,7 @@ jobs:
           # The candidate signs this URL, so it has to be set before the
           # candidate is built rather than only for the update manifest.
           $env:SESAME_PUBLIC_UPDATE_ARTIFACT_URL = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($record.artifact.filename)"
+          $env:SESAME_SYNC_MINIMUM_VERSION = (Get-Content -Raw -LiteralPath release/sync-minimum-version.txt).Trim()
           node tools/create-updater-artifacts.mjs --sign candidate-input/unsigned-candidate.json
           if ($LASTEXITCODE -ne 0) { throw "Candidate signing failed." }
           $candidate = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).candidate.json"
@@ -496,6 +497,8 @@ jobs:
           $env:SESAME_UPDATE_RECEIPT_V3_FILE = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).update-receipt.json"
           if (-not (Test-Path -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE)) { throw "The v3 update receipt was not produced: $($env:SESAME_UPDATE_RECEIPT_V3_FILE)." }
           Copy-Item -LiteralPath $env:SESAME_UPDATE_RECEIPT_V3_FILE -Destination candidate-receipt/
+          $env:SESAME_SYNC_FLOOR_FILE = "release-artifacts/sesame-$($record.version)-windows-$($record.architecture).sync-floor.json"
+          if (-not (Test-Path -LiteralPath $env:SESAME_SYNC_FLOOR_FILE)) { throw "The Sync floor was not produced: $($env:SESAME_SYNC_FLOOR_FILE)." }
           node tools/create-static-update-manifest.mjs $candidate candidate-receipt/latest.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
