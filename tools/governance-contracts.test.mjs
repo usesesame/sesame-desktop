@@ -157,6 +157,16 @@ test('release build outputs reach the signing jobs as data, never as script text
   assert.match(publish, /name:\s*sesame-candidate-\$\{\{ github\.ref_name \}\}\n\s+path:\s*release-handoff\s*$/m, 'publish merges the candidate files into the handoff directory')
 })
 
+test('the Windows release signs a Sync floor from the committed minimum version', () => {
+  const minimum = readFileSync(join(root, 'release', 'sync-minimum-version.txt'), 'utf8')
+  assert.match(minimum, /^\d+\.\d+\.\d+\n$/, 'the minimum Sync version must be one major.minor.patch line')
+  const body = readFileSync(join(root, '.github', 'workflows', 'release-early-access.yml'), 'utf8')
+  const receipt = jobBlock(body, 'candidate-receipt')
+  assert.match(receipt, /SESAME_SYNC_MINIMUM_VERSION = \(Get-Content -Raw -LiteralPath release\/sync-minimum-version\.txt\)\.Trim\(\)\s+node tools\/create-updater-artifacts\.mjs --sign/, 'the floor is signed with the committed minimum version')
+  assert.match(receipt, /Test-Path -LiteralPath \$env:SESAME_SYNC_FLOOR_FILE\)\) \{ throw[^\n]*\n\s+node tools\/create-static-update-manifest\.mjs/, 'a release without a signed floor must fail before the manifest is written')
+  assert.doesNotMatch(body.replace(receipt, ''), /SESAME_SYNC_MINIMUM_VERSION|SESAME_SYNC_FLOOR_FILE/, 'only the receipt job may handle the floor')
+})
+
 test('the Linux workflow passes plain manifest filenames to the handoff tools', () => {
   const body = read('.github', 'workflows', 'release-linux-early-access.yml')
   const calls = body.split('\n').filter((line) => /tools\/(verify-linux-handoff|verify-linux-release-evidence|create-linux-release-candidate|create-linux-sigstore-evidence)\.mjs\s+release-handoff/.test(line))
