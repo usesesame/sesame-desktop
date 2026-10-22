@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppStores } from '../stores/app-stores'
 import type { RecordKind } from '../item-fields'
 import type { VaultSnapshot } from '../types'
-import { copyItemField, grantPresence, recordItemUse, releaseItemField, searchItems, setSecureNoteLock } from '../vault'
+import { copyItemField, getSecureNote, grantPresence, recordItemUse, releaseItemField, searchItems, setSecureNoteLock } from '../vault'
 import { createFeedbackController } from './feedback-controller'
 import { createItemController, SEARCH_DEBOUNCE_MS, SECRET_REVEAL_TIMEOUT_MS, type RecordEditor } from './item-controller'
 import { createPresenceController } from './presence-controller'
@@ -19,6 +19,7 @@ vi.mock('../vault', async (importOriginal) => {
     grantPresence: vi.fn(),
     recordItemUse: vi.fn(),
     setSecureNoteLock: vi.fn(),
+    getSecureNote: vi.fn(),
   }
 })
 
@@ -452,6 +453,7 @@ describe('note lock', () => {
 
   beforeEach(() => {
     vi.mocked(setSecureNoteLock).mockReset()
+    vi.mocked(getSecureNote).mockReset()
     vi.mocked(grantPresence).mockReset()
   })
 
@@ -482,6 +484,26 @@ describe('note lock', () => {
     expect(grantPresence).toHaveBeenCalledWith('fictional master password')
     expect(setSecureNoteLock).toHaveBeenCalledTimes(2)
     expect(get(presence.state).open).toBe(false)
+  })
+
+  it('replaces the plaintext on screen with the locked note even when the note keeps the same update time', async () => {
+    const { controller, stores } = openNote()
+    const record = (content: string, locked: boolean) => ({
+      id: 'note-1', title: 'Fictional note', content, locked, tags: [], secretFields: locked ? ['content'] : [], favourite: false, createdAt: 1, updatedAt: 5, revision: 1, legacyFields: [],
+    }) as never
+    const snapshot = { items: [{ id: 'note-1', kind: 'secure_note', title: 'Fictional note', updatedAt: 5 }], folders: [] } as never
+    stores.vault.patch({ snapshot })
+    vi.mocked(getSecureNote).mockResolvedValueOnce(record('fictional plaintext body', false))
+    await controller.select('note-1', 'secure_note')
+    expect(JSON.stringify(get(controller.state).detail)).toContain('fictional plaintext body')
+
+    vi.mocked(getSecureNote).mockResolvedValueOnce(record('', true))
+    vi.mocked(setSecureNoteLock).mockResolvedValue({ id: 'note-1', snapshot })
+    await controller.setNoteLock(true)
+
+    const detail = get(controller.state).detail
+    expect(JSON.stringify(detail)).not.toContain('fictional plaintext body')
+    expect(detail?.locked).toBe(true)
   })
 
   it('ignores a lock request when the open item is not a note', async () => {

@@ -195,8 +195,9 @@ export function createItemController({ stores, feedback, login, presence, editor
     if (!active || active.kind !== 'secure_note') return
     try {
       const result = await setSecureNoteLock(active.id, locked)
-      hideAllFields()
+      clearDetail()
       vault.patch({ snapshot: result.snapshot })
+      await select(active.id, 'secure_note')
       feedback.showNotice(locked ? 'Note locked' : 'Lock removed', locked ? 'Opening this note now asks for your master password.' : 'This note shows without asking for your master password.')
     } catch (error) {
       if (presence.required(error)) presence.ask('unlock-note', () => setNoteLock(locked))
