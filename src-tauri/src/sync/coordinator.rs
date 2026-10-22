@@ -15,6 +15,8 @@ pub enum Phase {
     Idle,
     Working,
     Retrying { attempt: u32 },
+    GaveUp,
+    Paused,
     Halted(Halt),
 }
 
@@ -49,6 +51,18 @@ pub enum Outcome {
 
 /// Gives up rather than hiding a failing device behind a spinner.
 pub const MAX_ATTEMPTS: u32 = 6;
+
+pub struct ManualRun {
+    inner: Arc<Mutex<State>>,
+}
+
+impl Drop for ManualRun {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.inner.lock() {
+            state.running = false;
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Coordinator {
@@ -102,6 +116,45 @@ impl Coordinator {
         true
     }
 
+    /// A push, pull or conflict resolution a person asked for. It holds the same lock as a
+    /// scheduled run, so the two never overlap, and it leaves the phase alone.
+    pub fn begin_manual(&self) -> Option<ManualRun> {
+        let mut state = self.inner.lock().ok()?;
+        if state.running {
+            return None;
+        }
+        state.running = true;
+        Some(ManualRun {
+            inner: Arc::clone(&self.inner),
+        })
+    }
+
+    /// A person has fixed what stopped Sync, such as resolving a conflict or turning Sync off.
+    pub fn resume(&self) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if matches!(state.status.phase, Phase::Halted(_)) {
+            state.status.phase = Phase::Idle;
+            state.status.consecutive_failures = 0;
+            state.status.pending = false;
+        }
+    }
+
+    /// A person pressed Sync now, which is enough to try again after a stop they can fix elsewhere.
+    pub fn retry_after_user_action(&self) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if matches!(
+            state.status.phase,
+            Phase::Halted(Halt::NotEntitled) | Phase::Halted(Halt::Incompatible)
+        ) {
+            state.status.phase = Phase::Idle;
+            state.status.pending = false;
+        }
+    }
+
     pub fn finish(&self, outcome: Outcome) -> bool {
         let Ok(mut state) = self.inner.lock() else {
             return false;
@@ -126,7 +179,7 @@ impl Coordinator {
                 again
             }
             Outcome::Halt(Halt::Locked) => {
-                state.status.phase = Phase::Idle;
+                state.status.phase = Phase::Paused;
                 state.status.pending = false;
                 state.follow_up = false;
                 false
@@ -141,7 +194,7 @@ impl Coordinator {
             Outcome::Transient => {
                 state.status.consecutive_failures += 1;
                 if state.status.consecutive_failures >= MAX_ATTEMPTS {
-                    state.status.phase = Phase::Idle;
+                    state.status.phase = Phase::GaveUp;
                     state.status.pending = false;
                     state.follow_up = false;
                     return false;
@@ -165,7 +218,7 @@ mod tests {
         let coordinator = Coordinator::new();
         assert!(coordinator.begin());
         coordinator.finish(Outcome::Halt(Halt::Locked));
-        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert_eq!(coordinator.status().phase, Phase::Paused);
         assert!(coordinator.begin());
     }
 
@@ -188,6 +241,112 @@ mod tests {
         }
         assert!(coordinator.begin());
         assert!(!coordinator.finish(Outcome::Transient));
-        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert_eq!(coordinator.status().phase, Phase::GaveUp);
+        assert_eq!(coordinator.status().consecutive_failures, MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn giving_up_still_lets_the_next_scheduled_run_try_again_and_a_success_clears_it() {
+        let coordinator = Coordinator::new();
+        for _ in 0..MAX_ATTEMPTS {
+            assert!(coordinator.begin());
+            coordinator.finish(Outcome::Transient);
+        }
+        assert_eq!(coordinator.status().phase, Phase::GaveUp);
+
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Uploaded { revision: 4 });
+
+        let status = coordinator.status();
+        assert_eq!(status.phase, Phase::Idle);
+        assert_eq!(status.consecutive_failures, 0);
+        assert_eq!(status.last_success_revision, Some(4));
+    }
+
+    #[test]
+    fn a_locked_pause_does_not_reset_the_failure_count() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Transient);
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Locked));
+        assert_eq!(coordinator.status().consecutive_failures, 1);
+    }
+
+    #[test]
+    fn resuming_clears_any_halt_and_does_nothing_otherwise() {
+        for halt in [
+            Halt::Revoked,
+            Halt::NotEntitled,
+            Halt::Incompatible,
+            Halt::Fork,
+            Halt::Conflict { server_revision: 3 },
+        ] {
+            let coordinator = Coordinator::new();
+            assert!(coordinator.begin());
+            coordinator.finish(Outcome::Halt(halt));
+            coordinator.resume();
+            assert_eq!(coordinator.status().phase, Phase::Idle);
+            assert!(coordinator.begin());
+        }
+
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Transient);
+        coordinator.resume();
+        assert_eq!(coordinator.status().phase, Phase::Retrying { attempt: 1 });
+    }
+
+    #[test]
+    fn pressing_sync_now_retries_only_the_stops_a_person_can_fix_elsewhere() {
+        for (halt, retried) in [
+            (Halt::NotEntitled, true),
+            (Halt::Incompatible, true),
+            (Halt::Revoked, false),
+            (Halt::Fork, false),
+            (Halt::Conflict { server_revision: 3 }, false),
+        ] {
+            let coordinator = Coordinator::new();
+            assert!(coordinator.begin());
+            coordinator.finish(Outcome::Halt(halt));
+            coordinator.retry_after_user_action();
+            assert_eq!(coordinator.begin(), retried);
+        }
+    }
+
+    #[test]
+    fn a_manual_run_and_a_scheduled_run_never_overlap() {
+        let coordinator = Coordinator::new();
+        let manual = coordinator.begin_manual().expect("idle coordinator");
+        assert!(!coordinator.begin());
+        assert!(coordinator.begin_manual().is_none());
+        drop(manual);
+        assert!(coordinator.begin());
+        assert!(coordinator.begin_manual().is_none());
+    }
+
+    #[test]
+    fn a_manual_run_leaves_the_phase_alone_and_runs_even_while_halted() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Fork));
+        let manual = coordinator
+            .begin_manual()
+            .expect("a halt does not block a manual run");
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::Fork));
+        drop(manual);
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::Fork));
+        assert!(coordinator.begin_manual().is_some());
+    }
+
+    #[test]
+    fn a_manual_run_that_is_dropped_by_an_error_releases_the_lock() {
+        let coordinator = Coordinator::new();
+        let attempt = || -> Result<(), ()> {
+            let _run = coordinator.begin_manual().ok_or(())?;
+            Err(())
+        };
+        assert!(attempt().is_err());
+        assert!(coordinator.begin_manual().is_some());
     }
 }

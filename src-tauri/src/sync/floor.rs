@@ -12,7 +12,7 @@ pub const FLOOR_FILE_NAME: &str = "sync-floor.json";
 const PAYLOAD_LABEL: &str = "sesame-sync-floor-v1";
 const TAG_LABEL: &[u8] = b"sesame-sync-floor-tag-v1";
 const MANIFEST_RECEIPT_SET_LABEL: &str = "sesame-release-set-candidate-v1";
-const REFUSAL: &str =
+pub(crate) const REFUSAL: &str =
     "This version of Sesame can no longer use Sync. Update Sesame to keep syncing.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

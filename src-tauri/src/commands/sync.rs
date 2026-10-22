@@ -37,6 +37,7 @@ pub struct SyncStatusView {
     pub needs_new_key: bool,
     pub alarm: Option<String>,
     pub confirmed_at: Option<u64>,
+    pub peer_checks_skipped: bool,
 }
 
 pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
@@ -99,6 +100,7 @@ pub(super) struct Refreshed {
     pub server: StateView,
     pub update: VerifiedUpdate,
     pub confirmed_at: Option<u64>,
+    pub peer_checks_skipped: bool,
 }
 
 pub(super) fn unix_now() -> u64 {
@@ -107,30 +109,45 @@ pub(super) fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
+fn peer_history_outcome(
+    fetched: Option<Vec<Header>>,
+    head: Option<&Header>,
+) -> (Vec<Header>, bool) {
+    let Some(plain) = fetched else {
+        return (Vec::new(), true);
+    };
+    let reaches_head = match (plain.last(), head) {
+        (Some(last), Some(head)) => last.digest() == head.digest(),
+        _ => false,
+    };
+    if reaches_head {
+        (plain, false)
+    } else {
+        (Vec::new(), true)
+    }
+}
+
 async fn history_for_peers(
     client: &SyncClient,
     update: &VerifiedUpdate,
     own_device_id: &str,
     checkpoints: &[ServedCheckpoint],
-) -> Result<Vec<Header>, String> {
+) -> Result<(Vec<Header>, bool), String> {
     let Some(oldest) = oldest_revision_to_compare(update.head.as_ref(), own_device_id, checkpoints)
     else {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), false));
     };
     let Ok(served) = client.headers(oldest.saturating_sub(1)).await else {
-        return Ok(Vec::new());
+        return Ok(peer_history_outcome(None, update.head.as_ref()));
     };
     let plain: Vec<Header> = served.into_iter().map(|item| item.header).collect();
     verify_header_chain(&update.list, None, &plain).map_err(present_proof)?;
-    let reaches_head = match (plain.last(), update.head.as_ref()) {
-        (Some(last), Some(head)) => last.digest() == head.digest(),
-        _ => false,
-    };
-    Ok(if reaches_head { plain } else { Vec::new() })
+    Ok(peer_history_outcome(Some(plain), update.head.as_ref()))
 }
 
 pub(super) async fn refresh(client: &SyncClient, state: &SyncState) -> Result<Refreshed, String> {
     let peer_checkpoints = client.checkpoints().await.ok();
+    let mut peer_checks_skipped = peer_checkpoints.is_none();
     let server = client.state().await.map_err(present)?;
     if server.vault_id != state.vault_id {
         return Err("This device is set up for a different synced vault.".into());
@@ -159,8 +176,9 @@ pub(super) async fn refresh(client: &SyncClient, state: &SyncState) -> Result<Re
     .map_err(present_proof)?;
     let confirmed_at = match peer_checkpoints {
         Some(checkpoints) if !checkpoints.is_empty() => {
-            let history =
+            let (history, history_missing) =
                 history_for_peers(client, &update, &state.device_id, &checkpoints).await?;
+            peer_checks_skipped |= history_missing;
             check_peer_checkpoints(
                 &update.list,
                 update.head.as_ref(),
@@ -179,6 +197,7 @@ pub(super) async fn refresh(client: &SyncClient, state: &SyncState) -> Result<Re
         server,
         update,
         confirmed_at,
+        peer_checks_skipped,
     })
 }
 
@@ -288,6 +307,7 @@ fn status(state: &str) -> SyncStatusView {
         needs_new_key: false,
         alarm: None,
         confirmed_at: None,
+        peer_checks_skipped: false,
     }
 }
 
@@ -409,6 +429,7 @@ pub async fn sync_status(
     let (list, state) = match refresh(&client, &local).await {
         Ok(refreshed) => {
             view.confirmed_at = refreshed.confirmed_at;
+            view.peer_checks_skipped = refreshed.peer_checks_skipped;
             let mut next = local.clone();
             next.entries = refreshed.update.entries.clone();
             if next.entries != local.entries {
@@ -509,6 +530,7 @@ pub async fn sync_create_vault(
 pub async fn sync_disable(
     app: AppHandle,
     vault: tauri::State<'_, VaultState>,
+    coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
     master_password: String,
     force: Option<bool>,
 ) -> Result<(), String> {
@@ -516,7 +538,9 @@ pub async fn sync_disable(
     if local.is_some() && !force.unwrap_or(false) {
         super::sync_transfer::leave_vault(&app, &vault, &master_password).await?;
     }
-    forget_everything(&app)
+    forget_everything(&app)?;
+    coordinator.resume();
+    Ok(())
 }
 
 #[tauri::command]
@@ -616,5 +640,24 @@ mod tests {
             present(SyncError::NotEntitled),
             "sync_not_entitled:This account's subscription does not include Sesame Sync."
         );
+    }
+}
+
+#[cfg(test)]
+mod peer_history_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_history_fetch_is_reported_as_skipped_and_never_as_checked() {
+        let (history, skipped) = peer_history_outcome(None, None);
+        assert!(history.is_empty());
+        assert!(skipped);
+    }
+
+    #[test]
+    fn a_history_that_does_not_reach_the_head_is_reported_as_skipped() {
+        let (history, skipped) = peer_history_outcome(Some(Vec::new()), None);
+        assert!(history.is_empty());
+        assert!(skipped);
     }
 }
