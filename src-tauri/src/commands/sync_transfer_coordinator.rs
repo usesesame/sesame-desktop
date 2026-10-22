@@ -2,7 +2,7 @@
 fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Outcome {
     use crate::sync::coordinator::{Halt, Outcome};
 
-    if message == crate::sync::floor::REFUSAL {
+    if message == crate::sync::floor::REFUSAL || message == crate::sync::floor::DAMAGED_REFUSAL {
         return Outcome::Halt(Halt::Incompatible);
     }
     if let Some(revision) = message.strip_prefix("sync_conflict:") {
@@ -47,10 +47,15 @@ mod coordinator_classification_tests {
 
     #[test]
     fn the_kill_switch_refusal_halts_as_incompatible_and_never_as_a_removed_device() {
-        assert_eq!(
-            classify_transfer_failure(crate::sync::floor::REFUSAL),
-            Outcome::Halt(Halt::Incompatible)
-        );
+        for refusal in [
+            crate::sync::floor::REFUSAL,
+            crate::sync::floor::DAMAGED_REFUSAL,
+        ] {
+            assert_eq!(
+                classify_transfer_failure(refusal),
+                Outcome::Halt(Halt::Incompatible)
+            );
+        }
     }
 
     #[test]

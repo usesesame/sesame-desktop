@@ -80,6 +80,7 @@ interface SyncStatusView {
   needsNewKey: boolean
   alarm: string | null
   confirmedAt: number | null
+  floorConfirmedAt?: number | null
   peerChecksSkipped?: boolean
 }
 
@@ -106,6 +107,7 @@ const initialState: SyncControllerState = {
   needsNewKey: false,
   alarm: '',
   confirmedAt: 0,
+  floorCheckedAt: 0,
   peerChecksSkipped: false,
   devices: [],
   pairingCode: '',
@@ -167,6 +169,12 @@ function readableMessage(error: unknown, fallback: string) {
 }
 
 export type SyncChromeTone = 'ok' | 'busy' | 'warn'
+
+export function describeFloorCheck(state: string, floorCheckedAt: number): string {
+  if (state !== 'approved') return ''
+  if (floorCheckedAt === 0) return 'Sesame has not yet checked the minimum Sync version.'
+  return `Sesame last checked the minimum Sync version on ${new Date(floorCheckedAt * 1000).toLocaleString()}.`
+}
 
 export function describeSyncForChrome(state: Pick<SyncControllerState, 'enrolled' | 'state' | 'activity' | 'alarm' | 'needsNewKey'>): { label: string; tone: SyncChromeTone } | undefined {
   if (!state.enrolled || state.state !== 'approved') return undefined
@@ -277,6 +285,7 @@ export function createSyncController() {
         needsNewKey: status.needsNewKey,
         alarm: status.alarm ?? '',
         confirmedAt: status.confirmedAt ?? 0,
+        floorCheckedAt: status.floorConfirmedAt ?? 0,
         peerChecksSkipped: status.peerChecksSkipped ?? false,
         devices: status.devices,
         error: '',

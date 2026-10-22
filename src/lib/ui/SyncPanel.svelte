@@ -5,6 +5,7 @@
   import SyncJoinModal from './SyncJoinModal.svelte'
   import SyncConflictModal from './SyncConflictModal.svelte'
   import { syncController as syncPanel } from '../sync'
+  import { describeFloorCheck } from '../controllers/sync-controller'
 
   onMount(() => {
     void syncPanel.refresh()
@@ -39,6 +40,7 @@
   let showBackups = false
 
   $: coordinatorNote = describeCoordinator($syncPanel.coordinator)
+  $: floorCheck = describeFloorCheck($syncPanel.state, $syncPanel.floorCheckedAt)
   $: confirmation = describeConfirmation($syncPanel.state, $syncPanel.confirmedAt, others.length, $syncPanel.peerChecksSkipped)
 
   function describeConfirmation(state: string, confirmedAt: number, peers: number, skipped: boolean): string {
@@ -119,6 +121,9 @@
     {/if}
     {#if confirmation}
       <p class="sync-note">{confirmation}</p>
+    {/if}
+    {#if floorCheck}
+      <p class="sync-note">{floorCheck}</p>
     {/if}
     {#if $syncPanel.lastTransfer}
       <p class="sync-done">{$syncPanel.lastTransfer}</p>
