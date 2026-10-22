@@ -142,6 +142,21 @@ pub fn seal_vault_key(
 }
 
 /// The returned vault key is secret; the caller must zeroize it.
+pub fn seal_for_recipient(
+    vault_key: &[u8],
+    recipient_public_key: &[u8],
+    vault_id: &str,
+    epoch: u64,
+) -> VaultResult<Vec<u8>> {
+    if recipient_public_key.len() == super::xwing::PUBLIC_KEY_BYTES {
+        return seal_vault_key_hybrid(vault_key, recipient_public_key, vault_id, epoch);
+    }
+    let classical: [u8; X25519_KEY_BYTES] = recipient_public_key
+        .try_into()
+        .map_err(|_| "A Sync device key is invalid.".to_string())?;
+    seal_vault_key(vault_key, &classical, vault_id)
+}
+
 pub fn open_vault_key(
     package: &[u8],
     recipient: &EncryptionKeypair,

@@ -12,11 +12,12 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use crate::sync::keys::{EncryptionKeypair, X25519_KEY_BYTES};
-use crate::vault::platform::{protect_for_device, unprotect_for_device};
+use crate::sync::xwing::SecretKey as HybridSecretKey;
 use crate::vault::VaultResult;
 
 pub const IDENTITY_FILE_NAME: &str = "sync-identity.sesame";
 const SIGNING_SEED_BYTES: usize = 32;
+const HYBRID_PACKAGE_MIN_BYTES: usize = 512;
 /// 16 random bytes, 22 base64url characters; the server accepts 16 to 128.
 const OPAQUE_ID_BYTES: usize = 16;
 
@@ -27,12 +28,39 @@ struct StoredIdentity {
     device_id: String,
     protected_signing_seed: String,
     protected_encryption_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protected_hybrid_seed: Option<String>,
+}
+
+#[cfg(test)]
+fn protect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+fn unprotect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    Ok(bytes.to_vec())
+}
+
+#[cfg(not(test))]
+use crate::vault::platform::{protect_for_device, unprotect_for_device};
+
+fn ensure_device_protection() -> VaultResult<()> {
+    #[cfg(test)]
+    {
+        Ok(())
+    }
+    #[cfg(not(test))]
+    {
+        crate::vault::platform::ensure_device_protection()
+    }
 }
 
 pub struct DeviceIdentity {
     pub device_id: String,
     signing: SigningKey,
     encryption: EncryptionKeypair,
+    hybrid: Option<HybridSecretKey>,
 }
 
 impl DeviceIdentity {
@@ -47,6 +75,7 @@ impl DeviceIdentity {
             device_id: random_opaque_id()?,
             signing,
             encryption: EncryptionKeypair::generate()?,
+            hybrid: Some(HybridSecretKey::generate()?),
         })
     }
 
@@ -56,6 +85,23 @@ impl DeviceIdentity {
 
     pub fn encryption_public_key(&self) -> [u8; X25519_KEY_BYTES] {
         self.encryption.public_key()
+    }
+
+    pub fn package_public_key(&self) -> Vec<u8> {
+        match &self.hybrid {
+            Some(hybrid) => hybrid.public_key().to_vec(),
+            None => self.encryption.public_key().to_vec(),
+        }
+    }
+
+    pub fn has_hybrid_key(&self) -> bool {
+        self.hybrid.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn without_hybrid_key(mut self) -> Self {
+        self.hybrid = None;
+        self
     }
 
     pub fn sign_entry(
@@ -87,12 +133,24 @@ impl DeviceIdentity {
         package.sign(&self.signing)
     }
 
-    pub fn open_key_package(&self, sealed: &[u8], vault_id: &str) -> VaultResult<Vec<u8>> {
+    pub fn open_key_package(
+        &self,
+        sealed: &[u8],
+        vault_id: &str,
+        epoch: u64,
+    ) -> VaultResult<Vec<u8>> {
+        if sealed.len() > HYBRID_PACKAGE_MIN_BYTES {
+            let hybrid = self
+                .hybrid
+                .as_ref()
+                .ok_or("This device key package could not be read.")?;
+            return crate::sync::keys::open_vault_key_hybrid(sealed, hybrid, vault_id, epoch);
+        }
         crate::sync::keys::open_vault_key(sealed, &self.encryption, vault_id)
     }
 
     pub fn save(&self, path: &Path) -> VaultResult<()> {
-        crate::vault::platform::ensure_device_protection()?;
+        ensure_device_protection()?;
         let mut signing_seed = self.signing.to_bytes();
         let protected_signing = protect_for_device(&signing_seed);
         signing_seed.zeroize();
@@ -101,11 +159,25 @@ impl DeviceIdentity {
         let protected_encryption = protect_for_device(&encryption_secret);
         encryption_secret.zeroize();
 
+        let protected_hybrid_seed = match &self.hybrid {
+            Some(hybrid) => {
+                let mut seed = hybrid.seed_bytes();
+                let protected = protect_for_device(&seed);
+                seed.zeroize();
+                Some(URL_SAFE_NO_PAD.encode(protected?))
+            }
+            None => None,
+        };
         let stored = StoredIdentity {
-            version: 1,
+            version: if protected_hybrid_seed.is_some() {
+                2
+            } else {
+                1
+            },
             device_id: self.device_id.clone(),
             protected_signing_seed: URL_SAFE_NO_PAD.encode(protected_signing?),
             protected_encryption_secret: URL_SAFE_NO_PAD.encode(protected_encryption?),
+            protected_hybrid_seed,
         };
         let body = serde_json::to_vec(&stored)
             .map_err(|_| "Sesame could not save the device keys.".to_string())?;
@@ -124,7 +196,7 @@ impl DeviceIdentity {
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
         let stored: StoredIdentity = serde_json::from_slice(&body)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
-        if stored.version != 1 {
+        if stored.version != 1 && stored.version != 2 {
             return Err("These device keys were written by a newer Sesame.".to_string());
         }
 
@@ -152,10 +224,29 @@ impl DeviceIdentity {
         let encryption = EncryptionKeypair::from_secret_bytes(encryption_array);
         encryption_secret.zeroize();
 
+        let hybrid = match (&stored.protected_hybrid_seed, stored.version) {
+            (Some(encoded), 2) => {
+                let mut seed = unprotect_for_device(
+                    &URL_SAFE_NO_PAD
+                        .decode(encoded)
+                        .map_err(|_| "Sesame could not read the device keys.".to_string())?,
+                )?;
+                let array: [u8; crate::sync::xwing::SEED_BYTES] = seed
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| "Sesame could not read the device keys.".to_string())?;
+                seed.zeroize();
+                Some(HybridSecretKey::from_seed(array))
+            }
+            (None, 1) => None,
+            _ => return Err("Sesame could not read the device keys.".to_string()),
+        };
+
         Ok(Self {
             device_id: stored.device_id,
             signing,
             encryption,
+            hybrid,
         })
     }
 }
@@ -180,4 +271,135 @@ pub fn random_opaque_id() -> VaultResult<String> {
         .try_fill_bytes(&mut raw)
         .map_err(|_| "Sesame could not generate a device identifier.".to_string())?;
     Ok(URL_SAFE_NO_PAD.encode(raw))
+}
+
+#[cfg(test)]
+mod hybrid_tests {
+    use super::*;
+    use crate::sync::keys::{seal_vault_key, seal_vault_key_hybrid};
+    use crate::sync::xwing::PUBLIC_KEY_BYTES;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sesame-identity-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        identity_path(&dir)
+    }
+
+    #[test]
+    fn a_new_identity_publishes_its_hybrid_key() {
+        let identity = DeviceIdentity::generate().expect("identity");
+        assert_eq!(identity.package_public_key().len(), PUBLIC_KEY_BYTES);
+        assert!(identity.has_hybrid_key());
+    }
+
+    #[test]
+    fn a_saved_hybrid_identity_loads_with_the_same_public_key_and_opens_packages() {
+        let path = scratch("round-trip");
+        let identity = DeviceIdentity::generate().expect("identity");
+        identity.save(&path).expect("saved");
+        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        assert_eq!(loaded.package_public_key(), identity.package_public_key());
+        let sealed = seal_vault_key_hybrid(
+            &[9u8; 32],
+            &identity.package_public_key(),
+            "vaultAAAAAAAAAAAA01",
+            3,
+        )
+        .expect("sealed");
+        assert_eq!(
+            loaded
+                .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 3)
+                .expect("opened"),
+            vec![9u8; 32]
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_older_identity_file_without_a_hybrid_key_still_loads_and_publishes_its_classical_key() {
+        let path = scratch("older");
+        let identity = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        identity.save(&path).expect("saved");
+        let body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(body["version"], 1);
+        assert!(body.get("protected_hybrid_seed").is_none());
+        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        assert!(!loaded.has_hybrid_key());
+        assert_eq!(loaded.package_public_key().len(), X25519_KEY_BYTES);
+        let sealed = seal_vault_key(
+            &[9u8; 32],
+            &loaded.encryption_public_key(),
+            "vaultAAAAAAAAAAAA01",
+        )
+        .expect("sealed");
+        assert_eq!(
+            loaded
+                .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 3)
+                .expect("opened"),
+            vec![9u8; 32]
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_hybrid_identity_file_is_marked_with_a_newer_version_that_an_older_build_refuses() {
+        let path = scratch("version");
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        let body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(body["version"], 2);
+        assert!(body.get("protected_hybrid_seed").is_some());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_classical_only_identity_refuses_a_hybrid_package_and_a_hybrid_one_still_reads_a_classical_one(
+    ) {
+        let classical_only = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        let hybrid = DeviceIdentity::generate().expect("identity");
+        let sealed = seal_vault_key_hybrid(
+            &[9u8; 32],
+            &hybrid.package_public_key(),
+            "vaultAAAAAAAAAAAA01",
+            1,
+        )
+        .expect("sealed");
+        assert!(classical_only
+            .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 1)
+            .is_err());
+        let classical = seal_vault_key(
+            &[9u8; 32],
+            &hybrid.encryption_public_key(),
+            "vaultAAAAAAAAAAAA01",
+        )
+        .expect("sealed");
+        assert!(hybrid
+            .open_key_package(&classical, "vaultAAAAAAAAAAAA01", 1)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_hybrid_package_for_the_wrong_epoch_does_not_open() {
+        let identity = DeviceIdentity::generate().expect("identity");
+        let sealed = seal_vault_key_hybrid(
+            &[9u8; 32],
+            &identity.package_public_key(),
+            "vaultAAAAAAAAAAAA01",
+            2,
+        )
+        .expect("sealed");
+        assert!(identity
+            .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 3)
+            .is_err());
+    }
 }

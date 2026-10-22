@@ -297,7 +297,7 @@ pub async fn sync_take_new_key(
     crate::sync::engine::verify_package_for_removal(&refreshed.update.entries, &package)
         .map_err(present_proof)?;
     let sealed = decode_bytes(&package.ciphertext)?;
-    let mut opened = identity.open_key_package(&sealed, &local.vault_id)?;
+    let mut opened = identity.open_key_package(&sealed, &local.vault_id, epoch)?;
     let key: [u8; 32] = opened
         .as_slice()
         .try_into()
@@ -352,10 +352,8 @@ fn survivor_packages(
         if excluded.contains(&member.device_id.as_str()) {
             continue;
         }
-        let recipient: [u8; 32] = decode_bytes(&member.package_key)?
-            .try_into()
-            .map_err(|_| "A Sync device key is invalid.".to_string())?;
-        let sealed = crate::sync::keys::seal_vault_key(new_key, &recipient, vault_id)?;
+        let recipient = decode_bytes(&member.package_key)?;
+        let sealed = crate::sync::keys::seal_for_recipient(new_key, &recipient, vault_id, epoch)?;
         packages.push(identity.sign_key_package(KeyPackageV3 {
             vault_id: vault_id.to_string(),
             sender_device_id: identity.device_id.clone(),
