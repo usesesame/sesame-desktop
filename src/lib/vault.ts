@@ -1394,13 +1394,13 @@ export async function chooseBackupForRestore(): Promise<BackupSelection | null> 
 }
 
 // The backup must open with its own secret before it can replace the active vault.
-export async function restoreBackup(token: string, secret: string): Promise<RestoreBackupResult> {
+export async function restoreBackup(token: string, secret: string, confirmOlder = false): Promise<RestoreBackupResult> {
   if (previewMode) {
     const hadVault = previewUnlocked
     previewUnlocked = false
     return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false, restoredRevision: previewSnapshot.revision, replacedRevision: hadVault ? previewSnapshot.revision : undefined }
   }
-  return invoke<RestoreBackupResult>('restore_backup', { request: { token, secret } })
+  return invoke<RestoreBackupResult>('restore_backup', { request: { token, secret, confirmOlder } })
 }
 
 export async function verifyBackup(token: string, secret: string): Promise<BackupVerification> {
@@ -1663,4 +1663,19 @@ function previewSite(value: string) {
 
 function previewInitials(value: string) {
   return value.split(/\s+/).filter(Boolean).map((word) => word[0]).join('').slice(0, 2).toUpperCase() || '?'
+}
+
+export interface RollbackNotice {
+  recordedRevision: number
+  foundRevision: number
+}
+
+export async function getRollbackNotice(): Promise<RollbackNotice | null> {
+  if (previewMode) return null
+  return invoke<RollbackNotice | null>('get_rollback_notice')
+}
+
+export async function acceptRollback(): Promise<void> {
+  if (previewMode) return
+  await invoke('accept_rollback')
 }

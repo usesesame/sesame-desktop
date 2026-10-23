@@ -98,6 +98,12 @@ good-faith report that turns out to be out of scope is not held against you.
 
 ## Known limits
 
+- Sesame keeps a record on this device of the highest revision of your vault
+  that it has opened, and it asks you to confirm before it uses an older one,
+  including a backup that is older than your vault. A program running as you can
+  delete that record, so the warning does not stop someone who can already
+  change your files. Restoring a backup onto a device with no vault needs only
+  that backup's own master password or recovery kit.
 - PIN unlock is a convenience for this device, not a second factor. A program
   running as you can open the device key, and with the vault file it can test
   PINs offline. Each extra PIN digit makes that search ten times longer.

@@ -72,6 +72,8 @@ commands.allow = [
   "delete_login",
   "save_identity",
   "delete_identity",
+  "get_rollback_notice",
+  "accept_rollback",
   "save_secure_note",
   "set_secure_note_lock",
   "delete_secure_note",
