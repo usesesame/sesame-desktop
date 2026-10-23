@@ -2,7 +2,9 @@
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::crypto::{default_kdf_params, derive_key, encrypt_bytes, serialize_payload};
+use crate::crypto::{
+    default_kdf_params, derive_key, encrypt_bytes, master_password_kdf_params, serialize_payload,
+};
 use crate::loader::{Credential, MigrationPlan, VaultLoader};
 use crate::migration::fresh_vault_id;
 use crate::types::{Folder, VaultEntry, VaultFile, VaultPayload};
@@ -70,7 +72,7 @@ pub fn create_vault(password: &str, vault_name: &str) -> VaultResult<(OpenedVaul
     crate::password_analysis::check_new_master_password(password)?;
     let mut vault_key = Zeroizing::new([0_u8; 32]);
     fill_secret(&mut *vault_key)?;
-    let kdf = default_kdf_params();
+    let kdf = master_password_kdf_params();
     let wrapping_key = Zeroizing::new(derive_key(password, &kdf)?);
     let key_wrap = encrypt_bytes(&wrapping_key, &*vault_key, WRAP_AAD)?;
 

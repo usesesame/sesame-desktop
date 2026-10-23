@@ -3,7 +3,9 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use super::sync::local_data_dir;
-use crate::vault::crypto::{bytes_match, default_kdf_params, derive_key, encrypt_bytes};
+use crate::vault::crypto::{
+    bytes_match, default_kdf_params, derive_key, encrypt_bytes, master_password_kdf_params,
+};
 use crate::vault::util::generate_recovery_kit;
 use crate::vault::{VaultState, RECOVERY_WRAP_AAD, WRAP_AAD};
 
@@ -89,7 +91,7 @@ pub(super) fn adopt(
     payload: crate::vault::types::VaultPayload,
     master_password: &str,
 ) -> Result<String, String> {
-    let kdf = default_kdf_params();
+    let kdf = master_password_kdf_params();
     let wrapping_key = zeroize::Zeroizing::new(derive_key(master_password, &kdf)?);
     let key_wrap = encrypt_bytes(&wrapping_key, &key, WRAP_AAD)?;
 
