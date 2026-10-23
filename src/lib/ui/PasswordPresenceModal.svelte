@@ -2,7 +2,7 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
-  type PresenceIntent = 'reveal' | 'copy' | 'autotype' | 'enable-icons' | 'request-kit' | 'issue-kit' | 'reveal-field' | 'copy-field' | 'check-password'
+  type PresenceIntent = 'reveal' | 'copy' | 'autotype' | 'enable-icons' | 'request-kit' | 'issue-kit' | 'reveal-field' | 'copy-field' | 'check-password' | 'unlock-note'
 
   export let presenceSecret = ''
   export let intent: PresenceIntent = 'reveal'
@@ -31,6 +31,11 @@
       heading: 'Copy this value',
       description: 'Sesame asks for your master password again before it copies a saved secret. The value stays hidden.',
       action: 'Copy value',
+    },
+    'unlock-note': {
+      heading: 'Remove the note lock',
+      description: 'Sesame asks for your master password again before it removes the lock from a note, because the lock is what keeps the note hidden.',
+      action: 'Remove lock',
     },
     'check-password': {
       heading: 'Check this password',

@@ -25,6 +25,7 @@ export interface ItemDetail {
   legacyFields: LegacyField[]
   favourite: boolean
   folderId?: string
+  locked: boolean
 }
 
 function field(label: string, value: string, icon: string, options: { secret?: boolean; multiline?: boolean } = {}): ItemField | null {
@@ -73,7 +74,7 @@ function customFields(record: SecretView<CustomRecord>): ItemField[] {
 }
 
 export function itemDetail(kind: RecordKind, record: ItemRecordView): ItemDetail {
-  const shared = { attachments: [] as Attachment[], legacyFields: [] as LegacyField[] }
+  const shared = { attachments: [] as Attachment[], legacyFields: [] as LegacyField[], locked: false }
   switch (kind) {
     case 'identity': {
       const identity = record as SecretView<Identity>
@@ -81,7 +82,9 @@ export function itemDetail(kind: RecordKind, record: ItemRecordView): ItemDetail
     }
     case 'secure_note': {
       const note = record as SecretView<SecureNote>
-      return { ...shared, title: note.title, subtitle: '', fields: present([field('Content', note.content, 'note', { multiline: true })]), notes: '', tags: note.tags ?? [], legacyFields: note.legacyFields ?? [], favourite: note.favourite, folderId: note.folderId }
+      const locked = note.secretFields.includes('content') || Boolean(note.locked)
+      const content = locked ? secretField('Content', 'content', 'note', note.secretFields, { multiline: true }) : field('Content', note.content, 'note', { multiline: true })
+      return { ...shared, locked, title: note.title, subtitle: '', fields: present([content]), notes: '', tags: note.tags ?? [], legacyFields: note.legacyFields ?? [], favourite: note.favourite, folderId: note.folderId }
     }
     case 'card': {
       const card = record as SecretView<Card>

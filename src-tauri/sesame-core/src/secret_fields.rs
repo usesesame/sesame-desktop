@@ -75,10 +75,10 @@ kept_secrets_from_field!(
     SoftwareLicenseInput,
     DocumentMetadataInput,
     CustomRecordInput,
+    SecureNoteInput,
 );
 
 impl KeptSecrets for IdentityInput {}
-impl KeptSecrets for SecureNoteInput {}
 
 impl SecretSlots for VaultEntry {
     fn visit_secrets(&mut self, visit: &mut dyn FnMut(&str, &mut String)) {
@@ -95,6 +95,9 @@ impl SecretSlots for Identity {
 
 impl SecretSlots for SecureNote {
     fn visit_secrets(&mut self, visit: &mut dyn FnMut(&str, &mut String)) {
+        if self.locked {
+            visit("content", &mut self.content);
+        }
         visit_legacy(&mut self.legacy_fields, visit);
     }
 }
@@ -371,6 +374,74 @@ mod tests {
                 .expect("serialized item")
                 .contains(CANARY));
         }
+    }
+
+    fn note(locked: bool) -> SecureNote {
+        let mut note = SecureNote::default();
+        note.id = "note-a".to_string();
+        note.title = "Fictional note".to_string();
+        note.content = format!("{CANARY}-note-body");
+        note.locked = locked;
+        note
+    }
+
+    #[test]
+    fn an_unlocked_note_has_no_secret_slot_and_keeps_its_body_visible() {
+        let mut open = note(false);
+        assert!(secret_keys(&open).is_empty());
+        assert!(redact(&mut open).is_empty());
+        assert_eq!(open.content, format!("{CANARY}-note-body"));
+    }
+
+    #[test]
+    fn a_locked_note_names_its_body_as_a_secret_and_redaction_blanks_it() {
+        let mut locked = note(true);
+        assert_eq!(secret_keys(&locked), vec!["content"]);
+        assert_eq!(redact(&mut locked), vec!["content"]);
+        assert!(locked.content.is_empty());
+        assert!(!serde_json::to_string(&locked)
+            .expect("serialized note")
+            .contains(CANARY));
+    }
+
+    #[test]
+    fn a_locked_note_releases_its_body_by_slot_name_only() {
+        let locked = TaggedItem::SecureNote(note(true));
+        let value = secret_value(&locked, "content").expect("body slot");
+        assert_eq!(value.as_str(), format!("{CANARY}-note-body"));
+        assert!(secret_value(&TaggedItem::SecureNote(note(false)), "content").is_none());
+    }
+
+    #[test]
+    fn a_locked_note_keeps_its_stored_body_when_the_save_lists_it_as_kept() {
+        let existing = note(true);
+        let mut next = note(true);
+        next.content = String::new();
+
+        next.keep_secrets(&existing, &["content".to_string()]);
+
+        assert_eq!(next.content, format!("{CANARY}-note-body"));
+    }
+
+    #[test]
+    fn a_locked_note_loses_its_body_when_the_save_does_not_list_it_as_kept() {
+        let existing = note(true);
+        let mut next = note(true);
+        next.content = String::new();
+
+        next.keep_secrets(&existing, &[]);
+
+        assert!(next.content.is_empty());
+    }
+
+    #[test]
+    fn the_lock_is_written_only_when_it_is_on() {
+        let open = serde_json::to_value(note(false)).expect("open note");
+        let locked = serde_json::to_value(note(true)).expect("locked note");
+        assert!(open.get("locked").is_none());
+        assert_eq!(locked.get("locked"), Some(&serde_json::Value::Bool(true)));
+        let reread: SecureNote = serde_json::from_value(open).expect("note without the flag");
+        assert!(!reread.locked);
     }
 
     #[test]
