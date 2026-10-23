@@ -87,6 +87,25 @@ pub fn setup(app: &mut App) -> tauri::Result<()> {
     }
     tray.build(app)?;
 
+    let quick_access_configured = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .any(|window| window.label == "quick-access");
+    if quick_access_configured {
+        ensure_quick_access_window(app.handle()).ok_or_else(|| {
+            tauri::Error::Io(std::io::Error::other(
+                "Sesame could not prepare the quick access window.",
+            ))
+        })?;
+    }
+    ensure_main_window(app.handle()).ok_or_else(|| {
+        tauri::Error::Io(std::io::Error::other(
+            "Sesame could not prepare the main window.",
+        ))
+    })?;
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_min_size(Some(LogicalSize::new(MAIN_MIN_WIDTH, MAIN_MIN_HEIGHT)));
         secure_window(&window).map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
@@ -197,7 +216,7 @@ fn bounded_main_size(size: PhysicalSize<u32>, scale: f64) -> Option<PhysicalSize
 }
 
 pub fn toggle_quick_access(app: &AppHandle) {
-    let Some(window) = app.get_webview_window("quick-access") else {
+    let Some(window) = ensure_quick_access_window(app) else {
         return;
     };
     let already_focused = window.is_focused().unwrap_or(false);
@@ -278,6 +297,29 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .visible(false)
         .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
         .general_autofill_enabled(false)
+        .on_new_window(|_, _| NewWindowResponse::Deny)
+        .build()
+        .ok()?;
+    if secure_window(&window).is_err() {
+        let _ = window.destroy();
+        return None;
+    }
+    Some(window)
+}
+
+pub(crate) fn ensure_quick_access_window(app: &AppHandle) -> Option<WebviewWindow> {
+    if let Some(window) = app.get_webview_window("quick-access") {
+        return Some(window);
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "quick-access")?
+        .clone();
+    let window = WebviewWindowBuilder::from_config(app, &config)
+        .ok()?
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;

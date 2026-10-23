@@ -1202,6 +1202,18 @@ test('no webview may open a new window and the rebuilt main window denies it exp
   assert.equal([...shell.matchAll(/WebviewWindowBuilder::new/g)].length, 1)
 })
 
+test('every window is built in code so each one gets the new window handler', () => {
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  assert.deepEqual(config.app.windows.map((window) => window.label).sort(), ['main', 'quick-access'])
+  for (const window of config.app.windows) {
+    assert.equal(window.create, false, `${window.label} is created by Tauri before a handler can be attached`)
+  }
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
+  assert.match(quick, /WebviewWindowBuilder::from_config\(/, 'the quick access window is built from its configuration')
+  assert.match(quick, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/, 'the quick access window denies new windows')
+})
+
 test('vault key material is drawn from the system random source', () => {
   const util = read('src-tauri', 'sesame-core', 'src', 'util.rs')
   assert.match(
