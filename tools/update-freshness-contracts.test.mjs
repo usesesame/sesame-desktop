@@ -55,7 +55,7 @@ test('the scheduled job holds the key only in its environment, pins its actions 
   for (const line of workflow.split('\n').filter((entry) => entry.includes('uses:'))) {
     assert.match(line, /@[0-9a-f]{40} # v/, `${line.trim()} must pin a commit`)
   }
-  assert.match(workflow, /permissions:\n  contents: read/, 'the workflow default is read only')
+  assert.ok(workflow.includes('permissions:\n  contents: read\n'), 'the workflow default is read only')
   assert.match(workflow, /isPrerelease,isDraft/)
   assert.match(workflow, /must exist and be a published pre-release/)
   assert.ok(workflow.indexOf('Require the freshness release to be a pre-release') < workflow.indexOf('Replace the statement on the freshness release'), 'the pre-release check comes before the upload')
