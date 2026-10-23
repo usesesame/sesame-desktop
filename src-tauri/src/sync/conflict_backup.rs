@@ -221,15 +221,27 @@ pub fn list(directory: &Path, key: &[u8; 32]) -> Vec<BackupListing> {
 pub const MAX_BACKUPS: usize = 12;
 pub const MAX_BACKUP_BYTES: u64 = 256 * 1024 * 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Pruned {
+    pub removed: usize,
+    pub failed: usize,
+}
+
 /// Prunes oldest first; the copies for the resolution happening right now are protected.
 #[must_use]
-pub fn prune(directory: &Path, keep: &[PathBuf]) -> usize {
+pub fn prune_counting(directory: &Path, keep: &[PathBuf]) -> Pruned {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return 0,
-        Err(_) => return 1,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Pruned::default(),
+        Err(_) => {
+            return Pruned {
+                removed: 0,
+                failed: 1,
+            }
+        }
     };
     let mut failed = 0_usize;
+    let mut removed = 0_usize;
     let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
     for entry in entries {
         let Ok(entry) = entry else {
@@ -261,18 +273,23 @@ pub fn prune(directory: &Path, keep: &[PathBuf]) -> usize {
         if protected {
             continue;
         }
-        if (kept > MAX_BACKUPS || bytes > MAX_BACKUP_BYTES) && std::fs::remove_file(&path).is_err()
-        {
-            failed += 1;
+        if kept > MAX_BACKUPS || bytes > MAX_BACKUP_BYTES {
+            if std::fs::remove_file(&path).is_err() {
+                failed += 1;
+            } else {
+                removed += 1;
+            }
         }
     }
-    failed
+    Pruned { removed, failed }
 }
 
-pub fn prune_and_report(app: &tauri::AppHandle, directory: &Path, keep: &[PathBuf]) {
-    if prune(directory, keep) > 0 {
+pub fn prune_and_report(app: &tauri::AppHandle, directory: &Path, keep: &[PathBuf]) -> usize {
+    let pruned = prune_counting(directory, keep);
+    if pruned.failed > 0 {
         crate::diagnostics::record_backup_io_error(app);
     }
+    pruned.removed
 }
 
 #[cfg(test)]
@@ -397,13 +414,35 @@ mod tests {
         }
         let protected = paths[0].clone();
 
-        let failed = prune(&directory, std::slice::from_ref(&protected));
+        let pruned = prune_counting(&directory, std::slice::from_ref(&protected));
 
-        assert_eq!(failed, 0);
+        assert_eq!(
+            pruned,
+            Pruned {
+                removed: 2,
+                failed: 0
+            }
+        );
         let left = copies(&directory);
         assert!(left.contains(&protected));
         assert!(!left.contains(&paths[1]));
         assert!(left.contains(&paths[MAX_BACKUPS + 2]));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn pruning_below_the_limit_removes_nothing_and_says_so() {
+        let directory = scratch("below-limit");
+        for index in 0..MAX_BACKUPS {
+            write_aged(
+                &directory,
+                &format!("copy-{index:02}.sesame"),
+                (MAX_BACKUPS as u64 - index as u64) * 60,
+            );
+        }
+
+        assert_eq!(prune_counting(&directory, &[]), Pruned::default());
+        assert_eq!(copies(&directory).len(), MAX_BACKUPS);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -430,7 +469,7 @@ mod tests {
             return;
         }
 
-        let failed = prune(&directory, &[]);
+        let failed = prune_counting(&directory, &[]).failed;
 
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755))
             .expect("restored directory");
@@ -443,7 +482,7 @@ mod tests {
     fn a_missing_directory_has_nothing_to_prune() {
         let directory = scratch("missing-prune");
         let missing = directory.join("not-created");
-        assert_eq!(prune(&missing, &[]), 0);
+        assert_eq!(prune_counting(&missing, &[]).failed, 0);
         let _ = std::fs::remove_dir_all(&directory);
     }
 
@@ -452,7 +491,7 @@ mod tests {
         let directory = scratch("unlistable-prune");
         let not_a_directory = directory.join("plain-file");
         std::fs::write(&not_a_directory, b"x").expect("plain file");
-        assert_eq!(prune(&not_a_directory, &[]), 1);
+        assert_eq!(prune_counting(&not_a_directory, &[]).failed, 1);
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

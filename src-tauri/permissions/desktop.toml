@@ -75,6 +75,7 @@ commands.allow = [
   "get_rollback_notice",
   "accept_rollback",
   "save_secure_note",
+  "set_secure_note_lock",
   "delete_secure_note",
   "save_card",
   "delete_card",

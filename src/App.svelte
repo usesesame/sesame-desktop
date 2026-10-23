@@ -671,6 +671,7 @@
         itemRevealed={$itemState.revealed}
         onItemCopyField={(key, label) => void itemController.copyField(key, label)}
         onItemReveal={(key) => void itemController.revealField(key)}
+        onSetNoteLock={(locked) => void itemController.setNoteLock(locked)}
         onItemHide={itemController.hideField}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
         recoveryActionWorking={$loginState.recoveryActionWorking}

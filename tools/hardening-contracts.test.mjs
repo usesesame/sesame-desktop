@@ -390,7 +390,7 @@ function callerSuppliedBooleanGates(text) {
 test('the quick-access window cannot reach deliberate release or input-injection commands', () => {
   const manifests = JSON.parse(read('src-tauri', 'gen', 'schemas', 'acl-manifests.json'))
   const capabilities = JSON.parse(read('src-tauri', 'gen', 'schemas', 'capabilities.json'))
-  const forbidden = ['reveal_login_secret', 'auto_type', 'export_backup', 'export_vault_csv', 'export_recovery_kit', 'grant_presence', 'check_release_presence', 'release_item_field', 'copy_item_field', 'check_login_breach', 'copy_secret', 'clear_clipboard_if_unchanged']
+  const forbidden = ['reveal_login_secret', 'auto_type', 'export_backup', 'export_vault_csv', 'export_recovery_kit', 'grant_presence', 'check_release_presence', 'release_item_field', 'set_secure_note_lock', 'copy_item_field', 'check_login_breach', 'copy_secret', 'clear_clipboard_if_unchanged']
 
   const permission = manifests['__app-acl__'].permissions['quick-access']
   assert.ok(permission, 'the generated ACL does not define the quick-access permission')
@@ -473,6 +473,26 @@ test('the record read macro redacts and the gated commands require presence', ()
   for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach', 'copy_quick_access_field']) {
     assert.match(read('src-tauri', 'src', 'lib.rs'), new RegExp(`commands::${name},`), `${name} is not registered`)
   }
+})
+
+test('turning a note lock off needs the presence check and turning it on does not', () => {
+  const notes = read('src-tauri', 'src', 'commands', 'secure_notes.rs').split('#[cfg(test)]')[0]
+  const body = braceBody(notes, notes.indexOf('pub(crate) fn set_secure_note_lock_in_state('))
+  assert.match(body, /if !locked \{\s*require_release_presence\(state, presence\)\?;\s*\}/, 'unlocking a note no longer needs the presence check')
+  assert.match(notes, /item\.locked \|= existing\.locked;/, 'a save can now turn a note lock off')
+  assert.match(read('src-tauri', 'src', 'lib.rs'), /commands::set_secure_note_lock,/, 'set_secure_note_lock is not registered')
+})
+
+test('only a master password unlock counts as the presence check', () => {
+  const callers = filesMatching(/\.rs$/, join(root, 'src-tauri', 'src'))
+    .filter((path) => /grant_after_unlock\(/.test(read(relative(root, path)).split('#[cfg(test)]')[0]))
+    .map((path) => relative(root, path).split('\\').join('/'))
+    .sort()
+  assert.deepEqual(callers, ['src-tauri/src/commands/lifecycle.rs', 'src-tauri/src/release.rs'])
+  const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
+  const body = braceBody(lifecycle, lifecycle.indexOf('pub fn unlock_vault('))
+  assert.match(body, /if result\.is_ok\(\) \{[\s\S]*presence\.grant_after_unlock\(state\.session_epoch\(\)\);/, 'a master password unlock no longer grants the presence check after it succeeds')
 })
 
 test('the window never keeps a secret value in a record view', () => {
@@ -1180,6 +1200,18 @@ test('no webview may open a new window and the rebuilt main window denies it exp
   const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
   assert.match(shell, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/)
   assert.equal([...shell.matchAll(/WebviewWindowBuilder::new/g)].length, 1)
+})
+
+test('every window is built in code so each one gets the new window handler', () => {
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  assert.deepEqual(config.app.windows.map((window) => window.label).sort(), ['main', 'quick-access'])
+  for (const window of config.app.windows) {
+    assert.equal(window.create, false, `${window.label} is created by Tauri before a handler can be attached`)
+  }
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
+  assert.match(quick, /WebviewWindowBuilder::from_config\(/, 'the quick access window is built from its configuration')
+  assert.match(quick, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/, 'the quick access window denies new windows')
 })
 
 test('vault key material is drawn from the system random source', () => {

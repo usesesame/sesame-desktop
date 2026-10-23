@@ -117,13 +117,17 @@ good-faith report that turns out to be out of scope is not held against you.
   app's memory, drive its window, record your keystrokes, or capture the
   screen while a secret is shown.
 - Showing or copying a saved secret asks for your master password, and one
-  check covers the next two minutes. That covers login passwords, backup
-  codes, card numbers and security codes, Wi-Fi passwords, SSH keys and
-  passphrases, licence keys, document numbers and secret custom fields. They
-  stay in Sesame's native code until you ask, and copying happens there too.
-  Login one-time codes, secure note contents and notes show without the
-  check, because the window has to display them, and a one-time code expires
-  within a minute or so.
+  check covers the next two minutes. Unlocking with your master password
+  counts as that check, so someone who takes over an unlocked window in those
+  two minutes can read what the check protects. That covers login passwords,
+  backup codes, card numbers and security codes, Wi-Fi passwords, SSH keys and
+  passphrases, licence keys, document numbers, secret custom fields and the
+  text of any secure note you lock. They stay in Sesame's native code until
+  you ask, and copying happens there too. Login one-time codes, login notes
+  and secure notes you have not locked show without the check, because the
+  window has to display them, and a one-time code expires within a minute or
+  so. Locked notes are left out of search, and a vault that holds a locked
+  note does not open in a Sesame version that predates the lock.
 - Malware that controls your browser profile can act as the extension. The
   approval prompt in the Sesame window is the last check before a fill.
 - On Linux the browser helper trusts whichever program of yours owns its

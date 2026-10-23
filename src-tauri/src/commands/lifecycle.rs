@@ -4,6 +4,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::release::ReleasePresence;
 use crate::vault::crypto::decrypt_bytes;
 use crate::vault::storage::{
     clear_pin_throttle_state, complete_recovery_setup_for_session, derive_pin_wrapping_key,
@@ -459,6 +460,7 @@ pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &State<'_, Vaul
 pub fn unlock_vault(
     app: AppHandle,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
     request: MasterPasswordRequest,
 ) -> VaultResult<VaultSnapshot> {
     // One lifecycle critical section from file read to install.
@@ -474,6 +476,7 @@ pub fn unlock_vault(
     drop(session);
     if result.is_ok() {
         let _ = establish_pin_throttle_state(&app, &state);
+        presence.grant_after_unlock(state.session_epoch());
     }
     result
 }

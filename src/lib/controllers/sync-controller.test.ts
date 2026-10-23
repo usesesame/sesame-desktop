@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { get } from 'svelte/store'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSyncController, describeSyncForChrome } from './sync-controller'
+import { autoSyncBackoffMs, createSyncController, describeCoordinatorState, describeFloorCheck, describeSyncForChrome } from './sync-controller'
 
 const core = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => core)
@@ -15,6 +15,7 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   needsNewKey: false,
   alarm: null,
   confirmedAt: null,
+  floorConfirmedAt: null,
   ...overrides,
 })
 
@@ -253,6 +254,145 @@ describe('syncing without being asked', () => {
     const halted = approved()
     await halted.autoSync()
     expect(get(halted).activity).toBe('attention')
+  })
+
+  it('keeps when Sesame last confirmed the minimum Sync version and says so plainly when it never has', async () => {
+    answer({ sync_status: status({ floorConfirmedAt: 1_800_000_000 }), sync_coordinator_status: idle })
+    const sync = createSyncController()
+    await sync.refresh()
+    expect(get(sync).floorCheckedAt).toBe(1_800_000_000)
+    answer({ sync_status: status(), sync_coordinator_status: idle })
+    await sync.refresh()
+    expect(get(sync).floorCheckedAt).toBe(0)
+    expect(describeFloorCheck('approved', 0)).toBe('Sesame has not yet checked the minimum Sync version.')
+    expect(describeFloorCheck('approved', 1_800_000_000)).toMatch(/^Sesame last checked the minimum Sync version on .+\.$/)
+    expect(describeFloorCheck('not_enrolled', 0)).toBe('')
+    expect(describeFloorCheck('joining', 1_800_000_000)).toBe('')
+  })
+
+  it('tells the person what to do when the Sync version file is damaged and keeps the old version message for a real old build', () => {
+    const state = (halt: string) => ({ phase: 'halted', halt, consecutiveFailures: 0, lastSuccessRevision: 0 })
+    const damaged = describeCoordinatorState(state('floor_damaged'))
+    expect(damaged).toContain('Sync version file')
+    for (const name of ['sync-floor.json', 'sync-floor.json.tag', 'sync-floor.json.next']) expect(damaged).toContain(name)
+    expect(describeCoordinatorState(state('incompatible'))).toBe('Sesame Sync needs a newer version of this app.')
+  })
+
+  it('keeps the note that peer checks were skipped until a sync completes them', async () => {
+    answer({ sync_status: status({ peerChecksSkipped: true }), sync_coordinator_status: idle })
+    const sync = createSyncController()
+    await sync.refresh()
+    expect(get(sync).peerChecksSkipped).toBe(true)
+    answer({ sync_status: status({ peerChecksSkipped: false }), sync_coordinator_status: idle })
+    await sync.refresh()
+    expect(get(sync).peerChecksSkipped).toBe(false)
+    answer({ sync_status: status(), sync_coordinator_status: idle })
+    await sync.refresh()
+    expect(get(sync).peerChecksSkipped).toBe(false)
+  })
+
+  it('tells the person when resolving a conflict removed older recovery copies', async () => {
+    const side = { deviceLabel: 'Laptop', revision: 3, entryCount: 4, changedAt: '' }
+    const conflict = { ...idle, phase: 'halted', halt: 'conflict', conflictRevision: 4 }
+    answer({ sync_status: status(), sync_now: conflict, sync_conflict_details: { thisDevice: side, otherDevice: side } })
+    const sync = approved()
+    await sync.autoSync()
+    await vi.waitFor(() => expect(get(sync).conflictDetailsLoaded).toBe(true))
+
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_resolve_conflict: { recoveryCopies: ['a.sesame', 'b.sesame'], removedOldCopies: 2 } })
+    await sync.resolveConflict('this')
+    expect(get(sync).lastTransfer).toBe('Resolved. A recovery copy of each vault is saved on this device. Sesame removed 2 older recovery copies to stay within its limit.')
+  })
+
+  it('says nothing about removed copies when none were removed', async () => {
+    const side = { deviceLabel: 'Laptop', revision: 3, entryCount: 4, changedAt: '' }
+    const conflict = { ...idle, phase: 'halted', halt: 'conflict', conflictRevision: 4 }
+    answer({ sync_status: status(), sync_now: conflict, sync_conflict_details: { thisDevice: side, otherDevice: side } })
+    const sync = approved()
+    await sync.autoSync()
+    await vi.waitFor(() => expect(get(sync).conflictDetailsLoaded).toBe(true))
+
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_resolve_conflict: { recoveryCopies: ['a.sesame', 'b.sesame'], removedOldCopies: 0 } })
+    await sync.resolveConflict('other')
+    expect(get(sync).lastTransfer).toBe('Resolved. A recovery copy of each vault is saved on this device.')
+  })
+
+  it('waits longer after each failed run and caps the wait', () => {
+    expect(autoSyncBackoffMs(0)).toBe(0)
+    expect(autoSyncBackoffMs(1)).toBe(60_000)
+    expect(autoSyncBackoffMs(2)).toBe(120_000)
+    expect(autoSyncBackoffMs(3)).toBe(240_000)
+    expect(autoSyncBackoffMs(6)).toBe(30 * 60_000)
+    expect(autoSyncBackoffMs(50)).toBe(30 * 60_000)
+  })
+
+  it('does not run a scheduled sync again before the backoff has passed, and runs it after', async () => {
+    vi.useFakeTimers()
+    const failing = { ...idle, phase: 'retrying', consecutiveFailures: 3 }
+    answer({ sync_now: failing })
+    const sync = approved()
+    await sync.autoSync()
+    const runs = () => core.invoke.mock.calls.filter((call) => call[0] === 'sync_now').length
+    expect(runs()).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await sync.autoSync()
+    expect(runs()).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(180_000)
+    await sync.autoSync()
+    expect(runs()).toBe(2)
+  })
+
+  it('tries again at once when the network comes back, even inside the backoff', async () => {
+    vi.useFakeTimers()
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: false }, sync_now: { ...idle, phase: 'retrying', consecutiveFailures: 4 } })
+    const sync = approved()
+    const stop = sync.startBackground()
+    await vi.advanceTimersByTimeAsync(10)
+    const runs = () => core.invoke.mock.calls.filter((call) => call[0] === 'sync_now').length
+    const before = runs()
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(runs()).toBe(before + 1)
+    stop()
+  })
+
+  it('shows a run that gave up as failing and never as synced', async () => {
+    answer({ sync_now: { ...idle, phase: 'gave_up', consecutiveFailures: 6 } })
+    const failing = approved()
+    await failing.autoSync()
+    expect(get(failing).activity).toBe('failing')
+    expect(get(failing).lastSyncedAt).toBe(0)
+    expect(describeSyncForChrome({ enrolled: true, state: 'approved', activity: 'failing', alarm: '', needsNewKey: false })).toEqual({ label: 'Synced vault · Could not sync, will retry', tone: 'warn' })
+  })
+
+  it('does not call a paused run synced because the vault was locked', async () => {
+    answer({ sync_now: { ...idle, phase: 'paused', halt: 'locked' } })
+    const paused = approved()
+    await paused.autoSync()
+    expect(get(paused).activity).toBe('idle')
+    expect(get(paused).lastSyncedAt).toBe(0)
+  })
+
+  it('stamps the last sync time only when a run ended idle', async () => {
+    answer({ sync_now: idle })
+    const synced = approved()
+    await synced.autoSync()
+    expect(get(synced).activity).toBe('synced')
+    expect(get(synced).lastSyncedAt).toBeGreaterThan(0)
+  })
+
+  it('tells the host that Sync now was pressed by a person and that a scheduled run was not', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_now: idle })
+    const sync = approved()
+    await sync.autoSync()
+    expect(core.invoke).toHaveBeenCalledWith('sync_now')
+    core.invoke.mockClear()
+    await sync.syncNow()
+    expect(core.invoke).toHaveBeenCalledWith('sync_now', { manual: true })
   })
 
   it('syncs once, a moment after the last change, and only on a synced device', async () => {
