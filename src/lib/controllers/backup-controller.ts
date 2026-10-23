@@ -12,6 +12,7 @@ import {
   restoreBackup,
   verifyBackup,
 } from '../vault'
+import { parseOlderBackup } from '../older-backup'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
@@ -28,6 +29,8 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
   const state = controllerStore({
     restoreSelection: null as BackupSelection | null,
     restoreConfirmed: false,
+    restoreOlder: null as { restoredRevision: number; currentRevision: number } | null,
+    restoreOlderConfirmed: false,
     restoreSecret: '',
     restoringBackup: false,
     restorePresenceRequired: false,
@@ -76,12 +79,13 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     const current = state.value()
     if (!current.restoreSelection || !current.restoreSecret || current.restoringBackup) return
     if (vault.value().status.exists && !current.restoreConfirmed) return
+    if (current.restoreOlder && !current.restoreOlderConfirmed) return
     state.patch({ restoringBackup: true })
     feedback.clearError()
     try {
       const hadVault = vault.value().status.exists
       const upgraded = current.restoreSelection.compatibility === 'upgrade'
-      const restored = await restoreBackup(current.restoreSelection.token, current.restoreSecret)
+      const restored = await restoreBackup(current.restoreSelection.token, current.restoreSecret, current.restoreOlderConfirmed)
       const action = upgraded ? 'Older backup upgraded and restored.' : 'Backup restored.'
       const message = restored.safetyBackupName
         ? `${action} Sesame kept the previous vault as ${restored.safetyBackupName}.${restoreRevisionCopy(restored)}`
@@ -89,12 +93,14 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
           ? `${action}${restoreRevisionCopy(restored)}`
           : `${action} Unlock with the master password or recovery kit from that backup.`
       modal.close('restore')
-      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
+      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreOlder: null, restoreOlderConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
       await applyRestoredVault(message)
     } catch (error) {
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
         state.patch({ restorePresenceRequired: true, restorePresencePassword: '' })
         feedback.setErrorMessage('Confirm your current master password before Sesame replaces the vault.')
+      } else if (error instanceof Error && parseOlderBackup(error.message)) {
+        state.patch({ restoreOlder: parseOlderBackup(error.message), restoreOlderConfirmed: false })
       } else {
         feedback.setError(error)
       }
@@ -123,7 +129,12 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) {
         state.patch({ drillPresenceRequired: true })
       } else {
-        state.patch({ drillError: error instanceof Error ? error.message : 'The verified backup could not be restored.' })
+        const older = error instanceof Error ? parseOlderBackup(error.message) : null
+        state.patch({
+          drillError: older
+            ? `This backup is at revision ${older.restoredRevision} and your vault is at revision ${older.currentRevision}. Restore it from the restore option if you want an older vault back.`
+            : error instanceof Error ? error.message : 'The verified backup could not be restored.',
+        })
       }
     } finally {
       state.patch({ drillRestoring: false })
@@ -199,7 +210,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
         void recordDiagnostic('restore', 'selection_verified')
         const opened = modal.open({ kind: 'restore' })
         if (opened) {
-          state.patch({ restoreSelection, restoreConfirmed: false, restoreSecret: '' })
+          state.patch({ restoreSelection, restoreConfirmed: false, restoreOlder: null, restoreOlderConfirmed: false, restoreSecret: '' })
         } else {
           void recordDiagnostic('restore', 'modal_refused')
           feedback.setErrorMessage('Close the open dialog first, then try restoring again.')
@@ -212,7 +223,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     closeRestore() {
       if (state.value().restoringBackup) return
       modal.close('restore')
-      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
+      state.patch({ restoreSelection: null, restoreConfirmed: false, restoreOlder: null, restoreOlderConfirmed: false, restoreSecret: '', restorePresenceRequired: false, restorePresencePassword: '' })
     },
     async confirmRestore() {
       if (state.value().restorePresenceRequired) return
@@ -288,6 +299,8 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       state.set({
         restoreSelection: null,
         restoreConfirmed: false,
+        restoreOlder: null,
+        restoreOlderConfirmed: false,
         restoreSecret: '',
         restoringBackup: false,
         restorePresenceRequired: false,

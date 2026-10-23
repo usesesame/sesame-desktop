@@ -22,6 +22,8 @@
   import { createBackupController } from './lib/controllers/backup-controller'
   import { createCleanupController } from './lib/controllers/cleanup-controller'
   import { createUnlockController } from './lib/controllers/unlock-controller'
+  import { createRollbackController } from './lib/controllers/rollback-controller'
+  import RollbackNoticeModal from './lib/ui/RollbackNoticeModal.svelte'
   import { createIdentityController } from './lib/controllers/identity-controller'
   import { createSecureNoteController } from './lib/controllers/secure-note-controller'
   import { createCardController } from './lib/controllers/card-controller'
@@ -407,6 +409,11 @@
     modal: modalController,
   })
   const unlockState = unlockController.state
+  const rollbackController = createRollbackController()
+  const rollbackState = rollbackController.state
+  $: vaultUnlocked = $vault.snapshot !== null
+  $: if (vaultUnlocked) void rollbackController.refresh()
+  $: if (!vaultUnlocked) rollbackController.clear()
   onVaultDeleted = (message) => {
     settingsController.resetOnboarding()
     unlockController.markVaultDeleted(message)
@@ -938,6 +945,8 @@
       <RestoreModal
         restoreSelection={$backupState.restoreSelection}
         bind:restoreConfirmed={$backupState.restoreConfirmed}
+        olderBackup={$backupState.restoreOlder}
+        bind:olderConfirmed={$backupState.restoreOlderConfirmed}
         bind:restoreSecret={$backupState.restoreSecret}
         restoringBackup={$backupState.restoringBackup}
         replacesVault={$vault.status.exists}
@@ -1187,3 +1196,5 @@
       }}
     />
   {/if}
+
+  <RollbackNoticeModal notice={$rollbackState.notice} working={$rollbackState.working} errorMessage={$rollbackState.error} onKeep={rollbackController.keep} onLock={rollbackController.lock} />

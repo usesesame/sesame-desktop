@@ -415,6 +415,7 @@ pub fn restore_backup(
             false,
         )?,
     };
+    let confirm_older = request.confirm_older;
     let secret = Zeroizing::new(request.secret);
 
     let restored = (|secret: Zeroizing<String>| -> VaultResult<RestoreBackupResult> {
@@ -451,8 +452,15 @@ pub fn restore_backup(
             None => (prepared.revision(), None),
         };
 
+        crate::rollback_guard::require_older_confirmation(
+            restored_revision,
+            replaced_revision,
+            confirm_older,
+        )?;
+
         let installed = state
             .apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
+        crate::rollback_guard::reset_after_restore(&app, prepared.vault_id(), restored_revision);
         let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(&app);
         state.cache_pin_unlock(installed.pin_unlock_available);
         state.cache_hello_unlock(installed.hello_unlock_available);
