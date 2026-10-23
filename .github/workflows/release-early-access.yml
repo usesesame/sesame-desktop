@@ -22,6 +22,7 @@ env:
   # rather than name this one. /releases/latest only resolves for a release
   # that is not marked as a pre-release, which is why publish no longer does.
   SESAME_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+  SESAME_UPDATE_FRESHNESS_URL: https://github.com/${{ github.repository }}/releases/download/freshness/freshness.json
   SESAME_SUPPORTED_WINDOWS: Windows 10,Windows 11
   # The GitHub release carries the real notes, checksum, and verification
   # instructions. The marketing site has no per-version page, so pointing there
@@ -224,6 +225,8 @@ jobs:
           SESAME_UPDATER_PUBLIC_KEY: ${{ vars.SESAME_UPDATER_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ vars.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+          SESAME_UPDATE_FRESHNESS_PUBLIC_KEY: ${{ vars.SESAME_UPDATE_FRESHNESS_PUBLIC_KEY }}
+          SESAME_UPDATE_FRESHNESS_KEY_ID: ${{ vars.SESAME_UPDATE_FRESHNESS_KEY_ID }}
         run: |
           $config = Join-Path $env:RUNNER_TEMP 'unsigned-windows-updater-off.json'
           Set-Content -LiteralPath $config -Value '{"bundle":{"createUpdaterArtifacts":false}}' -Encoding ascii -NoNewline

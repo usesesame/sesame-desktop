@@ -68,6 +68,7 @@ import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 import { clearCachedWebsiteIcons } from '../website-icons'
 import { isTrivialPin, isValidPinLength, MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
+import { noUpdateNotice } from '../update-freshness-text'
 
 interface SettingsControllerOptions {
   stores: AppStores
@@ -210,7 +211,8 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
       const updateStatus = await checkDesktopUpdate()
       state.patch({ updateStatus })
       if (userInitiated && !updateStatus.available) {
-        feedback.showNotice('No update available', 'You are running the latest version of Sesame.')
+        const notice = noUpdateNotice(updateStatus)
+        feedback.showNotice(notice.title, notice.message)
       }
     }
     catch (error) { if (userInitiated) feedback.setError(error) }

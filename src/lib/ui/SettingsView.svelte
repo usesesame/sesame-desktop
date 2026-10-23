@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { describeFreshness } from '../update-freshness-text'
   import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
@@ -89,6 +90,7 @@
   export let onRefreshService: () => void
   export let serviceConnectionAvailable = true
   export let desktopUpdate: DesktopUpdateStatus = { available: false }
+  $: freshnessNote = describeFreshness(desktopUpdate)
   export let updateWorking = false
   export let updateProgress: DesktopUpdateProgress | null = null
   export let onCheckForUpdate: () => void
@@ -255,7 +257,7 @@
             {/if}
             <article>
               {#if $platformCapabilities.desktopUpdates}
-                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
+                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : `Check the configured signed release feed. No Sesame account is required.${freshnessNote ? ` ${freshnessNote}` : ''}`}</p></div>
                 {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing…' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking…' : 'Check now'}</button>{/if}
               {:else}
                 <div class="setting-copy"><strong>Desktop updates</strong><p>Sesame does not update itself on this system. You are running {$appVersion ? `version ${$appVersion}` : 'this build'}. Update it the way you installed it to get security fixes.</p></div>

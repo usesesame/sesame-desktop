@@ -607,3 +607,28 @@ describe('the first run Sync notice', () => {
     expect(localStorage.getItem('sesame-sync-notice-v1')).toBeNull()
   })
 })
+
+describe('the manual update check', () => {
+  it('claims the latest version only when nothing contradicts it', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.checkDesktopUpdate.mockResolvedValue({ available: false })
+    await controller.checkForUpdate(true)
+    expect(feedback.state.value().notice).toMatchObject({ title: 'No update available', message: 'You are running the latest version of Sesame.' })
+  })
+
+  it('says it could not confirm updates when the freshness check is stale', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.checkDesktopUpdate.mockResolvedValue({ available: false, freshness: { state: 'unconfirmed' } })
+    await controller.checkForUpdate(true)
+    const notice = feedback.state.value().notice
+    expect(notice?.title).toBe('Could not confirm updates')
+    expect(notice?.message).not.toContain('latest version')
+  })
+
+  it('says a newer release exists when the update information is frozen', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.checkDesktopUpdate.mockResolvedValue({ available: false, freshness: { state: 'newer_exists', version: '0.4.9' } })
+    await controller.checkForUpdate(true)
+    expect(feedback.state.value().notice?.title).toBe('A newer Sesame exists')
+  })
+})
