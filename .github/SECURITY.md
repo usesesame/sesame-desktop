@@ -163,3 +163,8 @@ good-faith report that turns out to be out of scope is not held against you.
   running inside the window can report activity and keep the lock from firing,
   but that code can already read everything the window shows. Where GNOME or
   KDE reports idle time, that time is used and the window reports nothing.
+- Website icons are off until you turn them on. Sesame fetches an icon only from
+  a public address, accepts only ICO, PNG and JPEG files of at most 128 KiB, and
+  checks the first bytes of the file. It does not decode the image, so the web
+  engine's own decoders read a file that the website chose, and a flaw in one of
+  them would run on that file.
