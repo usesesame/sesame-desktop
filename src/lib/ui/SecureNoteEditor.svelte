@@ -1,4 +1,5 @@
 <script lang="ts">
+  import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
   import LegacyDataPanel from './LegacyDataPanel.svelte'
@@ -14,6 +15,9 @@
   export let onClose: () => void
 
   let titleInput: HTMLInputElement
+  let wasLocked: boolean | null = null
+
+  $: if (wasLocked === null && !loadingNote) wasLocked = noteDraft.locked
 
   // Tracked from input events, not a snapshot, so nothing holds a second copy of the record.
   let dirty = false
@@ -63,6 +67,9 @@
   <div class="editor-fields">
     <label>Title <span class="field-hint">How this note appears in your list, e.g. “Home Wi-Fi”</span><input name="note-title" bind:this={titleInput} value={noteDraft.title} on:input={(event) => updateDraft({ title: event.currentTarget.value })} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
     <label>Content<textarea name="note-content" value={noteDraft.content} on:input={(event) => updateDraft({ content: event.currentTarget.value })} rows="8" maxlength="20000" placeholder="What you want to keep…"></textarea></label>
+    <KeptSecret draft={noteDraft} key="content" typed={noteDraft.content} onChange={(next) => updateDraft(next)} />
+    <label class="lock-option"><input name="note-locked" type="checkbox" checked={noteDraft.locked} disabled={wasLocked === true || savingNote} on:change={(event) => updateDraft({ locked: event.currentTarget.checked })} /> <span>Ask for my master password to open this note</span></label>
+    {#if wasLocked}<p class="field-hint">To remove the lock, use Remove the lock on the note's page.</p>{/if}
     <label>Tags <span class="field-hint">Comma separated, optional</span><input name="note-tags" value={noteDraft.tags.join(', ')} on:input={(event) => updateDraft({ tags: parseTags(event.currentTarget.value) })} maxlength="500" autocomplete="off" placeholder="e.g. home, travel…" /></label>
     <LegacyDataPanel fields={legacyFields} />
   </div>
@@ -80,3 +87,23 @@
   {/if}
   </form>
 </ModalShell>
+
+<style>
+  .lock-option {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text-2);
+    font-size: var(--type-2);
+    font-weight: var(--weight-regular);
+  }
+
+  .lock-option input {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
+  }
+</style>

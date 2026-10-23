@@ -21,6 +21,7 @@ const detail: ItemDetailShape = {
   attachments: [],
   legacyFields: [{ label: 'Old PIN', value: '', secret: true }],
   favourite: false,
+  locked: false,
 }
 
 function renderDetail(overrides: Record<string, unknown> = {}) {
@@ -38,6 +39,7 @@ function renderDetail(overrides: Record<string, unknown> = {}) {
     onDelete: vi.fn(),
     onMove: vi.fn(),
     onShowTag: vi.fn(),
+    onSetLock: vi.fn(),
     ...overrides,
   }
   render(ItemDetail, { props } as never)
@@ -79,4 +81,27 @@ test('a secret legacy value copies through the host by position', async () => {
   await fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
 
   expect(props.onCopyField).toHaveBeenCalledWith('legacy:0', 'Old PIN')
+})
+
+test('a note offers the lock and an open note says it shows whenever Sesame is unlocked', async () => {
+  const props = renderDetail({ kind: 'secure_note', detail: { ...detail, locked: false, fields: [] } })
+
+  expect(screen.getByText('This note shows whenever Sesame is unlocked.')).toBeTruthy()
+  await fireEvent.click(screen.getByRole('button', { name: 'Lock with master password' }))
+
+  expect(props.onSetLock).toHaveBeenCalledWith(true)
+})
+
+test('a locked note offers to remove the lock', async () => {
+  const props = renderDetail({ kind: 'secure_note', detail: { ...detail, locked: true, fields: [] } })
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Remove the lock' }))
+
+  expect(props.onSetLock).toHaveBeenCalledWith(false)
+})
+
+test('other kinds show no protection section', () => {
+  renderDetail()
+
+  expect(screen.queryByText('Protection')).toBeNull()
 })

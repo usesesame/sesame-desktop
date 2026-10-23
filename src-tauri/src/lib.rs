@@ -85,6 +85,7 @@ macro_rules! sesame_invoke_handler {
             commands::delete_identity,
             commands::get_secure_note,
             commands::save_secure_note,
+            commands::set_secure_note_lock,
             commands::delete_secure_note,
             commands::get_card,
             commands::save_card,

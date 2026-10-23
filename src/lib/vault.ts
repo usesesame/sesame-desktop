@@ -280,6 +280,7 @@ function previewSecretSlots(kind: string, record: Record<string, unknown>): Prev
       if (isSecret(row)) slots.push({ key: `${prefix}:${index}`, read: () => String(row.value ?? ''), write: (value: string) => { row.value = value }, blank: () => { row.value = '' } })
     })
   }
+  if (kind === 'secure_note' && record.locked === true) slots.push({ key: 'content', read: () => String(record.content ?? ''), write: (value: string) => { record.content = value }, blank: () => { record.content = '' } })
   if (kind === 'custom_record') collect(record.fields, 'field', (row) => row.kind === 'secret')
   if (kind === 'identity' || kind === 'secure_note' || kind === 'card') collect(record.legacyFields, 'legacy', (row) => row.secret === true)
   return slots
@@ -1137,6 +1138,17 @@ export async function saveSecureNote(input: SecureNoteInput): Promise<SaveSecure
 
 export async function deleteSecureNote(id: string): Promise<DeleteSecureNoteResult> {
   return secureNoteApi.delete(id)
+}
+
+export async function setSecureNoteLock(id: string, locked: boolean): Promise<SaveSecureNoteResult> {
+  if (previewMode) {
+    const note = previewSecureNotes[id]
+    if (!note) throw new Error('That saved note no longer exists.')
+    note.locked = locked
+    upsertPreviewItem('secure_note', id, note.title, '', note.tags ?? [])
+    return { id, snapshot: structuredClone(previewSnapshot) }
+  }
+  return invoke<SaveSecureNoteResult>('set_secure_note_lock', { id, locked })
 }
 
 export async function getCard(id: string): Promise<SecretView<Card>> {
