@@ -3962,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "sesame"
-version = "0.4.3"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "argon2",

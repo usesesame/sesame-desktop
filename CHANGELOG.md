@@ -4,6 +4,67 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.5.0
+
+### Notes
+
+- A secure note can be locked with your master password. A locked note keeps its
+  text out of the window until the master password check passes, and it is left
+  out of search. Unlocking Sesame with your master password counts as that
+  check for two minutes. A vault that holds a locked note does not open in an
+  older Sesame, so update every device before you lock a note.
+
+### Sync
+
+- Sync needs 0.5.0 or later. Older versions stop syncing and are asked to
+  update, because they cannot read a vault that holds a locked note or a
+  hybrid key package.
+- Moving the vault key to a new device now adds a post-quantum key exchange,
+  ML-KEM-768 combined with X25519 as the X-Wing draft describes. A device with
+  a hybrid key receives a hybrid package, and a device with an older key still
+  gets the older one. Once any device in a vault has a hybrid key, Sesame
+  refuses a new device that offers only the older key unless you allow it for
+  that pairing. Nobody independent has reviewed this exchange, and it does not
+  make Sesame quantum safe. Update a self-hosted server first, because a
+  server from before this version rejects the new key.
+- Sync now reports what happened. A stop clears once you fix its cause, a run
+  that gave up or paused because the vault is locked says so instead of showing
+  as synced, and failed runs back off and try again when the network returns.
+- Sync state survives a crash while it is being saved, and an upload that
+  reached the service but lost its answer is picked up on the next run and no
+  longer shows as a conflict.
+- A Sync version file that exists but cannot be read now refuses Sync until the
+  next update check repairs it. The Sync panel shows when Sesame last checked
+  the minimum Sync version.
+
+### Vault
+
+- Sesame keeps a record on this device of the highest vault revision it has
+  opened and asks you to confirm before it uses an older vault. Restoring a
+  backup that is older than your vault stops first, names both revisions and
+  asks for a second confirmation.
+- New vaults and a changed master password derive their key with Argon2id at
+  128 MiB and 3 passes. Existing vaults keep their settings until you change
+  the master password.
+- The refusal for a weak master password no longer names a length that the
+  check does not enforce.
+- The Export and deletion screen has a complete export. It writes one JSON file
+  with every item in the vault, including documents with their attachments,
+  custom records, folders and trash, and it needs your master password. The
+  file is not encrypted, and revision history is left out. The format is
+  described in `EXPORT-FORMAT.md`.
+
+### Security
+
+- The main and quick access windows are built in code and refuse to open new
+  windows.
+- Website icons accept only ICO, PNG and JPEG files. WebP and GIF are no longer
+  accepted, because their decoders have the longest record of flaws. The web
+  engine still decodes the icon a website sends, and the known limits say so.
+- The known limits now say that a program running as you can delete the
+  revision record, and that any program running as you can start the browser
+  helper and ask for a fill, with the approval prompt as the only check.
+
 ## 0.4.3
 
 ### Browser
