@@ -902,6 +902,41 @@
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
       "reviewed": "2026-10-20",
       "expires": "2027-01-18"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-111497",
+      "package": "brotli",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-22"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-113679",
+      "package": "harfbuzz",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-22"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-113680",
+      "package": "harfbuzz",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-22"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-112060",
+      "package": "rtmpdump",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-22"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-112061",
+      "package": "rtmpdump",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-10-24",
+      "expires": "2027-01-22"
     }
   ]
 }
