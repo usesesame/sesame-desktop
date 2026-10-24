@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Sesame",
         "width": 1360,
         "height": 860,
@@ -26,6 +27,7 @@
       },
       {
         "label": "quick-access",
+        "create": false,
         "title": "Sesame quick access",
         "url": "quick-access.html",
         "width": 460,

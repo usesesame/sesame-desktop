@@ -7,8 +7,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{
-    bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes, serialize_payload,
-    unwrap_with_password,
+    bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes,
+    master_password_kdf_params, serialize_payload, unwrap_with_password,
 };
 use crate::platform::{
     copy_private_file, create_private_dir, ensure_device_protection, open_private_file,
@@ -393,7 +393,7 @@ fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<
     let mut new_vault_key = Zeroizing::new([0_u8; 32]);
     fill_secret(&mut *new_vault_key)?;
 
-    let new_kdf = default_kdf_params();
+    let new_kdf = master_password_kdf_params();
     let new_wrapping_key = Zeroizing::new(derive_key(password, &new_kdf)?);
     let new_key_wrap = encrypt_bytes(&new_wrapping_key, &*new_vault_key, WRAP_AAD)?;
 

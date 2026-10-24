@@ -27,7 +27,15 @@ use crate::vault::VaultResult;
 
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
+const TRANSFER_BASE_TIMEOUT: Duration = Duration::from_secs(60);
+const TRANSFER_SLOWEST_BYTES_PER_SECOND: usize = 32 * 1024;
+const TRANSFER_MAX_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+fn transfer_timeout(bytes: usize) -> Duration {
+    (TRANSFER_BASE_TIMEOUT
+        + Duration::from_secs((bytes / TRANSFER_SLOWEST_BYTES_PER_SECOND) as u64))
+    .min(TRANSFER_MAX_TIMEOUT)
+}
 
 #[derive(Debug)]
 pub enum SyncError {
@@ -137,6 +145,35 @@ fn empty_as_none<'de, D: serde::Deserializer<'de>>(
 #[derive(Deserialize)]
 struct Entries {
     entries: Vec<DeviceListEntry>,
+}
+
+const HEADER_PAGE_SIZE: usize = 500;
+const MAX_HEADERS: usize = 20_000;
+
+async fn collect_header_pages<F, Fut>(after: u64, mut fetch: F) -> SyncResult<Vec<ServedHeader>>
+where
+    F: FnMut(u64) -> Fut,
+    Fut: std::future::Future<Output = SyncResult<Vec<ServedHeader>>>,
+{
+    let mut collected = Vec::new();
+    let mut cursor = after;
+    loop {
+        let page = fetch(cursor).await?;
+        let count = page.len();
+        if let Some(last) = page.last() {
+            cursor = last.header.revision;
+        }
+        collected.extend(page);
+        if collected.len() > MAX_HEADERS {
+            return Err(SyncError::Failed(
+                "The service returned more history than Sesame will read. Sync stopped and nothing was changed."
+                    .to_string(),
+            ));
+        }
+        if count < HEADER_PAGE_SIZE {
+            return Ok(collected);
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -395,7 +432,12 @@ impl SyncClient {
             request = request.header("Sesame-Request-Signature", value);
         }
         if long {
-            request = request.timeout(TRANSFER_TIMEOUT);
+            let size = if raw.is_empty() {
+                MAX_RESPONSE_BYTES
+            } else {
+                raw.len()
+            };
+            request = request.timeout(transfer_timeout(size));
         }
         if !raw.is_empty() {
             request = request.header("Content-Type", "application/json").body(raw);
@@ -658,21 +700,13 @@ impl SyncClient {
     }
 
     pub async fn headers(&self, after: u64) -> SyncResult<Vec<ServedHeader>> {
-        let mut collected = Vec::new();
-        let mut cursor = after;
-        loop {
+        collect_header_pages(after, |cursor| async move {
             let page: Headers = self
                 .read(&format!("/v1/sync/headers?after={cursor}&limit=500"), false)
                 .await?;
-            let count = page.headers.len();
-            if let Some(last) = page.headers.last() {
-                cursor = last.header.revision;
-            }
-            collected.extend(page.headers);
-            if count < 500 || collected.len() > 20_000 {
-                return Ok(collected);
-            }
-        }
+            Ok(page.headers)
+        })
+        .await
     }
 
     pub async fn checkpoints(&self) -> SyncResult<Vec<ServedCheckpoint>> {
@@ -793,6 +827,98 @@ mod tests {
 
     fn request(name: &str) -> serde_json::Value {
         fixture()["requests"][name].clone()
+    }
+
+    fn served(revision: u64) -> ServedHeader {
+        let mut header: ServedHeader =
+            serde_json::from_value(fixture()["responses"]["headers"]["headers"][0].clone())
+                .expect("fixture header");
+        header.header.revision = revision;
+        header
+    }
+
+    fn pages(
+        sizes: Vec<usize>,
+    ) -> impl FnMut(u64) -> std::future::Ready<SyncResult<Vec<ServedHeader>>> {
+        let mut sizes = sizes.into_iter();
+        let mut next = 1_u64;
+        move |_cursor| {
+            let count = sizes.next().unwrap_or(0);
+            let page = (0..count)
+                .map(|offset| served(next + offset as u64))
+                .collect::<Vec<_>>();
+            next += count as u64;
+            std::future::ready(Ok(page))
+        }
+    }
+
+    #[test]
+    fn a_transfer_gets_time_for_its_size_at_a_slow_uplink() {
+        assert_eq!(transfer_timeout(0), TRANSFER_BASE_TIMEOUT);
+        let ten_mebibytes_encoded = 14 * 1024 * 1024;
+        assert!(transfer_timeout(ten_mebibytes_encoded) > Duration::from_secs(180));
+        assert!(
+            transfer_timeout(ten_mebibytes_encoded)
+                >= Duration::from_secs((ten_mebibytes_encoded / (32 * 1024)) as u64)
+        );
+    }
+
+    #[test]
+    fn a_transfer_timeout_never_exceeds_its_ceiling_and_grows_with_size() {
+        assert!(transfer_timeout(1024 * 1024) < transfer_timeout(8 * 1024 * 1024));
+        assert_eq!(transfer_timeout(usize::MAX / 2), TRANSFER_MAX_TIMEOUT);
+        assert!(transfer_timeout(MAX_RESPONSE_BYTES) <= TRANSFER_MAX_TIMEOUT);
+    }
+
+    #[test]
+    fn header_paging_collects_every_page_until_a_short_one() {
+        let collected = tauri::async_runtime::block_on(collect_header_pages(
+            0,
+            pages(vec![HEADER_PAGE_SIZE, HEADER_PAGE_SIZE, 7]),
+        ))
+        .unwrap();
+        assert_eq!(collected.len(), 2 * HEADER_PAGE_SIZE + 7);
+        assert_eq!(
+            collected.last().map(|header| header.header.revision),
+            Some(1007)
+        );
+    }
+
+    #[test]
+    fn header_paging_passes_the_last_revision_as_the_next_cursor() {
+        let mut cursors = Vec::new();
+        let mut source = pages(vec![HEADER_PAGE_SIZE, 3]);
+        let collected = tauri::async_runtime::block_on(collect_header_pages(5, |cursor| {
+            cursors.push(cursor);
+            source(cursor)
+        }))
+        .unwrap();
+        assert_eq!(collected.len(), HEADER_PAGE_SIZE + 3);
+        assert_eq!(cursors, vec![5, HEADER_PAGE_SIZE as u64]);
+    }
+
+    #[test]
+    fn header_paging_refuses_a_history_past_the_cap_instead_of_reading_part_of_it() {
+        let full_pages = vec![HEADER_PAGE_SIZE; MAX_HEADERS / HEADER_PAGE_SIZE + 1];
+        let outcome = tauri::async_runtime::block_on(collect_header_pages(0, pages(full_pages)));
+        assert!(matches!(outcome, Err(SyncError::Failed(_))));
+    }
+
+    #[test]
+    fn header_paging_accepts_exactly_the_cap() {
+        let mut sizes = vec![HEADER_PAGE_SIZE; MAX_HEADERS / HEADER_PAGE_SIZE];
+        sizes.push(0);
+        let collected =
+            tauri::async_runtime::block_on(collect_header_pages(0, pages(sizes))).unwrap();
+        assert_eq!(collected.len(), MAX_HEADERS);
+    }
+
+    #[test]
+    fn header_paging_passes_a_failed_page_through() {
+        let outcome = tauri::async_runtime::block_on(collect_header_pages(0, |_| {
+            std::future::ready(Err(SyncError::Unavailable("fictional outage".into())))
+        }));
+        assert!(matches!(outcome, Err(SyncError::Unavailable(_))));
     }
 
     #[test]

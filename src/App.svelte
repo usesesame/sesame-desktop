@@ -22,6 +22,8 @@
   import { createBackupController } from './lib/controllers/backup-controller'
   import { createCleanupController } from './lib/controllers/cleanup-controller'
   import { createUnlockController } from './lib/controllers/unlock-controller'
+  import { createRollbackController } from './lib/controllers/rollback-controller'
+  import RollbackNoticeModal from './lib/ui/RollbackNoticeModal.svelte'
   import { createIdentityController } from './lib/controllers/identity-controller'
   import { createSecureNoteController } from './lib/controllers/secure-note-controller'
   import { createCardController } from './lib/controllers/card-controller'
@@ -407,6 +409,11 @@
     modal: modalController,
   })
   const unlockState = unlockController.state
+  const rollbackController = createRollbackController()
+  const rollbackState = rollbackController.state
+  $: vaultUnlocked = $vault.snapshot !== null
+  $: if (vaultUnlocked) void rollbackController.refresh()
+  $: if (!vaultUnlocked) rollbackController.clear()
   onVaultDeleted = (message) => {
     settingsController.resetOnboarding()
     unlockController.markVaultDeleted(message)
@@ -664,6 +671,7 @@
         itemRevealed={$itemState.revealed}
         onItemCopyField={(key, label) => void itemController.copyField(key, label)}
         onItemReveal={(key) => void itemController.revealField(key)}
+        onSetNoteLock={(locked) => void itemController.setNoteLock(locked)}
         onItemHide={itemController.hideField}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
         recoveryActionWorking={$loginState.recoveryActionWorking}
@@ -907,11 +915,13 @@
       <DataControlsModal
         dataActionWorking={$cleanupState.dataActionWorking}
         bind:readableExportConfirmed={$cleanupState.readableExportConfirmed}
+        bind:completeExportConfirmed={$cleanupState.completeExportConfirmed}
         exportPresenceRequired={$cleanupState.exportPresenceRequired}
         bind:exportPresencePassword={$cleanupState.exportPresencePassword}
         errorMessage={$feedbackState.errorMessage}
         onClose={cleanupController.closeDataControls}
         onExportReadable={cleanupController.exportReadableVault}
+        onExportComplete={cleanupController.exportCompleteVault}
         onConfirmPresence={cleanupController.confirmExportPresence}
         onOpenDeleteVault={cleanupController.openDeleteVault}
       />
@@ -935,6 +945,8 @@
       <RestoreModal
         restoreSelection={$backupState.restoreSelection}
         bind:restoreConfirmed={$backupState.restoreConfirmed}
+        olderBackup={$backupState.restoreOlder}
+        bind:olderConfirmed={$backupState.restoreOlderConfirmed}
         bind:restoreSecret={$backupState.restoreSecret}
         restoringBackup={$backupState.restoringBackup}
         replacesVault={$vault.status.exists}
@@ -1184,3 +1196,5 @@
       }}
     />
   {/if}
+
+  <RollbackNoticeModal notice={$rollbackState.notice} working={$rollbackState.working} errorMessage={$rollbackState.error} onKeep={rollbackController.keep} onLock={rollbackController.lock} />

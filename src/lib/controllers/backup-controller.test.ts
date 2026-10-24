@@ -114,6 +114,46 @@ describe('backup restore messages', () => {
   })
 })
 
+describe('restoring an older backup', () => {
+  it('stops before anything is replaced, names both revisions and restores only after a second confirmation', async () => {
+    const running = await restoreWith('current')
+    vaultApi.restoreBackup.mockRejectedValueOnce(new Error('olderBackup:2:5'))
+    await running.controller.confirmRestore()
+    expect(running.restored).toEqual([])
+    expect(running.controller.state.value().restoreOlder).toEqual({ restoredRevision: 2, currentRevision: 5 })
+    expect(vaultApi.restoreBackup).toHaveBeenLastCalledWith('fictional-backup-token', 'fictional master password 01', false)
+
+    vaultApi.restoreBackup.mockClear()
+    await running.controller.confirmRestore()
+    expect(vaultApi.restoreBackup).not.toHaveBeenCalled()
+
+    vaultApi.restoreBackup.mockResolvedValueOnce(restoredResult({ restoredRevision: 2, replacedRevision: 5 }))
+    running.controller.state.patch({ restoreOlderConfirmed: true })
+    await running.controller.confirmRestore()
+    expect(vaultApi.restoreBackup).toHaveBeenLastCalledWith('fictional-backup-token', 'fictional master password 01', true)
+    expect(running.restored).toHaveLength(1)
+    expect(running.controller.state.value().restoreOlder).toBeNull()
+    expect(running.controller.state.value().restoreOlderConfirmed).toBe(false)
+  })
+
+  it('shows an ordinary failure as an error and offers no second confirmation', async () => {
+    const running = await restoreWith('current')
+    vaultApi.restoreBackup.mockRejectedValueOnce(new Error('That secret did not open the backup.'))
+    await running.controller.confirmRestore()
+    expect(running.controller.state.value().restoreOlder).toBeNull()
+    expect(running.feedback.state.value().errorMessage).toBe('That secret did not open the backup.')
+  })
+
+  it('forgets the older warning when the dialog is closed', async () => {
+    const running = await restoreWith('current')
+    vaultApi.restoreBackup.mockRejectedValueOnce(new Error('olderBackup:2:5'))
+    await running.controller.confirmRestore()
+    running.controller.closeRestore()
+    expect(running.controller.state.value().restoreOlder).toBeNull()
+    expect(running.controller.state.value().restoreOlderConfirmed).toBe(false)
+  })
+})
+
 describe('backup drill restore', () => {
   it('asks for the current master password before retrying a drill restore', async () => {
     const running = harness()

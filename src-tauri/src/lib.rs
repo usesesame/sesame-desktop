@@ -9,6 +9,7 @@ mod commands;
 mod desktop_e2e;
 mod diagnostics;
 mod release;
+mod rollback_guard;
 mod sync;
 #[cfg(fuzzing)]
 pub use sync::fuzz_entry as sync_fuzz;
@@ -83,8 +84,11 @@ macro_rules! sesame_invoke_handler {
             commands::get_identity,
             commands::save_identity,
             commands::delete_identity,
+            rollback_guard::get_rollback_notice,
+            rollback_guard::accept_rollback,
             commands::get_secure_note,
             commands::save_secure_note,
+            commands::set_secure_note_lock,
             commands::delete_secure_note,
             commands::get_card,
             commands::save_card,
@@ -121,6 +125,8 @@ macro_rules! sesame_invoke_handler {
             commands::export_backup,
             commands::choose_csv_export_destination,
             commands::export_vault_csv,
+            commands::choose_json_export_destination,
+            commands::export_vault_json,
             commands::choose_recovery_kit_destination,
             commands::export_recovery_kit,
             commands::delete_local_vault,
@@ -283,6 +289,7 @@ pub fn run() {
         .manage(commands::FileSelectionState::default())
         .manage(browser_fill::BrowserFillState::default())
         .manage(release::ReleasePresence::default())
+        .manage(rollback_guard::RollbackGuard::default())
         .manage(desktop_shell::DesktopShellState::default())
         .manage(clipboard::ClipboardGuard::default())
         .setup(|app| {

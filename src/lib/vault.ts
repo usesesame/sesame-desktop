@@ -280,6 +280,7 @@ function previewSecretSlots(kind: string, record: Record<string, unknown>): Prev
       if (isSecret(row)) slots.push({ key: `${prefix}:${index}`, read: () => String(row.value ?? ''), write: (value: string) => { row.value = value }, blank: () => { row.value = '' } })
     })
   }
+  if (kind === 'secure_note' && record.locked === true) slots.push({ key: 'content', read: () => String(record.content ?? ''), write: (value: string) => { record.content = value }, blank: () => { record.content = '' } })
   if (kind === 'custom_record') collect(record.fields, 'field', (row) => row.kind === 'secret')
   if (kind === 'identity' || kind === 'secure_note' || kind === 'card') collect(record.legacyFields, 'legacy', (row) => row.secret === true)
   return slots
@@ -1139,6 +1140,17 @@ export async function deleteSecureNote(id: string): Promise<DeleteSecureNoteResu
   return secureNoteApi.delete(id)
 }
 
+export async function setSecureNoteLock(id: string, locked: boolean): Promise<SaveSecureNoteResult> {
+  if (previewMode) {
+    const note = previewSecureNotes[id]
+    if (!note) throw new Error('That saved note no longer exists.')
+    note.locked = locked
+    upsertPreviewItem('secure_note', id, note.title, '', note.tags ?? [])
+    return { id, snapshot: structuredClone(previewSnapshot) }
+  }
+  return invoke<SaveSecureNoteResult>('set_secure_note_lock', { id, locked })
+}
+
 export async function getCard(id: string): Promise<SecretView<Card>> {
   return cardApi.get(id)
 }
@@ -1363,6 +1375,13 @@ export async function exportVaultCsv(): Promise<string[] | null> {
   return invoke<string[]>('export_vault_csv', { token: chosen.token })
 }
 
+export async function exportVaultJson(): Promise<string | null> {
+  if (previewMode) return 'sesame-vault-export-preview.json'
+  const chosen = await invoke<ChosenFile | null>('choose_json_export_destination')
+  if (!chosen) return null
+  return invoke<string>('export_vault_json', { token: chosen.token })
+}
+
 export async function deleteLocalVault(masterPassword: string): Promise<void> {
   if (previewMode) {
     previewUnlocked = false
@@ -1382,13 +1401,13 @@ export async function chooseBackupForRestore(): Promise<BackupSelection | null> 
 }
 
 // The backup must open with its own secret before it can replace the active vault.
-export async function restoreBackup(token: string, secret: string): Promise<RestoreBackupResult> {
+export async function restoreBackup(token: string, secret: string, confirmOlder = false): Promise<RestoreBackupResult> {
   if (previewMode) {
     const hadVault = previewUnlocked
     previewUnlocked = false
     return { safetyBackupName: hadVault ? 'sesame-before-restore-preview.sesame' : undefined, pinUnlockAvailable: false, helloUnlockAvailable: false, restoredRevision: previewSnapshot.revision, replacedRevision: hadVault ? previewSnapshot.revision : undefined }
   }
-  return invoke<RestoreBackupResult>('restore_backup', { request: { token, secret } })
+  return invoke<RestoreBackupResult>('restore_backup', { request: { token, secret, confirmOlder } })
 }
 
 export async function verifyBackup(token: string, secret: string): Promise<BackupVerification> {
@@ -1651,4 +1670,19 @@ function previewSite(value: string) {
 
 function previewInitials(value: string) {
   return value.split(/\s+/).filter(Boolean).map((word) => word[0]).join('').slice(0, 2).toUpperCase() || '?'
+}
+
+export interface RollbackNotice {
+  recordedRevision: number
+  foundRevision: number
+}
+
+export async function getRollbackNotice(): Promise<RollbackNotice | null> {
+  if (previewMode) return null
+  return invoke<RollbackNotice | null>('get_rollback_notice')
+}
+
+export async function acceptRollback(): Promise<void> {
+  if (previewMode) return
+  await invoke('accept_rollback')
 }
