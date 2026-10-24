@@ -1,7 +1,7 @@
 use sesame_core::{
     json_export_bytes, Attachment, Card, CustomFieldEntry, CustomRecord, DocumentMetadata, Folder,
-    Identity, SecureNote, SoftwareLicense, SshKey, TaggedItem, TrashedItem, VaultEntry,
-    VaultPayload, WifiNetwork, READABLE_EXPORT_FORMAT, READABLE_EXPORT_VERSION,
+    Identity, LegacyField, SecureNote, SoftwareLicense, SshKey, TaggedItem, TrashedItem,
+    VaultEntry, VaultPayload, WifiNetwork, READABLE_EXPORT_FORMAT, READABLE_EXPORT_VERSION,
 };
 
 const CANARY: &str = "fictional-export-canary";
@@ -19,6 +19,12 @@ fn fictional_payload() -> VaultPayload {
     login.title = "Fictional login".to_string();
     login.password = format!("{CANARY}-login-password");
     login.totp = Some(format!("{CANARY}-totp"));
+    login.import_source = Some(format!("{CANARY}-import-source"));
+    login.legacy_fields = vec![LegacyField {
+        label: "Old PIN".to_string(),
+        value: format!("{CANARY}-legacy"),
+        secret: true,
+    }];
     payload.entries = vec![login];
 
     let mut identity = Identity::default();
@@ -31,6 +37,7 @@ fn fictional_payload() -> VaultPayload {
     note.id = "note-1".to_string();
     note.title = "Fictional note".to_string();
     note.content = format!("{CANARY}-note-body");
+    note.locked = true;
     payload.secure_notes = vec![note];
 
     let mut card = Card::default();
@@ -158,6 +165,8 @@ fn every_item_kind_is_exported_with_its_secrets() {
         "document-number",
         "custom-secret",
         "trashed-body",
+        "legacy",
+        "import-source",
     ] {
         assert!(
             text.contains(&format!("{CANARY}-{secret}")),

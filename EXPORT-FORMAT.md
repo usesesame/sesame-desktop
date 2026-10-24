@@ -40,9 +40,9 @@ field that was never set, such as `folderId` or `lastUsedAt`, is left out.
 
 | List | Fields beyond the common ones |
 | --- | --- |
-| `logins` | `url`, `urls`, `username`, `email`, `password`, `totp`, `backupCodes`, `recoveryEmail`, `recoveryPhone`, `recoveryNotApplicable`, `notes`, `passwordUpdatedAt` |
+| `logins` | `url`, `urls`, `username`, `email`, `password`, `totp`, `backupCodes`, `recoveryEmail`, `recoveryPhone`, `recoveryNotApplicable`, `notes`, `passwordUpdatedAt`, `importSource`, `legacyFields` |
 | `identities` | `fullName`, `email`, `phone`, `addressLine1`, `addressLine2`, `city`, `region`, `postalCode`, `country`, `legacyFields` |
-| `secureNotes` | `content`, `legacyFields` |
+| `secureNotes` | `content`, `locked`, `legacyFields` |
 | `cards` | `brand`, `cardholderName`, `number`, `expiryMonth`, `expiryYear`, `securityCode`, `notes`, `legacyFields` |
 | `wifiNetworks` | `ssid`, `password`, `securityType`, `notes` |
 | `sshKeys` | `keyType`, `publicKey`, `privateKey`, `passphrase`, `notes` |
@@ -52,7 +52,10 @@ field that was never set, such as `folderId` or `lastUsedAt`, is left out.
 
 `totp` holds the authenticator secret or `otpauth` address exactly as it was
 saved. `legacyFields` is a list of `{ "label", "value", "secret" }` that older
-versions of Sesame wrote. `fields` in a custom record is a list of
+versions of Sesame wrote. `importSource` names the program a login was imported
+from and is present only for an imported login. `locked` is present, and true,
+only for a secure note that was locked with the master password. The export
+still holds the text of a locked note. `fields` in a custom record is a list of
 `{ "label", "value", "kind" }`, and a `kind` of `secret` marks a value that Sesame
 hides on screen.
 
