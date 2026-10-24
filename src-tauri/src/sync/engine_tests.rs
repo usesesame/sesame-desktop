@@ -28,7 +28,7 @@ fn key(identity: &DeviceIdentity) -> String {
 }
 
 fn package_key(identity: &DeviceIdentity) -> String {
-    URL_SAFE_NO_PAD.encode(identity.encryption_public_key())
+    URL_SAFE_NO_PAD.encode(identity.package_public_key())
 }
 
 fn instance_key(world: &World) -> String {

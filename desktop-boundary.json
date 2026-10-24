@@ -15,6 +15,7 @@
     ".node-version",
     ".npmrc",
     "CONTRIBUTING.md",
+    "EXPORT-FORMAT.md",
     "LICENSE",
     "README.md",
     "TRADEMARKS.md",

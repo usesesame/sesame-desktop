@@ -15,13 +15,23 @@ use crate::{
     MIN_KDF_MEMORY_KIB, VAULT_SIZE_LIMIT_MESSAGE,
 };
 
+const MASTER_PASSWORD_KDF_MEMORY_KIB: u32 = 131_072;
+
 pub fn default_kdf_params() -> KdfParams {
+    kdf_params_with_memory(MIN_KDF_MEMORY_KIB)
+}
+
+pub fn master_password_kdf_params() -> KdfParams {
+    kdf_params_with_memory(MASTER_PASSWORD_KDF_MEMORY_KIB)
+}
+
+fn kdf_params_with_memory(memory_kib: u32) -> KdfParams {
     let mut salt = [0_u8; 32];
     fill_random(&mut salt);
     KdfParams {
         algorithm: "argon2id".into(),
         salt: URL_SAFE_NO_PAD.encode(salt),
-        memory_kib: MIN_KDF_MEMORY_KIB,
+        memory_kib,
         iterations: MIN_KDF_ITERATIONS,
         parallelism: 4,
     }

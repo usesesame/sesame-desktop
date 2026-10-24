@@ -118,6 +118,38 @@ describe('the Sync preview controller', () => {
     expect(get(sync).conflictOpen).toBe(true)
   })
 
+  it('offers to allow the older key exchange only after a device was refused for it, and sends the choice with the retry', async () => {
+    const refusal = 'This device only supports the older key exchange, and this vault already uses the newer one. Update Sesame on the new device, or allow the older key exchange and try again.'
+    let refused = false
+    const approve = () => {
+      if (!refused) {
+        refused = true
+        throw refusal
+      }
+      return { label: 'Old laptop' }
+    }
+    answer({ sync_pairing_code: { code: 'K7Q2MHX9PD', expiresInSeconds: 540 }, sync_approve_with_code: approve, sync_cancel_pairing: {}, sync_status: status(), sync_coordinator_status: idle })
+    const approveCalls = () => core.invoke.mock.calls.filter((call) => call[0] === 'sync_approve_with_code').map((call) => call[1])
+    const sync = createSyncController()
+    await sync.openPairing()
+    expect(get(sync).olderKeyRefused).toBe(true)
+    expect(approveCalls()).toEqual([{ allowClassical: false }])
+
+    sync.setAllowOlderKeys(true)
+    await sync.openPairing()
+    expect(approveCalls()).toEqual([{ allowClassical: false }, { allowClassical: true }])
+    expect(get(sync).pairingPhase).toBe('done')
+    expect(get(sync).olderKeyRefused).toBe(false)
+  })
+
+  it('forgets the allowance when the pairing window is closed', async () => {
+    answer({ sync_cancel_pairing: {}, sync_status: status(), sync_coordinator_status: idle })
+    const sync = createSyncController()
+    sync.setAllowOlderKeys(true)
+    await sync.closePairing()
+    expect(get(sync).allowOlderKeys).toBe(false)
+  })
+
   it('shows a pairing code, waits for the other device, and cancels cleanly', async () => {
     let finish: (value: unknown) => void = () => undefined
     answer({

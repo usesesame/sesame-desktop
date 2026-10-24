@@ -20,6 +20,7 @@ pub(crate) enum FilePurpose {
     ImportSource,
     BackupExport,
     CsvExport,
+    JsonExport,
     RecoveryKitExport,
     DiagnosticsExport,
     BackupRead,
@@ -255,6 +256,24 @@ pub async fn choose_csv_export_destination(
 }
 
 #[tauri::command]
+pub async fn choose_json_export_destination(
+    app: AppHandle,
+    state: State<'_, FileSelectionState>,
+) -> VaultResult<Option<ChosenFile>> {
+    chosen_file(
+        &state,
+        FilePurpose::JsonExport,
+        app.dialog()
+            .file()
+            .set_title("Save the complete export")
+            .set_file_name(dated_name("sesame-vault-export", "json"))
+            .add_filter("Sesame complete export", &["json"])
+            .blocking_save_file()
+            .and_then(path_from_file),
+    )
+}
+
+#[tauri::command]
 pub async fn choose_recovery_kit_destination(
     app: AppHandle,
     state: State<'_, FileSelectionState>,
@@ -320,6 +339,20 @@ pub fn wdio_issue_file_choice(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_choice_made_for_the_complete_export_serves_only_that_export() {
+        let (state, token) = state_with(FilePurpose::JsonExport, "fictional-export.json");
+        assert!(resolve_path(&state, Some(&token), None, FilePurpose::CsvExport, true).is_err());
+        let (state, token) = state_with(FilePurpose::JsonExport, "fictional-export.json");
+        assert!(resolve_path(&state, Some(&token), None, FilePurpose::JsonExport, true).is_ok());
+    }
+
+    #[test]
+    fn a_choice_made_for_the_readable_csv_cannot_write_the_complete_export() {
+        let (state, token) = state_with(FilePurpose::CsvExport, "fictional-export.csv");
+        assert!(resolve_path(&state, Some(&token), None, FilePurpose::JsonExport, true).is_err());
+    }
 
     fn state_with(purpose: FilePurpose, path: &str) -> (FileSelectionState, String) {
         let state = FileSelectionState::default();

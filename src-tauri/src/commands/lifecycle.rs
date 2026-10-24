@@ -171,6 +171,7 @@ fn install_unlocked_session(
         }
     }
     let snapshot = unlocked.snapshot();
+    crate::rollback_guard::observe_unlock(app, &snapshot);
     *session = Some(unlocked);
     // Fresh session epoch invalidates approvals bound to the previous one.
     state.advance_session_epoch();

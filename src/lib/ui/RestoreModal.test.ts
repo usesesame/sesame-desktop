@@ -87,3 +87,22 @@ test('a presence requirement asks for the current master password before replaci
   expect(screen.getByRole('button', { name: 'Confirm and restore' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Restore backup' })).toBeNull()
 })
+
+test('an ordinary restore shows no older backup warning', async () => {
+  renderRestore('current', { restoreSecret: 'fictional backup password', restoreConfirmed: true })
+  await Promise.resolve()
+  expect(screen.queryByText(/goes back in time/)).toBeNull()
+  expect((screen.getByRole('button', { name: 'Restore backup' }) as HTMLButtonElement).disabled).toBe(false)
+})
+
+test('an older backup names both revisions and stays blocked until the second box is ticked', async () => {
+  renderRestore('current', { restoreSecret: 'fictional backup password', restoreConfirmed: true, olderBackup: { restoredRevision: 2, currentRevision: 5 } })
+  await Promise.resolve()
+  const warning = screen.getByText(/goes back in time/)
+  expect(warning.textContent).toContain('revision 2')
+  expect(warning.textContent).toContain('revision 5')
+  const button = screen.getByRole('button', { name: 'Restore backup' }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  screen.getByLabelText('Restore the older backup anyway.').click()
+  await vi.waitFor(() => expect(button.disabled).toBe(false))
+})
