@@ -561,9 +561,6 @@ jobs:
 
       - run: npm ci
 
-      - name: Audit npm dependencies
-        run: npm audit --audit-level=high
-
       - name: Build the desktop frontend for shipped-package evidence
         run: npm run desktop:build
 
@@ -582,8 +579,8 @@ jobs:
       - name: Install Rust audit tool
         run: cargo install cargo-audit --version 0.22.2 --locked
 
-      - name: Audit Rust dependencies
-        run: cargo audit --file src-tauri/Cargo.lock
+      - name: Audit npm and Rust dependencies against the reviewed exceptions
+        run: node tools/audit-dependencies.mjs
 
       - name: Scan for secrets
         # The hosted action requires a commercial licence for organization
