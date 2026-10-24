@@ -8,6 +8,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SESAME_ALLOW_INSECURE_UPDATE_LOOPBACK");
     println!("cargo:rerun-if-env-changed=SESAME_RELEASE_CANDIDATE_PUBLIC_KEY");
     println!("cargo:rerun-if-env-changed=SESAME_RELEASE_CANDIDATE_KEY_ID");
+    println!("cargo:rerun-if-env-changed=SESAME_UPDATE_FRESHNESS_URL");
+    println!("cargo:rerun-if-env-changed=SESAME_UPDATE_FRESHNESS_PUBLIC_KEY");
+    println!("cargo:rerun-if-env-changed=SESAME_UPDATE_FRESHNESS_KEY_ID");
     println!("cargo:rerun-if-env-changed=VITE_SESAME_SITE_ORIGIN");
     let local_config = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".env.local");
     if std::env::var("PROFILE").as_deref() == Ok("debug") {

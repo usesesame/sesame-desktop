@@ -36,6 +36,9 @@ fn configured_value(name: &str) -> Option<&'static str> {
         "updater-key" => option_env!("SESAME_UPDATER_PUBLIC_KEY"),
         "candidate-key" => option_env!("SESAME_RELEASE_CANDIDATE_PUBLIC_KEY"),
         "candidate-key-id" => option_env!("SESAME_RELEASE_CANDIDATE_KEY_ID"),
+        "freshness-url" => option_env!("SESAME_UPDATE_FRESHNESS_URL"),
+        "freshness-key" => option_env!("SESAME_UPDATE_FRESHNESS_PUBLIC_KEY"),
+        "freshness-key-id" => option_env!("SESAME_UPDATE_FRESHNESS_KEY_ID"),
         _ => None,
     }
     .map(str::trim)
@@ -77,6 +80,19 @@ pub(crate) fn updater_public_key_if_configured() -> Option<&'static str> {
     }
     manifest_endpoint(required[0]?, insecure_loopback_enabled()).ok()?;
     required[1]
+}
+
+pub(crate) fn freshness_trust() -> Option<(url::Url, &'static str, &'static str)> {
+    let endpoint = manifest_endpoint(
+        configured_value("freshness-url")?,
+        insecure_loopback_enabled(),
+    )
+    .ok()?;
+    Some((
+        endpoint,
+        configured_value("freshness-key")?,
+        configured_value("freshness-key-id")?,
+    ))
 }
 
 pub(crate) fn candidate_trust() -> VaultResult<(&'static str, &'static str)> {

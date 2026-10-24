@@ -15,6 +15,7 @@ pub struct DesktopUpdateStatus {
     pub available: bool,
     pub version: Option<String>,
     pub body: Option<String>,
+    pub freshness: Option<crate::adapters::network::update_freshness::UpdateFreshness>,
 }
 
 #[derive(Clone, serde::Serialize, ts_rs::TS)]
@@ -201,15 +202,24 @@ async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
 #[tauri::command]
 pub async fn check_desktop_update(app: AppHandle) -> VaultResult<DesktopUpdateStatus> {
     match check(&app).await? {
-        Some(update) => Ok(DesktopUpdateStatus {
-            available: true,
-            version: Some(update.update.version),
-            body: update.update.body,
-        }),
+        Some(update) => {
+            let freshness = crate::adapters::network::update_freshness::current(
+                &app,
+                Some(update.update.version.as_str()),
+            )
+            .await;
+            Ok(DesktopUpdateStatus {
+                available: true,
+                version: Some(update.update.version),
+                body: update.update.body,
+                freshness,
+            })
+        }
         None => Ok(DesktopUpdateStatus {
             available: false,
             version: None,
             body: None,
+            freshness: crate::adapters::network::update_freshness::current(&app, None).await,
         }),
     }
 }
