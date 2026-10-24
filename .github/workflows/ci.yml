@@ -337,6 +337,44 @@ jobs:
       - name: Prove the browser host talks to the live desktop broker
         run: xvfb-run -a dbus-run-session -- node tools/test-browser-host-pipe.mjs
 
+      - name: Read the pinned Sync server commit
+        id: sync-server-pin
+        run: |
+          echo "repository=$(jq -r .repository src-tauri/contracts/sync/server-pin.json)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(jq -r .commit src-tauri/contracts/sync/server-pin.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.sync-server-pin.outputs.repository }}
+          ref: ${{ steps.sync-server-pin.outputs.commit }}
+          path: sesame-server
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sesame-server/go.mod
+          cache: false
+
+      # The client and the sync engine talk to the real Go service built from
+      # the pinned commit. The step fails unless exactly one test ran and passed.
+      - name: Prove Sync round trips against the real server
+        run: |
+          set -euo pipefail
+          (cd sesame-server && go build -tags synctestserver -o "$RUNNER_TEMP/synctestserver" ./cmd/synctestserver)
+          "$RUNNER_TEMP/synctestserver" > "$RUNNER_TEMP/synctestserver.out" &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            grep -q '^KEY=' "$RUNNER_TEMP/synctestserver.out" && break
+            sleep 0.2
+          done
+          export SESAME_SYNC_E2E_URL="$(sed -n 's/^URL=//p' "$RUNNER_TEMP/synctestserver.out")"
+          export SESAME_SYNC_E2E_KEY="$(sed -n 's/^KEY=//p' "$RUNNER_TEMP/synctestserver.out")"
+          test -n "$SESAME_SYNC_E2E_URL" && test -n "$SESAME_SYNC_E2E_KEY"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
+            the_rust_client_and_engine_round_trip_against_the_real_service -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e.out"
+          grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e.out"
+
   linux-bundles:
     needs: [lint, typecheck]
     runs-on: ubuntu-latest
