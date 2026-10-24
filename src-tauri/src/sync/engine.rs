@@ -352,7 +352,7 @@ pub fn create_entry(
         signer_device_id: identity.device_id.clone(),
         subject_device_id: identity.device_id.clone(),
         subject_signing_key: encoded(&identity.signing_public_key()),
-        subject_package_key: encoded(&identity.package_public_key()),
+        subject_package_key: encoded(&identity.encryption_public_key()),
         sealed_label: sealed_label.to_string(),
         epoch_after: 1,
         snapshot_floor: 0,

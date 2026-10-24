@@ -21,7 +21,7 @@ fn key_of(identity: &DeviceIdentity) -> String {
 }
 
 fn package_key_of(identity: &DeviceIdentity) -> String {
-    URL_SAFE_NO_PAD.encode(identity.package_public_key())
+    URL_SAFE_NO_PAD.encode(identity.encryption_public_key())
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
     let phone_ad = NewDeviceIdentity {
         device_id: phone.device_id.clone(),
         signing_key: key_of(&phone),
-        package_key: super::pairing::package_key_commitment(&package_key_of(&phone)),
+        package_key: package_key_of(&phone),
         label: "Phone".to_string(),
     }
     .encode()
@@ -123,8 +123,7 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
         .verify_confirmation(&URL_SAFE_NO_PAD.decode(confirmed).expect("bytes"))
         .expect("the phone proved the code");
 
-    let recipient = phone.package_public_key();
-    assert_eq!(recipient.len(), super::xwing::PUBLIC_KEY_BYTES);
+    let recipient: [u8; 32] = phone.encryption_public_key();
     let add = add_entry(
         &laptop,
         &list,
@@ -137,8 +136,7 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
         1,
     )
     .expect("add");
-    let package_bytes =
-        super::keys::seal_for_recipient(&vault_key, &recipient, VAULT, list.epoch()).expect("seal");
+    let package_bytes = super::keys::seal_vault_key(&vault_key, &recipient, VAULT).expect("seal");
     let package = laptop.sign_key_package(KeyPackageV3 {
         vault_id: VAULT.to_string(),
         sender_device_id: laptop.device_id.clone(),
@@ -173,7 +171,6 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
                 .decode(&received_package.ciphertext)
                 .expect("bytes"),
             VAULT,
-            received_package.vault_epoch,
         )
         .expect("open");
     assert_eq!(opened, vault_key);

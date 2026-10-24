@@ -7,8 +7,6 @@
   export let secondsLeft = 0
   export let doneLabel = ''
   export let error = ''
-  export let olderKeyRefused = false
-  export let allowOlderKeys = false
   export let onClose: () => void
   export let onRetry: () => void
 
@@ -36,9 +34,6 @@
         <p class="modal-lede">Sesame could not start pairing.</p>
       {/if}
       {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-      {#if olderKeyRefused && phase === 'idle'}
-        <label class="pairing-allow"><input name="allow-older-key-exchange" type="checkbox" bind:checked={allowOlderKeys} /><span>Allow a device that only supports the older key exchange.</span></label>
-      {/if}
     </div>
     <div class="modal-actions">
       {#if phase === 'done'}
@@ -60,15 +55,6 @@
     font-family: var(--font-code);
     font-size: var(--type-5, 1.6rem);
     letter-spacing: 0.14em;
-  }
-  .pairing-allow {
-    display: flex;
-    gap: var(--space-2);
-    align-items: flex-start;
-    margin-top: var(--space-3);
-    color: var(--text);
-    font-size: var(--type-2);
-    line-height: 1.5;
   }
   .pairing-note {
     margin: 0;

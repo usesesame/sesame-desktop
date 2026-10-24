@@ -14,7 +14,6 @@ pub const LABEL_CHECKPOINT: &str = "sesame-sync-v3-checkpoint";
 
 pub const DIGEST_BYTES: usize = 32;
 pub const KEY_BYTES: usize = 32;
-pub const HYBRID_KEY_BYTES: usize = 1216;
 pub const SIGNATURE_BYTES: usize = 64;
 pub const NONCE_BYTES: usize = 24;
 pub const REQUEST_NONCE_BYTES: usize = 16;

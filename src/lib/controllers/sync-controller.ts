@@ -24,8 +24,6 @@ export interface SyncControllerState {
   floorCheckedAt: number
   devices: SyncDeviceView[]
   pairingCode: string
-  allowOlderKeys: boolean
-  olderKeyRefused: boolean
   pairingSecondsLeft: number
   pairingPhase: 'idle' | 'waiting' | 'done'
   pairingDone: string
@@ -114,8 +112,6 @@ const initialState: SyncControllerState = {
   peerChecksSkipped: false,
   devices: [],
   pairingCode: '',
-  allowOlderKeys: false,
-  olderKeyRefused: false,
   pairingSecondsLeft: 0,
   pairingPhase: 'idle',
   pairingDone: '',
@@ -421,7 +417,7 @@ export function createSyncController() {
       }
     },
     async openPairing() {
-      store.patch({ pairingOpen: true, error: '', olderKeyRefused: false, pairingDone: '', pairingPhase: 'idle', pairingCode: '' })
+      store.patch({ pairingOpen: true, error: '', pairingDone: '', pairingPhase: 'idle', pairingCode: '' })
       try {
         const shown = await invoke<{ code: string; expiresInSeconds: number }>('sync_pairing_code')
         const deadline = Date.now() + shown.expiresInSeconds * 1000
@@ -434,28 +430,23 @@ export function createSyncController() {
         countdown = setInterval(() => {
           store.patch({ pairingSecondsLeft: Math.max(0, Math.round((deadline - Date.now()) / 1000)) })
         }, 1000)
-        const approved = await invoke<{ label: string }>('sync_approve_with_code', { allowClassical: store.value().allowOlderKeys })
+        const approved = await invoke<{ label: string }>('sync_approve_with_code')
         stopCountdown()
         store.patch({ pairingPhase: 'done', pairingDone: approved.label, pairingCode: '' })
         await refresh()
       } catch (error) {
         stopCountdown()
-        const message = typeof error === 'string' ? error : 'Sesame could not add that device.'
         store.patch({
           pairingPhase: 'idle',
           pairingCode: '',
-          error: message,
-          olderKeyRefused: message.includes('older key exchange'),
+          error: typeof error === 'string' ? error : 'Sesame could not add that device.',
         })
       }
-    },
-    setAllowOlderKeys(allowOlderKeys: boolean) {
-      store.patch({ allowOlderKeys })
     },
     async closePairing() {
       stopCountdown()
       await invoke('sync_cancel_pairing').catch(() => undefined)
-      store.patch({ pairingOpen: false, pairingPhase: 'idle', pairingCode: '', error: '', allowOlderKeys: false, olderKeyRefused: false })
+      store.patch({ pairingOpen: false, pairingPhase: 'idle', pairingCode: '', error: '' })
     },
     async takeNewKey(masterPassword: string) {
       store.patch({ working: true, error: '' })

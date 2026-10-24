@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::canonical::{
     decode_exact, decode_range, opaque_id, valid_digest, Canonical, ProofError, ProofResult,
-    HYBRID_KEY_BYTES, KEY_BYTES, LABEL_DEVICE_LIST, LABEL_DEVICE_LIST_DIGEST, MAX_DEVICES,
-    MAX_SEALED_LABEL_BYTES, MIN_SEALED_LABEL_BYTES, SIGNATURE_BYTES,
+    KEY_BYTES, LABEL_DEVICE_LIST, LABEL_DEVICE_LIST_DIGEST, MAX_DEVICES, MAX_SEALED_LABEL_BYTES,
+    MIN_SEALED_LABEL_BYTES, SIGNATURE_BYTES,
 };
 
 pub const ENTRY_CREATE: &str = "create";
@@ -87,9 +87,7 @@ impl DeviceListEntry {
                 if decode_exact(&self.subject_signing_key, KEY_BYTES).is_none() {
                     return Err(ProofError::invalid("signing key"));
                 }
-                if decode_exact(&self.subject_package_key, KEY_BYTES).is_none()
-                    && decode_exact(&self.subject_package_key, HYBRID_KEY_BYTES).is_none()
-                {
+                if decode_exact(&self.subject_package_key, KEY_BYTES).is_none() {
                     return Err(ProofError::invalid("package key"));
                 }
                 if decode_range(
@@ -331,54 +329,4 @@ pub fn verify_with_key(
     verifying
         .verify_strict(payload, &Signature::from_bytes(&signature))
         .map_err(|_| failure)
-}
-
-#[cfg(test)]
-mod hybrid_key_tests {
-    use super::*;
-    use crate::sync::canonical::HYBRID_KEY_BYTES;
-    use ed25519_dalek::SigningKey;
-
-    fn entry_with(package_key: &str) -> DeviceListEntry {
-        let signing = SigningKey::from_bytes(&[1u8; 32]);
-        DeviceListEntry {
-            vault_id: "vaultAAAAAAAAAAAA01".to_string(),
-            index: 1,
-            previous_digest: String::new(),
-            kind: ENTRY_CREATE.to_string(),
-            signer_device_id: "deviceAAAAAAAAAAA01".to_string(),
-            subject_device_id: "deviceAAAAAAAAAAA01".to_string(),
-            subject_signing_key: URL_SAFE_NO_PAD.encode(signing.verifying_key().to_bytes()),
-            subject_package_key: package_key.to_string(),
-            sealed_label: URL_SAFE_NO_PAD.encode([3u8; 48]),
-            epoch_after: 1,
-            snapshot_floor: 0,
-            signature: String::new(),
-        }
-        .sign(&signing)
-    }
-
-    fn key_of(length: usize) -> String {
-        URL_SAFE_NO_PAD.encode(vec![5u8; length])
-    }
-
-    #[test]
-    fn an_entry_may_carry_a_classical_or_a_hybrid_package_key() {
-        assert!(entry_with(&key_of(32)).validate().is_ok());
-        assert!(entry_with(&key_of(HYBRID_KEY_BYTES)).validate().is_ok());
-        assert_eq!(HYBRID_KEY_BYTES, 1216);
-    }
-
-    #[test]
-    fn a_package_key_of_any_other_length_or_form_is_refused() {
-        for length in [0, 1, 31, 33, 64, 1215, 1217, 64 * 1024] {
-            assert!(entry_with(&key_of(length)).validate().is_err(), "{length}");
-        }
-        assert!(entry_with(&format!("{}=", key_of(HYBRID_KEY_BYTES)))
-            .validate()
-            .is_err());
-        assert!(entry_with(&format!("{}\n", key_of(HYBRID_KEY_BYTES)))
-            .validate()
-            .is_err());
-    }
 }

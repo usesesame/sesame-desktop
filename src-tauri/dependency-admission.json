@@ -152,11 +152,6 @@
       "reason": "Verifies updater signatures. 0.3.0 replaces unsafe byte copies with safe slice copies and keeps the same API."
     },
     {
-      "name": "ml-kem",
-      "version": "0.3",
-      "reason": "ML-KEM-768, the post-quantum half of the hybrid X-Wing key exchange that wraps the vault key in Sync key packages. It is pure Rust and is used at the exact version 0.3.2."
-    },
-    {
       "name": "poly1305",
       "version": "0.9",
       "reason": "Enables the zeroize feature so the Poly1305 authenticator state is wiped on drop. It is already a locked transitive crate."
@@ -200,11 +195,6 @@
       "name": "sha2",
       "version": "0.11",
       "reason": "In use before this gate was adopted."
-    },
-    {
-      "name": "sha3",
-      "version": "0.11",
-      "reason": "SHA3-256 for the X-Wing key combiner and SHAKE256 for its seed expansion. It is already locked through ml-kem, so naming it directly adds no crate or version, and it is used at the exact version 0.11.0."
     },
     {
       "name": "svelte",

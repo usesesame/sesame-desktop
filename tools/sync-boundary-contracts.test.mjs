@@ -400,7 +400,7 @@ test('removing a device rotates the vault key and leaving does the same', () => 
   assert.match(rekey[0], /remove_entry\(/)
   assert.match(rekey[0], /survivor_packages\(/)
   assert.match(rekey[0], /verify_master_password\(/)
-  assert.match(transfer, /seal_for_recipient\(new_key, &recipient, vault_id, epoch\)/)
+  assert.match(transfer, /seal_vault_key\(new_key,/)
   assert.match(transfer, /rekey_without\(app, state, &identity\.device_id, master_password, false\)/, 'leaving must rekey for the devices that stay')
 })
 
