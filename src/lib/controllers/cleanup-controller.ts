@@ -5,6 +5,7 @@ import {
   deleteLocalVault,
   deleteLogin,
   exportVaultCsv,
+  exportVaultJson,
   getDuplicateGroups,
   getLoginBreachScanStatus,
   getMergeComparison,
@@ -48,6 +49,8 @@ export function createCleanupController(options: CleanupControllerOptions) {
     mergeComparison: null as MergeComparison | null,
     mergeChoices: {} as MergeChoices,
     readableExportConfirmed: false,
+    completeExportConfirmed: false,
+    pendingExport: 'csv' as 'csv' | 'json',
     exportPresenceRequired: false,
     exportPresencePassword: '',
     deleteVaultPassword: '',
@@ -98,18 +101,25 @@ export function createCleanupController(options: CleanupControllerOptions) {
     }
   }
 
-  async function runReadableExport() {
-    state.patch({ dataActionWorking: true })
+  async function runExport(kind: 'csv' | 'json') {
+    state.patch({ dataActionWorking: true, pendingExport: kind })
     feedback.clearError()
     try {
-      const fileNames = await exportVaultCsv()
-      if (fileNames?.length) {
-        feedback.showNotice(
-          'Readable export created',
-          fileNames.length > 1
-            ? `${fileNames.join(' and ')} contain unencrypted vault data. Open them as data, because a spreadsheet can run a cell that starts with a formula character.`
-            : `${fileNames[0]} contains unencrypted login data. Open it as data, because a spreadsheet can run a cell that starts with a formula character.`,
-        )
+      if (kind === 'json') {
+        const fileName = await exportVaultJson()
+        if (fileName) {
+          feedback.showNotice('Complete export created', `${fileName} holds every item in your vault, including passwords, and it is not encrypted. Store it carefully and delete it when you no longer need it.`)
+        }
+      } else {
+        const fileNames = await exportVaultCsv()
+        if (fileNames?.length) {
+          feedback.showNotice(
+            'Readable export created',
+            fileNames.length > 1
+              ? `${fileNames.join(' and ')} contain unencrypted vault data. Open them as data, because a spreadsheet can run a cell that starts with a formula character.`
+              : `${fileNames[0]} contains unencrypted login data. Open it as data, because a spreadsheet can run a cell that starts with a formula character.`,
+          )
+        }
       }
       state.patch({ exportPresenceRequired: false, exportPresencePassword: '' })
     } catch (error) {
@@ -310,11 +320,12 @@ export function createCleanupController(options: CleanupControllerOptions) {
       }
     },
     openDataControls() {
-      state.patch({ readableExportConfirmed: false, exportPresenceRequired: false, exportPresencePassword: '' })
+      state.patch({ readableExportConfirmed: false, completeExportConfirmed: false, exportPresenceRequired: false, exportPresencePassword: '' })
       modal.open({ kind: 'data-controls' })
     },
     closeDataControls() { modal.close('data-controls') },
     setReadableExportConfirmed(readableExportConfirmed: boolean) { state.patch({ readableExportConfirmed }) },
+    setCompleteExportConfirmed(completeExportConfirmed: boolean) { state.patch({ completeExportConfirmed }) },
     openDeleteVault() {
       modal.close('data-controls')
       state.patch({ deleteVaultPassword: '' })
@@ -327,7 +338,11 @@ export function createCleanupController(options: CleanupControllerOptions) {
     setDeleteVaultPassword(deleteVaultPassword: string) { state.patch({ deleteVaultPassword }) },
     async exportReadableVault() {
       if (!state.value().readableExportConfirmed) return
-      await runReadableExport()
+      await runExport('csv')
+    },
+    async exportCompleteVault() {
+      if (!state.value().completeExportConfirmed) return
+      await runExport('json')
     },
     async confirmExportPresence() {
       const secret = state.value().exportPresencePassword
@@ -337,7 +352,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
       try {
         await grantPresence(secret)
         state.patch({ exportPresencePassword: '' })
-        await runReadableExport()
+        await runExport(state.value().pendingExport)
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -368,8 +383,8 @@ export function createCleanupController(options: CleanupControllerOptions) {
       state.set({
         duplicateReviewOpen: false, duplicateGroups: [], duplicateGroupId: undefined, duplicateSelectedIds: [],
         duplicateReviewLoading: false, cleanupWorking: false, deleteCandidate: null, deleteBatch: [], mergeCandidate: null,
-        mergeKeepId: '', mergeComparison: null, mergeChoices: {}, readableExportConfirmed: false,
-        exportPresenceRequired: false, exportPresencePassword: '',
+        mergeKeepId: '', mergeComparison: null, mergeChoices: {}, readableExportConfirmed: false, completeExportConfirmed: false,
+        pendingExport: 'csv', exportPresenceRequired: false, exportPresencePassword: '',
         deleteVaultPassword: '', dataActionWorking: false, breachScan: null, breachScanError: '',
       })
     },

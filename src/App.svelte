@@ -915,11 +915,13 @@
       <DataControlsModal
         dataActionWorking={$cleanupState.dataActionWorking}
         bind:readableExportConfirmed={$cleanupState.readableExportConfirmed}
+        bind:completeExportConfirmed={$cleanupState.completeExportConfirmed}
         exportPresenceRequired={$cleanupState.exportPresenceRequired}
         bind:exportPresencePassword={$cleanupState.exportPresencePassword}
         errorMessage={$feedbackState.errorMessage}
         onClose={cleanupController.closeDataControls}
         onExportReadable={cleanupController.exportReadableVault}
+        onExportComplete={cleanupController.exportCompleteVault}
         onConfirmPresence={cleanupController.confirmExportPresence}
         onOpenDeleteVault={cleanupController.openDeleteVault}
       />
