@@ -367,6 +367,8 @@
   secondsLeft={$syncPanel.pairingSecondsLeft}
   doneLabel={$syncPanel.pairingDone}
   error={$syncPanel.error}
+  olderKeyRefused={$syncPanel.olderKeyRefused}
+  bind:allowOlderKeys={$syncPanel.allowOlderKeys}
   onClose={syncPanel.closePairing}
   onRetry={syncPanel.openPairing}
 />

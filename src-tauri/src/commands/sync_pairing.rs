@@ -106,12 +106,35 @@ pub async fn sync_cancel_pairing() -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) const CLASSICAL_KEY_REFUSAL: &str = "This device only supports the older key exchange, and this vault already uses the newer one. Update Sesame on the new device, or allow the older key exchange and try again.";
+
+fn refuse_classical_downgrade<'a>(
+    offered_package_key: &str,
+    member_package_keys: impl Iterator<Item = &'a str>,
+    allow_classical: bool,
+) -> Result<(), String> {
+    let length = |encoded: &str| {
+        URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_or(0, |bytes| bytes.len())
+    };
+    let offered_is_classical = length(offered_package_key) == crate::sync::keys::X25519_KEY_BYTES;
+    let vault_has_hybrid = member_package_keys
+        .into_iter()
+        .any(|key| length(key) == crate::sync::xwing::PUBLIC_KEY_BYTES);
+    if offered_is_classical && vault_has_hybrid && !allow_classical {
+        return Err(CLASSICAL_KEY_REFUSAL.to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sync_approve_with_code(
     app: AppHandle,
     vault: tauri::State<'_, VaultState>,
+    allow_classical: Option<bool>,
 ) -> Result<ApprovedDeviceView, String> {
-    let outcome = approve(&app, &vault).await;
+    let outcome = approve(&app, &vault, allow_classical.unwrap_or(false)).await;
     clear_shown_code();
     outcome
 }
@@ -119,6 +142,7 @@ pub async fn sync_approve_with_code(
 async fn approve(
     app: &AppHandle,
     vault: &tauri::State<'_, VaultState>,
+    allow_classical: bool,
 ) -> Result<ApprovedDeviceView, String> {
     let code = take_shown_code()?;
     let started = Instant::now();
@@ -157,6 +181,16 @@ async fn approve(
         }
         pause().await;
     };
+    if let Err(refusal) = refuse_classical_downgrade(
+        &offered.package_key,
+        list.current()
+            .iter()
+            .map(|member| member.package_key.as_str()),
+        allow_classical,
+    ) {
+        let _ = client.cancel_pairing(&identity, &offered.device_id).await;
+        return Err(refusal);
+    }
     let offer = URL_SAFE_NO_PAD
         .decode(&offered.offer)
         .map_err(|_| "The pairing message could not be read.".to_string())?;
@@ -174,7 +208,8 @@ async fn approve(
         NewDeviceIdentity::decode(&new_ad).ok_or("The pairing message could not be read.")?;
     if newcomer.device_id != offered.device_id
         || newcomer.signing_key != offered.signing_key
-        || newcomer.package_key != offered.package_key
+        || newcomer.package_key
+            != crate::sync::pairing::package_key_commitment(&offered.package_key)
     {
         let _ = client.cancel_pairing(&identity, &offered.device_id).await;
         return Err(
@@ -216,11 +251,9 @@ async fn approve(
         );
     }
 
-    let recipient: [u8; 32] = URL_SAFE_NO_PAD
-        .decode(&newcomer.package_key)
-        .ok()
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or("The new device offered a key Sesame cannot use.")?;
+    let recipient = URL_SAFE_NO_PAD
+        .decode(&offered.package_key)
+        .map_err(|_| "The new device offered a key Sesame cannot use.".to_string())?;
     let (sealed_label, package_bytes) = {
         let session = vault
             .session
@@ -235,7 +268,12 @@ async fn approve(
         unlocked.expose_vault_key(|key| {
             let label = seal_label(key, &state.vault_id, &newcomer.device_id, &newcomer.label)
                 .map_err(present_proof)?;
-            let package = crate::sync::keys::seal_vault_key(key, &recipient, &state.vault_id)?;
+            let package = crate::sync::keys::seal_for_recipient(
+                key,
+                &recipient,
+                &state.vault_id,
+                list.epoch(),
+            )?;
             Ok((label, package))
         })?
     };
@@ -245,7 +283,7 @@ async fn approve(
         &NewDevice {
             device_id: &newcomer.device_id,
             signing_key: &newcomer.signing_key,
-            package_key: &newcomer.package_key,
+            package_key: &offered.package_key,
         },
         &sealed_label,
         refreshed.server.current_revision,
@@ -386,11 +424,11 @@ async fn join(
 ) -> Result<SyncAdoptResult, String> {
     let started = Instant::now();
     let signing_key = URL_SAFE_NO_PAD.encode(identity.signing_public_key());
-    let package_key = URL_SAFE_NO_PAD.encode(identity.encryption_public_key());
+    let package_key = URL_SAFE_NO_PAD.encode(identity.package_public_key());
     let ad = NewDeviceIdentity {
         device_id: identity.device_id.clone(),
         signing_key: signing_key.clone(),
-        package_key: package_key.clone(),
+        package_key: crate::sync::pairing::package_key_commitment(&package_key),
         label: label.to_string(),
     }
     .encode()
@@ -487,7 +525,7 @@ async fn prepare_join(
         &JoinCheck {
             device_id: &identity.device_id,
             signing_key: &URL_SAFE_NO_PAD.encode(identity.signing_public_key()),
-            package_key: &URL_SAFE_NO_PAD.encode(identity.encryption_public_key()),
+            package_key: &URL_SAFE_NO_PAD.encode(identity.package_public_key()),
             approver,
         },
         &entries,
@@ -538,7 +576,7 @@ async fn complete_join(
         &JoinCheck {
             device_id: &identity.device_id,
             signing_key: &URL_SAFE_NO_PAD.encode(identity.signing_public_key()),
-            package_key: &URL_SAFE_NO_PAD.encode(identity.encryption_public_key()),
+            package_key: &URL_SAFE_NO_PAD.encode(identity.package_public_key()),
             approver,
         },
         &entries,
@@ -548,7 +586,7 @@ async fn complete_join(
     let sealed = URL_SAFE_NO_PAD
         .decode(&package.ciphertext)
         .map_err(|_| "The key package could not be read.".to_string())?;
-    let mut opened = identity.open_key_package(&sealed, &approver.vault_id)?;
+    let mut opened = identity.open_key_package(&sealed, &approver.vault_id, package.vault_epoch)?;
     let key: [u8; 32] = opened
         .as_slice()
         .try_into()
@@ -695,7 +733,7 @@ mod join_transaction_tests {
         let first = create_entry(&approver, vault_id, &URL_SAFE_NO_PAD.encode([7; 40]));
         let list = DeviceList::verify(std::slice::from_ref(&first)).expect("list");
         let signing_key = URL_SAFE_NO_PAD.encode(identity.signing_public_key());
-        let package_key = URL_SAFE_NO_PAD.encode(identity.encryption_public_key());
+        let package_key = URL_SAFE_NO_PAD.encode(identity.package_public_key());
         let added = add_entry(
             &approver,
             &list,
@@ -931,5 +969,53 @@ mod join_transaction_tests {
             );
             std::fs::remove_dir_all(directory).expect("remove fixture");
         }
+    }
+}
+
+#[cfg(test)]
+mod downgrade_tests {
+    use super::*;
+
+    fn key(length: usize) -> String {
+        URL_SAFE_NO_PAD.encode(vec![5u8; length])
+    }
+
+    #[test]
+    fn a_classical_key_is_refused_once_the_vault_holds_a_hybrid_key() {
+        let members = [key(32), key(1216)];
+        let result =
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), false);
+        assert_eq!(result, Err(CLASSICAL_KEY_REFUSAL.to_string()));
+    }
+
+    #[test]
+    fn the_person_can_allow_the_older_key_exchange() {
+        let members = [key(1216)];
+        assert!(
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), true).is_ok()
+        );
+    }
+
+    #[test]
+    fn a_classical_key_is_fine_while_no_member_has_a_hybrid_key() {
+        let members = [key(32), key(32)];
+        assert!(
+            refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), false).is_ok()
+        );
+    }
+
+    #[test]
+    fn a_hybrid_key_is_never_refused() {
+        let members = [key(1216)];
+        assert!(
+            refuse_classical_downgrade(&key(1216), members.iter().map(String::as_str), false)
+                .is_ok()
+        );
+        assert!(refuse_classical_downgrade(
+            &key(1216),
+            [key(32)].iter().map(String::as_str),
+            false
+        )
+        .is_ok());
     }
 }

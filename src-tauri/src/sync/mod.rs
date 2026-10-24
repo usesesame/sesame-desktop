@@ -12,6 +12,7 @@ pub mod pairing;
 pub mod pake;
 pub mod request;
 pub mod state;
+pub mod xwing;
 
 pub(crate) use crate::adapters::network::sync as client;
 pub mod conflict_backup;
