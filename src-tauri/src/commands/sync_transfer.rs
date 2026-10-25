@@ -5,14 +5,16 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use super::sync::{
-    load_state, local_data_dir, present, present_proof, record_checkpoint_if_due, refresh,
-    save_state, this_identity, vault_id_of, Refreshed,
+    journal_file, load_state, local_data_dir, present, present_proof, record_checkpoint_if_due,
+    refresh, require_no_pending_key_change, save_state, this_identity, unix_now, vault_id_of,
+    Refreshed,
 };
 use super::sync_adopt::{adopt, verify_master_password};
 use crate::sync::client::SyncClient;
 use crate::sync::devicelist::DeviceList;
 use crate::sync::engine::{build_header, open_label, plan_header, remove_entry, verify_accepted};
 use crate::sync::header::Header;
+use crate::sync::rekey_journal::{self, Journal, Outcome};
 use crate::sync::request::KeyPackageV3;
 use crate::sync::state::{payload_digest, SyncState};
 use crate::vault::{VaultResult, VaultState};
@@ -211,6 +213,7 @@ async fn upload_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let local = reconcile_pending_upload(&app, &client, local).await?;
@@ -291,6 +294,7 @@ async fn download_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let remote = fetch_remote(&client, &local).await?;
@@ -361,6 +365,14 @@ pub async fn sync_take_new_key(
     }
     let list = &refreshed.update.list;
     let epoch = list.epoch();
+    match reconcile_key_change(&journal_file(&app)?, list, refreshed.server.activated_epoch)? {
+        KeyChange::Adopt(journal) => {
+            return adopt_journal_key(&app, &state, local, refreshed, &journal, &master_password)
+                .await;
+        }
+        KeyChange::NotDone => return Err(KEY_CHANGE_NOT_DONE.into()),
+        KeyChange::Proceed => {}
+    }
     if refreshed.server.activated_epoch >= epoch {
         return Err("This device already has the current vault key.".into());
     }
@@ -413,6 +425,73 @@ pub async fn sync_take_new_key(
     Ok(SyncTakeKeyResult { recovery_kit })
 }
 
+const KEY_CHANGE_NOT_DONE: &str = "The vault key change did not go through, so nothing changed. Remove the device again if you still want to.";
+
+enum KeyChange {
+    Adopt(Journal),
+    NotDone,
+    Proceed,
+}
+
+fn reconcile_key_change(
+    path: &std::path::Path,
+    list: &DeviceList,
+    activated_epoch: u64,
+) -> Result<KeyChange, String> {
+    if !rekey_journal::is_pending(path) {
+        return Ok(KeyChange::Proceed);
+    }
+    let journal = Journal::load(path).map_err(|error| {
+        format!("{error} Turn Sesame Sync off on this device and pair it again.")
+    })?;
+    if journal.outcome(list) == Outcome::Adopt {
+        return Ok(KeyChange::Adopt(journal));
+    }
+    rekey_journal::forget(path)?;
+    if activated_epoch >= list.epoch() {
+        return Ok(KeyChange::NotDone);
+    }
+    Ok(KeyChange::Proceed)
+}
+
+async fn adopt_journal_key(
+    app: &AppHandle,
+    state: &tauri::State<'_, VaultState>,
+    local: SyncState,
+    refreshed: Refreshed,
+    journal: &Journal,
+    master_password: &str,
+) -> Result<SyncTakeKeyResult, String> {
+    let mut key = journal.key();
+    let adopted = {
+        let mut session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_mut()
+            .ok_or("Unlock Sesame before finishing the vault key change.")?;
+        verify_master_password(unlocked, master_password).and_then(|()| {
+            let payload = unlocked.open_payload()?.clone();
+            let kit = adopt(unlocked, key, payload, master_password)?;
+            state.advance_session_epoch();
+            Ok(kit)
+        })
+    };
+    key.zeroize();
+    let recovery_kit = adopted?;
+    state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
+    crate::commands::lifecycle::discard_pin_throttle_state(app, state);
+    crate::browser_fill::cancel_pending_approvals(app);
+    let mut next = local;
+    next.entries = refreshed.update.entries;
+    next.activated_epoch = journal.epoch_after;
+    save_state(app, &next)?;
+    rekey_journal::forget(&journal_file(app)?)?;
+    Ok(SyncTakeKeyResult { recovery_kit })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncRemovalResult {
@@ -448,6 +527,11 @@ fn survivor_packages(
     Ok(packages)
 }
 
+fn refused_before_commit(error: &crate::sync::client::SyncError) -> bool {
+    use crate::sync::client::SyncError;
+    !matches!(error, SyncError::Unavailable(_) | SyncError::Failed(_))
+}
+
 async fn rekey_without(
     app: &AppHandle,
     vault: &tauri::State<'_, VaultState>,
@@ -457,6 +541,7 @@ async fn rekey_without(
 ) -> Result<Option<String>, String> {
     let client = SyncClient::connect(app).await?;
     let identity = this_identity(app)?;
+    require_no_pending_key_change(app)?;
     let local = load_state(app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let refreshed = refresh(&client, &local).await?;
     require_activated(&refreshed)?;
@@ -493,10 +578,22 @@ async fn rekey_without(
         entry.epoch_after,
         &entry.digest(),
     )?;
-    client
-        .remove(&identity, &entry, &packages)
-        .await
-        .map_err(present)?;
+    let journal_path = journal_file(app)?;
+    if adopt_locally {
+        let saved =
+            Journal::new(&entry, list.head_digest(), &new_key, unix_now()).save(&journal_path);
+        if let Err(error) = saved {
+            new_key.zeroize();
+            return Err(error);
+        }
+    }
+    if let Err(error) = client.remove(&identity, &entry, &packages).await {
+        if adopt_locally && refused_before_commit(&error) {
+            let _ = rekey_journal::forget(&journal_path);
+        }
+        new_key.zeroize();
+        return Err(present(error));
+    }
 
     let mut entries = refreshed.update.entries.clone();
     entries.push(entry.clone());
@@ -528,6 +625,7 @@ async fn rekey_without(
     new_key.zeroize();
     if adopt_locally {
         save_state(app, &next)?;
+        let _ = rekey_journal::forget(&journal_path);
     }
     Ok(recovery_kit)
 }
@@ -672,6 +770,7 @@ async fn resolve_conflict(
         "other" => false,
         _ => return Err("Choose which vault to keep.".into()),
     };
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let remote = fetch_remote(&client, &local).await?;
@@ -1079,5 +1178,137 @@ mod survivor_tests {
                 .expect("opens"),
             [4u8; 32]
         );
+    }
+}
+
+#[cfg(test)]
+mod key_change_tests {
+    use super::*;
+    use crate::sync::client::SyncError;
+    use crate::sync::devicelist::DeviceListEntry;
+    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::identity::DeviceIdentity;
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+
+    fn lists() -> (DeviceListEntry, DeviceList, DeviceList) {
+        let creator = DeviceIdentity::generate().expect("identity");
+        let other = DeviceIdentity::generate().expect("identity");
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut base =
+            DeviceList::verify(&[create_entry(&creator, VAULT, &label(&creator))]).expect("list");
+        let add = add_entry(
+            &creator,
+            &base,
+            &NewDevice {
+                device_id: &other.device_id,
+                signing_key: &URL_SAFE_NO_PAD.encode(other.signing_public_key()),
+                package_key: &URL_SAFE_NO_PAD.encode(other.package_public_key()),
+            },
+            &label(&other),
+            0,
+        )
+        .expect("add");
+        base.extend(&add).expect("extend");
+        let removal = remove_entry(&creator, &base, &other.device_id).expect("removal");
+        let mut committed = base.clone();
+        committed.extend(&removal).expect("extend");
+        (removal, base, committed)
+    }
+
+    fn path(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sesame-keychange-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        rekey_journal::journal_path(&dir)
+    }
+
+    #[test]
+    fn without_a_journal_nothing_changes() {
+        let (_, base, _) = lists();
+        let path = path("none");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 1),
+            Ok(KeyChange::Proceed)
+        ));
+    }
+
+    #[test]
+    fn a_removal_in_the_list_hands_back_the_saved_key_and_keeps_the_journal_until_adoption() {
+        let (removal, base, committed) = lists();
+        let path = path("adopt");
+        Journal::new(&removal, base.head_digest(), &[4u8; 32], 1)
+            .save(&path)
+            .expect("saved");
+        match reconcile_key_change(&path, &committed, 2) {
+            Ok(KeyChange::Adopt(journal)) => assert_eq!(journal.key(), [4u8; 32]),
+            _ => panic!("expected the saved key"),
+        }
+        assert!(rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn a_removal_that_did_not_commit_drops_the_journal_and_says_nothing_changed() {
+        let (removal, base, _) = lists();
+        let path = path("not-done");
+        Journal::new(&removal, base.head_digest(), &[4u8; 32], 1)
+            .save(&path)
+            .expect("saved");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 1),
+            Ok(KeyChange::NotDone)
+        ));
+        assert!(!rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn a_journal_that_matches_nothing_drops_and_leaves_the_normal_path_to_a_device_that_is_behind()
+    {
+        let (removal, base, _) = lists();
+        let path = path("stale");
+        Journal::new(&removal, base.head_digest(), &[4u8; 32], 1)
+            .save(&path)
+            .expect("saved");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 0),
+            Ok(KeyChange::Proceed)
+        ));
+        assert!(!rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn an_unreadable_journal_is_kept_and_reported() {
+        let (_, base, _) = lists();
+        let path = path("unreadable");
+        std::fs::write(&path, b"damaged").unwrap();
+        let error = match reconcile_key_change(&path, &base, 1) {
+            Err(error) => error,
+            Ok(_) => panic!("a damaged journal was accepted"),
+        };
+        assert!(error.contains("pair it again"));
+        assert!(rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn only_an_answer_the_service_could_not_have_committed_drops_the_journal() {
+        for refused in [
+            SyncError::Conflict,
+            SyncError::NotApproved,
+            SyncError::NotActivated,
+            SyncError::NotEntitled,
+            SyncError::NotFound,
+            SyncError::StorageFull,
+        ] {
+            assert!(refused_before_commit(&refused), "{refused:?}");
+        }
+        for unknown in [
+            SyncError::Unavailable("offline".into()),
+            SyncError::Failed("timed out".into()),
+        ] {
+            assert!(!refused_before_commit(&unknown), "{unknown:?}");
+        }
     }
 }

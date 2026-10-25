@@ -155,6 +155,7 @@ async fn approve(
     let started = Instant::now();
     let client = SyncClient::connect(app).await?;
     let identity = this_identity(app)?;
+    super::sync::require_no_pending_key_change(app)?;
     let local = load_state(app)?.ok_or("Set up Sesame Sync on this device first.")?;
 
     let refreshed = refresh(&client, &local).await?;

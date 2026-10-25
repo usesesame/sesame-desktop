@@ -10,6 +10,7 @@ pub mod identity;
 pub mod keys;
 pub mod pairing;
 pub mod pake;
+pub mod rekey_journal;
 pub mod request;
 pub mod state;
 pub mod xwing;

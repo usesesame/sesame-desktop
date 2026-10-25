@@ -436,3 +436,10 @@ test('a fork or a disagreement stops Sync and is shown, never applied', () => {
   const host = read('src', 'lib', 'controllers', 'sync-controller.ts')
   assert.match(host, /Your devices disagree/)
 })
+
+test('Sync does not post a checkpoint while a vault key change is unfinished', () => {
+  const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const checkpoint = commands.match(/pub\(super\) async fn record_checkpoint_if_due\([\s\S]*?\n\}\n/)
+  assert.ok(checkpoint, 'record_checkpoint_if_due is no longer one function this test can read')
+  assert.match(checkpoint[0], /require_no_pending_key_change\(app\)/)
+})
