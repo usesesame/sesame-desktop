@@ -22,11 +22,23 @@ release cannot be published without saying what changed in it.
 - Moving the vault key to a new device now adds a post-quantum key exchange,
   ML-KEM-768 combined with X25519 as the X-Wing draft describes. A device with
   a hybrid key receives a hybrid package, and a device with an older key still
-  gets the older one. Once any device in a vault has a hybrid key, Sesame
-  refuses a new device that offers only the older key unless you allow it for
-  that pairing. Nobody independent has reviewed this exchange, and it does not
-  make Sesame quantum safe. Update a self-hosted server first, because a
-  server from before this version rejects the new key.
+  gets the older one. Once any current device in a vault has a hybrid key,
+  Sesame refuses a new device that offers only the older key unless you allow
+  it for that pairing. Nobody independent has reviewed this exchange, and it
+  does not make Sesame quantum safe. Update a self-hosted server first, because
+  a server from before this version rejects the new key, and Sesame says so
+  instead of failing without a reason.
+- The Sync panel shows which devices still have the older key. A device can
+  replace its older key from the panel, and once every device has the newer key
+  you can change the vault key without removing a device. A change protects only
+  what is written afterwards. It does not protect a transfer that was recorded
+  earlier or the data encrypted under the earlier key.
+- Removing a device or changing the vault key shows the new recovery kit first
+  and waits until you confirm it is saved. If Sesame stops in the middle, the
+  change is finished the next time you open Sync, with the same kit, and Sync
+  does not upload or download until it is.
+- Setting up Sync no longer replaces a device key file that a newer Sesame
+  wrote.
 - Sync now reports what happened. A stop clears once you fix its cause, a run
   that gave up or paused because the vault is locked says so instead of showing
   as synced, and failed runs back off and try again when the network returns.

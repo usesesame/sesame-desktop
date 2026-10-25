@@ -113,12 +113,21 @@ good-faith report that turns out to be out of scope is not held against you.
   independent review has happened. A service that refuses to answer, and a
   vault with a single device, are outside what Sync claims to prevent.
 - Sync device key transfer adds a post-quantum key exchange, ML-KEM-768
-  combined with X25519, when a device advertises a hybrid key. Nobody
-  independent has reviewed it, and Sesame is not quantum safe. A transfer
-  recorded before both devices moved to hybrid keys keeps the older protection
-  until the vault key changes, device signatures stay Ed25519, and the pairing
-  code exchange is unchanged. You can allow the older key exchange for one
-  pairing, and that pairing then has only the older protection.
+  combined with X25519, when the receiving device has a hybrid key. Nobody
+  independent has reviewed it, and Sesame is not quantum safe. A vault key
+  that was sent to a device before it had a hybrid key stays exposed to anyone
+  who recorded that transfer, and so does everything encrypted under that key.
+  Changing the vault key protects only what is written afterwards. A device
+  that joined before this version keeps its older key until you upgrade it in
+  the Sync panel, and the vault key can be changed without removing a device
+  once every device has the newer key. Device signatures stay Ed25519, the
+  pairing code exchange is unchanged, and the connection to the Sesame service
+  uses ordinary TLS. You can allow the older key exchange for one pairing, and
+  that pairing then has only the older protection.
+- A removed or rotated vault key is kept on the device under the operating
+  system's device protection until the change finishes, so an interrupted
+  change can be completed. Any program running as you can read it in that
+  time, and the same program can already read the vault while it is unlocked.
 - Sesame cannot protect an unlocked vault from software that controls your
   computer. Malware running as you, or as an administrator, can read the
   app's memory, drive its window, record your keystrokes, or capture the
