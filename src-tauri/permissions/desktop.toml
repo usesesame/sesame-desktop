@@ -251,6 +251,8 @@ commands.allow = [
   "sync_remove_device",
   "sync_rotate_vault_key",
   "sync_upgrade_device_key",
+  "sync_prepare_key_change",
+  "sync_cancel_key_change",
   "sync_coordinator_status",
   "sync_now",
 ]

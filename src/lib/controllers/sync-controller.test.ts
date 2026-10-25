@@ -207,22 +207,37 @@ describe('changing keys', () => {
     expect(get(sync).working).toBe(false)
   })
 
-  it('changes the vault key with the master password and keeps the new recovery kit until it is written down', async () => {
-    answer({ sync_status: status(), sync_coordinator_status: idle, sync_rotate_vault_key: { recoveryKit: 'FICTIONAL-KIT' } })
+  it('shows the new recovery kit before the vault key changes and sends no kit back afterwards', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_rotate_vault_key: {} })
     const sync = createSyncController()
+    await sync.prepareKeyChange('fictional master password')
+    expect(core.invoke).toHaveBeenCalledWith('sync_prepare_key_change', { masterPassword: 'fictional master password' })
+    expect(get(sync).preparedRecoveryKit).toBe('FICTIONAL-KIT')
     await sync.rotateVaultKey('fictional master password')
     expect(core.invoke).toHaveBeenCalledWith('sync_rotate_vault_key', { masterPassword: 'fictional master password' })
-    expect(get(sync).removalRecoveryKit).toBe('FICTIONAL-KIT')
-    sync.dismissRecoveryKit()
+    expect(get(sync).preparedRecoveryKit).toBe('')
     expect(get(sync).removalRecoveryKit).toBe('')
   })
 
-  it('does not keep a recovery kit when the vault key change fails', async () => {
-    answer({ sync_rotate_vault_key: new Error('Every device must have the newer key before the vault key can be changed.') })
+  it('keeps no kit when preparing fails, when the person cancels, or when the change fails', async () => {
+    answer({ sync_prepare_key_change: new Error('That master password is not correct.') })
     const sync = createSyncController()
-    await sync.rotateVaultKey('fictional master password')
-    expect(get(sync).removalRecoveryKit).toBe('')
-    expect(get(sync).loadError).toMatch(/newer key/)
+    await sync.prepareKeyChange('wrong')
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(get(sync).loadError).toBe('That master password is not correct.')
+
+    answer({ sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_cancel_key_change: {} })
+    await sync.prepareKeyChange('right')
+    expect(get(sync).preparedRecoveryKit).toBe('FICTIONAL-KIT')
+    await sync.cancelKeyChange()
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(core.invoke).toHaveBeenCalledWith('sync_cancel_key_change')
+
+    answer({ sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_remove_device: new Error('Show and save the new recovery kit first.') })
+    await sync.prepareKeyChange('right')
+    await sync.removeDevice('d2', 'right')
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(get(sync).loadError).toBe('Show and save the new recovery kit first.')
   })
 })
 

@@ -201,6 +201,8 @@ macro_rules! sesame_invoke_handler {
             commands::sync_transfer::sync_remove_device,
             commands::sync_transfer::sync_rotate_vault_key,
             commands::sync_transfer::sync_upgrade_device_key,
+            commands::sync_transfer::sync_prepare_key_change,
+            commands::sync_transfer::sync_cancel_key_change,
             commands::sync_transfer::sync_coordinator_status,
             commands::sync_transfer::sync_now,
             $($extra,)*
@@ -329,7 +331,9 @@ pub fn run() {
         })
         .on_window_event(desktop_shell::handle_window_event);
 
-    let builder = builder.manage(sync::coordinator::Coordinator::new());
+    let builder = builder
+        .manage(sync::coordinator::Coordinator::new())
+        .manage(sync::key_change::PreparedKeyChange::default());
 
     #[cfg(feature = "wdio")]
     let builder = builder.invoke_handler(sesame_wdio_handler!());

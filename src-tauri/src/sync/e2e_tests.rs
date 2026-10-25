@@ -281,7 +281,13 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
 
     let list = laptop_state.list().expect("list");
     let removal = remove_entry(&laptop, &list, &phone.device_id).expect("remove");
-    let journal = super::rekey_journal::Journal::new(&removal, list.head_digest(), &[4u8; 32], 1);
+    let journal = super::rekey_journal::Journal::new(
+        &removal,
+        list.head_digest(),
+        &[4u8; 32],
+        super::key_change::fictional_recovery(),
+        1,
+    );
     let served = |entries: Vec<super::devicelist::DeviceListEntry>| {
         DeviceList::verify(&entries).expect("the served list verifies")
     };

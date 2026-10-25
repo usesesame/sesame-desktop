@@ -7,6 +7,7 @@ pub mod engine;
 pub mod floor;
 pub mod header;
 pub mod identity;
+pub mod key_change;
 pub mod keys;
 pub mod pairing;
 pub mod pake;

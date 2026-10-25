@@ -38,6 +38,7 @@
   let removing = ''
   let removalPassword = ''
   let rotating = false
+  let kitSaved = false
   let rotationPassword = ''
   let keyPassword = ''
   let leaving = false
@@ -55,16 +56,23 @@
     return `Another device last confirmed this vault on ${new Date(confirmedAt * 1000).toLocaleString()}.`
   }
 
+  async function cancelKeyChange() {
+    kitSaved = false
+    await syncPanel.cancelKeyChange()
+  }
+
   async function confirmRemoval() {
     await syncPanel.removeDevice(removing, removalPassword)
     removalPassword = ''
     removing = ''
+    kitSaved = false
   }
 
   async function confirmRotation() {
     await syncPanel.rotateVaultKey(rotationPassword)
     rotationPassword = ''
     rotating = false
+    kitSaved = false
   }
 
   async function confirmKey() {
@@ -266,78 +274,134 @@
 {#if removing}
   <div class="sync-own-code">
     <strong>Remove this device</strong>
-    <p>
-      Sesame will change your vault key and give the new one to the devices
-      that are staying, so the removed device cannot read future changes.
-      Enter your master password to confirm.
-    </p>
-    <input
-      type="password"
-      bind:value={removalPassword}
-      placeholder="Master password"
-      aria-label="Master password"
-      autocomplete="current-password"
-    />
-    <div class="modal-actions">
-      <button
-        type="button"
-        class="secondary-button"
-        disabled={$syncPanel.working}
-        on:click={() => {
-          removing = ''
-          removalPassword = ''
-        }}
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        class="primary-button"
-        disabled={!removalPassword || $syncPanel.working}
-        on:click={confirmRemoval}
-      >
-        Remove device
-      </button>
-    </div>
+    {#if !$syncPanel.preparedRecoveryKit}
+      <p>
+        Sesame will change your vault key and give the new one to the devices
+        that are staying, so the removed device cannot read future changes.
+        Your current recovery kit stops working when the key changes, so Sesame shows the new
+        kit first. Enter your master password to see it.
+      </p>
+      <input
+        type="password"
+        bind:value={removalPassword}
+        placeholder="Master password"
+        aria-label="Master password"
+        autocomplete="current-password"
+      />
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          disabled={$syncPanel.working}
+          on:click={() => {
+            removing = ''
+            removalPassword = ''
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="primary-button"
+          disabled={!removalPassword || $syncPanel.working}
+          on:click={() => syncPanel.prepareKeyChange(removalPassword)}
+        >
+          Show the new recovery kit
+        </button>
+      </div>
+    {:else}
+      <p>Save this recovery kit now. It replaces your current kit once the device is removed.</p>
+      <code>{$syncPanel.preparedRecoveryKit}</code>
+      <label class="sync-kit-saved">
+        <input type="checkbox" bind:checked={kitSaved} />
+        I have saved the new recovery kit
+      </label>
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          disabled={$syncPanel.working}
+          on:click={cancelKeyChange}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="primary-button"
+          disabled={!kitSaved || $syncPanel.working}
+          on:click={confirmRemoval}
+        >
+          Remove device
+        </button>
+      </div>
+    {/if}
   </div>
 {/if}
 {#if rotating}
   <div class="sync-own-code">
     <strong>Change the vault key</strong>
-    <p>
-      Every device now has the newer key. Changing the vault key means new changes are written
-      under a key that was only sent with the newer key exchange. It does not protect anything
-      written before the change, because someone who recorded the earlier transfer and the
-      earlier data can still read both. Enter your master password to confirm.
-    </p>
-    <input
-      type="password"
-      bind:value={rotationPassword}
-      placeholder="Master password"
-      aria-label="Master password"
-      autocomplete="current-password"
-    />
-    <div class="modal-actions">
-      <button
-        type="button"
-        class="secondary-button"
-        disabled={$syncPanel.working}
-        on:click={() => {
-          rotating = false
-          rotationPassword = ''
-        }}
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        class="primary-button"
-        disabled={!rotationPassword || $syncPanel.working}
-        on:click={confirmRotation}
-      >
-        Change vault key
-      </button>
-    </div>
+    {#if !$syncPanel.preparedRecoveryKit}
+      <p>
+        Every device now has the newer key. Changing the vault key means new changes are written
+        under a key that was only sent with the newer key exchange. It does not protect anything
+        written before the change, because someone who recorded the earlier transfer and the
+        earlier data can still read both. Your current recovery kit stops working when the key
+        changes, so Sesame shows the new kit first. Enter your master password to see it.
+      </p>
+      <input
+        type="password"
+        bind:value={rotationPassword}
+        placeholder="Master password"
+        aria-label="Master password"
+        autocomplete="current-password"
+      />
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          disabled={$syncPanel.working}
+          on:click={() => {
+            rotating = false
+            rotationPassword = ''
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="primary-button"
+          disabled={!rotationPassword || $syncPanel.working}
+          on:click={() => syncPanel.prepareKeyChange(rotationPassword)}
+        >
+          Show the new recovery kit
+        </button>
+      </div>
+    {:else}
+      <p>Save this recovery kit now. It replaces your current kit once the vault key changes.</p>
+      <code>{$syncPanel.preparedRecoveryKit}</code>
+      <label class="sync-kit-saved">
+        <input type="checkbox" bind:checked={kitSaved} />
+        I have saved the new recovery kit
+      </label>
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          disabled={$syncPanel.working}
+          on:click={cancelKeyChange}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="primary-button"
+          disabled={!kitSaved || $syncPanel.working}
+          on:click={confirmRotation}
+        >
+          Change vault key
+        </button>
+      </div>
+    {/if}
   </div>
 {/if}
 {#if leaving}
@@ -523,7 +587,7 @@
     font-size: var(--type-3);
     letter-spacing: 0.08em;
   }
-  .sync-own-code input {
+  .sync-own-code input:not([type="checkbox"]) {
     justify-self: start;
     width: min(100%, 22rem);
     padding: 10px var(--space-3);
@@ -554,6 +618,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .sync-kit-saved {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--text);
+    font-size: var(--type-3);
   }
   .sync-key-note {
     margin: var(--space-2) 0 0;

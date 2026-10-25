@@ -84,23 +84,46 @@ pub(super) fn finish_adoption(
     Ok(recovery_kit)
 }
 
-/// Old-key wraps are rebuilt or dropped; a stale PIN wrap would unlock a vault this one cannot read.
+pub(super) fn prepare_recovery(
+    key: &[u8; 32],
+) -> Result<(String, crate::sync::key_change::PreparedRecovery), String> {
+    let kit = generate_recovery_kit()?;
+    let kdf = default_kdf_params();
+    let wrapping_key = zeroize::Zeroizing::new(derive_key(&kit, &kdf)?);
+    let wrap = encrypt_bytes(&wrapping_key, key, RECOVERY_WRAP_AAD)?;
+    Ok((kit, crate::sync::key_change::PreparedRecovery { wrap, kdf }))
+}
+
 pub(super) fn adopt(
+    vault: &mut crate::vault::UnlockedVault,
+    key: [u8; 32],
+    payload: crate::vault::types::VaultPayload,
+    master_password: &str,
+) -> Result<String, String> {
+    adopt_with(vault, key, payload, master_password, None)?
+        .ok_or_else(|| "Sesame could not prepare a recovery kit.".to_string())
+}
+
+/// Old-key wraps are rebuilt or dropped; a stale PIN wrap would unlock a vault this one cannot read.
+/// With a prepared recovery wrap the kit the person already saved stays valid and no new one is made.
+pub(super) fn adopt_with(
     vault: &mut crate::vault::UnlockedVault,
     mut key: [u8; 32],
     payload: crate::vault::types::VaultPayload,
     master_password: &str,
-) -> Result<String, String> {
+    prepared: Option<crate::sync::key_change::PreparedRecovery>,
+) -> Result<Option<String>, String> {
     let kdf = master_password_kdf_params();
     let wrapping_key = zeroize::Zeroizing::new(derive_key(master_password, &kdf)?);
     let key_wrap = encrypt_bytes(&wrapping_key, &key, WRAP_AAD)?;
 
-    let mut recovery_kit = generate_recovery_kit()?;
-    let shown = recovery_kit.clone();
-    let recovery_kdf = default_kdf_params();
-    let recovery_wrapping_key = zeroize::Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
-    recovery_kit.zeroize();
-    let recovery_wrap = encrypt_bytes(&recovery_wrapping_key, &key, RECOVERY_WRAP_AAD)?;
+    let (shown, recovery_wrap, recovery_kdf) = match prepared {
+        Some(prepared) => (None, prepared.wrap, prepared.kdf),
+        None => {
+            let (kit, recovery) = prepare_recovery(&key)?;
+            (Some(kit), recovery.wrap, recovery.kdf)
+        }
+    };
 
     let protected_key = crate::vault::VaultKey::new(key)?;
     key.zeroize();
@@ -132,4 +155,84 @@ pub(super) fn adopt(
         crate::vault::windows_hello::delete_key(&old.key_name);
     }
     Ok(shown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::crypto::decrypt_bytes;
+    use crate::vault::UnlockedVault;
+    use sesame_core::api::create_vault;
+
+    const PASSWORD: &str = "fictional master password";
+
+    fn session() -> UnlockedVault {
+        let (opened, _) = create_vault(PASSWORD, "Fictional vault").expect("created vault");
+        let directory =
+            std::env::temp_dir().join(format!("sesame-adopt-{}", crate::vault::random_id()));
+        std::fs::create_dir_all(&directory).expect("directory");
+        let path = directory.join("vault.sesame");
+        UnlockedVault::from_opened(path, &opened).expect("unlocked vault")
+    }
+
+    fn recovery_opens(vault: &UnlockedVault, kit: &str, key: &[u8; 32]) -> bool {
+        let (Some(kdf), Some(wrap)) = (&vault.recovery_kdf, &vault.recovery_wrap) else {
+            return false;
+        };
+        let wrapping = derive_key(kit, kdf).expect("derived");
+        decrypt_bytes(&wrapping, wrap, RECOVERY_WRAP_AAD)
+            .is_ok_and(|opened| opened.as_slice() == key.as_slice())
+    }
+
+    #[test]
+    fn a_prepared_kit_stays_valid_after_adoption_and_no_second_kit_is_made() {
+        let mut vault = session();
+        let payload = vault.open_payload().expect("payload").clone();
+        let key = [7u8; 32];
+        let (kit, recovery) = prepare_recovery(&key).expect("prepared");
+
+        let shown = adopt_with(
+            &mut vault,
+            key,
+            payload.clone(),
+            PASSWORD,
+            Some(recovery.clone()),
+        )
+        .expect("adopted");
+        assert!(shown.is_none());
+        assert!(recovery_opens(&vault, &kit, &key));
+        assert!(!recovery_opens(
+            &vault,
+            "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA",
+            &key
+        ));
+
+        let again =
+            adopt_with(&mut vault, key, payload, PASSWORD, Some(recovery)).expect("adopted again");
+        assert!(again.is_none());
+        assert!(
+            recovery_opens(&vault, &kit, &key),
+            "adopting twice from the journal keeps the saved kit working"
+        );
+    }
+
+    #[test]
+    fn without_a_prepared_kit_adoption_makes_one_that_opens_the_new_key() {
+        let mut vault = session();
+        let payload = vault.open_payload().expect("payload").clone();
+        let key = [9u8; 32];
+        let kit = adopt_with(&mut vault, key, payload, PASSWORD, None)
+            .expect("adopted")
+            .expect("a kit");
+        assert!(recovery_opens(&vault, &kit, &key));
+    }
+
+    #[test]
+    fn a_kit_prepared_for_one_key_does_not_open_another() {
+        let (kit, recovery) = prepare_recovery(&[1u8; 32]).expect("prepared");
+        let wrapping = derive_key(&kit, &recovery.kdf).expect("derived");
+        let opened = decrypt_bytes(&wrapping, &recovery.wrap, RECOVERY_WRAP_AAD).expect("opens");
+        assert_eq!(opened.as_slice(), [1u8; 32].as_slice());
+        assert!(decrypt_bytes(&wrapping, &recovery.wrap, WRAP_AAD).is_err());
+    }
 }
