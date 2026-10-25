@@ -43,7 +43,8 @@ test('the linux-rust job also runs the app against a service that predates the h
   assert.match(job, /SESAME_SYNC_E2E_OLD_KEY/)
   assert.match(job, /a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet/)
   assert.match(job, /a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it/)
-  assert.equal(job.match(/test result: ok\. 1 passed/g)?.length, 3, 'each of the three runs must prove that exactly one test passed')
+  assert.match(job, /devices_with_the_older_key_replace_it_and_the_vault_key_rotates_through_the_real_service/)
+  assert.equal(job.match(/test result: ok\. 1 passed/g)?.length, 4, 'each of the four runs must prove that exactly one test passed')
 })
 
 test('both test servers are stopped when the step ends', () => {

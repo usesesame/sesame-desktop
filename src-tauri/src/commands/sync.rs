@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -24,6 +26,7 @@ pub struct SyncDeviceView {
     pub state: String,
     pub is_this_device: bool,
     pub added_index: u64,
+    pub newer_key: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,6 +312,9 @@ fn views_from(
                 },
                 is_this_device: member.device_id == state.device_id,
                 added_index: member.added_index,
+                newer_key: URL_SAFE_NO_PAD
+                    .decode(&member.package_key)
+                    .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES),
             }
         })
         .collect();

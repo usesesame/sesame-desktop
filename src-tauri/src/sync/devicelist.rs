@@ -14,6 +14,8 @@ use super::canonical::{
 pub const ENTRY_CREATE: &str = "create";
 pub const ENTRY_ADD: &str = "add";
 pub const ENTRY_REMOVE: &str = "remove";
+pub const ENTRY_KEY: &str = "key";
+pub const ENTRY_ROTATE: &str = "rotate";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -108,6 +110,30 @@ impl DeviceListEntry {
                     || !self.sealed_label.is_empty()
                 {
                     return Err(ProofError::invalid("a removal carries no key or label"));
+                }
+            }
+            ENTRY_KEY => {
+                if self.signer_device_id != self.subject_device_id
+                    || !self.subject_signing_key.is_empty()
+                    || !self.sealed_label.is_empty()
+                {
+                    return Err(ProofError::invalid(
+                        "a key replacement is signed by its own device and carries only the new package key",
+                    ));
+                }
+                if decode_exact(&self.subject_package_key, HYBRID_KEY_BYTES).is_none() {
+                    return Err(ProofError::invalid("package key"));
+                }
+            }
+            ENTRY_ROTATE => {
+                if self.signer_device_id != self.subject_device_id
+                    || !self.subject_signing_key.is_empty()
+                    || !self.subject_package_key.is_empty()
+                    || !self.sealed_label.is_empty()
+                {
+                    return Err(ProofError::invalid(
+                        "a rotation is signed by its own device and carries no key or label",
+                    ));
                 }
             }
             _ => return Err(ProofError::invalid("kind")),
@@ -233,7 +259,10 @@ impl DeviceList {
         match entry.kind.as_str() {
             ENTRY_CREATE => Err(ProofError::device_list("only the first entry creates")),
             ENTRY_ADD => self.extend_add(entry),
-            _ => self.extend_remove(entry),
+            ENTRY_REMOVE => self.extend_remove(entry),
+            ENTRY_KEY => self.extend_key(entry),
+            ENTRY_ROTATE => self.extend_rotate(entry),
+            _ => Err(ProofError::device_list("kind")),
         }
     }
 
@@ -285,6 +314,41 @@ impl DeviceList {
             .filter(|member| member.removed_index == 0)
             .ok_or_else(|| ProofError::device_list("subject is not a member"))?;
         subject.removed_index = entry.index;
+        self.push(entry, entry.epoch_after);
+        Ok(())
+    }
+
+    fn extend_key(&mut self, entry: &DeviceListEntry) -> ProofResult<()> {
+        if entry.epoch_after != self.epoch() {
+            return Err(ProofError::device_list(
+                "a key replacement does not change the epoch",
+            ));
+        }
+        let signer = self
+            .members
+            .get_mut(&entry.signer_device_id)
+            .filter(|member| member.removed_index == 0)
+            .ok_or_else(|| ProofError::device_list("signer is not a member"))?;
+        if decode_exact(&signer.package_key, KEY_BYTES).is_none() {
+            return Err(ProofError::device_list(
+                "only a device with the older package key can replace it",
+            ));
+        }
+        signer.package_key = entry.subject_package_key.clone();
+        self.push(entry, entry.epoch_after);
+        Ok(())
+    }
+
+    fn extend_rotate(&mut self, entry: &DeviceListEntry) -> ProofResult<()> {
+        let next_epoch = self
+            .epoch()
+            .checked_add(1)
+            .ok_or_else(|| ProofError::device_list("epoch overflow"))?;
+        if entry.epoch_after != next_epoch {
+            return Err(ProofError::device_list(
+                "a rotation raises the epoch by one",
+            ));
+        }
         self.push(entry, entry.epoch_after);
         Ok(())
     }

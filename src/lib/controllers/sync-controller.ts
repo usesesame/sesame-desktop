@@ -61,6 +61,7 @@ export interface SyncDeviceView {
   state: string
   isThisDevice: boolean
   addedIndex: number
+  newerKey: boolean
 }
 
 interface SyncTransferResult {
@@ -504,6 +505,38 @@ export function createSyncController() {
           working: false,
           loadError:
             readableMessage(error, 'Sesame could not remove that device.'),
+        })
+      }
+    },
+    async upgradeDeviceKey() {
+      store.patch({ working: true, loadError: '' })
+      try {
+        await invoke('sync_upgrade_device_key')
+        store.patch({ working: false, lastTransfer: 'This device now has the newer key.' })
+        await refresh()
+      } catch (error) {
+        store.patch({
+          working: false,
+          loadError: readableMessage(error, 'Sesame could not upgrade the key on this device.'),
+        })
+      }
+    },
+    async rotateVaultKey(masterPassword: string) {
+      store.patch({ working: true, loadError: '' })
+      try {
+        const result = await invoke<{ recoveryKit: string }>('sync_rotate_vault_key', {
+          masterPassword,
+        })
+        store.patch({
+          working: false,
+          removalRecoveryKit: result.recoveryKit,
+          lastTransfer: 'Your vault now uses a new key.',
+        })
+        await refresh()
+      } catch (error) {
+        store.patch({
+          working: false,
+          loadError: readableMessage(error, 'Sesame could not change the vault key.'),
         })
       }
     },

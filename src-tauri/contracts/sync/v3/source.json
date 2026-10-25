@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "sourceRepository": "usesesame/sesame-server",
-  "sourceCommit": "03d7f77da73494c8eb6338be508985c2a463caa4",
+  "sourceCommit": "812c3d666f2dc33c5bcfaea617fdee0569e92d49",
   "sourcePaths": {
     "v3-fixture.json": "internal/syncproto/testdata/v3-fixture.json",
     "wire-fixture.json": "internal/syncv3http/testdata/wire-fixture.json"
   },
   "files": {
-    "v3-fixture.json": "38095e35fa02a98f8952e01fb602bb34e9178886f6f6004c02c9bda65eba1215",
+    "v3-fixture.json": "f2eaec3c64f037656d8da9435152d932a967252facf022ce7d6c9d0d9d5ae715",
     "wire-fixture.json": "0b55fc00abe2026a322291dfebc09345014f93d481fe5df243bd5fab6030de27"
   }
 }

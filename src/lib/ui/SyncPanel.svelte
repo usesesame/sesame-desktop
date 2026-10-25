@@ -31,9 +31,14 @@
 
   $: summary = statusMessages[$syncPanel.state] ?? 'Sesame could not read the Sync status'
   $: others = $syncPanel.devices.filter((device) => !device.isThisDevice && device.state === 'approved')
+  $: members = $syncPanel.devices.filter((device) => device.state === 'approved')
+  $: thisDevice = members.find((device) => device.isThisDevice)
+  $: allNewer = members.length > 1 && members.every((device) => device.newerKey)
 
   let removing = ''
   let removalPassword = ''
+  let rotating = false
+  let rotationPassword = ''
   let keyPassword = ''
   let leaving = false
   let leavePassword = ''
@@ -54,6 +59,12 @@
     await syncPanel.removeDevice(removing, removalPassword)
     removalPassword = ''
     removing = ''
+  }
+
+  async function confirmRotation() {
+    await syncPanel.rotateVaultKey(rotationPassword)
+    rotationPassword = ''
+    rotating = false
   }
 
   async function confirmKey() {
@@ -290,6 +301,45 @@
     </div>
   </div>
 {/if}
+{#if rotating}
+  <div class="sync-own-code">
+    <strong>Change the vault key</strong>
+    <p>
+      Every device now has the newer key. Changing the vault key means new changes are written
+      under a key that was only sent with the newer key exchange. It does not protect anything
+      written before the change, because someone who recorded the earlier transfer and the
+      earlier data can still read both. Enter your master password to confirm.
+    </p>
+    <input
+      type="password"
+      bind:value={rotationPassword}
+      placeholder="Master password"
+      aria-label="Master password"
+      autocomplete="current-password"
+    />
+    <div class="modal-actions">
+      <button
+        type="button"
+        class="secondary-button"
+        disabled={$syncPanel.working}
+        on:click={() => {
+          rotating = false
+          rotationPassword = ''
+        }}
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        class="primary-button"
+        disabled={!rotationPassword || $syncPanel.working}
+        on:click={confirmRotation}
+      >
+        Change vault key
+      </button>
+    </div>
+  </div>
+{/if}
 {#if leaving}
   <div class="sync-own-code">
     <strong>Turn Sync off on this device</strong>
@@ -327,6 +377,24 @@
     </div>
   </div>
 {/if}
+{#if $syncPanel.state === 'approved' && thisDevice && !thisDevice.newerKey}
+  <p class="sync-key-note">
+    This device still uses the older key exchange. Upgrading replaces the key that other devices
+    use to send it the vault key, and it needs a Sync server that has been updated.
+  </p>
+  <div class="sync-actions-row">
+    <button type="button" class="text-button" disabled={$syncPanel.working} on:click={syncPanel.upgradeDeviceKey}>
+      Upgrade this device's key
+    </button>
+  </div>
+{/if}
+{#if $syncPanel.state === 'approved' && allNewer && !rotating && !leaving}
+  <div class="sync-actions-row">
+    <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (rotating = true)}>
+      Change the vault key
+    </button>
+  </div>
+{/if}
 {#if $syncPanel.state === 'approved' && !leaving}
   <div class="sync-actions-row">
     <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (leaving = true)}>
@@ -339,7 +407,7 @@
     {#each others as device (device.deviceId)}
       <li>
         <span class="sync-device-label">{device.label || 'Unnamed device'}</span>
-        <span class="sync-device-state">{stateLabels[device.state] ?? device.state}</span>
+        <span class="sync-device-state">{stateLabels[device.state] ?? device.state}, {device.newerKey ? 'newer key' : 'older key'}</span>
         <button
           type="button"
           class="text-button"
@@ -486,6 +554,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .sync-key-note {
+    margin: var(--space-2) 0 0;
+    color: var(--text-muted);
+    font-size: var(--type-2);
   }
   .sync-device-state {
     flex: none;

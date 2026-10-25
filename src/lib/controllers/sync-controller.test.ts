@@ -11,7 +11,7 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   state: 'approved',
   vaultEpoch: 1,
   revision: 3,
-  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1 }],
+  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1, newerKey: false }],
   needsNewKey: false,
   alarm: null,
   confirmedAt: null,
@@ -180,6 +180,49 @@ describe('the Sync preview controller', () => {
     expect(get(sync).removalRecoveryKit).toBe('FICTIONAL-KIT')
     sync.dismissRecoveryKit()
     expect(get(sync).removalRecoveryKit).toBe('')
+  })
+})
+
+describe('changing keys', () => {
+  beforeEach(() => {
+    core.invoke.mockReset()
+    localStorage.clear()
+  })
+
+  it('upgrades this device and then reloads what Rust verified', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_upgrade_device_key: {} })
+    const sync = createSyncController()
+    await sync.upgradeDeviceKey()
+    expect(core.invoke).toHaveBeenCalledWith('sync_upgrade_device_key')
+    expect(get(sync).lastTransfer).toBe('This device now has the newer key.')
+    expect(get(sync).loadError).toBe('')
+  })
+
+  it('shows the reason in plain words when the key upgrade is refused', async () => {
+    const refusal = 'This Sync server does not accept the newer device keys yet.'
+    answer({ sync_upgrade_device_key: new Error(refusal) })
+    const sync = createSyncController()
+    await sync.upgradeDeviceKey()
+    expect(get(sync).loadError).toBe(refusal)
+    expect(get(sync).working).toBe(false)
+  })
+
+  it('changes the vault key with the master password and keeps the new recovery kit until it is written down', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_rotate_vault_key: { recoveryKit: 'FICTIONAL-KIT' } })
+    const sync = createSyncController()
+    await sync.rotateVaultKey('fictional master password')
+    expect(core.invoke).toHaveBeenCalledWith('sync_rotate_vault_key', { masterPassword: 'fictional master password' })
+    expect(get(sync).removalRecoveryKit).toBe('FICTIONAL-KIT')
+    sync.dismissRecoveryKit()
+    expect(get(sync).removalRecoveryKit).toBe('')
+  })
+
+  it('does not keep a recovery kit when the vault key change fails', async () => {
+    answer({ sync_rotate_vault_key: new Error('Every device must have the newer key before the vault key can be changed.') })
+    const sync = createSyncController()
+    await sync.rotateVaultKey('fictional master password')
+    expect(get(sync).removalRecoveryKit).toBe('')
+    expect(get(sync).loadError).toMatch(/newer key/)
   })
 })
 

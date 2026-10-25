@@ -8,7 +8,9 @@ use serde::Deserialize;
 
 use super::canonical::{ProofError, ProofResult, REQUEST_TIMESTAMP_SKEW, VERSION_V3};
 use super::checkpoint::Checkpoint;
-use super::devicelist::{DeviceList, DeviceListEntry, ENTRY_ADD, ENTRY_CREATE, ENTRY_REMOVE};
+use super::devicelist::{
+    DeviceList, DeviceListEntry, ENTRY_ADD, ENTRY_CREATE, ENTRY_KEY, ENTRY_REMOVE, ENTRY_ROTATE,
+};
 use super::header::{verify_header, verify_header_chain, Header};
 use super::identity::DeviceIdentity;
 use super::pairing::ApproverIdentity;
@@ -422,6 +424,56 @@ pub fn remove_entry(
     }))
 }
 
+pub fn key_entry(
+    identity: &DeviceIdentity,
+    list: &DeviceList,
+    package_key: &str,
+) -> ProofResult<DeviceListEntry> {
+    let index = list
+        .head()
+        .checked_add(1)
+        .ok_or_else(|| ProofError::device_list("index overflow"))?;
+    Ok(identity.sign_entry(DeviceListEntry {
+        vault_id: list.vault_id().to_string(),
+        index,
+        previous_digest: list.head_digest().to_string(),
+        kind: ENTRY_KEY.to_string(),
+        signer_device_id: identity.device_id.clone(),
+        subject_device_id: identity.device_id.clone(),
+        subject_signing_key: String::new(),
+        subject_package_key: package_key.to_string(),
+        sealed_label: String::new(),
+        epoch_after: list.epoch(),
+        snapshot_floor: 0,
+        signature: String::new(),
+    }))
+}
+
+pub fn rotate_entry(identity: &DeviceIdentity, list: &DeviceList) -> ProofResult<DeviceListEntry> {
+    let index = list
+        .head()
+        .checked_add(1)
+        .ok_or_else(|| ProofError::device_list("index overflow"))?;
+    let epoch = list
+        .epoch()
+        .checked_add(1)
+        .ok_or_else(|| ProofError::device_list("epoch overflow"))?;
+    Ok(identity.sign_entry(DeviceListEntry {
+        vault_id: list.vault_id().to_string(),
+        index,
+        previous_digest: list.head_digest().to_string(),
+        kind: ENTRY_ROTATE.to_string(),
+        signer_device_id: identity.device_id.clone(),
+        subject_device_id: identity.device_id.clone(),
+        subject_signing_key: String::new(),
+        subject_package_key: String::new(),
+        sealed_label: String::new(),
+        epoch_after: epoch,
+        snapshot_floor: 0,
+        signature: String::new(),
+    }))
+}
+
 pub struct HeaderPlan {
     pub vault_id: String,
     pub device_id: String,
@@ -537,9 +589,14 @@ pub fn verify_package_for_removal(
 ) -> ProofResult<()> {
     let entry = entries
         .iter()
-        .find(|entry| entry.kind == ENTRY_REMOVE && entry.epoch_after == package.vault_epoch)
+        .find(|entry| {
+            (entry.kind == ENTRY_REMOVE || entry.kind == ENTRY_ROTATE)
+                && entry.epoch_after == package.vault_epoch
+        })
         .ok_or_else(|| {
-            ProofError::device_list("the device list shows no removal that made this key")
+            ProofError::device_list(
+                "the device list shows no removal or rotation that made this key",
+            )
         })?;
     if package.entry_digest != entry.digest() || package.sender_device_id != entry.signer_device_id
     {

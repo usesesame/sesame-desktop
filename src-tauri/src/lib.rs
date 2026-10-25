@@ -199,6 +199,8 @@ macro_rules! sesame_invoke_handler {
             commands::sync_transfer::sync_list_conflict_backups,
             commands::sync_transfer::sync_restore_conflict_backup,
             commands::sync_transfer::sync_remove_device,
+            commands::sync_transfer::sync_rotate_vault_key,
+            commands::sync_transfer::sync_upgrade_device_key,
             commands::sync_transfer::sync_coordinator_status,
             commands::sync_transfer::sync_now,
             $($extra,)*

@@ -11,7 +11,7 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   state: 'approved',
   vaultEpoch: 1,
   revision: 3,
-  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1 }],
+  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1, newerKey: false }],
   needsNewKey: false,
   alarm: null,
   confirmedAt: null,
