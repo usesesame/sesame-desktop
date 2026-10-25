@@ -24,14 +24,12 @@ const MAX_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 500;
 const CACHE_SALT_FILE: &str = "icon-cache-salt.bin";
 const CACHE_SALT_BYTES: usize = 32;
-const ALLOWED_ICON_MEDIA_TYPES: [&str; 7] = [
+const ALLOWED_ICON_MEDIA_TYPES: [&str; 5] = [
     "image/x-icon",
     "image/vnd.microsoft.icon",
     "image/png",
     "image/jpeg",
     "image/jpg",
-    "image/gif",
-    "image/webp",
 ];
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -597,10 +595,6 @@ fn detect_image_type(bytes: &[u8]) -> Option<&'static str> {
         Some("image/png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
         Some("image/jpeg")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        Some("image/webp")
     } else {
         None
     }
@@ -1130,6 +1124,44 @@ mod tests {
             accepted_icon_body(Some("image/x-icon"), b"\x00\x00\x01\x00").expect("icon accepted"),
             "image/x-icon"
         );
+    }
+
+    #[test]
+    fn webp_and_gif_icons_are_refused_by_type_and_by_content() {
+        let webp = b"RIFF\x24\x00\x00\x00WEBPVP8 ";
+        let gif = b"GIF89a\x01\x00\x01\x00";
+        for media_type in ["image/webp", "image/gif"] {
+            assert!(
+                accepted_icon_media_type(Some(media_type)).is_err(),
+                "{media_type}"
+            );
+        }
+        assert!(accepted_icon_body(Some("image/png"), webp).is_err());
+        assert!(accepted_icon_body(Some("image/png"), gif).is_err());
+        assert!(accepted_icon_body(None, webp).is_err());
+        assert!(accepted_icon_body(None, gif).is_err());
+        assert_eq!(detect_image_type(webp), None);
+        assert_eq!(detect_image_type(gif), None);
+    }
+
+    #[test]
+    fn icon_ico_png_and_jpeg_are_still_accepted() {
+        for (media_type, bytes, detected) in [
+            ("image/x-icon", &b"\x00\x00\x01\x00"[..], "image/x-icon"),
+            (
+                "image/vnd.microsoft.icon",
+                &b"\x00\x00\x01\x00"[..],
+                "image/x-icon",
+            ),
+            ("image/png", &b"\x89PNG\r\n\x1a\n"[..], "image/png"),
+            ("image/jpeg", &b"\xff\xd8\xff\xe0"[..], "image/jpeg"),
+            ("image/jpg", &b"\xff\xd8\xff\xe0"[..], "image/jpeg"),
+        ] {
+            assert_eq!(
+                accepted_icon_body(Some(media_type), bytes).expect(media_type),
+                detected
+            );
+        }
     }
 
     #[test]

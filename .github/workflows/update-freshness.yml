@@ -1,0 +1,59 @@
+name: Update freshness
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: update-freshness
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment: freshness
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Find the newest published release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 50 --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tagName')
+          if [ -z "$tag" ]; then
+            echo "No published release with a plain version tag was found." >&2
+            exit 1
+          fi
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Require the freshness release to be a pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          state=$(gh release view freshness --repo "$GITHUB_REPOSITORY" --json isPrerelease,isDraft --jq '"\(.isPrerelease) \(.isDraft)"')
+          if [ "$state" != "true false" ]; then
+            echo "The freshness release must exist and be a published pre-release, or it could replace the latest release." >&2
+            exit 1
+          fi
+
+      - name: Sign a fresh statement
+        env:
+          SESAME_UPDATE_FRESHNESS_SIGNING_KEY: ${{ secrets.SESAME_UPDATE_FRESHNESS_SIGNING_KEY }}
+          SESAME_UPDATE_FRESHNESS_KEY_ID: ${{ vars.SESAME_UPDATE_FRESHNESS_KEY_ID }}
+        run: node tools/update-freshness.mjs sign --version "${{ steps.latest.outputs.version }}" --out freshness.json
+
+      - name: Replace the statement on the freshness release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload freshness freshness.json --clobber --repo "$GITHUB_REPOSITORY"

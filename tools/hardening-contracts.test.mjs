@@ -1236,7 +1236,8 @@ test('vault key material is drawn from the system random source', () => {
     ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
     ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
     ['src-tauri/src/commands/sync_transfer.rs', 'rekey_without'],
-    ['src-tauri/src/commands/sync_adopt.rs', 'adopt'],
+    ['src-tauri/src/commands/sync_adopt.rs', 'prepare_recovery'],
+    ['src-tauri/src/commands/sync_transfer.rs', 'sync_prepare_key_change'],
   ]
   const offenders = []
   for (const [path, name] of secretSites) {

@@ -11,7 +11,7 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   state: 'approved',
   vaultEpoch: 1,
   revision: 3,
-  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1 }],
+  devices: [{ deviceId: 'd1', label: 'Laptop', state: 'approved', isThisDevice: true, addedIndex: 1, newerKey: false }],
   needsNewKey: false,
   alarm: null,
   confirmedAt: null,
@@ -180,6 +180,64 @@ describe('the Sync preview controller', () => {
     expect(get(sync).removalRecoveryKit).toBe('FICTIONAL-KIT')
     sync.dismissRecoveryKit()
     expect(get(sync).removalRecoveryKit).toBe('')
+  })
+})
+
+describe('changing keys', () => {
+  beforeEach(() => {
+    core.invoke.mockReset()
+    localStorage.clear()
+  })
+
+  it('upgrades this device and then reloads what Rust verified', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_upgrade_device_key: {} })
+    const sync = createSyncController()
+    await sync.upgradeDeviceKey()
+    expect(core.invoke).toHaveBeenCalledWith('sync_upgrade_device_key')
+    expect(get(sync).lastTransfer).toBe('This device now has the newer key.')
+    expect(get(sync).loadError).toBe('')
+  })
+
+  it('shows the reason in plain words when the key upgrade is refused', async () => {
+    const refusal = 'This Sync server does not accept the newer device keys yet.'
+    answer({ sync_upgrade_device_key: new Error(refusal) })
+    const sync = createSyncController()
+    await sync.upgradeDeviceKey()
+    expect(get(sync).loadError).toBe(refusal)
+    expect(get(sync).working).toBe(false)
+  })
+
+  it('shows the new recovery kit before the vault key changes and sends no kit back afterwards', async () => {
+    answer({ sync_status: status(), sync_coordinator_status: idle, sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_rotate_vault_key: {} })
+    const sync = createSyncController()
+    await sync.prepareKeyChange('fictional master password')
+    expect(core.invoke).toHaveBeenCalledWith('sync_prepare_key_change', { masterPassword: 'fictional master password' })
+    expect(get(sync).preparedRecoveryKit).toBe('FICTIONAL-KIT')
+    await sync.rotateVaultKey('fictional master password')
+    expect(core.invoke).toHaveBeenCalledWith('sync_rotate_vault_key', { masterPassword: 'fictional master password' })
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(get(sync).removalRecoveryKit).toBe('')
+  })
+
+  it('keeps no kit when preparing fails, when the person cancels, or when the change fails', async () => {
+    answer({ sync_prepare_key_change: new Error('That master password is not correct.') })
+    const sync = createSyncController()
+    await sync.prepareKeyChange('wrong')
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(get(sync).loadError).toBe('That master password is not correct.')
+
+    answer({ sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_cancel_key_change: {} })
+    await sync.prepareKeyChange('right')
+    expect(get(sync).preparedRecoveryKit).toBe('FICTIONAL-KIT')
+    await sync.cancelKeyChange()
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(core.invoke).toHaveBeenCalledWith('sync_cancel_key_change')
+
+    answer({ sync_prepare_key_change: { recoveryKit: 'FICTIONAL-KIT' }, sync_remove_device: new Error('Show and save the new recovery kit first.') })
+    await sync.prepareKeyChange('right')
+    await sync.removeDevice('d2', 'right')
+    expect(get(sync).preparedRecoveryKit).toBe('')
+    expect(get(sync).loadError).toBe('Show and save the new recovery kit first.')
   })
 })
 
