@@ -492,14 +492,7 @@ pub async fn sync_create_vault(
         Err(other) => return Err(present(other)),
     }
     let path = identity_file(&app)?;
-    let identity = match DeviceIdentity::load(&path) {
-        Ok(existing) => existing,
-        Err(_) => {
-            let generated = DeviceIdentity::generate()?;
-            generated.save(&path)?;
-            generated
-        }
-    };
+    let identity = crate::sync::identity::load_or_create(&path)?;
     let (vault_id, sealed) = {
         let session = vault
             .session

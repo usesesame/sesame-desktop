@@ -18,6 +18,7 @@ use crate::vault::VaultResult;
 pub const IDENTITY_FILE_NAME: &str = "sync-identity.sesame";
 const SIGNING_SEED_BYTES: usize = 32;
 const HYBRID_PACKAGE_MIN_BYTES: usize = 512;
+const WRITTEN_BY_NEWER_BUILD: &str = "These device keys were written by a newer Sesame.";
 /// 16 random bytes, 22 base64url characters; the server accepts 16 to 128.
 const OPAQUE_ID_BYTES: usize = 16;
 
@@ -196,11 +197,17 @@ impl DeviceIdentity {
     pub fn load(path: &Path) -> VaultResult<Self> {
         let body = std::fs::read(path)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
+        #[derive(Deserialize)]
+        struct StoredVersion {
+            version: u8,
+        }
+        let probe: StoredVersion = serde_json::from_slice(&body)
+            .map_err(|_| "Sesame could not read the device keys.".to_string())?;
+        if probe.version != 1 && probe.version != 2 {
+            return Err(WRITTEN_BY_NEWER_BUILD.to_string());
+        }
         let stored: StoredIdentity = serde_json::from_slice(&body)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
-        if stored.version != 1 && stored.version != 2 {
-            return Err("These device keys were written by a newer Sesame.".to_string());
-        }
 
         let mut signing_seed = unprotect_for_device(
             &URL_SAFE_NO_PAD
@@ -250,6 +257,18 @@ impl DeviceIdentity {
             encryption,
             hybrid,
         })
+    }
+}
+
+pub fn load_or_create(path: &Path) -> VaultResult<DeviceIdentity> {
+    match DeviceIdentity::load(path) {
+        Ok(existing) => Ok(existing),
+        Err(error) if error == WRITTEN_BY_NEWER_BUILD => Err(error),
+        Err(_) => {
+            let generated = DeviceIdentity::generate()?;
+            generated.save(path)?;
+            Ok(generated)
+        }
     }
 }
 
@@ -403,5 +422,145 @@ mod hybrid_tests {
         assert!(identity
             .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 3)
             .is_err());
+    }
+
+    fn rewritten(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        change(&mut body);
+        std::fs::write(path, serde_json::to_vec(&body).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_identity_file_this_build_does_not_understand_is_refused_and_left_untouched() {
+        let path = scratch("unknown");
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| body["version"] = serde_json::json!(3));
+        let before = std::fs::read(&path).unwrap();
+        assert!(DeviceIdentity::load(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_version_and_the_hybrid_seed_must_agree() {
+        let path = scratch("agree");
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| {
+            body.as_object_mut()
+                .unwrap()
+                .remove("protected_hybrid_seed");
+        });
+        assert!(
+            DeviceIdentity::load(&path).is_err(),
+            "version 2 without a seed"
+        );
+
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| body["version"] = serde_json::json!(1));
+        assert!(
+            DeviceIdentity::load(&path).is_err(),
+            "version 1 with a seed"
+        );
+
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        for seed in ["", "AAAA", "not base64!"] {
+            rewritten(&path, |body| {
+                body["protected_hybrid_seed"] = serde_json::json!(seed)
+            });
+            assert!(DeviceIdentity::load(&path).is_err(), "seed {seed:?}");
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_copied_identity_file_restores_the_same_device_and_keys() {
+        let path = scratch("restore");
+        let identity = DeviceIdentity::generate().expect("identity");
+        identity.save(&path).expect("saved");
+        let restored = path.with_file_name("restored.sesame");
+        std::fs::copy(&path, &restored).unwrap();
+        forget(&path).expect("forgotten");
+        assert!(DeviceIdentity::load(&path).is_err());
+        let loaded = DeviceIdentity::load(&restored).expect("restored");
+        assert_eq!(loaded.device_id, identity.device_id);
+        assert_eq!(loaded.package_public_key(), identity.package_public_key());
+        assert_eq!(loaded.signing_public_key(), identity.signing_public_key());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_device_that_forgot_its_keys_and_pairs_again_gets_a_new_device_and_a_new_hybrid_key() {
+        let path = scratch("forget");
+        let first = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        first.save(&path).expect("saved");
+        assert_eq!(
+            DeviceIdentity::load(&path)
+                .expect("loaded")
+                .package_public_key()
+                .len(),
+            X25519_KEY_BYTES
+        );
+        forget(&path).expect("forgotten");
+        forget(&path).expect("forgetting twice is fine");
+        assert!(!path.exists());
+        let second = DeviceIdentity::generate().expect("identity");
+        second.save(&path).expect("saved");
+        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        assert_ne!(loaded.device_id, first.device_id);
+        assert_ne!(loaded.signing_public_key(), first.signing_public_key());
+        assert_eq!(loaded.package_public_key().len(), PUBLIC_KEY_BYTES);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn setup_keeps_a_file_from_a_newer_build_and_replaces_one_it_cannot_read() {
+        let path = scratch("load-or-create");
+        let created = load_or_create(&path).expect("created");
+        assert!(created.has_hybrid_key());
+        assert_eq!(
+            load_or_create(&path).expect("loaded").device_id,
+            created.device_id
+        );
+
+        rewritten(&path, |body| body["version"] = serde_json::json!(3));
+        let before = std::fs::read(&path).unwrap();
+        assert!(load_or_create(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        std::fs::write(
+            &path,
+            br#"{"version":3,"keys":"a layout this build does not know"}"#,
+        )
+        .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            load_or_create(&path).err().as_deref(),
+            Some(WRITTEN_BY_NEWER_BUILD)
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        std::fs::write(&path, b"damaged").unwrap();
+        let replaced = load_or_create(&path).expect("replaced");
+        assert_ne!(replaced.device_id, created.device_id);
+        assert_eq!(
+            DeviceIdentity::load(&path).expect("loads").device_id,
+            replaced.device_id
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

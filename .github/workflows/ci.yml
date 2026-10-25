@@ -342,6 +342,7 @@ jobs:
         run: |
           echo "repository=$(jq -r .repository src-tauri/contracts/sync/server-pin.json)" >> "$GITHUB_OUTPUT"
           echo "commit=$(jq -r .commit src-tauri/contracts/sync/server-pin.json)" >> "$GITHUB_OUTPUT"
+          echo "older=$(jq -r .olderCommit src-tauri/contracts/sync/server-pin.json)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -350,30 +351,53 @@ jobs:
           path: sesame-server
           persist-credentials: false
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.sync-server-pin.outputs.repository }}
+          ref: ${{ steps.sync-server-pin.outputs.older }}
+          path: sesame-server-older
+          persist-credentials: false
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sesame-server/go.mod
           cache: false
 
       # The client and the sync engine talk to the real Go service built from
-      # the pinned commit. The step fails unless exactly one test ran and passed.
+      # the pinned commit, and a second service built from an older commit that
+      # does not accept the hybrid device key. Each run fails unless exactly one
+      # test ran and passed.
       - name: Prove Sync round trips against the real server
         run: |
           set -euo pipefail
+          mkdir -p sesame-server-older/cmd/synctestserver
+          cp sesame-server/cmd/synctestserver/main.go sesame-server-older/cmd/synctestserver/main.go
           (cd sesame-server && go build -tags synctestserver -o "$RUNNER_TEMP/synctestserver" ./cmd/synctestserver)
+          (cd sesame-server-older && go build -tags synctestserver -o "$RUNNER_TEMP/synctestserver-older" ./cmd/synctestserver)
           "$RUNNER_TEMP/synctestserver" > "$RUNNER_TEMP/synctestserver.out" &
           server=$!
-          trap 'kill "$server" 2>/dev/null || true' EXIT
+          "$RUNNER_TEMP/synctestserver-older" > "$RUNNER_TEMP/synctestserver-older.out" &
+          older=$!
+          trap 'kill "$server" "$older" 2>/dev/null || true' EXIT
           for _ in $(seq 1 50); do
-            grep -q '^KEY=' "$RUNNER_TEMP/synctestserver.out" && break
+            grep -q '^KEY=' "$RUNNER_TEMP/synctestserver.out" && grep -q '^KEY=' "$RUNNER_TEMP/synctestserver-older.out" && break
             sleep 0.2
           done
           export SESAME_SYNC_E2E_URL="$(sed -n 's/^URL=//p' "$RUNNER_TEMP/synctestserver.out")"
           export SESAME_SYNC_E2E_KEY="$(sed -n 's/^KEY=//p' "$RUNNER_TEMP/synctestserver.out")"
+          export SESAME_SYNC_E2E_OLD_URL="$(sed -n 's/^URL=//p' "$RUNNER_TEMP/synctestserver-older.out")"
+          export SESAME_SYNC_E2E_OLD_KEY="$(sed -n 's/^KEY=//p' "$RUNNER_TEMP/synctestserver-older.out")"
           test -n "$SESAME_SYNC_E2E_URL" && test -n "$SESAME_SYNC_E2E_KEY"
+          test -n "$SESAME_SYNC_E2E_OLD_URL" && test -n "$SESAME_SYNC_E2E_OLD_KEY"
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
             the_rust_client_and_engine_round_trip_against_the_real_service -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e.out"
           grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e.out"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
+            a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-mixed.out"
+          grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-mixed.out"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
+            a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-older.out"
+          grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-older.out"
 
   linux-bundles:
     needs: [lint, typecheck]

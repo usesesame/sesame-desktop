@@ -13,7 +13,7 @@ use super::sync::{
     save_state, this_identity, vault_id_of,
 };
 use super::sync_adopt::{finish_adoption, verify_master_password, SyncAdoptResult};
-use crate::sync::client::{SyncClient, SyncError};
+use crate::sync::client::{PairingRecord, SyncClient, SyncError};
 use crate::sync::engine::{
     add_entry, floor_for, seal_label, verify_join, verify_server_view, JoinCheck, NewDevice,
     ServerView,
@@ -108,7 +108,7 @@ pub async fn sync_cancel_pairing() -> Result<(), String> {
 
 pub(crate) const CLASSICAL_KEY_REFUSAL: &str = "This device only supports the older key exchange, and this vault already uses the newer one. Update Sesame on the new device, or allow the older key exchange and try again.";
 
-fn refuse_classical_downgrade<'a>(
+pub(crate) fn refuse_classical_downgrade<'a>(
     offered_package_key: &str,
     member_package_keys: impl Iterator<Item = &'a str>,
     allow_classical: bool,
@@ -126,6 +126,13 @@ fn refuse_classical_downgrade<'a>(
         return Err(CLASSICAL_KEY_REFUSAL.to_string());
     }
     Ok(())
+}
+
+fn newcomer_matches_offer(newcomer: &NewDeviceIdentity, offered: &PairingRecord) -> bool {
+    newcomer.device_id == offered.device_id
+        && newcomer.signing_key == offered.signing_key
+        && newcomer.package_key
+            == crate::sync::pairing::package_key_commitment(&offered.package_key)
 }
 
 #[tauri::command]
@@ -206,11 +213,7 @@ async fn approve(
     let (answered, new_ad) = pake::answer(&code, &offer, &ad)?;
     let newcomer =
         NewDeviceIdentity::decode(&new_ad).ok_or("The pairing message could not be read.")?;
-    if newcomer.device_id != offered.device_id
-        || newcomer.signing_key != offered.signing_key
-        || newcomer.package_key
-            != crate::sync::pairing::package_key_commitment(&offered.package_key)
-    {
+    if !newcomer_matches_offer(&newcomer, &offered) {
         let _ = client.cancel_pairing(&identity, &offered.device_id).await;
         return Err(
             "The device and the service disagree about the new device's keys. Pairing stopped."
@@ -1002,6 +1005,85 @@ mod downgrade_tests {
         assert!(
             refuse_classical_downgrade(&key(32), members.iter().map(String::as_str), false).is_ok()
         );
+    }
+
+    fn offer(package_key: &str) -> PairingRecord {
+        PairingRecord {
+            device_id: "deviceBBBBBBBBBBBB01".to_string(),
+            signing_key: key(32),
+            package_key: package_key.to_string(),
+            state: "offered".to_string(),
+            offer: String::new(),
+            confirm: None,
+        }
+    }
+
+    fn advertisement(package_key: &str) -> NewDeviceIdentity {
+        NewDeviceIdentity {
+            device_id: "deviceBBBBBBBBBBBB01".to_string(),
+            signing_key: key(32),
+            package_key: crate::sync::pairing::package_key_commitment(package_key),
+            label: "Phone".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_key_the_service_offers_must_be_the_key_the_new_device_committed_to() {
+        let hybrid = URL_SAFE_NO_PAD.encode(vec![5u8; 1216]);
+        let other_hybrid = URL_SAFE_NO_PAD.encode(vec![6u8; 1216]);
+        let truncated = URL_SAFE_NO_PAD.encode(vec![5u8; 1215]);
+        let classical = key(32);
+
+        assert!(newcomer_matches_offer(
+            &advertisement(&hybrid),
+            &offer(&hybrid)
+        ));
+        assert!(newcomer_matches_offer(
+            &advertisement(&classical),
+            &offer(&classical)
+        ));
+        for swapped in [&other_hybrid, &truncated, &classical] {
+            assert!(!newcomer_matches_offer(
+                &advertisement(&hybrid),
+                &offer(swapped)
+            ));
+        }
+        assert!(!newcomer_matches_offer(
+            &advertisement(&classical),
+            &offer(&hybrid)
+        ));
+
+        let mut other_device = offer(&hybrid);
+        other_device.device_id = "deviceCCCCCCCCCCCC01".to_string();
+        assert!(!newcomer_matches_offer(
+            &advertisement(&hybrid),
+            &other_device
+        ));
+        let mut other_signer = offer(&hybrid);
+        other_signer.signing_key = key(33);
+        assert!(!newcomer_matches_offer(
+            &advertisement(&hybrid),
+            &other_signer
+        ));
+    }
+
+    #[test]
+    fn a_key_of_an_unknown_length_is_not_taken_for_a_classical_downgrade() {
+        let members = [key(1216)];
+        for length in [0, 31, 33, 1215, 1217] {
+            assert!(refuse_classical_downgrade(
+                &key(length),
+                members.iter().map(String::as_str),
+                false
+            )
+            .is_ok());
+        }
+        assert!(refuse_classical_downgrade(
+            "not base64!",
+            members.iter().map(String::as_str),
+            false
+        )
+        .is_ok());
     }
 
     #[test]
