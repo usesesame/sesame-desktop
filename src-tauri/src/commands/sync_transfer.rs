@@ -1020,6 +1020,168 @@ include!("sync_transfer_recovery.rs");
 include!("sync_transfer_coordinator.rs");
 
 #[cfg(test)]
+mod survivor_tests {
+    use super::*;
+    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::identity::DeviceIdentity;
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+
+    fn identity(hybrid: bool) -> DeviceIdentity {
+        let generated = DeviceIdentity::generate().expect("identity");
+        if hybrid {
+            generated
+        } else {
+            generated.without_hybrid_key()
+        }
+    }
+
+    fn mixed_vault(
+        creator: &DeviceIdentity,
+        joiners: &[&DeviceIdentity],
+    ) -> (DeviceList, crate::sync::devicelist::DeviceListEntry) {
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut entries = vec![create_entry(creator, VAULT, &label(creator))];
+        let mut list = DeviceList::verify(&entries).expect("list");
+        for joiner in joiners {
+            let entry = add_entry(
+                creator,
+                &list,
+                &NewDevice {
+                    device_id: &joiner.device_id,
+                    signing_key: &URL_SAFE_NO_PAD.encode(joiner.signing_public_key()),
+                    package_key: &URL_SAFE_NO_PAD.encode(joiner.package_public_key()),
+                },
+                &label(joiner),
+                0,
+            )
+            .expect("add");
+            list.extend(&entry).expect("extend");
+            entries.push(entry);
+        }
+        let removal =
+            remove_entry(creator, &list, &joiners[joiners.len() - 1].device_id).expect("removal");
+        (list, removal)
+    }
+
+    fn package_for<'a>(
+        packages: &'a [KeyPackageV3],
+        device: &DeviceIdentity,
+    ) -> Option<&'a KeyPackageV3> {
+        packages
+            .iter()
+            .find(|package| package.recipient_device_id == device.device_id)
+    }
+
+    #[test]
+    fn a_rekey_seals_the_suite_each_survivor_advertises_and_nothing_to_the_removed_device() {
+        let creator = identity(true);
+        let older = identity(false);
+        let newer = identity(true);
+        let removed = identity(true);
+        let (list, removal) = mixed_vault(&creator, &[&older, &newer, &removed]);
+        let new_key = [4u8; 32];
+        let excluded = [removed.device_id.as_str(), creator.device_id.as_str()];
+
+        let packages = survivor_packages(
+            &creator,
+            &list,
+            VAULT,
+            &new_key,
+            &excluded,
+            removal.epoch_after,
+            &removal.digest(),
+        )
+        .expect("packages");
+
+        assert_eq!(packages.len(), 2);
+        assert!(package_for(&packages, &removed).is_none());
+        assert!(package_for(&packages, &creator).is_none());
+        let sealed = |device: &DeviceIdentity| {
+            let package = package_for(&packages, device).expect("package");
+            assert_eq!(package.sender_device_id, creator.device_id);
+            assert_eq!(package.vault_epoch, removal.epoch_after);
+            assert_eq!(package.entry_digest, removal.digest());
+            assert!(package
+                .verify(&URL_SAFE_NO_PAD.encode(creator.signing_public_key()))
+                .is_ok());
+            URL_SAFE_NO_PAD.decode(&package.ciphertext).expect("bytes")
+        };
+
+        let for_older = sealed(&older);
+        let for_newer = sealed(&newer);
+        assert_eq!(
+            for_older.len(),
+            crate::sync::keys::X25519_KEY_BYTES
+                + crate::sync::keys::KEY_PACKAGE_NONCE_BYTES
+                + new_key.len()
+                + 16
+        );
+        assert_eq!(for_newer[0], crate::sync::keys::HYBRID_PACKAGE_VERSION);
+        assert!(for_newer.len() > for_older.len());
+
+        assert_eq!(
+            older
+                .open_key_package(&for_older, VAULT, removal.epoch_after)
+                .expect("older opens"),
+            new_key
+        );
+        assert_eq!(
+            newer
+                .open_key_package(&for_newer, VAULT, removal.epoch_after)
+                .expect("newer opens"),
+            new_key
+        );
+        assert!(older
+            .open_key_package(&for_newer, VAULT, removal.epoch_after)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_older, VAULT, removal.epoch_after)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_newer, VAULT, removal.epoch_after + 1)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_newer, "vaultBBBBBBBBBBBB02", removal.epoch_after)
+            .is_err());
+        assert!(removed
+            .open_key_package(&for_newer, VAULT, removal.epoch_after)
+            .is_err());
+    }
+
+    #[test]
+    fn a_rekey_to_a_vault_of_older_devices_seals_only_the_older_suite() {
+        let creator = identity(false);
+        let first = identity(false);
+        let removed = identity(false);
+        let (list, removal) = mixed_vault(&creator, &[&first, &removed]);
+        let packages = survivor_packages(
+            &creator,
+            &list,
+            VAULT,
+            &[4u8; 32],
+            &[removed.device_id.as_str(), creator.device_id.as_str()],
+            removal.epoch_after,
+            &removal.digest(),
+        )
+        .expect("packages");
+        assert_eq!(packages.len(), 1);
+        let bytes = URL_SAFE_NO_PAD
+            .decode(&packages[0].ciphertext)
+            .expect("bytes");
+        assert!(bytes.len() < 512);
+        assert_eq!(
+            first
+                .open_key_package(&bytes, VAULT, removal.epoch_after)
+                .expect("opens"),
+            [4u8; 32]
+        );
+    }
+}
+
+#[cfg(test)]
 mod key_change_tests {
     use super::*;
     use crate::sync::client::SyncError;

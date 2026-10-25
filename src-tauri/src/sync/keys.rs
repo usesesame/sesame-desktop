@@ -405,6 +405,73 @@ mod hybrid_tests {
             seal_vault_key(&[7u8; 32], &classical_recipient.public_key(), VAULT).expect("seal");
         assert!(open_vault_key_hybrid(&classical, &recipient, VAULT, 1).is_err());
     }
+
+    #[test]
+    fn the_recipient_key_length_picks_the_suite_and_no_other_length_seals() {
+        let classical = EncryptionKeypair::generate().expect("keys");
+        let (hybrid, hybrid_public) = pair();
+        let key = [7u8; 32];
+
+        let older = seal_for_recipient(&key, &classical.public_key(), VAULT, 4).expect("seal");
+        assert_eq!(
+            older.len(),
+            X25519_KEY_BYTES + KEY_PACKAGE_NONCE_BYTES + 32 + 16
+        );
+        assert_eq!(
+            open_vault_key(&older, &classical, VAULT).expect("open"),
+            key
+        );
+
+        let newer = seal_for_recipient(&key, &hybrid_public, VAULT, 4).expect("seal");
+        assert_eq!(newer[0], HYBRID_PACKAGE_VERSION);
+        assert_eq!(
+            open_vault_key_hybrid(&newer, &hybrid, VAULT, 4).expect("open"),
+            key
+        );
+
+        for length in [
+            0,
+            1,
+            31,
+            33,
+            64,
+            super::super::xwing::PUBLIC_KEY_BYTES - 1,
+            super::super::xwing::PUBLIC_KEY_BYTES + 1,
+            MAX_KEY_PACKAGE_BYTES,
+        ] {
+            assert!(
+                seal_for_recipient(&key, &vec![7u8; length], VAULT, 4).is_err(),
+                "a recipient key of {length} bytes sealed"
+            );
+        }
+        let mut trailing = hybrid_public.to_vec();
+        trailing.push(0);
+        assert!(seal_for_recipient(&key, &trailing, VAULT, 4).is_err());
+        assert!(
+            seal_for_recipient(&key, &hybrid_public[..hybrid_public.len() - 1], VAULT, 4).is_err()
+        );
+        assert!(seal_for_recipient(&[], &hybrid_public, VAULT, 4).is_err());
+        assert!(seal_for_recipient(&[], &classical.public_key(), VAULT, 4).is_err());
+    }
+
+    #[test]
+    fn a_package_opened_with_the_other_suite_never_opens() {
+        let classical = EncryptionKeypair::generate().expect("keys");
+        let (hybrid, hybrid_public) = pair();
+        let older =
+            seal_for_recipient(&[7u8; 32], &classical.public_key(), VAULT, 4).expect("seal");
+        let newer = seal_for_recipient(&[7u8; 32], &hybrid_public, VAULT, 4).expect("seal");
+        assert!(open_vault_key(&newer, &classical, VAULT).is_err());
+        assert!(open_vault_key_hybrid(&older, &hybrid, VAULT, 4).is_err());
+
+        let mut relabelled = older.clone();
+        relabelled.insert(0, HYBRID_PACKAGE_VERSION);
+        assert!(open_vault_key_hybrid(&relabelled, &hybrid, VAULT, 4).is_err());
+        let mut stripped = newer[1..].to_vec();
+        assert!(open_vault_key(&stripped, &classical, VAULT).is_err());
+        stripped.clear();
+        assert!(open_vault_key(&stripped, &classical, VAULT).is_err());
+    }
 }
 
 #[cfg(test)]

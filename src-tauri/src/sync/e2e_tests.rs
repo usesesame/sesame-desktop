@@ -305,3 +305,210 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
         Err(super::client::SyncError::NotFound)
     ));
 }
+
+fn pairing_offer_of(identity: &DeviceIdentity, label: &str, code: &str) -> Offer {
+    let advertisement = NewDeviceIdentity {
+        device_id: identity.device_id.clone(),
+        signing_key: key_of(identity),
+        package_key: super::pairing::package_key_commitment(&package_key_of(identity)),
+        label: label.to_string(),
+    }
+    .encode()
+    .expect("ad");
+    Offer::begin(code, &advertisement).expect("offer")
+}
+
+#[test]
+#[ignore = "needs the older Go test server named by SESAME_SYNC_E2E_OLD_URL and SESAME_SYNC_E2E_OLD_KEY"]
+fn a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet() {
+    let url = std::env::var("SESAME_SYNC_E2E_OLD_URL").expect("url");
+    let instance = std::env::var("SESAME_SYNC_E2E_OLD_KEY").expect("key");
+    let hybrid = DeviceIdentity::generate().expect("identity");
+    let classical = DeviceIdentity::generate()
+        .expect("identity")
+        .without_hybrid_key();
+    let newcomer = DeviceIdentity::generate().expect("identity");
+    let older_newcomer = DeviceIdentity::generate()
+        .expect("identity")
+        .without_hybrid_key();
+    let vault_key = [9u8; 32];
+    let sealed = |identity: &DeviceIdentity| {
+        seal_label(&vault_key, VAULT, &identity.device_id, "Laptop").expect("label")
+    };
+
+    let hybrid_client = SyncClient::for_tests(&url, "token-a", &instance);
+    let refused =
+        run(hybrid_client.create_vault(&hybrid, &create_entry(&hybrid, VAULT, &sealed(&hybrid))));
+    assert!(
+        matches!(refused, Err(super::client::SyncError::ServerNeedsUpdate)),
+        "{refused:?}"
+    );
+    assert!(matches!(
+        run(hybrid_client.state()),
+        Err(super::client::SyncError::NotFound)
+    ));
+
+    let offer = pairing_offer_of(&newcomer, "Phone", "ABCDEFGHJK");
+    let refused = run(hybrid_client.begin_pairing(
+        &newcomer,
+        &newcomer.device_id,
+        &key_of(&newcomer),
+        &package_key_of(&newcomer),
+        &offer.message,
+    ));
+    assert!(
+        matches!(refused, Err(super::client::SyncError::ServerNeedsUpdate)),
+        "{refused:?}"
+    );
+    assert_eq!(
+        refused.expect_err("refused").to_string(),
+        super::client::SERVER_NEEDS_UPDATE
+    );
+
+    let classical_client = SyncClient::for_tests(&url, "token-b", &instance);
+    run(classical_client.create_vault(
+        &classical,
+        &create_entry(&classical, VAULT, &sealed(&classical)),
+    ))
+    .expect("the older service accepts a device with only the older key");
+    let offer = pairing_offer_of(&older_newcomer, "Tablet", "ABCDEFGHJK");
+    let older_newcomer_client = SyncClient::for_tests(&url, "token-c", &instance);
+    run(older_newcomer_client.begin_pairing(
+        &older_newcomer,
+        &older_newcomer.device_id,
+        &key_of(&older_newcomer),
+        &package_key_of(&older_newcomer),
+        &offer.message,
+    ))
+    .expect("the older service accepts an offer with only the older key");
+}
+
+#[test]
+#[ignore = "needs the Go test server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY"]
+fn a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it() {
+    let url = std::env::var("SESAME_SYNC_E2E_URL").expect("url");
+    let instance = std::env::var("SESAME_SYNC_E2E_KEY").expect("key");
+    let laptop = DeviceIdentity::generate().expect("identity");
+    let tablet = DeviceIdentity::generate()
+        .expect("identity")
+        .without_hybrid_key();
+    let laptop_client = SyncClient::for_tests(&url, "token-a", &instance);
+    let tablet_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let vault_key = [9u8; 32];
+
+    let create = create_entry(
+        &laptop,
+        VAULT,
+        &seal_label(&vault_key, VAULT, &laptop.device_id, "Laptop").expect("label"),
+    );
+    run(laptop_client.create_vault(&laptop, &create)).expect("create vault");
+    let list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
+    let plan = plan_header(&laptop.device_id, &list, None).expect("plan");
+    let ciphertext = vec![5u8; 128];
+    let first = build_header(&laptop, &plan, &[1u8; 24], &ciphertext);
+    run(laptop_client.upload(&laptop, &first, &ciphertext)).expect("upload");
+
+    let code = pake::generate_code().expect("code");
+    let offer = pairing_offer_of(&tablet, "Tablet", &code);
+    run(tablet_client.begin_pairing(
+        &tablet,
+        &tablet.device_id,
+        &key_of(&tablet),
+        &package_key_of(&tablet),
+        &offer.message,
+    ))
+    .expect("begin pairing");
+    let view = run(laptop_client.devices()).expect("devices");
+    let offered = view
+        .pairings
+        .iter()
+        .find(|pairing| pairing.state == "offered")
+        .expect("offered pairing");
+    assert_eq!(
+        URL_SAFE_NO_PAD
+            .decode(&offered.package_key)
+            .expect("key")
+            .len(),
+        super::keys::X25519_KEY_BYTES
+    );
+
+    let approver_ad = ApproverIdentity {
+        device_id: laptop.device_id.clone(),
+        signing_key: key_of(&laptop),
+        vault_id: VAULT.to_string(),
+        head_digest: list.head_digest().to_string(),
+    }
+    .encode()
+    .expect("ad");
+    let received = URL_SAFE_NO_PAD.decode(&offered.offer).expect("offer bytes");
+    let (answered, _) = pake::answer(&code, &received, &approver_ad).expect("answer");
+    run(laptop_client.answer_pairing(&laptop, &offered.device_id, &answered.message))
+        .expect("answer pairing");
+    let status = run(tablet_client.pairing_status()).expect("status");
+    let answer = URL_SAFE_NO_PAD
+        .decode(status.answer.expect("answer"))
+        .expect("answer bytes");
+    let completed = offer.finish(&answer).expect("the codes match");
+    run(tablet_client.confirm_pairing(&tablet, &completed.confirmation)).expect("confirm");
+
+    let members = list
+        .current()
+        .into_iter()
+        .map(|member| member.package_key.clone())
+        .collect::<Vec<_>>();
+    let refused = crate::commands::sync_pairing::refuse_classical_downgrade(
+        &offered.package_key,
+        members.iter().map(String::as_str),
+        false,
+    );
+    assert_eq!(
+        refused,
+        Err(crate::commands::sync_pairing::CLASSICAL_KEY_REFUSAL.to_string())
+    );
+    crate::commands::sync_pairing::refuse_classical_downgrade(
+        &offered.package_key,
+        members.iter().map(String::as_str),
+        true,
+    )
+    .expect("the person allowed the older key exchange");
+
+    let recipient = URL_SAFE_NO_PAD.decode(&offered.package_key).expect("key");
+    let add = add_entry(
+        &laptop,
+        &list,
+        &NewDevice {
+            device_id: &tablet.device_id,
+            signing_key: &key_of(&tablet),
+            package_key: &package_key_of(&tablet),
+        },
+        &seal_label(&vault_key, VAULT, &tablet.device_id, "Tablet").expect("label"),
+        1,
+    )
+    .expect("add");
+    let sealed =
+        super::keys::seal_for_recipient(&vault_key, &recipient, VAULT, list.epoch()).expect("seal");
+    assert_eq!(
+        sealed.len(),
+        super::keys::X25519_KEY_BYTES + super::keys::KEY_PACKAGE_NONCE_BYTES + vault_key.len() + 16
+    );
+    let package = laptop.sign_key_package(KeyPackageV3 {
+        vault_id: VAULT.to_string(),
+        sender_device_id: laptop.device_id.clone(),
+        recipient_device_id: tablet.device_id.clone(),
+        vault_epoch: list.epoch(),
+        entry_digest: add.digest(),
+        ciphertext: URL_SAFE_NO_PAD.encode(&sealed),
+        signature: String::new(),
+    });
+    run(laptop_client.approve(&laptop, &add, &package)).expect("approve");
+
+    let received = run(tablet_client.key_package()).expect("key package");
+    let opened = tablet
+        .open_key_package(
+            &URL_SAFE_NO_PAD.decode(&received.ciphertext).expect("bytes"),
+            VAULT,
+            received.vault_epoch,
+        )
+        .expect("the older device opens its package through the real service");
+    assert_eq!(opened, vault_key);
+}
