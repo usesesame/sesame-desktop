@@ -100,11 +100,10 @@ test('a workflow that writes says so at the job that writes', () => {
 test('the Windows release build resolves the public keys without a signing key or OIDC identity', () => {
   const body = read('.github', 'workflows', 'release-early-access.yml')
   const build = jobBlock(body, 'build')
-  assert.match(
-    build,
-    /^\s+environment:\s*release-build\s*$/m,
-    'the release build takes the candidate public key from release-build and must carry no private key',
-  )
+  assert.doesNotMatch(build, /^\s+environment:/m, 'the release build compiles the app and must run outside every key environment')
+  for (const key of ['SESAME_CAPABILITY_PUBLIC_KEY', 'SESAME_UPDATER_PUBLIC_KEY', 'SESAME_RELEASE_CANDIDATE_PUBLIC_KEY']) {
+    assert.match(build, new RegExp(`\\$\\{\\{ vars\\.${key} \\}\\}`), `the release build reads ${key} from a repository variable`)
+  }
   assert.doesNotMatch(build, /id-token/, 'the release build must not be able to mint an OIDC token')
   for (const secret of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'SESAME_RELEASE_CANDIDATE_SIGNING_KEY']) {
     assert.doesNotMatch(build, new RegExp(secret), `${secret} must not be available to the release build`)
@@ -239,6 +238,35 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
   assert.match(body, /vault/i, 'the policy is not scoped to this product')
 })
 
+
+const releaseWorkflows = ['release-early-access.yml', 'release-linux-early-access.yml']
+const privateSigningSecret = /secrets\.(?:SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY|TAURI_SIGNING_PRIVATE_KEY_PASSWORD)\s*\}\}/
+const jobNames = (body) => [...body.matchAll(/^ {2}([a-z0-9_-]+):$/gm)].map(([, name]) => name)
+
+test('release jobs restore no cache that another run could have written', () => {
+  for (const workflow of releaseWorkflows) {
+    const body = read('.github', 'workflows', workflow)
+    assert.doesNotMatch(body, /uses:\s*Swatinem\/rust-cache@/, `${workflow} restores a Rust cache written by another run`)
+    assert.doesNotMatch(body, /^\s+cache:/m, `${workflow} restores a package cache written by another run`)
+  }
+})
+
+test('release workflows read public keys from variables and open release-build only to sign', () => {
+  for (const workflow of releaseWorkflows) {
+    const body = read('.github', 'workflows', workflow)
+    assert.doesNotMatch(body, /secrets\.[A-Z_]*PUBLIC_KEY/, `${workflow} reads a public key from a secret, which puts the job in a secret environment for no reason`)
+    for (const name of jobNames(body)) {
+      const job = jobBlock(body, name)
+      const signs = privateSigningSecret.test(job)
+      const opensSigning = /^\s+environment:\s*release-build\s*$/m.test(job)
+      const problem = signs ? 'reads a signing key outside release-build' : 'opens release-build without signing anything'
+      assert.equal(opensSigning, signs, `${workflow} ${name} ${problem}`)
+      if (/^\s+environment:\s*release-publish\s*$/m.test(job)) {
+        assert.doesNotMatch(job, privateSigningSecret, `${workflow} ${name} publishes and must not read a signing key`)
+      }
+    }
+  }
+})
 
 test('private signing jobs cannot compile application code or stage sidecars', () => {
   for (const workflow of workflows) {

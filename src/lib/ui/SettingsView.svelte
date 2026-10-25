@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { describeFreshness } from '../update-freshness-text'
   import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
@@ -89,6 +90,7 @@
   export let onRefreshService: () => void
   export let serviceConnectionAvailable = true
   export let desktopUpdate: DesktopUpdateStatus = { available: false }
+  $: freshnessNote = describeFreshness(desktopUpdate)
   export let updateWorking = false
   export let updateProgress: DesktopUpdateProgress | null = null
   export let onCheckForUpdate: () => void
@@ -229,7 +231,7 @@
               <div class="theme-toggle" role="group" aria-label="Theme" use:slidingSelection><button type="button" class:active={theme === 'light'} aria-pressed={theme === 'light'} aria-label="Light" on:click={() => onSetTheme('light')}><Icon name="sun" size={15} /></button><button type="button" class:active={theme === 'auto'} aria-pressed={theme === 'auto'} aria-label="System" on:click={() => onSetTheme('auto')}><Icon name="monitor" size={15} /></button><button type="button" class:active={theme === 'dark'} aria-pressed={theme === 'dark'} aria-label="Dark" on:click={() => onSetTheme('dark')}><Icon name="moon" size={15} /></button></div>
             </article>
             <article>
-              <div class="setting-copy"><strong>Website icons</strong><p>Download icons only as they come into view, then reuse Sesame's local copy for up to 30 days. The first request still reveals the saved domain to that site. {websiteIconCacheLabel}</p></div>
+              <div class="setting-copy"><strong>Website icons</strong><p>Download icons only as they come into view, then reuse Sesame's local copy for up to 30 days. The first request still reveals the saved domain to that site. Sesame accepts only ICO, PNG and JPEG icons, and the web engine decodes the icon a website sends. {websiteIconCacheLabel}</p></div>
               <div class="website-icon-actions"><button type="button" class="text-button" disabled={websiteIconCacheWorking || websiteIconCacheEntryCount === 0} on:click={onClearWebsiteIconCache}>Clear cache</button><button type="button" class="switch" class:active={siteIconsEnabled} role="switch" aria-checked={siteIconsEnabled} aria-label="Website icons" disabled={siteIconsWorking} on:click={() => onSetSiteIconsEnabled(!siteIconsEnabled)}><span></span></button></div>
             </article>
           </div>
@@ -255,7 +257,7 @@
             {/if}
             <article>
               {#if $platformCapabilities.desktopUpdates}
-                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : 'Check the configured signed release feed. No Sesame account is required.'}</p></div>
+                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : `Check the configured signed release feed. No Sesame account is required.${freshnessNote ? ` ${freshnessNote}` : ''}`}</p></div>
                 {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing…' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking…' : 'Check now'}</button>{/if}
               {:else}
                 <div class="setting-copy"><strong>Desktop updates</strong><p>Sesame does not update itself on this system. You are running {$appVersion ? `version ${$appVersion}` : 'this build'}. Update it the way you installed it to get security fixes.</p></div>

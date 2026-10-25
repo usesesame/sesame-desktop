@@ -1,8 +1,9 @@
 use super::devicelist::DeviceListEntry;
 use super::fuzz_entry::{device_list, envelope, key_package, pairing_message};
 use super::header::Header;
-use super::keys::{seal_vault_key, EncryptionKeypair};
+use super::keys::{seal_vault_key, seal_vault_key_hybrid, EncryptionKeypair};
 use super::pake::Offer;
+use super::xwing::{SecretKey, SEED_BYTES};
 
 const ITERATIONS: usize = 4_000;
 
@@ -108,6 +109,26 @@ fn mutated_key_packages_never_panic_and_only_the_exact_package_opens() {
     let seed = serde_json::to_vec(&wrapper).expect("encode");
     for _ in 0..ITERATIONS {
         let _ = key_package(&mutate(&seed, &mut rng));
+    }
+}
+
+#[test]
+fn mutated_hybrid_key_packages_never_panic_and_only_the_exact_package_opens() {
+    let recipient = SecretKey::from_seed([7u8; SEED_BYTES]);
+    let package = seal_vault_key_hybrid(
+        &[9u8; 32],
+        &recipient.public_key(),
+        "vaultAAAAAAAAAAAA01",
+        1,
+    )
+    .expect("seal");
+    assert_eq!(key_package(&package), Some(vec![9u8; 32]));
+    let mut rng = Rng(0x2468_ace0_1357_9bdf);
+    for _ in 0..ITERATIONS {
+        let data = mutate(&package, &mut rng);
+        if key_package(&data).is_some() {
+            assert_eq!(data, package, "a changed hybrid package opened");
+        }
     }
 }
 

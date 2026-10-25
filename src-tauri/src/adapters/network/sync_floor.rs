@@ -65,7 +65,7 @@ fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
-async fn fetch_manifest(endpoint: url::Url) -> Option<serde_json::Value> {
+pub(crate) async fn fetch_manifest(endpoint: url::Url) -> Option<serde_json::Value> {
     ensure_crypto_provider();
     let secure = endpoint.scheme() == "https";
     let client = reqwest::Client::builder()

@@ -92,6 +92,7 @@ struct BrokenHeader {
 struct Fixture {
     chain: Vec<FixtureEntry>,
     removal_chain: Vec<FixtureEntry>,
+    key_chain: Vec<FixtureEntry>,
     headers: Vec<FixtureHeader>,
     request: FixtureRequest,
     receipt: FixtureReceipt,
@@ -133,7 +134,12 @@ fn entries(items: &[FixtureEntry]) -> Vec<DeviceListEntry> {
 #[test]
 fn every_device_list_entry_matches_the_go_bytes_and_digest() {
     let fixture = fixture();
-    for item in fixture.chain.iter().chain(fixture.removal_chain.iter()) {
+    for item in fixture
+        .chain
+        .iter()
+        .chain(fixture.removal_chain.iter())
+        .chain(fixture.key_chain.iter())
+    {
         assert_eq!(
             item.entry.signing_payload(),
             unhex(&item.signing_payload_hex)
@@ -418,4 +424,51 @@ fn the_wire_fixture_names_the_checkpoint_request_and_response() {
             .expect("parse the wire fixture");
     assert!(wire["requests"]["checkpoint"]["checkpoint"]["observedAt"].is_u64());
     assert!(wire["responses"]["checkpoints"]["checkpoints"][0]["acceptedAt"].is_string());
+}
+
+#[test]
+fn the_go_key_replacement_and_rotation_chain_verifies_and_rust_signs_the_same_entries() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    let fixture = fixture();
+    let list = DeviceList::verify(&entries(&fixture.key_chain)).expect("key chain");
+    assert_eq!((list.head(), list.epoch(), list.current().len()), (5, 2, 3));
+    let replaced = &fixture.key_chain[3].entry;
+    let desktop = list.member(&replaced.signer_device_id).expect("desktop");
+    assert_eq!(desktop.package_key, replaced.subject_package_key);
+    assert_eq!(
+        URL_SAFE_NO_PAD
+            .decode(&desktop.package_key)
+            .expect("key")
+            .len(),
+        crate::sync::xwing::PUBLIC_KEY_BYTES
+    );
+
+    let signed = |index: usize, template: DeviceListEntry| {
+        let key = key_for(&fixture, &template.signer_device_id);
+        let entry = DeviceListEntry {
+            signature: String::new(),
+            ..template
+        }
+        .sign(&key);
+        assert_eq!(entry, fixture.key_chain[index].entry);
+        assert_eq!(entry.digest(), fixture.key_chain[index].digest);
+    };
+    signed(
+        3,
+        DeviceListEntry {
+            index: 4,
+            previous_digest: fixture.key_chain[2].digest.clone(),
+            ..replaced.clone()
+        },
+    );
+    let rotation = &fixture.key_chain[4].entry;
+    signed(
+        4,
+        DeviceListEntry {
+            index: 5,
+            previous_digest: fixture.key_chain[3].digest.clone(),
+            ..rotation.clone()
+        },
+    );
 }
