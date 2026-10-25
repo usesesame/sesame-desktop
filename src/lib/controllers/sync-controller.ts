@@ -34,6 +34,7 @@ export interface SyncControllerState {
   coordinator: SyncCoordinatorView
   backups: SyncBackupView[]
   removalRecoveryKit: string
+  preparedRecoveryKit: string
   conflictThisDevice: SyncConflictSide
   conflictOtherDevice: SyncConflictSide
 }
@@ -61,6 +62,7 @@ export interface SyncDeviceView {
   state: string
   isThisDevice: boolean
   addedIndex: number
+  newerKey: boolean
 }
 
 interface SyncTransferResult {
@@ -129,6 +131,7 @@ const initialState: SyncControllerState = {
   },
   backups: [],
   removalRecoveryKit: '',
+  preparedRecoveryKit: '',
   conflictDetailsLoaded: false,
   conflictDetailsError: '',
   conflictThisDevice: emptySide,
@@ -486,24 +489,71 @@ export function createSyncController() {
         })
       }
     },
+    async prepareKeyChange(masterPassword: string) {
+      store.patch({ working: true, loadError: '' })
+      try {
+        const result = await invoke<{ recoveryKit: string }>('sync_prepare_key_change', {
+          masterPassword,
+        })
+        store.patch({ working: false, preparedRecoveryKit: result.recoveryKit })
+      } catch (error) {
+        store.patch({
+          working: false,
+          preparedRecoveryKit: '',
+          loadError: readableMessage(error, 'Sesame could not prepare the new recovery kit.'),
+        })
+      }
+    },
+    async cancelKeyChange() {
+      store.patch({ preparedRecoveryKit: '' })
+      await invoke('sync_cancel_key_change').catch(() => undefined)
+    },
     async removeDevice(deviceId: string, masterPassword: string) {
       store.patch({ working: true, loadError: '' })
       try {
-        const result = await invoke<{ recoveryKit: string }>('sync_remove_device', {
-          deviceId,
-          masterPassword,
-        })
+        await invoke('sync_remove_device', { deviceId, masterPassword })
         store.patch({
           working: false,
-          removalRecoveryKit: result.recoveryKit,
+          preparedRecoveryKit: '',
           lastTransfer: 'Device removed. Your vault now uses a new key.',
         })
         await refresh()
       } catch (error) {
         store.patch({
           working: false,
-          loadError:
-            readableMessage(error, 'Sesame could not remove that device.'),
+          preparedRecoveryKit: '',
+          loadError: readableMessage(error, 'Sesame could not remove that device.'),
+        })
+      }
+    },
+    async upgradeDeviceKey() {
+      store.patch({ working: true, loadError: '' })
+      try {
+        await invoke('sync_upgrade_device_key')
+        store.patch({ working: false, lastTransfer: 'This device now has the newer key.' })
+        await refresh()
+      } catch (error) {
+        store.patch({
+          working: false,
+          loadError: readableMessage(error, 'Sesame could not upgrade the key on this device.'),
+        })
+      }
+    },
+    async rotateVaultKey(masterPassword: string) {
+      store.patch({ working: true, loadError: '' })
+      try {
+        await invoke('sync_rotate_vault_key', { masterPassword })
+        store.patch({
+          working: false,
+          preparedRecoveryKit: '',
+          lastTransfer: 'Your vault now uses a new key.',
+        })
+        await refresh()
+      } catch (error) {
+        store.patch({
+          working: false,
+          preparedRecoveryKit: '',
+          loadError: readableMessage(error, 'Sesame could not change the vault key.'),
         })
       }
     },

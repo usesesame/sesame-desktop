@@ -396,6 +396,9 @@ jobs:
             a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-mixed.out"
           grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-mixed.out"
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
+            devices_with_the_older_key_replace_it_and_the_vault_key_rotates_through_the_real_service -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-keys.out"
+          grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-keys.out"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib \
             a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-older.out"
           grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-older.out"
 

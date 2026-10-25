@@ -101,6 +101,13 @@ impl DeviceIdentity {
         self.hybrid.is_some()
     }
 
+    pub fn with_hybrid_key(mut self) -> VaultResult<Self> {
+        if self.hybrid.is_none() {
+            self.hybrid = Some(HybridSecretKey::generate()?);
+        }
+        Ok(self)
+    }
+
     #[cfg(test)]
     pub fn without_hybrid_key(mut self) -> Self {
         self.hybrid = None;
@@ -560,6 +567,45 @@ mod hybrid_tests {
         assert_eq!(
             DeviceIdentity::load(&path).expect("loads").device_id,
             replaced.device_id
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn an_older_identity_gains_a_hybrid_key_once_keeps_its_older_key_and_saves_as_version_two() {
+        let path = scratch("upgrade");
+        let older = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        let classical_public = older.package_public_key();
+        older.save(&path).expect("saved");
+        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        let upgraded = loaded.with_hybrid_key().expect("hybrid");
+        let hybrid_public = upgraded.package_public_key();
+        assert_eq!(hybrid_public.len(), PUBLIC_KEY_BYTES);
+        let again = upgraded.with_hybrid_key().expect("hybrid");
+        assert_eq!(again.package_public_key(), hybrid_public);
+        again.save(&path).expect("saved");
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(body["version"], 2);
+        let reloaded = DeviceIdentity::load(&path).expect("reloaded");
+        assert_eq!(reloaded.package_public_key(), hybrid_public);
+        assert_eq!(reloaded.device_id, older.device_id);
+        assert_eq!(reloaded.signing_public_key(), older.signing_public_key());
+
+        let sealed_before = seal_vault_key(
+            &[9u8; 32],
+            &classical_public.as_slice().try_into().unwrap(),
+            "vaultAAAAAAAAAAAA01",
+        )
+        .expect("sealed");
+        assert_eq!(
+            reloaded
+                .open_key_package(&sealed_before, "vaultAAAAAAAAAAAA01", 1)
+                .expect("a package sealed to the older key still opens"),
+            vec![9u8; 32]
         );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

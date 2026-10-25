@@ -281,7 +281,13 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
 
     let list = laptop_state.list().expect("list");
     let removal = remove_entry(&laptop, &list, &phone.device_id).expect("remove");
-    let journal = super::rekey_journal::Journal::new(&removal, list.head_digest(), &[4u8; 32], 1);
+    let journal = super::rekey_journal::Journal::new(
+        &removal,
+        list.head_digest(),
+        &[4u8; 32],
+        super::key_change::fictional_recovery(),
+        1,
+    );
     let served = |entries: Vec<super::devicelist::DeviceListEntry>| {
         DeviceList::verify(&entries).expect("the served list verifies")
     };
@@ -364,6 +370,19 @@ fn a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet() {
         refused.expect_err("refused").to_string(),
         super::client::SERVER_NEEDS_UPDATE
     );
+
+    let probe = DeviceIdentity::generate().expect("identity");
+    let entry = super::engine::key_entry(&probe, &DeviceList::default(), &package_key_of(&probe))
+        .expect("entry");
+    for refused in [
+        run(hybrid_client.upgrade_device_key(&probe, &entry)),
+        run(hybrid_client.rotate(&probe, &entry, &[])),
+    ] {
+        assert!(
+            matches!(refused, Err(super::client::SyncError::ServerNeedsUpdate)),
+            "{refused:?}"
+        );
+    }
 
     let classical_client = SyncClient::for_tests(&url, "token-b", &instance);
     run(classical_client.create_vault(
@@ -511,4 +530,215 @@ fn a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it() {
         )
         .expect("the older device opens its package through the real service");
     assert_eq!(opened, vault_key);
+    run(laptop_client.reset(&laptop, 1)).expect("reset");
+}
+
+struct Member<'a> {
+    identity: &'a DeviceIdentity,
+    client: &'a SyncClient,
+}
+
+fn admit(
+    approver: &Member<'_>,
+    newcomer: &Member<'_>,
+    list: &DeviceList,
+    floor: u64,
+    vault_key: &[u8; 32],
+) -> DeviceList {
+    let code = pake::generate_code().expect("code");
+    let offer = pairing_offer_of(newcomer.identity, "Device", &code);
+    run(newcomer.client.begin_pairing(
+        newcomer.identity,
+        &newcomer.identity.device_id,
+        &key_of(newcomer.identity),
+        &package_key_of(newcomer.identity),
+        &offer.message,
+    ))
+    .expect("begin pairing");
+    let view = run(approver.client.devices()).expect("devices");
+    let offered = view
+        .pairings
+        .iter()
+        .find(|pairing| pairing.state == "offered")
+        .expect("offered pairing");
+    let approver_ad = ApproverIdentity {
+        device_id: approver.identity.device_id.clone(),
+        signing_key: key_of(approver.identity),
+        vault_id: VAULT.to_string(),
+        head_digest: list.head_digest().to_string(),
+    }
+    .encode()
+    .expect("ad");
+    let received = URL_SAFE_NO_PAD.decode(&offered.offer).expect("offer bytes");
+    let (answered, _) = pake::answer(&code, &received, &approver_ad).expect("answer");
+    run(approver
+        .client
+        .answer_pairing(approver.identity, &offered.device_id, &answered.message))
+    .expect("answer pairing");
+    let status = run(newcomer.client.pairing_status()).expect("status");
+    let answer = URL_SAFE_NO_PAD
+        .decode(status.answer.expect("answer"))
+        .expect("answer bytes");
+    let completed = offer.finish(&answer).expect("the codes match");
+    run(newcomer
+        .client
+        .confirm_pairing(newcomer.identity, &completed.confirmation))
+    .expect("confirm");
+
+    let add = add_entry(
+        approver.identity,
+        list,
+        &NewDevice {
+            device_id: &newcomer.identity.device_id,
+            signing_key: &key_of(newcomer.identity),
+            package_key: &package_key_of(newcomer.identity),
+        },
+        &seal_label(vault_key, VAULT, &newcomer.identity.device_id, "Device").expect("label"),
+        floor,
+    )
+    .expect("add");
+    let sealed = super::keys::seal_for_recipient(
+        vault_key,
+        &newcomer.identity.package_public_key(),
+        VAULT,
+        list.epoch(),
+    )
+    .expect("seal");
+    let package = approver.identity.sign_key_package(KeyPackageV3 {
+        vault_id: VAULT.to_string(),
+        sender_device_id: approver.identity.device_id.clone(),
+        recipient_device_id: newcomer.identity.device_id.clone(),
+        vault_epoch: list.epoch(),
+        entry_digest: add.digest(),
+        ciphertext: URL_SAFE_NO_PAD.encode(&sealed),
+        signature: String::new(),
+    });
+    run(approver.client.approve(approver.identity, &add, &package)).expect("approve");
+    let received = run(newcomer.client.key_package()).expect("key package");
+    run(newcomer
+        .client
+        .activate(newcomer.identity, &received.digest()))
+    .expect("activate");
+    let mut next = list.clone();
+    next.extend(&add).expect("extend");
+    next
+}
+
+#[test]
+#[ignore = "needs the Go test server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY"]
+fn devices_with_the_older_key_replace_it_and_the_vault_key_rotates_through_the_real_service() {
+    let url = std::env::var("SESAME_SYNC_E2E_URL").expect("url");
+    let instance = std::env::var("SESAME_SYNC_E2E_KEY").expect("key");
+    let mut laptop = DeviceIdentity::generate()
+        .expect("identity")
+        .without_hybrid_key();
+    let mut tablet = DeviceIdentity::generate()
+        .expect("identity")
+        .without_hybrid_key();
+    let laptop_client = SyncClient::for_tests(&url, "token-a", &instance);
+    let tablet_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let vault_key = [9u8; 32];
+
+    let create = create_entry(
+        &laptop,
+        VAULT,
+        &seal_label(&vault_key, VAULT, &laptop.device_id, "Laptop").expect("label"),
+    );
+    run(laptop_client.create_vault(&laptop, &create)).expect("create vault");
+    let mut list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
+    let plan = plan_header(&laptop.device_id, &list, None).expect("plan");
+    let ciphertext = vec![5u8; 128];
+    let first = build_header(&laptop, &plan, &[1u8; 24], &ciphertext);
+    run(laptop_client.upload(&laptop, &first, &ciphertext)).expect("upload");
+    list = admit(
+        &Member {
+            identity: &laptop,
+            client: &laptop_client,
+        },
+        &Member {
+            identity: &tablet,
+            client: &tablet_client,
+        },
+        &list,
+        1,
+        &vault_key,
+    );
+
+    let hybrid_len = super::xwing::PUBLIC_KEY_BYTES;
+    let key_of_member = |list: &DeviceList, id: &str| {
+        URL_SAFE_NO_PAD
+            .decode(&list.member(id).expect("member").package_key)
+            .expect("key")
+            .len()
+    };
+    assert_eq!(key_of_member(&list, &laptop.device_id), 32);
+
+    laptop = laptop.with_hybrid_key().expect("hybrid");
+    let replacement =
+        super::engine::key_entry(&laptop, &list, &package_key_of(&laptop)).expect("entry");
+    run(laptop_client.upgrade_device_key(&laptop, &replacement)).expect("laptop upgrades");
+    let again = super::engine::key_entry(&laptop, &list, &package_key_of(&laptop)).expect("entry");
+    assert!(
+        run(laptop_client.upgrade_device_key(&laptop, &again)).is_err(),
+        "the same entry cannot be posted twice"
+    );
+    list.extend(&replacement).expect("extend");
+
+    tablet = tablet.with_hybrid_key().expect("hybrid");
+    let replacement =
+        super::engine::key_entry(&tablet, &list, &package_key_of(&tablet)).expect("entry");
+    run(tablet_client.upgrade_device_key(&tablet, &replacement)).expect("tablet upgrades");
+    list.extend(&replacement).expect("extend");
+
+    let served = DeviceList::verify(&run(laptop_client.device_list(0)).expect("served list"))
+        .expect("the served list verifies");
+    assert_eq!(served.head_digest(), list.head_digest());
+    assert_eq!(key_of_member(&served, &laptop.device_id), hybrid_len);
+    assert_eq!(key_of_member(&served, &tablet.device_id), hybrid_len);
+    assert_eq!(served.epoch(), 1);
+
+    let rotation = super::engine::rotate_entry(&laptop, &list).expect("rotation");
+    let new_key = [4u8; 32];
+    let sealed = super::keys::seal_for_recipient(
+        &new_key,
+        &tablet.package_public_key(),
+        VAULT,
+        rotation.epoch_after,
+    )
+    .expect("seal");
+    assert_eq!(sealed[0], super::keys::HYBRID_PACKAGE_VERSION);
+    let package = laptop.sign_key_package(KeyPackageV3 {
+        vault_id: VAULT.to_string(),
+        sender_device_id: laptop.device_id.clone(),
+        recipient_device_id: tablet.device_id.clone(),
+        vault_epoch: rotation.epoch_after,
+        entry_digest: rotation.digest(),
+        ciphertext: URL_SAFE_NO_PAD.encode(&sealed),
+        signature: String::new(),
+    });
+    run(laptop_client.rotate(&laptop, &rotation, std::slice::from_ref(&package))).expect("rotate");
+
+    let entries = run(tablet_client.device_list(0)).expect("served list");
+    let after = DeviceList::verify(&entries).expect("the rotated list verifies");
+    assert_eq!((after.epoch(), after.current().len()), (2, 2));
+    let delivered = run(tablet_client.key_package()).expect("key package");
+    super::engine::verify_package_for_removal(&entries, &delivered)
+        .expect("a rotation counts as the entry that made this key");
+    delivered
+        .verify(&key_of(&laptop))
+        .expect("the package is signed by the rotating device");
+    let opened = tablet
+        .open_key_package(
+            &URL_SAFE_NO_PAD
+                .decode(&delivered.ciphertext)
+                .expect("bytes"),
+            VAULT,
+            delivered.vault_epoch,
+        )
+        .expect("the other device opens the new key");
+    assert_eq!(opened, new_key);
+    run(tablet_client.activate(&tablet, &delivered.digest())).expect("activate");
+    let state = run(tablet_client.state()).expect("state");
+    assert_eq!((state.vault_epoch, state.activated_epoch), (2, 2));
+    run(laptop_client.reset(&laptop, 2)).expect("reset");
 }

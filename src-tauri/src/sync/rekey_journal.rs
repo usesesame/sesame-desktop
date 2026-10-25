@@ -7,6 +7,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::devicelist::{DeviceList, DeviceListEntry};
 use super::identity::{ensure_device_protection, protect_for_device, unprotect_for_device};
+use super::key_change::PreparedRecovery;
 use crate::vault::VaultResult;
 
 pub const JOURNAL_FILE_NAME: &str = "sync-rekey-journal.sesame";
@@ -24,6 +25,8 @@ struct StoredJournal {
     epoch_after: u64,
     created_at: u64,
     protected_key: String,
+    #[serde(default)]
+    recovery: Option<PreparedRecovery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +42,7 @@ pub struct Journal {
     pub base_head_digest: String,
     pub epoch_after: u64,
     pub created_at: u64,
+    pub recovery: Option<PreparedRecovery>,
     key: Zeroizing<[u8; 32]>,
 }
 
@@ -63,6 +67,7 @@ impl Journal {
         entry: &DeviceListEntry,
         base_head_digest: &str,
         key: &[u8; 32],
+        recovery: PreparedRecovery,
         created_at: u64,
     ) -> Self {
         Self {
@@ -72,6 +77,7 @@ impl Journal {
             base_head_digest: base_head_digest.to_string(),
             epoch_after: entry.epoch_after,
             created_at,
+            recovery: Some(recovery),
             key: Zeroizing::new(*key),
         }
     }
@@ -92,6 +98,7 @@ impl Journal {
             epoch_after: self.epoch_after,
             created_at: self.created_at,
             protected_key: URL_SAFE_NO_PAD.encode(&protected),
+            recovery: self.recovery.clone(),
         };
         protected.zeroize();
         let body = serde_json::to_vec(&stored)
@@ -132,6 +139,7 @@ impl Journal {
             base_head_digest: stored.base_head_digest,
             epoch_after: stored.epoch_after,
             created_at: stored.created_at,
+            recovery: stored.recovery,
             key: Zeroizing::new(key),
         })
     }
@@ -153,6 +161,7 @@ mod tests {
     use super::*;
     use crate::sync::engine::{add_entry, create_entry, remove_entry, seal_label, NewDevice};
     use crate::sync::identity::DeviceIdentity;
+    use crate::sync::key_change::fictional_recovery;
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
 
@@ -223,9 +232,15 @@ mod tests {
     fn saved(world: &World, name: &str) -> (PathBuf, DeviceListEntry) {
         let entry = removal(world, &world.base, &world.second);
         let path = scratch(name);
-        Journal::new(&entry, world.base.head_digest(), &[4u8; 32], 1_700_000_000)
-            .save(&path)
-            .expect("saved");
+        Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1_700_000_000,
+        )
+        .save(&path)
+        .expect("saved");
         (path, entry)
     }
 
@@ -241,6 +256,22 @@ mod tests {
         assert_eq!(loaded.entry_digest, entry.digest());
         assert_eq!(loaded.epoch_after, entry.epoch_after);
         assert_eq!(loaded.base_head_digest, world.base.head_digest());
+        let recovery = loaded.recovery.as_ref().expect("recovery");
+        assert_eq!(recovery.wrap.nonce, "fictional-nonce");
+        assert_eq!(recovery.kdf.salt, "fictional-salt");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_journal_from_a_build_that_kept_no_recovery_wrap_still_loads_without_one() {
+        let world = world();
+        let (path, _) = saved(&world, "no-recovery");
+        rewritten(&path, |body| {
+            body.as_object_mut().unwrap().remove("recovery");
+        });
+        let loaded = Journal::load(&path).expect("loaded");
+        assert!(loaded.recovery.is_none());
+        assert_eq!(loaded.key(), [4u8; 32]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -248,9 +279,15 @@ mod tests {
     fn saving_again_replaces_the_journal_and_forgetting_twice_is_fine() {
         let world = world();
         let (path, entry) = saved(&world, "replace");
-        Journal::new(&entry, world.base.head_digest(), &[5u8; 32], 1)
-            .save(&path)
-            .expect("saved");
+        Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[5u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
         assert_eq!(Journal::load(&path).expect("loaded").key(), [5u8; 32]);
         forget(&path).expect("forgotten");
         forget(&path).expect("forgetting twice is fine");
@@ -296,7 +333,13 @@ mod tests {
     fn a_removal_that_reached_the_list_is_adopted() {
         let world = world();
         let entry = removal(&world, &world.base, &world.second);
-        let journal = Journal::new(&entry, world.base.head_digest(), &[4u8; 32], 1);
+        let journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
         let committed = extended(&world.base, &entry);
         assert_eq!(journal.outcome(&committed), Outcome::Adopt);
     }
@@ -305,7 +348,13 @@ mod tests {
     fn a_removal_that_never_reached_the_list_is_discarded() {
         let world = world();
         let entry = removal(&world, &world.base, &world.second);
-        let journal = Journal::new(&entry, world.base.head_digest(), &[4u8; 32], 1);
+        let journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
         assert_eq!(journal.outcome(&world.base), Outcome::Discard);
     }
 
@@ -313,7 +362,13 @@ mod tests {
     fn another_removal_at_the_same_place_or_a_later_key_change_is_discarded() {
         let world = world();
         let ours = removal(&world, &world.base, &world.second);
-        let journal = Journal::new(&ours, world.base.head_digest(), &[4u8; 32], 1);
+        let journal = Journal::new(
+            &ours,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
 
         let theirs = removal(&world, &world.base, &world.first);
         assert_eq!(
@@ -331,7 +386,13 @@ mod tests {
     fn a_journal_for_another_vault_is_discarded() {
         let world = world();
         let entry = removal(&world, &world.base, &world.second);
-        let mut journal = Journal::new(&entry, world.base.head_digest(), &[4u8; 32], 1);
+        let mut journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
         journal.vault_id = "vaultBBBBBBBBBBBB02".to_string();
         assert_eq!(
             journal.outcome(&extended(&world.base, &entry)),

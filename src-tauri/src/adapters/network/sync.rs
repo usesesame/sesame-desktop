@@ -45,6 +45,13 @@ fn is_hybrid_package_key(encoded: &str) -> bool {
         .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES)
 }
 
+fn name_the_server_without_the_route(error: SyncError) -> SyncError {
+    match error {
+        SyncError::Rejected | SyncError::NotFound => SyncError::ServerNeedsUpdate,
+        other => other,
+    }
+}
+
 fn name_the_old_server(error: SyncError, package_key: &str) -> SyncError {
     match error {
         SyncError::Rejected if is_hybrid_package_key(package_key) => SyncError::ServerNeedsUpdate,
@@ -238,6 +245,11 @@ struct MessageBody<'a> {
 struct ApproveBody<'a> {
     entry: &'a DeviceListEntry,
     package: &'a KeyPackageV3,
+}
+
+#[derive(Serialize)]
+struct UpgradeKeyBody<'a> {
+    entry: &'a DeviceListEntry,
 }
 
 #[derive(Serialize)]
@@ -678,6 +690,41 @@ impl SyncClient {
         )
         .await
         .map(|_| ())
+    }
+
+    pub async fn upgrade_device_key(
+        &self,
+        identity: &DeviceIdentity,
+        entry: &DeviceListEntry,
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/devices/key",
+            Some(&UpgradeKeyBody { entry }),
+            false,
+        )
+        .await
+        .map(|_| ())
+        .map_err(name_the_server_without_the_route)
+    }
+
+    pub async fn rotate(
+        &self,
+        identity: &DeviceIdentity,
+        entry: &DeviceListEntry,
+        packages: &[KeyPackageV3],
+    ) -> SyncResult<()> {
+        self.write_raw(
+            identity,
+            reqwest::Method::POST,
+            "/v1/sync/devices/rotate",
+            Some(&RemoveBody { entry, packages }),
+            false,
+        )
+        .await
+        .map(|_| ())
+        .map_err(name_the_server_without_the_route)
     }
 
     pub async fn key_package(&self) -> SyncResult<KeyPackageV3> {
