@@ -25,7 +25,8 @@ struct StoredJournal {
     epoch_after: u64,
     created_at: u64,
     protected_key: String,
-    recovery: PreparedRecovery,
+    #[serde(default)]
+    recovery: Option<PreparedRecovery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +42,7 @@ pub struct Journal {
     pub base_head_digest: String,
     pub epoch_after: u64,
     pub created_at: u64,
-    pub recovery: PreparedRecovery,
+    pub recovery: Option<PreparedRecovery>,
     key: Zeroizing<[u8; 32]>,
 }
 
@@ -76,7 +77,7 @@ impl Journal {
             base_head_digest: base_head_digest.to_string(),
             epoch_after: entry.epoch_after,
             created_at,
-            recovery,
+            recovery: Some(recovery),
             key: Zeroizing::new(*key),
         }
     }
@@ -255,8 +256,22 @@ mod tests {
         assert_eq!(loaded.entry_digest, entry.digest());
         assert_eq!(loaded.epoch_after, entry.epoch_after);
         assert_eq!(loaded.base_head_digest, world.base.head_digest());
-        assert_eq!(loaded.recovery.wrap.nonce, "fictional-nonce");
-        assert_eq!(loaded.recovery.kdf.salt, "fictional-salt");
+        let recovery = loaded.recovery.as_ref().expect("recovery");
+        assert_eq!(recovery.wrap.nonce, "fictional-nonce");
+        assert_eq!(recovery.kdf.salt, "fictional-salt");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_journal_from_a_build_that_kept_no_recovery_wrap_still_loads_without_one() {
+        let world = world();
+        let (path, _) = saved(&world, "no-recovery");
+        rewritten(&path, |body| {
+            body.as_object_mut().unwrap().remove("recovery");
+        });
+        let loaded = Journal::load(&path).expect("loaded");
+        assert!(loaded.recovery.is_none());
+        assert_eq!(loaded.key(), [4u8; 32]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -308,12 +323,6 @@ mod tests {
             assert!(Journal::load(&path).is_err(), "{field}");
             let _ = std::fs::remove_dir_all(path.parent().unwrap());
         }
-        let (path, _) = saved(&world, "no-recovery");
-        rewritten(&path, |body| {
-            body.as_object_mut().unwrap().remove("recovery");
-        });
-        assert!(Journal::load(&path).is_err());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
         let (path, _) = saved(&world, "extra");
         rewritten(&path, |body| body["extra"] = serde_json::json!(true));
         assert!(Journal::load(&path).is_err());

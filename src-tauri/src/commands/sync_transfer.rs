@@ -476,19 +476,19 @@ async fn adopt_journal_key(
             .ok_or("Unlock Sesame before finishing the vault key change.")?;
         verify_master_password(unlocked, master_password).and_then(|()| {
             let payload = unlocked.open_payload()?.clone();
-            adopt_with(
+            let kit = adopt_with(
                 unlocked,
                 key,
                 payload,
                 master_password,
-                Some(journal.recovery.clone()),
+                journal.recovery.clone(),
             )?;
             state.advance_session_epoch();
-            Ok(())
+            Ok(kit)
         })
     };
     key.zeroize();
-    adopted?;
+    let recovery_kit = adopted?.unwrap_or_default();
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
     crate::commands::lifecycle::discard_pin_throttle_state(app, state);
@@ -498,9 +498,7 @@ async fn adopt_journal_key(
     next.activated_epoch = journal.epoch_after;
     save_state(app, &next)?;
     rekey_journal::forget(&journal_file(app)?)?;
-    Ok(SyncTakeKeyResult {
-        recovery_kit: String::new(),
-    })
+    Ok(SyncTakeKeyResult { recovery_kit })
 }
 
 fn survivor_packages(
