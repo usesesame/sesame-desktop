@@ -18,6 +18,7 @@ use crate::vault::VaultResult;
 pub const IDENTITY_FILE_NAME: &str = "sync-identity.sesame";
 const SIGNING_SEED_BYTES: usize = 32;
 const HYBRID_PACKAGE_MIN_BYTES: usize = 512;
+const WRITTEN_BY_NEWER_BUILD: &str = "These device keys were written by a newer Sesame.";
 /// 16 random bytes, 22 base64url characters; the server accepts 16 to 128.
 const OPAQUE_ID_BYTES: usize = 16;
 
@@ -199,7 +200,7 @@ impl DeviceIdentity {
         let stored: StoredIdentity = serde_json::from_slice(&body)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
         if stored.version != 1 && stored.version != 2 {
-            return Err("These device keys were written by a newer Sesame.".to_string());
+            return Err(WRITTEN_BY_NEWER_BUILD.to_string());
         }
 
         let mut signing_seed = unprotect_for_device(
@@ -250,6 +251,18 @@ impl DeviceIdentity {
             encryption,
             hybrid,
         })
+    }
+}
+
+pub fn load_or_create(path: &Path) -> VaultResult<DeviceIdentity> {
+    match DeviceIdentity::load(path) {
+        Ok(existing) => Ok(existing),
+        Err(error) if error == WRITTEN_BY_NEWER_BUILD => Err(error),
+        Err(_) => {
+            let generated = DeviceIdentity::generate()?;
+            generated.save(path)?;
+            Ok(generated)
+        }
     }
 }
 
@@ -505,6 +518,31 @@ mod hybrid_tests {
         assert_ne!(loaded.device_id, first.device_id);
         assert_ne!(loaded.signing_public_key(), first.signing_public_key());
         assert_eq!(loaded.package_public_key().len(), PUBLIC_KEY_BYTES);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn setup_keeps_a_file_from_a_newer_build_and_replaces_one_it_cannot_read() {
+        let path = scratch("load-or-create");
+        let created = load_or_create(&path).expect("created");
+        assert!(created.has_hybrid_key());
+        assert_eq!(
+            load_or_create(&path).expect("loaded").device_id,
+            created.device_id
+        );
+
+        rewritten(&path, |body| body["version"] = serde_json::json!(3));
+        let before = std::fs::read(&path).unwrap();
+        assert!(load_or_create(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        std::fs::write(&path, b"damaged").unwrap();
+        let replaced = load_or_create(&path).expect("replaced");
+        assert_ne!(replaced.device_id, created.device_id);
+        assert_eq!(
+            DeviceIdentity::load(&path).expect("loads").device_id,
+            replaced.device_id
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
