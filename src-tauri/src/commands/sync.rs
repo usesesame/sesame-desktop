@@ -227,6 +227,7 @@ pub(super) async fn record_checkpoint_if_due(
 ) {
     if refreshed.server.device_state != "approved"
         || refreshed.server.activated_epoch != refreshed.server.vault_epoch
+        || require_no_pending_key_change(app).is_err()
     {
         return;
     }
