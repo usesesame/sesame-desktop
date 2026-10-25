@@ -33,19 +33,19 @@ struct StoredIdentity {
 }
 
 #[cfg(test)]
-fn protect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+pub(crate) fn protect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
 #[cfg(test)]
-fn unprotect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+pub(crate) fn unprotect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
 #[cfg(not(test))]
-use crate::vault::platform::{protect_for_device, unprotect_for_device};
+pub(crate) use crate::vault::platform::{protect_for_device, unprotect_for_device};
 
-fn ensure_device_protection() -> VaultResult<()> {
+pub(crate) fn ensure_device_protection() -> VaultResult<()> {
     #[cfg(test)]
     {
         Ok(())

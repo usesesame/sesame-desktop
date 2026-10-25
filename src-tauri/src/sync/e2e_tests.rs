@@ -281,7 +281,20 @@ fn the_rust_client_and_engine_round_trip_against_the_real_service() {
 
     let list = laptop_state.list().expect("list");
     let removal = remove_entry(&laptop, &list, &phone.device_id).expect("remove");
+    let journal = super::rekey_journal::Journal::new(&removal, list.head_digest(), &[4u8; 32], 1);
+    let served = |entries: Vec<super::devicelist::DeviceListEntry>| {
+        DeviceList::verify(&entries).expect("the served list verifies")
+    };
+    assert_eq!(
+        journal.outcome(&served(run(laptop_client.device_list(0)).expect("list"))),
+        super::rekey_journal::Outcome::Discard
+    );
     run(laptop_client.remove(&laptop, &removal, &[])).expect("remove the phone");
+    assert_eq!(
+        journal.outcome(&served(run(laptop_client.device_list(0)).expect("list"))),
+        super::rekey_journal::Outcome::Adopt,
+        "the journal recognises the removal in the list the real service serves"
+    );
     let after = run(phone_client.state()).expect("state");
     assert_eq!(after.device_state, "none");
     assert!(run(phone_client.snapshot()).is_err());
