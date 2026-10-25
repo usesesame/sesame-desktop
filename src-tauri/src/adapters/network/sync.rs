@@ -37,6 +37,21 @@ fn transfer_timeout(bytes: usize) -> Duration {
     .min(TRANSFER_MAX_TIMEOUT)
 }
 
+pub const SERVER_NEEDS_UPDATE: &str = "This Sync server does not accept the newer device keys yet. If you run the server yourself, update it and try again. Otherwise try again later.";
+
+fn is_hybrid_package_key(encoded: &str) -> bool {
+    URL_SAFE_NO_PAD
+        .decode(encoded)
+        .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES)
+}
+
+fn name_the_old_server(error: SyncError, package_key: &str) -> SyncError {
+    match error {
+        SyncError::Rejected if is_hybrid_package_key(package_key) => SyncError::ServerNeedsUpdate,
+        other => other,
+    }
+}
+
 #[derive(Debug)]
 pub enum SyncError {
     Unavailable(String),
@@ -46,6 +61,8 @@ pub enum SyncError {
     NotEntitled,
     NotFound,
     StorageFull,
+    Rejected,
+    ServerNeedsUpdate,
     Failed(String),
 }
 
@@ -71,6 +88,8 @@ impl std::fmt::Display for SyncError {
                 formatter,
                 "This vault is too large for the space the service gives it."
             ),
+            Self::Rejected => write!(formatter, "Sesame Sync could not complete that request."),
+            Self::ServerNeedsUpdate => write!(formatter, "{SERVER_NEEDS_UPDATE}"),
         }
     }
 }
@@ -396,6 +415,7 @@ impl SyncClient {
             "sync_vault_not_found" | "sync_not_found" => SyncError::NotFound,
             "sync_conflict" | "sync_vault_exists" => SyncError::Conflict,
             "sync_storage_limit_reached" => SyncError::StorageFull,
+            "sync_invalid" => SyncError::Rejected,
             "sync_signature_invalid" => SyncError::Failed(
                 "The service did not accept this device's signature. Check that the date and time on this computer are correct."
                     .into(),
@@ -531,6 +551,7 @@ impl SyncClient {
         )
         .await
         .map(|_| ())
+        .map_err(|error| name_the_old_server(error, &entry.subject_package_key))
     }
 
     pub async fn device_list(&self, after: u64) -> SyncResult<Vec<DeviceListEntry>> {
@@ -567,6 +588,7 @@ impl SyncClient {
         )
         .await
         .map(|_| ())
+        .map_err(|error| name_the_old_server(error, package_key))
     }
 
     pub async fn pairing_status(&self) -> SyncResult<PairingStatus> {
@@ -1083,6 +1105,46 @@ mod tests {
         let target = custom(&server, &fake);
         drop(server);
         assert!(connect(&target).is_err());
+    }
+
+    #[test]
+    fn a_refused_hybrid_key_names_the_server_and_other_refusals_stay_unchanged() {
+        let hybrid = URL_SAFE_NO_PAD.encode([5u8; crate::sync::xwing::PUBLIC_KEY_BYTES]);
+        let classical = URL_SAFE_NO_PAD.encode([5u8; 32]);
+        let truncated = URL_SAFE_NO_PAD.encode([5u8; crate::sync::xwing::PUBLIC_KEY_BYTES - 1]);
+        assert!(matches!(
+            name_the_old_server(SyncError::Rejected, &hybrid),
+            SyncError::ServerNeedsUpdate
+        ));
+        for key in [classical.as_str(), truncated.as_str(), "not base64!", ""] {
+            assert!(matches!(
+                name_the_old_server(SyncError::Rejected, key),
+                SyncError::Rejected
+            ));
+        }
+        for other in [
+            SyncError::Conflict,
+            SyncError::NotApproved,
+            SyncError::NotFound,
+            SyncError::Failed("x".into()),
+        ] {
+            assert!(!matches!(
+                name_the_old_server(other, &hybrid),
+                SyncError::ServerNeedsUpdate
+            ));
+        }
+        let client = SyncClient::for_tests("http://127.0.0.1:1", "fictional-device-token", "key");
+        assert!(matches!(
+            client.classify(
+                reqwest::StatusCode::BAD_REQUEST,
+                br#"{"error":{"code":"sync_invalid"}}"#
+            ),
+            SyncError::Rejected
+        ));
+        assert_eq!(
+            SyncError::Rejected.to_string(),
+            "Sesame Sync could not complete that request."
+        );
     }
 
     #[test]

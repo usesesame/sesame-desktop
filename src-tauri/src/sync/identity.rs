@@ -404,4 +404,107 @@ mod hybrid_tests {
             .open_key_package(&sealed, "vaultAAAAAAAAAAAA01", 3)
             .is_err());
     }
+
+    fn rewritten(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        change(&mut body);
+        std::fs::write(path, serde_json::to_vec(&body).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_identity_file_this_build_does_not_understand_is_refused_and_left_untouched() {
+        let path = scratch("unknown");
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| body["version"] = serde_json::json!(3));
+        let before = std::fs::read(&path).unwrap();
+        assert!(DeviceIdentity::load(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn the_version_and_the_hybrid_seed_must_agree() {
+        let path = scratch("agree");
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| {
+            body.as_object_mut()
+                .unwrap()
+                .remove("protected_hybrid_seed");
+        });
+        assert!(
+            DeviceIdentity::load(&path).is_err(),
+            "version 2 without a seed"
+        );
+
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        rewritten(&path, |body| body["version"] = serde_json::json!(1));
+        assert!(
+            DeviceIdentity::load(&path).is_err(),
+            "version 1 with a seed"
+        );
+
+        DeviceIdentity::generate()
+            .expect("identity")
+            .save(&path)
+            .expect("saved");
+        for seed in ["", "AAAA", "not base64!"] {
+            rewritten(&path, |body| {
+                body["protected_hybrid_seed"] = serde_json::json!(seed)
+            });
+            assert!(DeviceIdentity::load(&path).is_err(), "seed {seed:?}");
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_copied_identity_file_restores_the_same_device_and_keys() {
+        let path = scratch("restore");
+        let identity = DeviceIdentity::generate().expect("identity");
+        identity.save(&path).expect("saved");
+        let restored = path.with_file_name("restored.sesame");
+        std::fs::copy(&path, &restored).unwrap();
+        forget(&path).expect("forgotten");
+        assert!(DeviceIdentity::load(&path).is_err());
+        let loaded = DeviceIdentity::load(&restored).expect("restored");
+        assert_eq!(loaded.device_id, identity.device_id);
+        assert_eq!(loaded.package_public_key(), identity.package_public_key());
+        assert_eq!(loaded.signing_public_key(), identity.signing_public_key());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_device_that_forgot_its_keys_and_pairs_again_gets_a_new_device_and_a_new_hybrid_key() {
+        let path = scratch("forget");
+        let first = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        first.save(&path).expect("saved");
+        assert_eq!(
+            DeviceIdentity::load(&path)
+                .expect("loaded")
+                .package_public_key()
+                .len(),
+            X25519_KEY_BYTES
+        );
+        forget(&path).expect("forgotten");
+        forget(&path).expect("forgetting twice is fine");
+        assert!(!path.exists());
+        let second = DeviceIdentity::generate().expect("identity");
+        second.save(&path).expect("saved");
+        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        assert_ne!(loaded.device_id, first.device_id);
+        assert_ne!(loaded.signing_public_key(), first.signing_public_key());
+        assert_eq!(loaded.package_public_key().len(), PUBLIC_KEY_BYTES);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
 }
