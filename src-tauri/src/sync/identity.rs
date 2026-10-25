@@ -197,11 +197,17 @@ impl DeviceIdentity {
     pub fn load(path: &Path) -> VaultResult<Self> {
         let body = std::fs::read(path)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
-        let stored: StoredIdentity = serde_json::from_slice(&body)
+        #[derive(Deserialize)]
+        struct StoredVersion {
+            version: u8,
+        }
+        let probe: StoredVersion = serde_json::from_slice(&body)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
-        if stored.version != 1 && stored.version != 2 {
+        if probe.version != 1 && probe.version != 2 {
             return Err(WRITTEN_BY_NEWER_BUILD.to_string());
         }
+        let stored: StoredIdentity = serde_json::from_slice(&body)
+            .map_err(|_| "Sesame could not read the device keys.".to_string())?;
 
         let mut signing_seed = unprotect_for_device(
             &URL_SAFE_NO_PAD
@@ -534,6 +540,18 @@ mod hybrid_tests {
         rewritten(&path, |body| body["version"] = serde_json::json!(3));
         let before = std::fs::read(&path).unwrap();
         assert!(load_or_create(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        std::fs::write(
+            &path,
+            br#"{"version":3,"keys":"a layout this build does not know"}"#,
+        )
+        .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(
+            load_or_create(&path).err().as_deref(),
+            Some(WRITTEN_BY_NEWER_BUILD)
+        );
         assert_eq!(std::fs::read(&path).unwrap(), before);
 
         std::fs::write(&path, b"damaged").unwrap();
