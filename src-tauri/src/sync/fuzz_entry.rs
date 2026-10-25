@@ -4,12 +4,14 @@ use super::checkpoint::Checkpoint;
 use super::devicelist::{DeviceList, DeviceListEntry};
 use super::engine::ServedHeader;
 use super::header::{verify_header, Header};
-use super::keys::{open_vault_key, EncryptionKeypair};
+use super::keys::{open_vault_key, open_vault_key_hybrid, EncryptionKeypair};
 use super::pake;
 use super::request::KeyPackageV3;
+use super::xwing::{SecretKey, SEED_BYTES};
 
 const FIXTURE: &str = include_str!("../../contracts/sync/v3/v3-fixture.json");
 const VAULT: &str = "vaultAAAAAAAAAAAA01";
+const EPOCH: u64 = 1;
 
 fn fixed_list() -> &'static DeviceList {
     static LIST: OnceLock<DeviceList> = OnceLock::new();
@@ -53,7 +55,10 @@ pub fn key_package(data: &[u8]) -> Option<Vec<u8>> {
         let _ = package.digest();
     }
     let recipient = EncryptionKeypair::from_secret_bytes([7u8; 32]);
-    open_vault_key(data, &recipient, VAULT).ok()
+    let hybrid = SecretKey::from_seed([7u8; SEED_BYTES]);
+    open_vault_key(data, &recipient, VAULT)
+        .ok()
+        .or_else(|| open_vault_key_hybrid(data, &hybrid, VAULT, EPOCH).ok())
 }
 
 pub fn device_list(data: &[u8]) -> Option<usize> {

@@ -22,6 +22,7 @@ env:
   # rather than name this one. /releases/latest only resolves for a release
   # that is not marked as a pre-release, which is why publish no longer does.
   SESAME_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+  SESAME_UPDATE_FRESHNESS_URL: https://github.com/${{ github.repository }}/releases/download/freshness/freshness.json
   SESAME_SUPPORTED_WINDOWS: Windows 10,Windows 11
   # The GitHub release carries the real notes, checksum, and verification
   # instructions. The marketing site has no per-version page, so pointing there
@@ -40,7 +41,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -81,7 +82,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -131,7 +132,7 @@ jobs:
             node tools/run-vault-restore-gate.mjs --binary src-tauri/target/release/sesame.exe --out vault-compatibility
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vault-compatibility-${{ matrix.platform }}
           path: vault-compatibility
@@ -155,7 +156,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
@@ -168,7 +169,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: vault-compatibility-*
           path: vault-compatibility
@@ -224,6 +225,8 @@ jobs:
           SESAME_UPDATER_PUBLIC_KEY: ${{ vars.SESAME_UPDATER_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_PUBLIC_KEY: ${{ vars.SESAME_RELEASE_CANDIDATE_PUBLIC_KEY }}
           SESAME_RELEASE_CANDIDATE_KEY_ID: ${{ vars.SESAME_RELEASE_CANDIDATE_KEY_ID }}
+          SESAME_UPDATE_FRESHNESS_PUBLIC_KEY: ${{ vars.SESAME_UPDATE_FRESHNESS_PUBLIC_KEY }}
+          SESAME_UPDATE_FRESHNESS_KEY_ID: ${{ vars.SESAME_UPDATE_FRESHNESS_KEY_ID }}
         run: |
           $config = Join-Path $env:RUNNER_TEMP 'unsigned-windows-updater-off.json'
           Set-Content -LiteralPath $config -Value '{"bundle":{"createUpdaterArtifacts":false}}' -Encoding ascii -NoNewline
@@ -239,7 +242,7 @@ jobs:
           "name=$($installers[0].Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sesame-build-${{ github.ref_name }}
           path: |
@@ -263,12 +266,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
       - name: Download the built installer and evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-build-${{ github.ref_name }}
           path: release-input
@@ -357,7 +360,7 @@ jobs:
           node tools/prepare-public-release-evidence.mjs release-handoff public-release-evidence '${{ steps.evidence.outputs.manifest }}'
           node tools/audit-public-release-evidence.mjs public-release-evidence
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sesame-release-${{ github.ref_name }}
           path: |
@@ -378,13 +381,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-release-${{ github.ref_name }}
 
@@ -421,7 +424,7 @@ jobs:
           $sha256 = (Get-FileHash -LiteralPath candidate-input/unsigned-candidate.json -Algorithm SHA256).Hash.ToLowerInvariant()
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sesame-candidate-input-${{ github.ref_name }}
           path: candidate-input/unsigned-candidate.json
@@ -439,15 +442,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-release-${{ github.ref_name }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-candidate-input-${{ github.ref_name }}
           path: candidate-input
@@ -484,7 +487,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $env:SESAME_SYNC_FLOOR_FILE)) { throw "The Sync floor was not produced: $($env:SESAME_SYNC_FLOOR_FILE)." }
           node tools/create-static-update-manifest.mjs $candidate candidate-receipt/latest.json
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sesame-candidate-${{ github.ref_name }}
           path: candidate-receipt
@@ -507,15 +510,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-release-${{ github.ref_name }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sesame-candidate-${{ github.ref_name }}
           path: release-handoff

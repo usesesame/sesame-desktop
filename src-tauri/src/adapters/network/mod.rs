@@ -12,6 +12,7 @@ pub(crate) mod sync_floor;
 #[cfg(test)]
 pub(crate) mod test_server;
 pub(crate) mod trusted_time;
+pub(crate) mod update_freshness;
 pub(crate) mod website_icons;
 
 pub(crate) fn ensure_crypto_provider() {

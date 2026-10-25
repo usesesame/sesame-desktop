@@ -5,14 +5,19 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use super::sync::{
-    load_state, local_data_dir, present, present_proof, record_checkpoint_if_due, refresh,
-    save_state, this_identity, vault_id_of, Refreshed,
+    journal_file, load_state, local_data_dir, present, present_proof, record_checkpoint_if_due,
+    refresh, require_no_pending_key_change, save_state, this_identity, unix_now, vault_id_of,
+    Refreshed,
 };
-use super::sync_adopt::{adopt, verify_master_password};
+use super::sync_adopt::{adopt, adopt_with, prepare_recovery, verify_master_password};
 use crate::sync::client::SyncClient;
 use crate::sync::devicelist::DeviceList;
-use crate::sync::engine::{build_header, open_label, plan_header, remove_entry, verify_accepted};
+use crate::sync::engine::{
+    build_header, key_entry, open_label, plan_header, remove_entry, rotate_entry, verify_accepted,
+};
 use crate::sync::header::Header;
+use crate::sync::key_change::PreparedKeyChange;
+use crate::sync::rekey_journal::{self, Journal, Outcome};
 use crate::sync::request::KeyPackageV3;
 use crate::sync::state::{payload_digest, SyncState};
 use crate::vault::{VaultResult, VaultState};
@@ -211,6 +216,7 @@ async fn upload_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let local = reconcile_pending_upload(&app, &client, local).await?;
@@ -291,6 +297,7 @@ async fn download_vault(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncTransferResult, String> {
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let remote = fetch_remote(&client, &local).await?;
@@ -361,6 +368,14 @@ pub async fn sync_take_new_key(
     }
     let list = &refreshed.update.list;
     let epoch = list.epoch();
+    match reconcile_key_change(&journal_file(&app)?, list, refreshed.server.activated_epoch)? {
+        KeyChange::Adopt(journal) => {
+            return adopt_journal_key(&app, &state, local, refreshed, &journal, &master_password)
+                .await;
+        }
+        KeyChange::NotDone => return Err(KEY_CHANGE_NOT_DONE.into()),
+        KeyChange::Proceed => {}
+    }
     if refreshed.server.activated_epoch >= epoch {
         return Err("This device already has the current vault key.".into());
     }
@@ -413,10 +428,77 @@ pub async fn sync_take_new_key(
     Ok(SyncTakeKeyResult { recovery_kit })
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncRemovalResult {
-    pub recovery_kit: String,
+const KEY_CHANGE_NOT_DONE: &str = "The vault key change did not go through, so nothing changed. Remove the device again if you still want to.";
+
+enum KeyChange {
+    Adopt(Journal),
+    NotDone,
+    Proceed,
+}
+
+fn reconcile_key_change(
+    path: &std::path::Path,
+    list: &DeviceList,
+    activated_epoch: u64,
+) -> Result<KeyChange, String> {
+    if !rekey_journal::is_pending(path) {
+        return Ok(KeyChange::Proceed);
+    }
+    let journal = Journal::load(path).map_err(|error| {
+        format!("{error} Turn Sesame Sync off on this device and pair it again.")
+    })?;
+    if journal.outcome(list) == Outcome::Adopt {
+        return Ok(KeyChange::Adopt(journal));
+    }
+    rekey_journal::forget(path)?;
+    if activated_epoch >= list.epoch() {
+        return Ok(KeyChange::NotDone);
+    }
+    Ok(KeyChange::Proceed)
+}
+
+async fn adopt_journal_key(
+    app: &AppHandle,
+    state: &tauri::State<'_, VaultState>,
+    local: SyncState,
+    refreshed: Refreshed,
+    journal: &Journal,
+    master_password: &str,
+) -> Result<SyncTakeKeyResult, String> {
+    let mut key = journal.key();
+    let adopted = {
+        let mut session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_mut()
+            .ok_or("Unlock Sesame before finishing the vault key change.")?;
+        verify_master_password(unlocked, master_password).and_then(|()| {
+            let payload = unlocked.open_payload()?.clone();
+            let kit = adopt_with(
+                unlocked,
+                key,
+                payload,
+                master_password,
+                journal.recovery.clone(),
+            )?;
+            state.advance_session_epoch();
+            Ok(kit)
+        })
+    };
+    key.zeroize();
+    let recovery_kit = adopted?.unwrap_or_default();
+    state.cache_pin_unlock(false);
+    state.cache_hello_unlock(false);
+    crate::commands::lifecycle::discard_pin_throttle_state(app, state);
+    crate::browser_fill::cancel_pending_approvals(app);
+    let mut next = local;
+    next.entries = refreshed.update.entries;
+    next.activated_epoch = journal.epoch_after;
+    save_state(app, &next)?;
+    rekey_journal::forget(&journal_file(app)?)?;
+    Ok(SyncTakeKeyResult { recovery_kit })
 }
 
 fn survivor_packages(
@@ -448,24 +530,49 @@ fn survivor_packages(
     Ok(packages)
 }
 
+fn every_member_has_the_newer_key(list: &DeviceList) -> bool {
+    list.current()
+        .iter()
+        .all(|member| is_newer_key(&member.package_key))
+}
+
+fn is_newer_key(encoded: &str) -> bool {
+    URL_SAFE_NO_PAD
+        .decode(encoded)
+        .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES)
+}
+
+fn refused_before_commit(error: &crate::sync::client::SyncError) -> bool {
+    use crate::sync::client::SyncError;
+    !matches!(error, SyncError::Unavailable(_) | SyncError::Failed(_))
+}
+
 async fn rekey_without(
     app: &AppHandle,
     vault: &tauri::State<'_, VaultState>,
-    subject: &str,
+    prepared: &PreparedKeyChange,
+    subject: Option<&str>,
     master_password: &str,
     adopt_locally: bool,
-) -> Result<Option<String>, String> {
+) -> Result<(), String> {
     let client = SyncClient::connect(app).await?;
     let identity = this_identity(app)?;
+    require_no_pending_key_change(app)?;
     let local = load_state(app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let refreshed = refresh(&client, &local).await?;
     require_activated(&refreshed)?;
     let list = &refreshed.update.list;
-    if list
-        .member(subject)
-        .is_none_or(|member| member.removed_index != 0)
-    {
-        return Err("That device is not part of this vault.".into());
+    if let Some(subject) = subject {
+        if list
+            .member(subject)
+            .is_none_or(|member| member.removed_index != 0)
+        {
+            return Err("That device is not part of this vault.".into());
+        }
+    } else if !every_member_has_the_newer_key(list) {
+        return Err(
+            "Every device must have the newer key before the vault key can be changed.".into(),
+        );
     }
     {
         let session = vault
@@ -480,10 +587,24 @@ async fn rekey_without(
             return Err("The unlocked vault is not the Sync vault.".into());
         }
     }
-    let entry = remove_entry(&identity, list, subject).map_err(present_proof)?;
+    let entry = match subject {
+        Some(subject) => remove_entry(&identity, list, subject),
+        None => rotate_entry(&identity, list),
+    }
+    .map_err(present_proof)?;
     let mut new_key = [0u8; 32];
-    crate::vault::util::fill_secret(&mut new_key)?;
-    let excluded = [subject, identity.device_id.as_str()];
+    let recovery = if adopt_locally {
+        let (key, recovery) = prepared.take(std::time::Instant::now())?;
+        new_key = key;
+        Some(recovery)
+    } else {
+        crate::vault::util::fill_secret(&mut new_key)?;
+        None
+    };
+    let excluded: Vec<&str> = subject
+        .into_iter()
+        .chain(std::iter::once(identity.device_id.as_str()))
+        .collect();
     let packages = survivor_packages(
         &identity,
         list,
@@ -493,17 +614,38 @@ async fn rekey_without(
         entry.epoch_after,
         &entry.digest(),
     )?;
-    client
-        .remove(&identity, &entry, &packages)
-        .await
-        .map_err(present)?;
+    let journal_path = journal_file(app)?;
+    if adopt_locally {
+        let saved = recovery
+            .clone()
+            .ok_or_else(|| "Sesame could not prepare the new recovery kit.".to_string())
+            .and_then(|recovery| {
+                Journal::new(&entry, list.head_digest(), &new_key, recovery, unix_now())
+                    .save(&journal_path)
+            });
+        if let Err(error) = saved {
+            new_key.zeroize();
+            return Err(error);
+        }
+    }
+    let posted = match subject {
+        Some(_) => client.remove(&identity, &entry, &packages).await,
+        None => client.rotate(&identity, &entry, &packages).await,
+    };
+    if let Err(error) = posted {
+        if adopt_locally && refused_before_commit(&error) {
+            let _ = rekey_journal::forget(&journal_path);
+        }
+        new_key.zeroize();
+        return Err(present(error));
+    }
 
     let mut entries = refreshed.update.entries.clone();
     entries.push(entry.clone());
     let mut next = local.clone();
     next.entries = entries;
-    let recovery_kit = if adopt_locally {
-        let kit = {
+    if adopt_locally {
+        {
             let mut session = vault
                 .session
                 .lock()
@@ -512,41 +654,130 @@ async fn rekey_without(
                 .as_mut()
                 .ok_or("Unlock Sesame before removing a device.")?;
             let payload = unlocked.open_payload()?.clone();
-            let kit = adopt(unlocked, new_key, payload, master_password)?;
+            adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             vault.advance_session_epoch();
-            kit
-        };
+        }
         vault.cache_pin_unlock(false);
         vault.cache_hello_unlock(false);
         crate::commands::lifecycle::discard_pin_throttle_state(app, vault);
         crate::browser_fill::cancel_pending_approvals(app);
         next.activated_epoch = entry.epoch_after;
-        Some(kit)
-    } else {
-        None
-    };
+    }
     new_key.zeroize();
     if adopt_locally {
         save_state(app, &next)?;
+        let _ = rekey_journal::forget(&journal_path);
     }
-    Ok(recovery_kit)
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPreparedKit {
+    pub recovery_kit: String,
+}
+
+#[tauri::command]
+pub async fn sync_prepare_key_change(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    prepared: tauri::State<'_, PreparedKeyChange>,
+    master_password: String,
+) -> Result<SyncPreparedKit, String> {
+    require_no_pending_key_change(&app)?;
+    load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_ref()
+            .ok_or("Unlock Sesame before changing the vault key.")?;
+        verify_master_password(unlocked, &master_password)?;
+    }
+    let mut key = [0u8; 32];
+    crate::vault::util::fill_secret(&mut key)?;
+    let made = prepare_recovery(&key);
+    let result = made.map(|(kit, recovery)| {
+        prepared.stage(&key, recovery, std::time::Instant::now());
+        SyncPreparedKit { recovery_kit: kit }
+    });
+    key.zeroize();
+    result
+}
+
+#[tauri::command]
+pub fn sync_cancel_key_change(prepared: tauri::State<'_, PreparedKeyChange>) {
+    prepared.discard();
 }
 
 #[tauri::command]
 pub async fn sync_remove_device(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
+    prepared: tauri::State<'_, PreparedKeyChange>,
     device_id: String,
     master_password: String,
-) -> Result<SyncRemovalResult, String> {
+) -> Result<(), String> {
     let identity = this_identity(&app)?;
     if device_id == identity.device_id {
         return Err("Turn Sesame Sync off on this device instead of removing it.".into());
     }
-    let kit = rekey_without(&app, &state, &device_id, &master_password, true)
-        .await?
-        .ok_or("Sesame could not finish the removal.")?;
-    Ok(SyncRemovalResult { recovery_kit: kit })
+    rekey_without(
+        &app,
+        &state,
+        &prepared,
+        Some(&device_id),
+        &master_password,
+        true,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_rotate_vault_key(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    prepared: tauri::State<'_, PreparedKeyChange>,
+    master_password: String,
+) -> Result<(), String> {
+    rekey_without(&app, &state, &prepared, None, &master_password, true).await
+}
+
+#[tauri::command]
+pub async fn sync_upgrade_device_key(app: AppHandle) -> Result<(), String> {
+    let client = SyncClient::connect(&app).await?;
+    require_no_pending_key_change(&app)?;
+    let identity = this_identity(&app)?;
+    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
+    let refreshed = refresh(&client, &local).await?;
+    require_activated(&refreshed)?;
+    let list = &refreshed.update.list;
+    let member = list
+        .member(&identity.device_id)
+        .filter(|member| member.removed_index == 0)
+        .ok_or("This device is not part of the vault.")?;
+    if is_newer_key(&member.package_key) {
+        return Err("This device already has the newer key.".into());
+    }
+    let identity = identity.with_hybrid_key()?;
+    identity.save(&super::sync::identity_file(&app)?)?;
+    let entry = key_entry(
+        &identity,
+        list,
+        &URL_SAFE_NO_PAD.encode(identity.package_public_key()),
+    )
+    .map_err(present_proof)?;
+    client
+        .upgrade_device_key(&identity, &entry)
+        .await
+        .map_err(present)?;
+    let mut next = local;
+    next.entries = refreshed.update.entries;
+    next.entries.push(entry);
+    save_state(&app, &next)?;
+    Ok(())
 }
 
 pub(super) async fn leave_vault(
@@ -555,9 +786,15 @@ pub(super) async fn leave_vault(
     master_password: &str,
 ) -> Result<(), String> {
     let identity = this_identity(app)?;
-    rekey_without(app, state, &identity.device_id, master_password, false)
-        .await
-        .map(|_| ())
+    rekey_without(
+        app,
+        state,
+        &PreparedKeyChange::default(),
+        Some(&identity.device_id),
+        master_password,
+        false,
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -672,6 +909,7 @@ async fn resolve_conflict(
         "other" => false,
         _ => return Err("Choose which vault to keep.".into()),
     };
+    require_no_pending_key_change(&app)?;
     let client = SyncClient::connect(&app).await?;
     let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
     let remote = fetch_remote(&client, &local).await?;
@@ -919,3 +1157,390 @@ async fn run_one_transfer(
 
 include!("sync_transfer_recovery.rs");
 include!("sync_transfer_coordinator.rs");
+
+#[cfg(test)]
+mod survivor_tests {
+    use super::*;
+    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::identity::DeviceIdentity;
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+
+    fn identity(hybrid: bool) -> DeviceIdentity {
+        let generated = DeviceIdentity::generate().expect("identity");
+        if hybrid {
+            generated
+        } else {
+            generated.without_hybrid_key()
+        }
+    }
+
+    fn mixed_vault(
+        creator: &DeviceIdentity,
+        joiners: &[&DeviceIdentity],
+    ) -> (DeviceList, crate::sync::devicelist::DeviceListEntry) {
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut entries = vec![create_entry(creator, VAULT, &label(creator))];
+        let mut list = DeviceList::verify(&entries).expect("list");
+        for joiner in joiners {
+            let entry = add_entry(
+                creator,
+                &list,
+                &NewDevice {
+                    device_id: &joiner.device_id,
+                    signing_key: &URL_SAFE_NO_PAD.encode(joiner.signing_public_key()),
+                    package_key: &URL_SAFE_NO_PAD.encode(joiner.package_public_key()),
+                },
+                &label(joiner),
+                0,
+            )
+            .expect("add");
+            list.extend(&entry).expect("extend");
+            entries.push(entry);
+        }
+        let removal =
+            remove_entry(creator, &list, &joiners[joiners.len() - 1].device_id).expect("removal");
+        (list, removal)
+    }
+
+    fn package_for<'a>(
+        packages: &'a [KeyPackageV3],
+        device: &DeviceIdentity,
+    ) -> Option<&'a KeyPackageV3> {
+        packages
+            .iter()
+            .find(|package| package.recipient_device_id == device.device_id)
+    }
+
+    #[test]
+    fn a_rekey_seals_the_suite_each_survivor_advertises_and_nothing_to_the_removed_device() {
+        let creator = identity(true);
+        let older = identity(false);
+        let newer = identity(true);
+        let removed = identity(true);
+        let (list, removal) = mixed_vault(&creator, &[&older, &newer, &removed]);
+        let new_key = [4u8; 32];
+        let excluded = [removed.device_id.as_str(), creator.device_id.as_str()];
+
+        let packages = survivor_packages(
+            &creator,
+            &list,
+            VAULT,
+            &new_key,
+            &excluded,
+            removal.epoch_after,
+            &removal.digest(),
+        )
+        .expect("packages");
+
+        assert_eq!(packages.len(), 2);
+        assert!(package_for(&packages, &removed).is_none());
+        assert!(package_for(&packages, &creator).is_none());
+        let sealed = |device: &DeviceIdentity| {
+            let package = package_for(&packages, device).expect("package");
+            assert_eq!(package.sender_device_id, creator.device_id);
+            assert_eq!(package.vault_epoch, removal.epoch_after);
+            assert_eq!(package.entry_digest, removal.digest());
+            assert!(package
+                .verify(&URL_SAFE_NO_PAD.encode(creator.signing_public_key()))
+                .is_ok());
+            URL_SAFE_NO_PAD.decode(&package.ciphertext).expect("bytes")
+        };
+
+        let for_older = sealed(&older);
+        let for_newer = sealed(&newer);
+        assert_eq!(
+            for_older.len(),
+            crate::sync::keys::X25519_KEY_BYTES
+                + crate::sync::keys::KEY_PACKAGE_NONCE_BYTES
+                + new_key.len()
+                + 16
+        );
+        assert_eq!(for_newer[0], crate::sync::keys::HYBRID_PACKAGE_VERSION);
+        assert!(for_newer.len() > for_older.len());
+
+        assert_eq!(
+            older
+                .open_key_package(&for_older, VAULT, removal.epoch_after)
+                .expect("older opens"),
+            new_key
+        );
+        assert_eq!(
+            newer
+                .open_key_package(&for_newer, VAULT, removal.epoch_after)
+                .expect("newer opens"),
+            new_key
+        );
+        assert!(older
+            .open_key_package(&for_newer, VAULT, removal.epoch_after)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_older, VAULT, removal.epoch_after)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_newer, VAULT, removal.epoch_after + 1)
+            .is_err());
+        assert!(newer
+            .open_key_package(&for_newer, "vaultBBBBBBBBBBBB02", removal.epoch_after)
+            .is_err());
+        assert!(removed
+            .open_key_package(&for_newer, VAULT, removal.epoch_after)
+            .is_err());
+    }
+
+    #[test]
+    fn a_rekey_to_a_vault_of_older_devices_seals_only_the_older_suite() {
+        let creator = identity(false);
+        let first = identity(false);
+        let removed = identity(false);
+        let (list, removal) = mixed_vault(&creator, &[&first, &removed]);
+        let packages = survivor_packages(
+            &creator,
+            &list,
+            VAULT,
+            &[4u8; 32],
+            &[removed.device_id.as_str(), creator.device_id.as_str()],
+            removal.epoch_after,
+            &removal.digest(),
+        )
+        .expect("packages");
+        assert_eq!(packages.len(), 1);
+        let bytes = URL_SAFE_NO_PAD
+            .decode(&packages[0].ciphertext)
+            .expect("bytes");
+        assert!(bytes.len() < 512);
+        assert_eq!(
+            first
+                .open_key_package(&bytes, VAULT, removal.epoch_after)
+                .expect("opens"),
+            [4u8; 32]
+        );
+    }
+}
+
+#[cfg(test)]
+mod key_change_tests {
+    use super::*;
+    use crate::sync::client::SyncError;
+    use crate::sync::devicelist::DeviceListEntry;
+    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::identity::DeviceIdentity;
+    use crate::sync::key_change::fictional_recovery;
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+
+    fn lists() -> (DeviceListEntry, DeviceList, DeviceList) {
+        let creator = DeviceIdentity::generate().expect("identity");
+        let other = DeviceIdentity::generate().expect("identity");
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut base =
+            DeviceList::verify(&[create_entry(&creator, VAULT, &label(&creator))]).expect("list");
+        let add = add_entry(
+            &creator,
+            &base,
+            &NewDevice {
+                device_id: &other.device_id,
+                signing_key: &URL_SAFE_NO_PAD.encode(other.signing_public_key()),
+                package_key: &URL_SAFE_NO_PAD.encode(other.package_public_key()),
+            },
+            &label(&other),
+            0,
+        )
+        .expect("add");
+        base.extend(&add).expect("extend");
+        let removal = remove_entry(&creator, &base, &other.device_id).expect("removal");
+        let mut committed = base.clone();
+        committed.extend(&removal).expect("extend");
+        (removal, base, committed)
+    }
+
+    fn path(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sesame-keychange-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        rekey_journal::journal_path(&dir)
+    }
+
+    #[test]
+    fn without_a_journal_nothing_changes() {
+        let (_, base, _) = lists();
+        let path = path("none");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 1),
+            Ok(KeyChange::Proceed)
+        ));
+    }
+
+    #[test]
+    fn a_removal_in_the_list_hands_back_the_saved_key_and_keeps_the_journal_until_adoption() {
+        let (removal, base, committed) = lists();
+        let path = path("adopt");
+        Journal::new(
+            &removal,
+            base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
+        match reconcile_key_change(&path, &committed, 2) {
+            Ok(KeyChange::Adopt(journal)) => assert_eq!(journal.key(), [4u8; 32]),
+            _ => panic!("expected the saved key"),
+        }
+        assert!(rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn a_removal_that_did_not_commit_drops_the_journal_and_says_nothing_changed() {
+        let (removal, base, _) = lists();
+        let path = path("not-done");
+        Journal::new(
+            &removal,
+            base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 1),
+            Ok(KeyChange::NotDone)
+        ));
+        assert!(!rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn a_journal_that_matches_nothing_drops_and_leaves_the_normal_path_to_a_device_that_is_behind()
+    {
+        let (removal, base, _) = lists();
+        let path = path("stale");
+        Journal::new(
+            &removal,
+            base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
+        assert!(matches!(
+            reconcile_key_change(&path, &base, 0),
+            Ok(KeyChange::Proceed)
+        ));
+        assert!(!rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn an_unreadable_journal_is_kept_and_reported() {
+        let (_, base, _) = lists();
+        let path = path("unreadable");
+        std::fs::write(&path, b"damaged").unwrap();
+        let error = match reconcile_key_change(&path, &base, 1) {
+            Err(error) => error,
+            Ok(_) => panic!("a damaged journal was accepted"),
+        };
+        assert!(error.contains("pair it again"));
+        assert!(rekey_journal::is_pending(&path));
+    }
+
+    #[test]
+    fn only_an_answer_the_service_could_not_have_committed_drops_the_journal() {
+        for refused in [
+            SyncError::Conflict,
+            SyncError::NotApproved,
+            SyncError::NotActivated,
+            SyncError::NotEntitled,
+            SyncError::NotFound,
+            SyncError::StorageFull,
+        ] {
+            assert!(refused_before_commit(&refused), "{refused:?}");
+        }
+        for unknown in [
+            SyncError::Unavailable("offline".into()),
+            SyncError::Failed("timed out".into()),
+        ] {
+            assert!(!refused_before_commit(&unknown), "{unknown:?}");
+        }
+    }
+
+    #[test]
+    fn a_vault_key_change_needs_every_current_device_to_have_the_newer_key() {
+        let creator = DeviceIdentity::generate().expect("identity");
+        let older = DeviceIdentity::generate()
+            .expect("identity")
+            .without_hybrid_key();
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut list =
+            DeviceList::verify(&[create_entry(&creator, VAULT, &label(&creator))]).expect("list");
+        assert!(every_member_has_the_newer_key(&list));
+        let add = add_entry(
+            &creator,
+            &list,
+            &NewDevice {
+                device_id: &older.device_id,
+                signing_key: &URL_SAFE_NO_PAD.encode(older.signing_public_key()),
+                package_key: &URL_SAFE_NO_PAD.encode(older.package_public_key()),
+            },
+            &label(&older),
+            0,
+        )
+        .expect("add");
+        list.extend(&add).expect("extend");
+        assert!(!every_member_has_the_newer_key(&list));
+
+        let upgraded = older.with_hybrid_key().expect("hybrid");
+        let replacement = key_entry(
+            &upgraded,
+            &list,
+            &URL_SAFE_NO_PAD.encode(upgraded.package_public_key()),
+        )
+        .expect("replacement");
+        list.extend(&replacement).expect("extend");
+        assert!(every_member_has_the_newer_key(&list));
+    }
+
+    #[test]
+    fn a_journal_for_a_rotation_is_adopted_once_the_rotation_is_in_the_list() {
+        let creator = DeviceIdentity::generate().expect("identity");
+        let label = seal_label(&[9u8; 32], VAULT, &creator.device_id, "Device").expect("label");
+        let mut list = DeviceList::verify(&[create_entry(&creator, VAULT, &label)]).expect("list");
+        let rotation = rotate_entry(&creator, &list).expect("rotation");
+        let path = path("rotation");
+        Journal::new(
+            &rotation,
+            list.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
+        assert!(matches!(
+            reconcile_key_change(&path, &list, 1),
+            Ok(KeyChange::NotDone)
+        ));
+        Journal::new(
+            &rotation,
+            list.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save(&path)
+        .expect("saved");
+        list.extend(&rotation).expect("extend");
+        assert!(matches!(
+            reconcile_key_change(&path, &list, 2),
+            Ok(KeyChange::Adopt(_))
+        ));
+    }
+}

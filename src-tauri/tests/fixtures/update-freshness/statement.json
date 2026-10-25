@@ -1,0 +1,9 @@
+{
+  "fictionalSeed": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+  "publicKey": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+  "statement": {
+    "payload": "sesame-update-freshness-v1\n0.4.4\n1800000000",
+    "signingKeyId": "fictional-freshness-key",
+    "signature": "cX2LVtsObwReq8DZkQ5qy4deDSw1mq_cZ9VOUx9PQmRtF-f_SnTNTqwBpupXE4RxiWSMD8w7wuzhxvO4mjbIDw"
+  }
+}

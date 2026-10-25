@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -24,6 +26,7 @@ pub struct SyncDeviceView {
     pub state: String,
     pub is_this_device: bool,
     pub added_index: u64,
+    pub newer_key: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,7 +95,24 @@ pub(super) fn save_state(app: &AppHandle, state: &SyncState) -> VaultResult<()> 
     crate::sync::state::write_protected(&state_file(app)?, state)
 }
 
+pub(super) const KEY_CHANGE_PENDING: &str =
+    "This device has not finished changing the vault key. Open Sync and finish it before syncing.";
+
+pub(super) fn journal_file(app: &AppHandle) -> VaultResult<PathBuf> {
+    Ok(crate::sync::rekey_journal::journal_path(&local_data_dir(
+        app,
+    )?))
+}
+
+pub(super) fn require_no_pending_key_change(app: &AppHandle) -> VaultResult<()> {
+    if crate::sync::rekey_journal::is_pending(&journal_file(app)?) {
+        return Err(KEY_CHANGE_PENDING.to_string());
+    }
+    Ok(())
+}
+
 pub(super) fn forget_everything(app: &AppHandle) -> VaultResult<()> {
+    crate::sync::rekey_journal::forget(&journal_file(app)?)?;
     crate::sync::identity::forget(&identity_file(app)?)?;
     crate::sync::state::forget_protected(&state_file(app)?)
 }
@@ -210,6 +230,7 @@ pub(super) async fn record_checkpoint_if_due(
 ) {
     if refreshed.server.device_state != "approved"
         || refreshed.server.activated_epoch != refreshed.server.vault_epoch
+        || require_no_pending_key_change(app).is_err()
     {
         return;
     }
@@ -291,6 +312,9 @@ fn views_from(
                 },
                 is_this_device: member.device_id == state.device_id,
                 added_index: member.added_index,
+                newer_key: URL_SAFE_NO_PAD
+                    .decode(&member.package_key)
+                    .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES),
             }
         })
         .collect();
@@ -465,8 +489,9 @@ pub async fn sync_status(
     {
         view.state = "removed".to_string();
     }
-    view.needs_new_key =
-        server.device_state == "approved" && server.activated_epoch < server.vault_epoch;
+    view.needs_new_key = server.device_state == "approved"
+        && (server.activated_epoch < server.vault_epoch
+            || crate::sync::rekey_journal::is_pending(&journal_file(&app)?));
     Ok(view)
 }
 
@@ -492,14 +517,7 @@ pub async fn sync_create_vault(
         Err(other) => return Err(present(other)),
     }
     let path = identity_file(&app)?;
-    let identity = match DeviceIdentity::load(&path) {
-        Ok(existing) => existing,
-        Err(_) => {
-            let generated = DeviceIdentity::generate()?;
-            generated.save(&path)?;
-            generated
-        }
-    };
+    let identity = crate::sync::identity::load_or_create(&path)?;
     let (vault_id, sealed) = {
         let session = vault
             .session
