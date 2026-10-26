@@ -612,6 +612,8 @@
     onNavigate={navigate}
     onLock={() => unlockController.lock()}
     onDismissNotice={feedbackController.dismissNotice}
+    onHoldNotice={feedbackController.holdNotice}
+    onResumeNotice={feedbackController.resumeNotice}
     onDismissError={feedbackController.clearError}
     onNewLogin={() => loginController.openNew()}
     onCopyPassword={() => void loginController.copySelectedField('password')}

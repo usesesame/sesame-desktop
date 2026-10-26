@@ -211,6 +211,7 @@ button.no-totp, .credential-button, .more-button {
 .toast button, .alert button { display: grid; width: 25px; height: 25px; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-muted); background: transparent; font-size: var(--type-4); }
 .toast button:hover { color: var(--accent-link); background: var(--tint); }
 .toast-timer { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; transform-origin: left; background: var(--ring-fill); animation: toast-countdown 4.8s linear both; }
+.toast:hover .toast-timer, .toast:focus-within .toast-timer { animation-play-state: paused; }
 .alert { border-color: var(--danger-tint); color: var(--danger); background: var(--danger-bg); }
 .alert .toast-icon { color: var(--danger); background: var(--danger-tint); }
 .alert p { margin: 0; color: var(--danger); }

@@ -13,6 +13,8 @@
   export let onNavigate: (view: View) => void
   export let onLock: () => void
   export let onDismissNotice: () => void
+  export let onHoldNotice: () => void = () => {}
+  export let onResumeNotice: () => void = () => {}
   export let onDismissError: () => void
   export let onNewLogin: () => void = () => {}
   export let onCopyPassword: () => void = () => {}
@@ -98,7 +100,7 @@
 
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">Current section: {title}</p>
 
-    <Toast {notice} {errorMessage} {onDismissNotice} {onDismissError} />
+    <Toast {notice} {errorMessage} {onDismissNotice} {onDismissError} onHold={onHoldNotice} onResume={onResumeNotice} />
     <slot />
   </section>
 </main>

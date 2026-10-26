@@ -5,10 +5,12 @@
   export let errorMessage = ''
   export let onDismissNotice: () => void
   export let onDismissError: () => void
+  export let onHold: () => void = () => {}
+  export let onResume: () => void = () => {}
 </script>
 
 {#if notice}
-  <div class="toast" role="status" aria-live="polite" aria-atomic="true">
+  <div class="toast" role="status" aria-live="polite" aria-atomic="true" on:mouseenter={onHold} on:mouseleave={onResume} on:focusin={onHold} on:focusout={onResume}>
     <span class="toast-icon" aria-hidden="true"><Icon name="check" size={15} strokeWidth={2.2} /></span>
     <div><strong>{notice.title}</strong><p>{notice.message}</p></div>
     <button type="button" aria-label="Dismiss notification" on:click={onDismissNotice}>×</button>
