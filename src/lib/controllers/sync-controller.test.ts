@@ -355,7 +355,7 @@ describe('syncing without being asked', () => {
     answer({ sync_status: status(), sync_coordinator_status: idle })
     await sync.refresh()
     expect(get(sync).floorCheckedAt).toBe(0)
-    expect(describeFloorCheck('approved', 0)).toBe('Sesame has not yet checked the minimum Sync version.')
+    expect(describeFloorCheck('approved', 0)).toBe('Sesame has not yet checked the minimum Sync version. It checks when it looks for an update.')
     expect(describeFloorCheck('approved', 1_800_000_000)).toMatch(/^Sesame last checked the minimum Sync version on .+\.$/)
     expect(describeFloorCheck('not_enrolled', 0)).toBe('')
     expect(describeFloorCheck('joining', 1_800_000_000)).toBe('')

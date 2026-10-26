@@ -23,6 +23,16 @@ release cannot be published without saying what changed in it.
   that it had read before. Sesame keeps those names on the device. A name it
   never read still shows as a device.
 
+### Quick access
+
+- The quick access window no longer closes the moment focus slips away. It
+  waits a little over a second for focus to come back, and up to eight seconds
+  while the pointer is still over it, so a window manager that follows the
+  pointer or a small mouse movement does not close it. It still closes once
+  focus has really gone, so decrypted titles do not stay on screen unattended.
+- A pointer that rests over the results no longer takes the selection from the
+  keyboard, and the arrow keys scroll the selected result into view.
+
 ### Browser
 
 - Settings says when another Sesame on the same computer already serves the
@@ -36,6 +46,8 @@ release cannot be published without saying what changed in it.
 - A dialog that replaces another one, such as the login editor handing over to
   the delete confirmation, no longer fades the dimmed background out and back
   in.
+- The Sync panel says when Sesame checks the minimum Sync version, instead of
+  only saying that it has not.
 - A dialog is now moved into place before it is shown, so its entrance plays
   once from where it ends up. A dialog that was created closed and opened later
   was never moved at all.

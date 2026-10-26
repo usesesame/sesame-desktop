@@ -222,7 +222,7 @@ export function describeCoordinatorState(state: {
 
 export function describeFloorCheck(state: string, floorCheckedAt: number): string {
   if (state !== 'approved') return ''
-  if (floorCheckedAt === 0) return 'Sesame has not yet checked the minimum Sync version.'
+  if (floorCheckedAt === 0) return 'Sesame has not yet checked the minimum Sync version. It checks when it looks for an update.'
   return `Sesame last checked the minimum Sync version on ${new Date(floorCheckedAt * 1000).toLocaleString()}.`
 }
 
