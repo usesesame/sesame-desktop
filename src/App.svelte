@@ -480,7 +480,11 @@
     void $allItems
     syncController.vaultChanged()
   }
-  onDestroy(() => stopSyncBackground?.())
+  const stopShowingSyncedChanges = syncController.onVaultApplied(() => void unlockController.reloadAfterSync())
+  onDestroy(() => {
+    stopSyncBackground?.()
+    stopShowingSyncedChanges()
+  })
 
   onMount(() => {
     let stopQuickAccessOpen = () => {}

@@ -27,7 +27,7 @@ export interface SyncControllerState {
   allowOlderKeys: boolean
   olderKeyRefused: boolean
   pairingSecondsLeft: number
-  pairingPhase: 'idle' | 'waiting' | 'done'
+  pairingPhase: 'idle' | 'starting' | 'waiting' | 'done'
   pairingDone: string
   conflictDetailsLoaded: boolean
   conflictDetailsError: string
@@ -46,6 +46,7 @@ export interface SyncCoordinatorView {
   pending: boolean
   lastSuccessRevision: number
   consecutiveFailures: number
+  downloadsApplied: number
 }
 
 export interface SyncBackupView {
@@ -128,6 +129,7 @@ const initialState: SyncControllerState = {
     pending: false,
     lastSuccessRevision: 0,
     consecutiveFailures: 0,
+    downloadsApplied: 0,
   },
   backups: [],
   removalRecoveryKit: '',
@@ -199,6 +201,8 @@ export function describeCoordinatorState(state: {
         return 'Your devices disagree about this vault. Sync is paused and nothing was changed here.'
       case 'conflict':
         return 'Two devices changed this vault. Choose which version to keep.'
+      case 'needs_new_key':
+        return 'This device needs the new vault key. Open Sync and take it.'
       case 'locked':
         return 'Unlock Sesame to keep syncing.'
       default:
@@ -294,10 +298,25 @@ export function createSyncController() {
     }
   }
 
+  const appliedListeners = new Set<() => void>()
+  let downloadsSeen = 0
+
+  function notifyVaultApplied() {
+    for (const listener of appliedListeners) listener()
+  }
+
+  function noteCoordinator(coordinator: SyncCoordinatorView) {
+    if (coordinator.downloadsApplied > downloadsSeen) {
+      downloadsSeen = coordinator.downloadsApplied
+      notifyVaultApplied()
+    }
+  }
+
   async function loadCoordinator() {
     try {
       const coordinator = await invoke<SyncCoordinatorView>('sync_coordinator_status')
       store.patch({ coordinator })
+      noteCoordinator(coordinator)
     } catch {
       // The panel keeps its last known state rather than claiming idle.
     }
@@ -380,6 +399,12 @@ export function createSyncController() {
   const api = {
     subscribe: store.subscribe,
     refresh,
+    onVaultApplied(listener: () => void) {
+      appliedListeners.add(listener)
+      return () => {
+        appliedListeners.delete(listener)
+      }
+    },
     openEnable() {
       store.patch({ enableOpen: true, error: '' })
     },
@@ -417,6 +442,7 @@ export function createSyncController() {
           removalRecoveryKit: result.recoveryKit,
           lastTransfer: 'This device joined the synced vault.',
         })
+        notifyVaultApplied()
         await refresh()
       } catch (error) {
         await refresh()
@@ -424,7 +450,7 @@ export function createSyncController() {
       }
     },
     async openPairing() {
-      store.patch({ pairingOpen: true, error: '', olderKeyRefused: false, pairingDone: '', pairingPhase: 'idle', pairingCode: '' })
+      store.patch({ pairingOpen: true, error: '', olderKeyRefused: false, pairingDone: '', pairingPhase: 'starting', pairingCode: '' })
       try {
         const shown = await invoke<{ code: string; expiresInSeconds: number }>('sync_pairing_code')
         const deadline = Date.now() + shown.expiresInSeconds * 1000
@@ -579,6 +605,8 @@ export function createSyncController() {
       try {
         const status = await invoke<SyncCoordinatorView>('sync_now')
         store.patch({ coordinator: status, activity: activityFor(status), lastSyncedAt: status.phase === 'idle' ? Date.now() : store.value().lastSyncedAt })
+        noteCoordinator(status)
+        if (status.halt === 'needs_new_key') store.patch({ needsNewKey: true })
         if (status.halt === 'conflict') {
           store.patch({
             conflictOpen: true,
@@ -633,6 +661,7 @@ export function createSyncController() {
       try {
         const status = await invoke<SyncCoordinatorView>('sync_now', { manual: true })
         store.patch({ working: false, coordinator: status })
+        noteCoordinator(status)
         if (status.halt === 'conflict') {
           store.patch({
             conflictOpen: true,
@@ -713,6 +742,7 @@ export function createSyncController() {
           conflictOpen: false,
           lastTransfer: removed > 0 ? `${base} Sesame removed ${removed} older recovery ${removed === 1 ? 'copy' : 'copies'} to stay within its limit.` : base,
         })
+        if (choice === 'other') notifyVaultApplied()
         await refresh()
       } catch (error) {
         fail(error)
@@ -734,6 +764,7 @@ export function createSyncController() {
       try {
         const result = await invoke<SyncTransferResult>('sync_download_vault')
         store.patch({ working: false, lastTransfer: describe('Updated from Sync', result) })
+        notifyVaultApplied()
         await refresh()
       } catch (error) {
         fail(error)

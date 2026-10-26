@@ -61,6 +61,40 @@ export function createUnlockController(options: UnlockControllerOptions) {
     else options.clearSelection()
   }
 
+  async function showSnapshot(snapshot: VaultSnapshot, selectedId: string | null) {
+    vault.patch({ snapshot })
+    const selected = selectedId ? vaultItems(snapshot).find((item) => item.id === selectedId) : undefined
+    if (selected) await options.selectItem(selected.id, selected.kind)
+    else await openFirst(snapshot)
+    await options.refreshActiveView()
+  }
+
+  async function showSyncedSnapshot(snapshot: VaultSnapshot) {
+    const selectedId = selection.value().activeItemId
+    const shown = selectedId ? vaultItems(vault.value().snapshot).find((item) => item.id === selectedId) : undefined
+    vault.patch({ snapshot })
+    if (modal.state.value().active === null) {
+      const selected = selectedId ? vaultItems(snapshot).find((item) => item.id === selectedId) : undefined
+      if (!selected) await openFirst(snapshot)
+      else if (selected.updatedAt !== shown?.updatedAt) await options.selectItem(selected.id, selected.kind)
+    }
+    await options.refreshActiveView()
+  }
+
+  let reloading: Promise<void> | undefined
+  let reloadAgain = false
+
+  async function reloadOnce() {
+    if (!vault.value().status.unlocked) return
+    try {
+      const snapshot = await unlockVault({ masterPassword: '' }, true)
+      if (!vault.value().status.unlocked) return
+      await showSyncedSnapshot(snapshot)
+    } catch (error) {
+      if (vault.value().status.unlocked) feedback.setError(error)
+    }
+  }
+
   async function installExistingUnlock(snapshot: VaultSnapshot): Promise<boolean> {
     let status = await getVaultStatus()
     if (status.onboardingRequired) {
@@ -127,6 +161,24 @@ export function createUnlockController(options: UnlockControllerOptions) {
         state.patch({ isWorking: false })
       }
     },
+    /// A sync replaced the vault in memory. A second request while one is reading runs once more afterwards.
+    reloadAfterSync(): Promise<void> {
+      if (reloading) {
+        reloadAgain = true
+        return reloading
+      }
+      reloading = (async () => {
+        try {
+          do {
+            reloadAgain = false
+            await reloadOnce()
+          } while (reloadAgain)
+        } finally {
+          reloading = undefined
+        }
+      })()
+      return reloading
+    },
     async refreshCurrentView() {
       if (state.value().refreshingVault || !vault.value().status.unlocked) return
       state.patch({ refreshingVault: true })
@@ -135,11 +187,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
       try {
         const snapshot = await unlockVault({ masterPassword: '' }, true)
         await nextPaint()
-        vault.patch({ snapshot })
-        const selected = selectedId ? vaultItems(snapshot).find((item) => item.id === selectedId) : undefined
-        if (selected) await options.selectItem(selected.id, selected.kind)
-        else await openFirst(snapshot)
-        await options.refreshActiveView()
+        await showSnapshot(snapshot, selectedId)
         feedback.showNotice('Vault view refreshed', 'The current view is up to date.')
       } catch (error) {
         feedback.setError(error)

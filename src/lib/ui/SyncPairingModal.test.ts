@@ -31,3 +31,18 @@ test('after a refusal the person can tick the allowance and ask for a new code',
   await vi.waitFor(() => expect(box.checked).toBe(true))
   expect(screen.getByRole('button', { name: 'Show a new code' })).toBeTruthy()
 })
+
+test('while the code is being made it does not claim that pairing could not start', async () => {
+  render(SyncPairingModal, { ...base, phase: 'starting' as never })
+  await Promise.resolve()
+  expect(screen.queryByText('Sesame could not start pairing.')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Show a new code' })).toBeNull()
+  expect(screen.getByRole('status').textContent).toContain('Getting a code')
+})
+
+test('it says pairing could not start only after a start failed', async () => {
+  render(SyncPairingModal, { ...base, phase: 'idle' as const, error: 'Sesame could not reach the service.' })
+  await Promise.resolve()
+  expect(screen.getByText('Sesame could not start pairing.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Show a new code' })).toBeTruthy()
+})

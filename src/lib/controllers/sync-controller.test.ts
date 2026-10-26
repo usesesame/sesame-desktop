@@ -19,7 +19,7 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-const idle = { phase: 'idle', halt: '', conflictRevision: 0, pending: false, lastSuccessRevision: 3, consecutiveFailures: 0 }
+const idle = { phase: 'idle', halt: '', conflictRevision: 0, pending: false, lastSuccessRevision: 3, consecutiveFailures: 0, downloadsApplied: 0 }
 
 function answer(responses: Record<string, unknown>) {
   core.invoke.mockImplementation(async (command: string) => {
@@ -161,6 +161,7 @@ describe('the Sync preview controller', () => {
     })
     const sync = createSyncController()
     const pairing = sync.openPairing()
+    expect(get(sync).pairingPhase).toBe('starting')
     await vi.waitFor(() => expect(get(sync).pairingCode).toBe('K7Q2MHX9PD'))
     expect(get(sync).pairingPhase).toBe('waiting')
     finish({ label: 'Phone' })
@@ -564,5 +565,142 @@ describe('syncing without being asked', () => {
     window.dispatchEvent(new Event('focus'))
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
     expect(core.invoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('showing what another device changed', () => {
+  const approved = () => {
+    localStorage.setItem('sesame-sync-cache-v1', JSON.stringify({ enrolled: true, state: 'approved' }))
+    return createSyncController()
+  }
+
+  beforeEach(() => {
+    core.invoke.mockReset()
+    localStorage.clear()
+  })
+
+  it('tells the app once when a background sync applied a change, and not when it only checked', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    answer({ sync_now: idle })
+    await sync.autoSync()
+    expect(applied).not.toHaveBeenCalled()
+    answer({ sync_now: { ...idle, downloadsApplied: 1 } })
+    await sync.autoSync()
+    expect(applied).toHaveBeenCalledTimes(1)
+    await sync.autoSync()
+    expect(applied).toHaveBeenCalledTimes(1)
+    answer({ sync_now: { ...idle, downloadsApplied: 2 } })
+    await sync.autoSync()
+    expect(applied).toHaveBeenCalledTimes(2)
+  })
+
+  it('tells the app when Sync now applied a change', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    answer({ sync_now: { ...idle, downloadsApplied: 1 }, sync_status: status(), sync_coordinator_status: { ...idle, downloadsApplied: 1 } })
+    await sync.syncNow()
+    expect(applied).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells the app after a manual download and after joining a synced vault', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    answer({
+      sync_download_vault: { revision: 4, vaultEpoch: 1, entryCount: 2 },
+      sync_join_with_code: { recoveryKit: '' },
+      sync_status: status(),
+      sync_coordinator_status: idle,
+    })
+    await sync.pull()
+    expect(applied).toHaveBeenCalledTimes(1)
+    await sync.join('ABCD-EFGH', 'Fictional laptop', 'fictional master password')
+    expect(applied).toHaveBeenCalledTimes(2)
+  })
+
+  it('tells the app when a status read shows a change it had not been told about', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    answer({ sync_status: status(), sync_coordinator_status: { ...idle, downloadsApplied: 2 } })
+    await sync.refresh()
+    expect(applied).toHaveBeenCalledTimes(1)
+    await sync.refresh()
+    expect(applied).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells the app when a conflict is settled by keeping the other device, and not when this one is kept', async () => {
+    const side = { deviceLabel: 'Laptop', revision: 3, changedAt: '', entryCount: 1 }
+    const conflicted = { ...idle, phase: 'halted', halt: 'conflict', conflictRevision: 4 }
+    answer({ sync_now: conflicted, sync_conflict_details: { thisDevice: side, otherDevice: side } })
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    await sync.autoSync()
+    answer({ sync_resolve_conflict: { recoveryCopies: [] }, sync_status: status(), sync_coordinator_status: idle })
+    await sync.resolveConflict('this')
+    expect(applied).not.toHaveBeenCalled()
+    await sync.resolveConflict('other')
+    expect(applied).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not tell the app about a failed download', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    sync.onVaultApplied(applied)
+    answer({ sync_download_vault: new Error('This device has changes that are not synced yet.') })
+    await sync.pull()
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  it('stops telling a listener that was removed', async () => {
+    const sync = approved()
+    const applied = vi.fn()
+    const stop = sync.onVaultApplied(applied)
+    stop()
+    answer({ sync_now: { ...idle, downloadsApplied: 1 } })
+    await sync.autoSync()
+    expect(applied).not.toHaveBeenCalled()
+  })
+})
+
+describe('a device that is waiting for the new vault key', () => {
+  beforeEach(() => {
+    core.invoke.mockReset()
+    localStorage.clear()
+  })
+
+  const waiting = { ...idle, phase: 'halted', halt: 'needs_new_key' }
+
+  it('says the device needs the new key and never says it could not reach the service', () => {
+    const text = describeCoordinatorState({ ...waiting, consecutiveFailures: 0, lastSuccessRevision: 3 })
+    expect(text).toBe('This device needs the new vault key. Open Sync and take it.')
+    expect(text).not.toContain('reach')
+  })
+
+  it('shows the bar as needing the new key as soon as a run is refused for it, before the panel is opened', async () => {
+    localStorage.setItem('sesame-sync-cache-v1', JSON.stringify({ enrolled: true, state: 'approved' }))
+    answer({ sync_now: waiting })
+    const sync = createSyncController()
+    await sync.autoSync()
+    expect(get(sync).needsNewKey).toBe(true)
+    expect(describeSyncForChrome(get(sync))).toEqual({ label: 'Synced vault · Needs the new key', tone: 'warn' })
+  })
+
+  it('stops asking the service while it waits and clears the wait once the key is taken', async () => {
+    localStorage.setItem('sesame-sync-cache-v1', JSON.stringify({ enrolled: true, state: 'approved' }))
+    answer({ sync_now: waiting })
+    const sync = createSyncController()
+    await sync.autoSync()
+    core.invoke.mockClear()
+    await sync.autoSync()
+    expect(core.invoke).not.toHaveBeenCalled()
+    answer({ sync_take_new_key: { recoveryKit: '' }, sync_status: status({ needsNewKey: false }), sync_coordinator_status: idle })
+    await sync.takeNewKey('fictional master password')
+    expect(get(sync).needsNewKey).toBe(false)
+    expect(get(sync).coordinator.phase).toBe('idle')
   })
 })
