@@ -1,3 +1,8 @@
+<script module lang="ts">
+  const HANDOVER_MS = 150
+  let lastClosedAt = Number.NEGATIVE_INFINITY
+</script>
+
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
 
@@ -9,6 +14,8 @@
   export let modalClass = ''
   export let initialFocus: ((dialog: HTMLElement) => void) | null = null
   export let ariaBusy: boolean | undefined = undefined
+
+  const steady = typeof document !== 'undefined' && (document.querySelector('[data-modal-shell]') !== null || performance.now() - lastClosedAt < HANDOVER_MS)
 
   let dialog: HTMLDivElement
   let shell: HTMLDivElement
@@ -105,6 +112,7 @@
   })
 
   onDestroy(() => {
+    lastClosedAt = performance.now()
     portaledShell?.remove()
     portaledShell = null
     restoreFocus()
@@ -114,7 +122,7 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if open}
-  <div bind:this={shell} class="modal-backdrop{tone ? ` ${tone}-backdrop` : ''}" data-modal-shell role="presentation" on:click={closeOnBackdrop}>
+  <div bind:this={shell} class="modal-backdrop{tone ? ` ${tone}-backdrop` : ''}{steady ? ' modal-backdrop-steady' : ''}" data-modal-shell role="presentation" on:click={closeOnBackdrop}>
     <div bind:this={dialog} class="modal{modalClass ? ` ${modalClass}` : ''}" role="dialog" aria-modal="true" aria-labelledby={labelledby} aria-describedby={describedby || undefined} aria-busy={ariaBusy} tabindex="-1">
       <slot />
     </div>
