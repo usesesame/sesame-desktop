@@ -4,6 +4,27 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.5.1
+
+### Sync
+
+- A device shows what another device changed as soon as Sync applies it. The
+  Vault screen used to stay as it was until the vault was locked and unlocked.
+- Two devices no longer write new versions in turns while nobody is editing.
+  Sesame now records the vault as it stands after it applies a change from
+  another device, so it no longer takes that change for an edit of its own.
+  This also stops a false message that two devices changed the vault after a
+  device takes the new vault key.
+- A device that is waiting for the new vault key now says that it needs the
+  key. It used to say that it could not reach Sesame Sync.
+- Adding a device shows that a code is being made, instead of saying that
+  pairing could not start.
+
+### Settings
+
+- The Sync part of the Connections tab is arranged as Sesame Sync, Devices and
+  Vault key, and the Devices list now includes this device.
+
 ## 0.5.0
 
 ### Notes
@@ -68,6 +89,12 @@ release cannot be published without saying what changed in it.
 
 ### Security
 
+- Sesame checks a signed statement that names the newest release. The update
+  screen says when a newer release exists that the update information on this
+  device does not list, and when Sesame has not confirmed in the last 30 days
+  that no update is waiting. The statement is signed with a key whose public
+  half is built into the app. During the 30 days after the last confirmation,
+  the check cannot show that someone is holding back an update.
 - The main and quick access windows are built in code and refuse to open new
   windows.
 - Website icons accept only ICO, PNG and JPEG files. WebP and GIF are no longer
