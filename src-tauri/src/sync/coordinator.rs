@@ -8,6 +8,7 @@ pub enum Halt {
     FloorDamaged,
     Fork,
     Conflict { server_revision: i64 },
+    NeedsNewKey,
     Locked,
 }
 
@@ -28,6 +29,7 @@ pub struct Status {
     pub pending: bool,
     pub last_success_revision: Option<i64>,
     pub consecutive_failures: u32,
+    pub downloads_applied: u32,
 }
 
 impl Default for Status {
@@ -37,6 +39,7 @@ impl Default for Status {
             pending: false,
             last_success_revision: None,
             consecutive_failures: 0,
+            downloads_applied: 0,
         }
     }
 }
@@ -142,6 +145,18 @@ impl Coordinator {
         }
     }
 
+    /// Taking the new vault key is the only thing that ends a wait for it, and it ends no other stop.
+    pub fn key_taken(&self) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if state.status.phase == Phase::Halted(Halt::NeedsNewKey) {
+            state.status.phase = Phase::Idle;
+            state.status.consecutive_failures = 0;
+            state.status.pending = false;
+        }
+    }
+
     /// A person pressed Sync now, which is enough to try again after a stop they can fix elsewhere.
     pub fn retry_after_user_action(&self) {
         let Ok(mut state) = self.inner.lock() else {
@@ -163,6 +178,9 @@ impl Coordinator {
             return false;
         };
         state.running = false;
+        if matches!(outcome, Outcome::Downloaded { .. }) {
+            state.status.downloads_applied = state.status.downloads_applied.saturating_add(1);
+        }
         match outcome {
             Outcome::Uploaded { revision } | Outcome::Downloaded { revision } => {
                 state.status.last_success_revision = Some(revision);
@@ -215,6 +233,53 @@ impl Coordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_download_counts_as_a_change_applied_to_this_vault() {
+        let coordinator = Coordinator::new();
+        for outcome in [
+            Outcome::Uploaded { revision: 2 },
+            Outcome::AlreadyCurrent,
+            Outcome::Transient,
+            Outcome::Halt(Halt::Conflict { server_revision: 3 }),
+        ] {
+            coordinator.resume();
+            assert!(coordinator.begin());
+            coordinator.finish(outcome);
+            assert_eq!(coordinator.status().downloads_applied, 0);
+        }
+        coordinator.resume();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Downloaded { revision: 4 });
+        assert_eq!(coordinator.status().downloads_applied, 1);
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Downloaded { revision: 5 });
+        assert_eq!(coordinator.status().downloads_applied, 2);
+    }
+
+    #[test]
+    fn taking_the_new_key_ends_the_wait_for_it_and_no_other_stop() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::NeedsNewKey));
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::NeedsNewKey));
+        assert!(!coordinator.begin());
+        coordinator.key_taken();
+        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert!(coordinator.begin());
+
+        coordinator.finish(Outcome::Halt(Halt::Revoked));
+        coordinator.key_taken();
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::Revoked));
+        coordinator.resume();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Conflict { server_revision: 4 }));
+        coordinator.key_taken();
+        assert_eq!(
+            coordinator.status().phase,
+            Phase::Halted(Halt::Conflict { server_revision: 4 })
+        );
+    }
 
     #[test]
     fn a_locked_vault_pauses_one_run_and_does_not_stop_sync_for_good() {

@@ -11,6 +11,7 @@ fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Outcome
     if let Some(revision) = message.strip_prefix("sync_conflict:") {
         return Outcome::Halt(Halt::Conflict { server_revision: revision.parse().unwrap_or(0) });
     }
+    if message == NOT_ACTIVATED { return Outcome::Halt(Halt::NeedsNewKey); }
     if message == "sync_locked" || message.contains("Unlock Sesame") { return Outcome::Halt(Halt::Locked); }
     if message.starts_with("sync_fork:") { return Outcome::Halt(Halt::Fork); }
     if message.contains("not approved") || message.contains("no longer") { return Outcome::Halt(Halt::Revoked); }
@@ -61,6 +62,19 @@ mod coordinator_classification_tests {
         assert_eq!(
             classify_transfer_failure(crate::sync::floor::DAMAGED_REFUSAL),
             Outcome::Halt(Halt::FloorDamaged)
+        );
+    }
+
+    #[test]
+    fn a_device_that_has_not_taken_the_new_key_halts_with_its_own_reason_and_never_looks_offline() {
+        let message = "This device has not taken the new vault key yet. Open Sync and take it.";
+        assert_eq!(
+            classify_transfer_failure(message),
+            Outcome::Halt(Halt::NeedsNewKey)
+        );
+        assert_eq!(
+            classify_transfer_failure(super::NOT_ACTIVATED),
+            Outcome::Halt(Halt::NeedsNewKey)
         );
     }
 

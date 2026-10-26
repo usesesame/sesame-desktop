@@ -637,10 +637,7 @@ async fn complete_join(
         sesame_core::loader::VaultLoader::open_snapshot(head.version, &key, &blob, &head.aad())?;
     let payload = authenticated.payload().clone();
     let entry_count = payload.entries.len();
-    let digest = crate::sync::state::payload_digest(
-        &serde_json::to_vec(&payload)
-            .map_err(|_| "The synced vault could not be prepared.".to_string())?,
-    );
+    let digest = super::sync_adopt::digest_after_commit(&payload)?;
 
     pending.entries = entries;
     pending.head = update.head;
