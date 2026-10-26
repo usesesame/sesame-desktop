@@ -510,4 +510,51 @@ describe('secrets other than the password', () => {
 
     expect(vaultApi.saveLogin).toHaveBeenCalledWith(expect.objectContaining({ backupCodes: [], keepBackupCodes: true }))
   })
+  it('keeps the search and filters after editing a login that stays in its folder', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    before.entries[0].folderId = 'folder-1'
+    stores.vault.patch({ snapshot: before })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    after.entries[0].folderId = 'folder-1'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-a'))
+
+    controller.openEditor()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+  })
+
+  it('follows a login to its new folder when an edit moves it', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    before.entries[0].folderId = 'folder-1'
+    stores.vault.patch({ snapshot: before })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    after.entries[0].folderId = 'folder-2'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-a'))
+
+    controller.openEditor()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-2', securityFilter: null, searchQuery: '' })
+  })
+
+  it('shows a new login by clearing the search and opening its folder', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }, { id: 'login-new', title: 'Fresh' }])
+    after.entries[1].folderId = 'folder-2'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-new', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-new'))
+
+    controller.openNew()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-2', securityFilter: null, searchQuery: '' })
+  })
 })

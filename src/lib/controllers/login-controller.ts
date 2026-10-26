@@ -566,9 +566,12 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       feedback.clearError()
       try {
         const result = await saveLogin({ ...draft, totp: totpEntered ? draft.totp : undefined, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
+        const folderBefore = draft.id ? vault.value().snapshot?.entries.find((entry) => entry.id === draft.id)?.folderId : undefined
         vault.patch({ snapshot: result.snapshot })
         const savedEntry = result.snapshot.entries.find((entry) => entry.id === result.id)
-        selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
+        if (!draft.id || savedEntry?.folderId !== folderBefore) {
+          selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
+        }
         modal.close('login-editor')
         state.patch({ loginDraft: emptyLoginDraft() })
         await selectEntry(result.id)
