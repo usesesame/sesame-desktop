@@ -19,11 +19,23 @@ release cannot be published without saying what changed in it.
   key. It used to say that it could not reach Sesame Sync.
 - Adding a device shows that a code is being made, instead of saying that
   pairing could not start.
+- After the vault key changes, a device still shows the names of other devices
+  that it had read before. Sesame keeps those names on the device. A name it
+  never read still shows as a device.
+
+### Browser
+
+- Settings says when another Sesame on the same computer already serves the
+  browser extension. The first Sesame to start keeps the connection, as it did
+  before, and a later one now says why the extension does not reach it.
 
 ### Settings
 
 - The Sync part of the Connections tab is arranged as Sesame Sync, Devices and
   Vault key, and the Devices list now includes this device.
+- A dialog that replaces another one, such as the login editor handing over to
+  the delete confirmation, no longer fades the dimmed background out and back
+  in.
 
 ## 0.5.0
 
