@@ -297,7 +297,9 @@ test('healthy desktop browser plumbing is not shown as extension installation', 
   assert.match(source, /Recheck desktop setup/)
   assert.doesNotMatch(source, /\? 'Installed'/)
   const settings = component('SettingsView.svelte')
-  assert.match(settings, /{#if !browserIntegration\?\.ready\}[\s\S]*?<BrowserIntegrationSetting/)
+  assert.match(settings, /{#if !browserIntegration\?\.ready \|\| browserIntegration\?\.servedElsewhere\}[\s\S]*?<BrowserIntegrationSetting/)
+  assert.match(source, /Another Sesame on this computer already serves the browser extension/)
+  assert.doesNotMatch(source, /heldElsewhere[^\n]*\? 'No repair needed'/)
 })
 
 test('PanelResizer is an operable window splitter, not a decorative bar', () => {

@@ -341,7 +341,7 @@
       </div>
     {:else if tab === 'connections'}
       <div class="settings-groups">
-        {#if !browserIntegration?.ready}
+        {#if !browserIntegration?.ready || browserIntegration?.servedElsewhere}
           <section class="settings-group" aria-labelledby="settings-group-connections-browser">
             <h3 id="settings-group-connections-browser">Browser</h3>
             <div class="settings-list">
