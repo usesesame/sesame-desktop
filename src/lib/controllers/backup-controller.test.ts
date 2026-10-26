@@ -1,3 +1,4 @@
+/* @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppStores } from '../stores/app-stores'
 import { PRESENCE_REQUIRED } from '../vault'
@@ -197,5 +198,50 @@ describe('backup drill failures', () => {
   it('carries the integrity-failure message into the drill error', async () => {
     const running = await verifyFailure('The vault data could not be authenticated. Restore a known-good encrypted backup.')
     expect(running.controller.state.value().drillError).toBe('The vault data could not be authenticated. Restore a known-good encrypted backup.')
+  })
+})
+
+describe('backup actions that wait on the system', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vaultApi.recordDiagnostic.mockResolvedValue(undefined)
+  })
+
+  it('refreshes the recovery health after an export that needed the master password', async () => {
+    const { controller } = harness()
+    vaultApi.grantPresence.mockResolvedValue(undefined)
+    vaultApi.exportBackup.mockResolvedValue('fictional-export.sesame')
+    vaultApi.getRecoveryHealth.mockResolvedValue({ marker: 'fresh' })
+    controller.state.patch({ exportPresencePassword: 'fictional master password 01' })
+    await controller.confirmExportPresence()
+    expect(vaultApi.getRecoveryHealth).toHaveBeenCalledTimes(1)
+    expect(controller.state.value().health).toEqual({ marker: 'fresh' })
+    expect(controller.state.value().healthLoading).toBe(false)
+  })
+
+  it('starts one export at a time and says it is busy meanwhile', async () => {
+    const { controller } = harness()
+    let finish: (name: string) => void = () => {}
+    vaultApi.exportBackup.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve }))
+    vaultApi.getRecoveryHealth.mockResolvedValue({})
+    const first = controller.exportEncryptedBackup()
+    expect(controller.state.value().backupBusy).toBe(true)
+    await controller.exportEncryptedBackup()
+    expect(vaultApi.exportBackup).toHaveBeenCalledTimes(1)
+    finish('fictional-export.sesame')
+    await first
+    expect(controller.state.value().backupBusy).toBe(false)
+  })
+
+  it('starts one snapshot at a time and clears the busy mark when it fails', async () => {
+    const { controller } = harness()
+    let fail: (error: Error) => void = () => {}
+    vaultApi.createBackup.mockImplementation(() => new Promise<string>((_resolve, reject) => { fail = reject }))
+    const first = controller.makeBackup()
+    await controller.makeBackup()
+    expect(vaultApi.createBackup).toHaveBeenCalledTimes(1)
+    fail(new Error('Sesame could not write the snapshot.'))
+    await first
+    expect(controller.state.value().backupBusy).toBe(false)
   })
 })

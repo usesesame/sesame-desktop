@@ -5,6 +5,7 @@ import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
 
 const vaultApi = vi.hoisted(() => ({
+  cancelLoginBreachScan: vi.fn(),
   exportVaultCsv: vi.fn(),
   exportVaultJson: vi.fn(),
   grantPresence: vi.fn(),
@@ -86,5 +87,16 @@ describe('the complete export', () => {
     await controller.confirmExportPresence()
     expect(vaultApi.exportVaultCsv).toHaveBeenCalledTimes(2)
     expect(vaultApi.exportVaultJson).not.toHaveBeenCalled()
+  })
+})
+
+describe('cancelling a breach check', () => {
+  it('says so when the cancel did not go through, and keeps the scan running', async () => {
+    const { controller } = harness()
+    controller.state.patch({ breachScan: { phase: 'running', checked: 1, total: 4, results: [] } })
+    vaultApi.cancelLoginBreachScan.mockRejectedValue(new Error('no'))
+    await controller.cancelBreachScan()
+    expect(controller.state.value().breachScanError).toBe('Sesame could not cancel the breach check. It is still running.')
+    expect(controller.state.value().breachScan?.phase).toBe('running')
   })
 })

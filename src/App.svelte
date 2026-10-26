@@ -757,7 +757,7 @@
         titleFor={historyItemTitle}
       />
     {:else if $selection.activeView === 'backups'}
-      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
+      <BackupsView backupBusy={$backupState.backupBusy} health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
         theme={$settings.theme}

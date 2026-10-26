@@ -16,6 +16,7 @@
   let doneId = ''
   let doneLabel = ''
   let presenceItem: QuickAccessItem | null = null
+  let failure = ''
   let searchInput: HTMLInputElement | undefined
   let resultList: HTMLUListElement | undefined
   let searchSequence = 0
@@ -33,6 +34,7 @@
     doneId = ''
     doneLabel = ''
     presenceItem = null
+    failure = ''
   }
 
   async function updateSearch() {
@@ -72,15 +74,18 @@
     if (workingId) return
     if (action.field === 'open') {
       workingId = item.id
+      failure = ''
       try {
         await openQuickAccessItem(item.id)
       } catch {
         workingId = ''
+        failure = 'Sesame could not open that item.'
       }
       return
     }
     workingId = item.id
     presenceItem = null
+    failure = ''
     try {
       await copyQuickAccessField(item.id, action.field)
       doneId = item.id
@@ -89,6 +94,7 @@
     } catch (error) {
       workingId = ''
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) presenceItem = item
+      else failure = 'Sesame could not copy that. Try again.'
     }
   }
 
@@ -100,6 +106,7 @@
       await openQuickAccessItem(id)
     } catch {
       workingId = ''
+      failure = 'Sesame could not open that item.'
     }
   }
 
@@ -209,6 +216,9 @@
           </li>
         {/each}
       </ul>
+      {#if failure}
+        <p class="quick-access-failure" role="alert">{failure}</p>
+      {/if}
       {#if presenceItem}
         <p class="quick-access-presence" role="status">
           <span>Confirm your master password in Sesame to copy from {presenceItem.title}.</span>
@@ -223,7 +233,7 @@
 
 <style>
   :global(body) { min-width: 0; background: transparent; }
-  .quick-access { animation: view-enter .16s var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise); overflow: hidden; }
+  .quick-access { animation: view-enter var(--t-fast) var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise); overflow: hidden; }
   .quick-access-status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; color: var(--text-muted); font-size: var(--type-2); text-align: center; }
   .quick-access-search { display: flex; align-items: center; gap: var(--space-2); flex: none; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); }
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }
@@ -246,6 +256,7 @@
   .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: var(--type-2); font-weight: var(--weight-medium); white-space: nowrap; }
   .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-3); text-align: center; }
   .quick-access-presence { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--type-2); }
+  .quick-access-failure { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--danger); font-size: var(--type-2); }
   .quick-access-presence span { min-width: 0; }
   .quick-access-presence button { flex: none; min-height: 32px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-bold); cursor: pointer; }
   .quick-access-presence button:hover { background: var(--tint); }

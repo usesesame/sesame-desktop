@@ -45,6 +45,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     drillError: '',
     health: null as RecoveryHealth | null,
     healthLoading: false,
+    backupBusy: false,
     exportPresenceRequired: false,
     exportPresencePassword: '',
   })
@@ -173,20 +174,30 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
     state,
     refreshHealth,
     async makeBackup() {
+      if (state.value().backupBusy) return
+      state.patch({ backupBusy: true })
       try {
         feedback.showNotice('Backup created', await createBackup())
         await refreshHealth()
       } catch (error) {
         feedback.setError(error)
+      } finally {
+        state.patch({ backupBusy: false })
       }
     },
     async exportEncryptedBackup() {
-      await runEncryptedExport()
+      if (state.value().backupBusy) return
+      state.patch({ backupBusy: true })
+      try {
+        await runEncryptedExport()
+      } finally {
+        state.patch({ backupBusy: false })
+      }
     },
     async confirmExportPresence() {
       const secret = state.value().exportPresencePassword
-      if (!secret || state.value().healthLoading) return
-      state.patch({ healthLoading: true })
+      if (!secret || state.value().backupBusy) return
+      state.patch({ backupBusy: true })
       feedback.clearError()
       try {
         await grantPresence(secret)
@@ -195,7 +206,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
       } catch (error) {
         feedback.setError(error)
       } finally {
-        state.patch({ healthLoading: false })
+        state.patch({ backupBusy: false })
       }
     },
     async beginRestore() {
@@ -315,6 +326,7 @@ export function createBackupController({ stores, feedback, modal, onRestored }: 
         drillError: '',
         health: null,
         healthLoading: false,
+        backupBusy: false,
         exportPresenceRequired: false,
         exportPresencePassword: '',
       })

@@ -113,3 +113,23 @@ test('the arrow keys keep the selected result in view', async () => {
   await fireEvent.keyDown(window, { key: 'ArrowDown' })
   await waitFor(() => expect(scrolled).toHaveBeenCalledWith({ block: 'nearest' }))
 })
+
+test('a copy that fails for any other reason says so instead of going quiet', async () => {
+  vaultApi.copyQuickAccessField.mockRejectedValue(new Error('Nothing is saved in that field for this item.'))
+  render(QuickAccessView)
+
+  await fireEvent.click(await screen.findByRole('button', { name: /Copy password/ }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Sesame could not copy that')
+})
+
+test('an item that cannot be opened says so', async () => {
+  vaultApi.copyQuickAccessField.mockRejectedValue(new Error('presenceRequired'))
+  vaultApi.openQuickAccessItem.mockRejectedValue(new Error('gone'))
+  render(QuickAccessView)
+
+  await fireEvent.click(await screen.findByRole('button', { name: /Copy password/ }))
+  await fireEvent.click(await screen.findByRole('button', { name: 'Open Sesame' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('Sesame could not open that')
+})
