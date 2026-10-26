@@ -53,7 +53,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this licence appears in your list, e.g. “Office suite”</span><input name="licence-title" bind:this={titleInput} bind:value={licenseDraft.title} required maxlength="160" placeholder="e.g. Office suite…" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this licence appears in your list, e.g. "Office suite"</span><input name="licence-title" bind:this={titleInput} bind:value={licenseDraft.title} required maxlength="160" placeholder="e.g. Office suite…" autocomplete="off" /></label>
     <label>Product<input name="licence-product" bind:value={licenseDraft.productName} maxlength="256" autocomplete="off" /></label>
     <label>Licence key<input name="licence-key" bind:value={licenseDraft.licenseKey} maxlength="512" autocomplete="off" class="monospace-field" spellcheck="false" /></label>
     <KeptSecret draft={licenseDraft} key="licenseKey" typed={licenseDraft.licenseKey} onChange={(next) => (licenseDraft = { ...licenseDraft, ...next })} />

@@ -16,7 +16,9 @@
   let doneId = ''
   let doneLabel = ''
   let presenceItem: QuickAccessItem | null = null
+  let failure = ''
   let searchInput: HTMLInputElement | undefined
+  let resultList: HTMLUListElement | undefined
   let searchSequence = 0
 
   $: if (selectedIndex >= items.length) selectedIndex = Math.max(0, items.length - 1)
@@ -32,6 +34,7 @@
     doneId = ''
     doneLabel = ''
     presenceItem = null
+    failure = ''
   }
 
   async function updateSearch() {
@@ -71,15 +74,18 @@
     if (workingId) return
     if (action.field === 'open') {
       workingId = item.id
+      failure = ''
       try {
         await openQuickAccessItem(item.id)
       } catch {
         workingId = ''
+        failure = 'Sesame could not open that item.'
       }
       return
     }
     workingId = item.id
     presenceItem = null
+    failure = ''
     try {
       await copyQuickAccessField(item.id, action.field)
       doneId = item.id
@@ -88,6 +94,7 @@
     } catch (error) {
       workingId = ''
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) presenceItem = item
+      else failure = 'Sesame could not copy that. Try again.'
     }
   }
 
@@ -99,11 +106,18 @@
       await openQuickAccessItem(id)
     } catch {
       workingId = ''
+      failure = 'Sesame could not open that item.'
     }
   }
 
   function primaryAction(item: QuickAccessItem): QuickAccessAction | undefined {
     return item.actions[0]
+  }
+
+  async function keepSelectionInView() {
+    await tick()
+    const row = resultList?.children[selectedIndex]
+    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -120,9 +134,11 @@
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       selectedIndex = Math.min(items.length - 1, selectedIndex + 1)
+      void keepSelectionInView()
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       selectedIndex = Math.max(0, selectedIndex - 1)
+      void keepSelectionInView()
     } else if (event.key === 'Enter') {
       event.preventDefault()
       const item = items[selectedIndex]
@@ -171,10 +187,10 @@
       <input bind:this={searchInput} name="quick-access-search" bind:value={query} on:input={() => void updateSearch()} type="search" autocomplete="off" spellcheck="false" placeholder="Search Sesame…" aria-label="Search saved items" />
     </label>
     {#if items.length}
-      <ul class="quick-access-results">
+      <ul class="quick-access-results" bind:this={resultList}>
         {#each items as item, index (item.id)}
           <li class="quick-access-result-row" class:active={index === selectedIndex}>
-            <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
+            <button type="button" class:active={index === selectedIndex} on:mousemove={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
               <span class="entry-avatar" aria-hidden="true">
                 {#if item.kind === 'login'}{item.initials}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
@@ -189,7 +205,7 @@
                 aria-label={`${action.label} for ${item.title}`}
                 title={action.label}
                 disabled={Boolean(workingId) && workingId !== item.id}
-                on:mouseenter={() => (selectedIndex = index)}
+                on:mousemove={() => (selectedIndex = index)}
                 on:click|stopPropagation={() => void runAction(item, action)}
               >
                 <Icon name="copy" size={14} />
@@ -200,6 +216,9 @@
           </li>
         {/each}
       </ul>
+      {#if failure}
+        <p class="quick-access-failure" role="alert">{failure}</p>
+      {/if}
       {#if presenceItem}
         <p class="quick-access-presence" role="status">
           <span>Confirm your master password in Sesame to copy from {presenceItem.title}.</span>
@@ -214,7 +233,7 @@
 
 <style>
   :global(body) { min-width: 0; background: transparent; }
-  .quick-access { animation: view-enter .16s var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise); overflow: hidden; }
+  .quick-access { animation: view-enter var(--t-fast) var(--ease-out) both; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100vh; padding: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-raise); overflow: hidden; }
   .quick-access-status { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); flex: 1; color: var(--text-muted); font-size: var(--type-2); text-align: center; }
   .quick-access-search { display: flex; align-items: center; gap: var(--space-2); flex: none; border-radius: var(--radius-md); padding: 0 var(--space-3); color: var(--text-muted); background: var(--surface-inset); }
   .quick-access-search input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 12px 0; color: var(--text); font-size: var(--type-3); }
@@ -237,6 +256,7 @@
   .quick-access-result-state { display: inline-flex; align-items: center; justify-self: end; gap: 5px; color: var(--text-faint); font-size: var(--type-2); font-weight: var(--weight-medium); white-space: nowrap; }
   .quick-access-empty { margin: var(--space-4) 0 0; color: var(--text-muted); font-size: var(--type-3); text-align: center; }
   .quick-access-presence { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--type-2); }
+  .quick-access-failure { margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--danger); font-size: var(--type-2); }
   .quick-access-presence span { min-width: 0; }
   .quick-access-presence button { flex: none; min-height: 32px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-2); color: var(--accent-link); background: var(--surface-inset); font-size: var(--type-2); font-weight: var(--weight-bold); cursor: pointer; }
   .quick-access-presence button:hover { background: var(--tint); }

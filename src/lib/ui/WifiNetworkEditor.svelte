@@ -56,7 +56,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this network appears in your list, e.g. “Home Wi-Fi”</span><input name="wifi-title" bind:this={titleInput} bind:value={networkDraft.title} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this network appears in your list, e.g. "Home Wi-Fi"</span><input name="wifi-title" bind:this={titleInput} bind:value={networkDraft.title} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
     <label>Network name (SSID)<input name="wifi-ssid" bind:value={networkDraft.ssid} maxlength="64" autocomplete="off" spellcheck="false" /></label>
     <label>Password
       <span class="password-field single">

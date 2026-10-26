@@ -341,7 +341,7 @@
       </div>
     {:else if tab === 'connections'}
       <div class="settings-groups">
-        {#if !browserIntegration?.ready}
+        {#if !browserIntegration?.ready || browserIntegration?.servedElsewhere}
           <section class="settings-group" aria-labelledby="settings-group-connections-browser">
             <h3 id="settings-group-connections-browser">Browser</h3>
             <div class="settings-list">
@@ -355,15 +355,15 @@
             </div>
           </section>
         {/if}
-        <section class="settings-group" aria-labelledby="settings-group-connections-account">
-          <h3 id="settings-group-connections-account">Sesame account</h3>
-          <div class="settings-list">
-            {#if !serviceConnection.serverAddress}
+        {#if !serviceConnection.serverAddress}
+          <section class="settings-group" aria-labelledby="settings-group-connections-account">
+            <h3 id="settings-group-connections-account">Sesame account</h3>
+            <div class="settings-list">
               <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
-            {/if}
-            <SyncPanel />
-          </div>
-        </section>
+            </div>
+          </section>
+        {/if}
+        <SyncPanel />
         <section class="settings-group" aria-labelledby="settings-group-connections-server">
           <h3 id="settings-group-connections-server">Connect to your own server</h3>
           <div class="settings-list">

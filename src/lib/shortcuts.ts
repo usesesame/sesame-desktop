@@ -6,6 +6,7 @@ export interface Shortcut {
 export const SHORTCUTS: readonly Shortcut[] = [
   { keys: 'Ctrl L', label: 'Lock the vault' },
   { keys: 'Ctrl K', label: 'Search every item' },
+  { keys: '/', label: 'Search every item when no field is focused' },
   { keys: 'Ctrl J', label: 'Jump to the search results' },
   { keys: 'Ctrl N', label: 'Add a login' },
   { keys: 'Ctrl C', label: 'Copy the password' },

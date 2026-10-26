@@ -46,6 +46,8 @@
   let showBackups = false
 
   $: coordinatorNote = describeCoordinatorState($syncPanel.coordinator)
+  $: statusLabel = $syncPanel.needsNewKey ? 'Needs the new key' : (stateLabels[$syncPanel.state] ?? 'Unknown')
+  $: statusLine = $syncPanel.needsNewKey ? 'This device needs the new vault key before it can sync.' : [summary + '.', coordinatorNote].filter(Boolean).join(' ')
   $: floorCheck = describeFloorCheck($syncPanel.state, $syncPanel.floorCheckedAt)
   $: confirmation = describeConfirmation($syncPanel.state, $syncPanel.confirmedAt, others.length, $syncPanel.peerChecksSkipped)
 
@@ -54,6 +56,12 @@
     if (skipped) return 'Sesame could not check what your other devices last saw, so it could not rule out an old copy of this vault. It checks again on the next sync.'
     if (confirmedAt === 0) return 'No other device has confirmed this vault yet.'
     return `Another device last confirmed this vault on ${new Date(confirmedAt * 1000).toLocaleString()}.`
+  }
+
+  function deviceNote(device: { isThisDevice: boolean; state: string; newerKey: boolean }): string {
+    const key = device.newerKey ? 'newer key' : 'older key'
+    if (device.isThisDevice) return $syncPanel.needsNewKey ? 'This device, needs the new vault key' : `This device, ${key}`
+    return `${stateLabels[device.state] ?? device.state}, ${key}`
   }
 
   async function cancelKeyChange() {
@@ -87,402 +95,315 @@
   }
 </script>
 
-<article class="sync-row">
-  <div class="setting-copy">
-    <strong>Sesame Sync</strong>
-    <p role="status">{summary}.</p>
-    {#if $syncPanel.alarm}
-      <p class="sync-alarm" role="alert">
-        {$syncPanel.alarm} Sync is paused and nothing was changed on this device.
-      </p>
+<section class="settings-group" aria-labelledby="settings-group-sync">
+  <h3 id="settings-group-sync">Sesame Sync</h3>
+  <div class="settings-list">
+    <article>
+      <div class="setting-copy">
+        <strong>{statusLabel}</strong>
+        <p role="status">{statusLine}</p>
+        {#if $syncPanel.alarm}
+          <p class="sync-alarm" role="alert">
+            {$syncPanel.alarm} Sync is paused and nothing was changed on this device.
+          </p>
+        {/if}
+        {#if $syncPanel.loadError}
+          <p class="sync-note">{$syncPanel.loadError}</p>
+        {/if}
+        {#if $syncPanel.lastTransfer}
+          <p class="sync-done">{$syncPanel.lastTransfer}</p>
+        {/if}
+      </div>
+      <div class="sync-actions">
+        {#if $syncPanel.state === 'approved'}
+          <button type="button" class="secondary-button settings-manage" disabled={$syncPanel.working || $syncPanel.needsNewKey} on:click={syncPanel.syncNow}>
+            {$syncPanel.working ? 'Syncing…' : 'Sync now'}
+          </button>
+          <button type="button" class="secondary-button settings-manage" disabled={$syncPanel.working || $syncPanel.needsNewKey} on:click={syncPanel.openPairing}>
+            Add a device
+          </button>
+        {:else if $syncPanel.state === 'no_vault'}
+          <button type="button" class="secondary-button settings-manage" disabled={$syncPanel.working} on:click={syncPanel.openEnable}>
+            Set up
+          </button>
+        {:else if $syncPanel.state === 'not_enrolled' || $syncPanel.state === 'pairing' || $syncPanel.state === 'joining'}
+          <button type="button" class="secondary-button settings-manage" disabled={$syncPanel.working} on:click={syncPanel.openJoin}>
+            {$syncPanel.state === 'joining' ? 'Finish joining' : 'Join with a code'}
+          </button>
+          {#if $syncPanel.state !== 'joining'}
+            <button type="button" class="text-button" disabled={$syncPanel.working} on:click={syncPanel.openEnable}>
+              Start a new synced vault
+            </button>
+          {/if}
+        {:else if $syncPanel.state === 'removed'}
+          <button type="button" class="secondary-button settings-manage" disabled={$syncPanel.working} on:click={() => syncPanel.leave('', true)}>
+            Turn Sync off here
+          </button>
+        {/if}
+        <button type="button" class="text-button" disabled={$syncPanel.working} on:click={syncPanel.refresh}>
+          Refresh
+        </button>
+      </div>
+    </article>
+    {#if $syncPanel.needsNewKey}
+      <div class="sync-own-code">
+        <strong>Take the new vault key</strong>
+        <p>
+          A device was removed and the vault key changed. This device needs the new key before it can
+          sync again. Enter your master password to continue and get a new recovery kit.
+        </p>
+        <input type="password" bind:value={keyPassword} placeholder="Master password" aria-label="Master password" autocomplete="current-password" />
+        <div class="modal-actions">
+          <button type="button" class="primary-button" disabled={!keyPassword || $syncPanel.working} on:click={confirmKey}>
+            Take the new key
+          </button>
+        </div>
+      </div>
     {/if}
-    {#if $syncPanel.loadError}
-      <p class="sync-note">{$syncPanel.loadError}</p>
+    {#if $syncPanel.removalRecoveryKit}
+      <div class="sync-own-code" role="status">
+        <strong>Write down your new recovery kit</strong>
+        <p>Save this kit now, because your vault key changed and your previous kit no longer works.</p>
+        <code>{$syncPanel.removalRecoveryKit}</code>
+        <button type="button" class="text-button" on:click={syncPanel.dismissRecoveryKit}>
+          I have written it down
+        </button>
+      </div>
     {/if}
-    {#if coordinatorNote}
-      <p class="sync-note">{coordinatorNote}</p>
-    {/if}
-    {#if confirmation}
-      <p class="sync-note">{confirmation}</p>
-    {/if}
-    {#if floorCheck}
-      <p class="sync-note">{floorCheck}</p>
-    {/if}
-    {#if $syncPanel.lastTransfer}
-      <p class="sync-done">{$syncPanel.lastTransfer}</p>
-    {/if}
-  </div>
-  <div class="sync-actions">
-    {#if $syncPanel.state === 'approved'}
-      <button
-        type="button"
-        class="secondary-button settings-manage"
-        disabled={$syncPanel.working || $syncPanel.needsNewKey}
-        on:click={syncPanel.syncNow}
-      >
-        {$syncPanel.working ? 'Syncing…' : 'Sync now'}
-      </button>
-      <button
-        type="button"
-        class="secondary-button settings-manage"
-        disabled={$syncPanel.working || $syncPanel.needsNewKey}
-        on:click={syncPanel.openPairing}
-      >
-        Add a device
-      </button>
-    {:else if $syncPanel.state === 'no_vault'}
-      <button
-        type="button"
-        class="secondary-button settings-manage"
-        disabled={$syncPanel.working}
-        on:click={syncPanel.openEnable}
-      >
-        Set up
-      </button>
-    {:else if $syncPanel.state === 'not_enrolled' || $syncPanel.state === 'pairing' || $syncPanel.state === 'joining'}
-      <button
-        type="button"
-        class="secondary-button settings-manage"
-        disabled={$syncPanel.working}
-        on:click={syncPanel.openJoin}
-      >
-        {$syncPanel.state === 'joining' ? 'Finish joining' : 'Join with a code'}
-      </button>
-      {#if $syncPanel.state !== 'joining'}
-      <button
-        type="button"
-        class="text-button"
-        disabled={$syncPanel.working}
-        on:click={syncPanel.openEnable}
-      >
-        Start a new synced vault
-      </button>
-      {/if}
-    {:else if $syncPanel.state === 'removed'}
-      <button
-        type="button"
-        class="secondary-button settings-manage"
-        disabled={$syncPanel.working}
-        on:click={() => syncPanel.leave('', true)}
-      >
-        Turn Sync off here
-      </button>
+    {#if confirmation || floorCheck}
+      <article>
+        <div class="setting-copy">
+          <strong>Checks</strong>
+          {#if confirmation}<p>{confirmation}</p>{/if}
+          {#if floorCheck}<p>{floorCheck}</p>{/if}
+        </div>
+      </article>
     {/if}
     {#if $syncPanel.enrolled}
-      <button
-        type="button"
-        class="text-button"
-        disabled={$syncPanel.working}
-        on:click={() => {
-          showBackups = !showBackups
-          if (showBackups) void syncPanel.loadBackups()
-        }}
-      >
-        {showBackups ? 'Hide recovery copies' : 'Recovery copies'}
-      </button>
-    {/if}
-    <button
-      type="button"
-      class="text-button"
-      disabled={$syncPanel.working}
-      on:click={syncPanel.refresh}
-    >
-      Refresh
-    </button>
-  </div>
-</article>
-
-<article class="sync-caution">
-  <div class="setting-copy">
-    <strong>Not independently reviewed</strong>
-    <p>
-      Sync has not had an independent security review. Keep backups while you try it.
-    </p>
-  </div>
-</article>
-
-{#if $syncPanel.needsNewKey}
-  <div class="sync-own-code">
-    <strong>Take the new vault key</strong>
-    <p>
-      A device was removed and the vault key changed. This device needs the new key before it can
-      sync again. Enter your master password to continue and get a new recovery kit.
-    </p>
-    <input
-      type="password"
-      bind:value={keyPassword}
-      placeholder="Master password"
-      aria-label="Master password"
-      autocomplete="current-password"
-    />
-    <div class="modal-actions">
-      <button
-        type="button"
-        class="primary-button"
-        disabled={!keyPassword || $syncPanel.working}
-        on:click={confirmKey}
-      >
-        Take the new key
-      </button>
-    </div>
-  </div>
-{/if}
-{#if $syncPanel.removalRecoveryKit}
-  <div class="sync-own-code" role="status">
-    <strong>Write down your new recovery kit</strong>
-    <p>
-      Save this kit now, because your vault key changed and your previous kit no longer works.
-    </p>
-    <code>{$syncPanel.removalRecoveryKit}</code>
-    <button type="button" class="text-button" on:click={syncPanel.dismissRecoveryKit}>
-      I have written it down
-    </button>
-  </div>
-{/if}
-{#if showBackups}
-  <div class="sync-own-code">
-    <strong>Recovery copies</strong>
-    <p>
-      Sesame saves a recovery copy before replacing a vault, and saves your current vault
-      before you restore one.
-    </p>
-    {#if $syncPanel.backups.length === 0}
-      <p>No recovery copies on this device.</p>
-    {:else}
-      <ul class="sync-devices">
-        {#each $syncPanel.backups as backup (backup.name)}
-          <li>
-            <span class="sync-device-label">
-              {backup.side === 'this-device' ? 'This device' : 'Other device'}, version
-              {backup.revision}
-            </span>
-            <span class="sync-device-state">{backup.entryCount} logins</span>
-            <button
-              type="button"
-              class="text-button"
-              disabled={$syncPanel.working}
-              on:click={() => syncPanel.restoreBackup(backup.name)}
-            >
-              Restore
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </div>
-{/if}
-{#if removing}
-  <div class="sync-own-code">
-    <strong>Remove this device</strong>
-    {#if !$syncPanel.preparedRecoveryKit}
-      <p>
-        Sesame will change your vault key and give the new one to the devices
-        that are staying, so the removed device cannot read future changes.
-        Your current recovery kit stops working when the key changes, so Sesame shows the new
-        kit first. Enter your master password to see it.
-      </p>
-      <input
-        type="password"
-        bind:value={removalPassword}
-        placeholder="Master password"
-        aria-label="Master password"
-        autocomplete="current-password"
-      />
-      <div class="modal-actions">
-        <button
-          type="button"
-          class="secondary-button"
-          disabled={$syncPanel.working}
-          on:click={() => {
-            removing = ''
-            removalPassword = ''
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="primary-button"
-          disabled={!removalPassword || $syncPanel.working}
-          on:click={() => syncPanel.prepareKeyChange(removalPassword)}
-        >
-          Show the new recovery kit
-        </button>
-      </div>
-    {:else}
-      <p>Save this recovery kit now. It replaces your current kit once the device is removed.</p>
-      <code>{$syncPanel.preparedRecoveryKit}</code>
-      <label class="sync-kit-saved">
-        <input type="checkbox" bind:checked={kitSaved} />
-        I have saved the new recovery kit
-      </label>
-      <div class="modal-actions">
-        <button
-          type="button"
-          class="secondary-button"
-          disabled={$syncPanel.working}
-          on:click={cancelKeyChange}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="primary-button"
-          disabled={!kitSaved || $syncPanel.working}
-          on:click={confirmRemoval}
-        >
-          Remove device
-        </button>
-      </div>
-    {/if}
-  </div>
-{/if}
-{#if rotating}
-  <div class="sync-own-code">
-    <strong>Change the vault key</strong>
-    {#if !$syncPanel.preparedRecoveryKit}
-      <p>
-        Every device now has the newer key. Changing the vault key means new changes are written
-        under a key that was only sent with the newer key exchange. It does not protect anything
-        written before the change, because someone who recorded the earlier transfer and the
-        earlier data can still read both. Your current recovery kit stops working when the key
-        changes, so Sesame shows the new kit first. Enter your master password to see it.
-      </p>
-      <input
-        type="password"
-        bind:value={rotationPassword}
-        placeholder="Master password"
-        aria-label="Master password"
-        autocomplete="current-password"
-      />
-      <div class="modal-actions">
-        <button
-          type="button"
-          class="secondary-button"
-          disabled={$syncPanel.working}
-          on:click={() => {
-            rotating = false
-            rotationPassword = ''
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="primary-button"
-          disabled={!rotationPassword || $syncPanel.working}
-          on:click={() => syncPanel.prepareKeyChange(rotationPassword)}
-        >
-          Show the new recovery kit
-        </button>
-      </div>
-    {:else}
-      <p>Save this recovery kit now. It replaces your current kit once the vault key changes.</p>
-      <code>{$syncPanel.preparedRecoveryKit}</code>
-      <label class="sync-kit-saved">
-        <input type="checkbox" bind:checked={kitSaved} />
-        I have saved the new recovery kit
-      </label>
-      <div class="modal-actions">
-        <button
-          type="button"
-          class="secondary-button"
-          disabled={$syncPanel.working}
-          on:click={cancelKeyChange}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="primary-button"
-          disabled={!kitSaved || $syncPanel.working}
-          on:click={confirmRotation}
-        >
-          Change vault key
-        </button>
-      </div>
-    {/if}
-  </div>
-{/if}
-{#if leaving}
-  <div class="sync-own-code">
-    <strong>Turn Sync off on this device</strong>
-    <p>
-      This device leaves the vault and the vault key changes for the devices that stay. Your local
-      vault stays here. Enter your master password to confirm.
-    </p>
-    <input
-      type="password"
-      bind:value={leavePassword}
-      placeholder="Master password"
-      aria-label="Master password"
-      autocomplete="current-password"
-    />
-    <div class="modal-actions">
-      <button
-        type="button"
-        class="secondary-button"
-        disabled={$syncPanel.working}
-        on:click={() => {
-          leaving = false
-          leavePassword = ''
-        }}
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        class="primary-button"
-        disabled={!leavePassword || $syncPanel.working}
-        on:click={confirmLeave}
-      >
-        Turn Sync off
-      </button>
-    </div>
-  </div>
-{/if}
-{#if $syncPanel.state === 'approved' && thisDevice && !thisDevice.newerKey}
-  <p class="sync-key-note">
-    This device still uses the older key exchange. Upgrading replaces the key that other devices
-    use to send it the vault key, and it needs a Sync server that has been updated.
-  </p>
-  <div class="sync-actions-row">
-    <button type="button" class="text-button" disabled={$syncPanel.working} on:click={syncPanel.upgradeDeviceKey}>
-      Upgrade this device's key
-    </button>
-  </div>
-{/if}
-{#if $syncPanel.state === 'approved' && allNewer && !rotating && !leaving}
-  <div class="sync-actions-row">
-    <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (rotating = true)}>
-      Change the vault key
-    </button>
-  </div>
-{/if}
-{#if $syncPanel.state === 'approved' && !leaving}
-  <div class="sync-actions-row">
-    <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (leaving = true)}>
-      Turn Sync off on this device
-    </button>
-  </div>
-{/if}
-{#if others.length > 0}
-  <ul class="sync-devices">
-    {#each others as device (device.deviceId)}
-      <li>
-        <span class="sync-device-label">{device.label || 'Unnamed device'}</span>
-        <span class="sync-device-state">{stateLabels[device.state] ?? device.state}, {device.newerKey ? 'newer key' : 'older key'}</span>
+      <article>
+        <div class="setting-copy">
+          <strong>Recovery copies</strong>
+          <p>Sesame saves a recovery copy before replacing a vault, and saves your current vault before you restore one.</p>
+        </div>
         <button
           type="button"
           class="text-button"
           disabled={$syncPanel.working}
-          on:click={() => (removing = device.deviceId)}
+          on:click={() => {
+            showBackups = !showBackups
+            if (showBackups) void syncPanel.loadBackups()
+          }}
         >
-          Remove
+          {showBackups ? 'Hide' : 'Show'}
         </button>
-      </li>
-    {/each}
-  </ul>
+      </article>
+      {#if showBackups}
+        {#if $syncPanel.backups.length === 0}
+          <p class="sync-empty">No recovery copies on this device.</p>
+        {:else}
+          <ul class="sync-devices">
+            {#each $syncPanel.backups as backup (backup.name)}
+              <li>
+                <span class="sync-device-label">
+                  {backup.side === 'this-device' ? 'This device' : 'Other device'}, version
+                  {backup.revision}
+                </span>
+                <span class="sync-device-state">{backup.entryCount} logins</span>
+                <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => syncPanel.restoreBackup(backup.name)}>
+                  Restore
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
+    {/if}
+    <article>
+      <div class="setting-copy">
+        <strong>Not independently reviewed</strong>
+        <p>Sync has not had an independent security review. Keep backups while you try it.</p>
+      </div>
+    </article>
+  </div>
+</section>
+
+{#if $syncPanel.state === 'approved' && members.length > 0}
+  <section class="settings-group" aria-labelledby="settings-group-sync-devices">
+    <h3 id="settings-group-sync-devices">Devices</h3>
+    <div class="settings-list">
+      {#each members as device (device.deviceId)}
+        <article>
+          <div class="setting-copy">
+            <strong>{device.label || 'Unnamed device'}</strong>
+            <p>{deviceNote(device)}</p>
+          </div>
+          {#if !device.isThisDevice}
+            <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (removing = device.deviceId)}>
+              Remove
+            </button>
+          {/if}
+        </article>
+      {/each}
+      {#if removing}
+        <div class="sync-own-code">
+          <strong>Remove this device</strong>
+          {#if !$syncPanel.preparedRecoveryKit}
+            <p>
+              Sesame will change your vault key and give the new one to the devices
+              that are staying, so the removed device cannot read future changes.
+              Your current recovery kit stops working when the key changes, so Sesame shows the new
+              kit first. Enter your master password to see it.
+            </p>
+            <input type="password" bind:value={removalPassword} placeholder="Master password" aria-label="Master password" autocomplete="current-password" />
+            <div class="modal-actions">
+              <button
+                type="button"
+                class="secondary-button"
+                disabled={$syncPanel.working}
+                on:click={() => {
+                  removing = ''
+                  removalPassword = ''
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" class="primary-button" disabled={!removalPassword || $syncPanel.working} on:click={() => syncPanel.prepareKeyChange(removalPassword)}>
+                Show the new recovery kit
+              </button>
+            </div>
+          {:else}
+            <p>Save this recovery kit now. It replaces your current kit once the device is removed.</p>
+            <code>{$syncPanel.preparedRecoveryKit}</code>
+            <label class="sync-kit-saved">
+              <input type="checkbox" bind:checked={kitSaved} />
+              I have saved the new recovery kit
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="secondary-button" disabled={$syncPanel.working} on:click={cancelKeyChange}>
+                Cancel
+              </button>
+              <button type="button" class="primary-button" disabled={!kitSaved || $syncPanel.working} on:click={confirmRemoval}>
+                Remove device
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </section>
+
+  <section class="settings-group" aria-labelledby="settings-group-sync-key">
+    <h3 id="settings-group-sync-key">Vault key</h3>
+    <div class="settings-list">
+      {#if thisDevice && !thisDevice.newerKey}
+        <article>
+          <div class="setting-copy">
+            <strong>This device's key</strong>
+            <p>
+              This device still uses the older key exchange. Upgrading replaces the key that other devices
+              use to send it the vault key, and it needs a Sync server that has been updated.
+            </p>
+          </div>
+          <button type="button" class="text-button" disabled={$syncPanel.working} on:click={syncPanel.upgradeDeviceKey}>
+            Upgrade this device's key
+          </button>
+        </article>
+      {/if}
+      {#if allNewer && !rotating && !leaving}
+        <article>
+          <div class="setting-copy">
+            <strong>Change the vault key</strong>
+            <p>Every device has the newer key, so the vault key can be changed.</p>
+          </div>
+          <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (rotating = true)}>
+            Change the vault key
+          </button>
+        </article>
+      {/if}
+      {#if rotating}
+        <div class="sync-own-code">
+          <strong>Change the vault key</strong>
+          {#if !$syncPanel.preparedRecoveryKit}
+            <p>
+              Every device now has the newer key. Changing the vault key means new changes are written
+              under a key that was only sent with the newer key exchange. It does not protect anything
+              written before the change, because someone who recorded the earlier transfer and the
+              earlier data can still read both. Your current recovery kit stops working when the key
+              changes, so Sesame shows the new kit first. Enter your master password to see it.
+            </p>
+            <input type="password" bind:value={rotationPassword} placeholder="Master password" aria-label="Master password" autocomplete="current-password" />
+            <div class="modal-actions">
+              <button
+                type="button"
+                class="secondary-button"
+                disabled={$syncPanel.working}
+                on:click={() => {
+                  rotating = false
+                  rotationPassword = ''
+                }}
+              >
+                Cancel
+              </button>
+              <button type="button" class="primary-button" disabled={!rotationPassword || $syncPanel.working} on:click={() => syncPanel.prepareKeyChange(rotationPassword)}>
+                Show the new recovery kit
+              </button>
+            </div>
+          {:else}
+            <p>Save this recovery kit now. It replaces your current kit once the vault key changes.</p>
+            <code>{$syncPanel.preparedRecoveryKit}</code>
+            <label class="sync-kit-saved">
+              <input type="checkbox" bind:checked={kitSaved} />
+              I have saved the new recovery kit
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="secondary-button" disabled={$syncPanel.working} on:click={cancelKeyChange}>
+                Cancel
+              </button>
+              <button type="button" class="primary-button" disabled={!kitSaved || $syncPanel.working} on:click={confirmRotation}>
+                Change vault key
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
+      {#if !leaving}
+        <article>
+          <div class="setting-copy">
+            <strong>Turn Sync off on this device</strong>
+            <p>This device leaves the vault and the vault key changes for the devices that stay. Your local vault stays here.</p>
+          </div>
+          <button type="button" class="text-button" disabled={$syncPanel.working} on:click={() => (leaving = true)}>
+            Turn Sync off
+          </button>
+        </article>
+      {:else}
+        <div class="sync-own-code">
+          <strong>Turn Sync off on this device</strong>
+          <p>
+            This device leaves the vault and the vault key changes for the devices that stay. Your local
+            vault stays here. Enter your master password to confirm.
+          </p>
+          <input type="password" bind:value={leavePassword} placeholder="Master password" aria-label="Master password" autocomplete="current-password" />
+          <div class="modal-actions">
+            <button
+              type="button"
+              class="secondary-button"
+              disabled={$syncPanel.working}
+              on:click={() => {
+                leaving = false
+                leavePassword = ''
+              }}
+            >
+              Cancel
+            </button>
+            <button type="button" class="primary-button" disabled={!leavePassword || $syncPanel.working} on:click={confirmLeave}>
+              Turn Sync off
+            </button>
+          </div>
+        </div>
+      {/if}
+    </div>
+  </section>
 {/if}
 
 <SyncEnableModal
@@ -537,9 +458,22 @@
     font-size: var(--type-2);
     line-height: 1.5;
   }
+  .sync-alarm {
+    margin: var(--space-2) 0 0;
+    color: var(--danger);
+    font-size: var(--type-2);
+    line-height: 1.5;
+  }
+  .sync-empty {
+    margin: 0;
+    padding: var(--space-3) 0;
+    color: var(--text-muted);
+    font-size: var(--type-2);
+    border-bottom: 1px solid var(--border-soft);
+  }
 
-  .sync-row {
-    flex-wrap: wrap;
+  article .setting-copy {
+    flex: 1 1 16rem;
   }
 
   .sync-actions {
@@ -547,18 +481,8 @@
     flex: 0 1 auto;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: flex-end;
     gap: var(--space-2) var(--space-3);
-  }
-
-  .sync-alarm {
-    margin: var(--space-2) 0 0;
-    color: var(--danger);
-    font-size: var(--type-2);
-    line-height: 1.5;
-  }
-
-  .sync-actions-row {
-    padding: var(--space-2) 0;
   }
 
   .sync-own-code {
@@ -600,8 +524,7 @@
 
   .sync-devices {
     display: grid;
-    gap: var(--space-2);
-    margin: var(--space-2) 0 0;
+    margin: 0;
     padding: 0;
     list-style: none;
   }
@@ -609,6 +532,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border-soft);
   }
   .sync-device-label {
     flex: 1;
@@ -625,11 +550,6 @@
     gap: var(--space-2);
     color: var(--text);
     font-size: var(--type-3);
-  }
-  .sync-key-note {
-    margin: var(--space-2) 0 0;
-    color: var(--text-muted);
-    font-size: var(--type-2);
   }
   .sync-device-state {
     flex: none;

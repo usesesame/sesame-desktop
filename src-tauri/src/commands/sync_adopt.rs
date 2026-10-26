@@ -84,6 +84,67 @@ pub(super) fn finish_adoption(
     Ok(recovery_kit)
 }
 
+pub(super) fn digest_after_commit(
+    payload: &crate::vault::types::VaultPayload,
+) -> Result<String, String> {
+    let mut committed = payload.clone();
+    committed.revision = committed.revision.saturating_add(1);
+    let mut bytes = serde_json::to_vec(&committed)
+        .map_err(|_| "Sesame could not read the synced vault.".to_string())?;
+    let digest = crate::sync::state::payload_digest(&bytes);
+    bytes.zeroize();
+    committed.zeroize();
+    Ok(digest)
+}
+
+pub(super) fn digest_kept_through_adoption(
+    state: &crate::sync::state::SyncState,
+    vault: &crate::vault::UnlockedVault,
+) -> Result<Option<String>, String> {
+    let payload = vault.open_payload()?;
+    let mut bytes = serde_json::to_vec(&*payload)
+        .map_err(|_| "Sesame could not read the local vault.".to_string())?;
+    let unsynced = state.has_local_changes(&bytes);
+    bytes.zeroize();
+    if unsynced {
+        return Ok(None);
+    }
+    digest_after_commit(&payload).map(Some)
+}
+
+pub(super) struct KeptThroughAdoption {
+    digest: Option<String>,
+    names: std::collections::BTreeMap<String, String>,
+}
+
+impl KeptThroughAdoption {
+    pub(super) fn capture(
+        state: &crate::sync::state::SyncState,
+        list: &crate::sync::devicelist::DeviceList,
+        vault: &crate::vault::UnlockedVault,
+    ) -> Result<Self, String> {
+        let names = vault.expose_vault_key(|key| {
+            Ok(super::sync::names_for(
+                list,
+                &state.remembered_names(),
+                &state.vault_id,
+                Some(key),
+            ))
+        })?;
+        Ok(Self {
+            digest: digest_kept_through_adoption(state, vault)?,
+            names,
+        })
+    }
+
+    pub(super) fn apply(self, next: &mut crate::sync::state::SyncState) {
+        if let Some(digest) = self.digest {
+            next.payload_digest = digest;
+        }
+        let _ = next.remember_names(&self.names);
+    }
+}
+
 pub(super) fn prepare_recovery(
     key: &[u8; 32],
 ) -> Result<(String, crate::sync::key_change::PreparedRecovery), String> {
@@ -225,6 +286,99 @@ mod tests {
             .expect("adopted")
             .expect("a kit");
         assert!(recovery_opens(&vault, &kit, &key));
+    }
+
+    fn bytes_of(vault: &UnlockedVault) -> Vec<u8> {
+        serde_json::to_vec(&*vault.open_payload().expect("payload")).expect("bytes")
+    }
+
+    fn state_matching(vault: &UnlockedVault) -> crate::sync::state::SyncState {
+        let mut state = crate::sync::state::SyncState::new("fictionalVault00000001", "device");
+        state.payload_digest = crate::sync::state::payload_digest(&bytes_of(vault));
+        state
+    }
+
+    #[test]
+    fn taking_a_new_key_does_not_make_a_synced_vault_look_edited() {
+        let mut vault = session();
+        let mut state = state_matching(&vault);
+        let kept = digest_kept_through_adoption(&state, &vault).expect("digest");
+        let payload = vault.open_payload().expect("payload").clone();
+        adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
+        state.payload_digest = kept.expect("a clean vault keeps its digest");
+        assert!(!state.has_local_changes(&bytes_of(&vault)));
+    }
+
+    #[test]
+    fn taking_a_new_key_never_hides_an_edit_that_was_not_synced() {
+        let mut vault = session();
+        let state = state_matching(&vault);
+        let mut edited = vault.open_payload().expect("payload").clone();
+        edited.vault_name = "Fictional vault edited offline".into();
+        crate::vault::storage::commit_payload_change(&mut vault, edited).expect("edit");
+        assert!(state.has_local_changes(&bytes_of(&vault)));
+
+        assert_eq!(
+            digest_kept_through_adoption(&state, &vault).expect("digest"),
+            None
+        );
+        let payload = vault.open_payload().expect("payload").clone();
+        adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
+        assert!(state.has_local_changes(&bytes_of(&vault)));
+    }
+
+    #[test]
+    fn the_digest_a_join_stores_before_adopting_matches_the_vault_after_it() {
+        let mut vault = session();
+        let mut remote = vault.open_payload().expect("payload").clone();
+        remote.vault_name = "Fictional vault from the first device".into();
+        remote.revision = 12;
+        let expected = digest_after_commit(&remote).expect("digest");
+        adopt_with(&mut vault, [6u8; 32], remote, PASSWORD, None).expect("adopted");
+        assert_eq!(
+            crate::sync::state::payload_digest(&bytes_of(&vault)),
+            expected
+        );
+    }
+
+    #[test]
+    fn names_read_before_a_key_is_taken_are_still_shown_after_it() {
+        use crate::sync::devicelist::DeviceList;
+        use crate::sync::engine::{create_entry, seal_label};
+        use crate::sync::identity::DeviceIdentity;
+
+        let mut vault = session();
+        let old_key = vault.expose_vault_key(|key| Ok(*key)).expect("key");
+        let creator = DeviceIdentity::generate().expect("identity");
+        let sealed = seal_label(
+            &old_key,
+            "fictionalVault00000001",
+            &creator.device_id,
+            "Fictional laptop",
+        )
+        .expect("label");
+        let create = create_entry(&creator, "fictionalVault00000001", &sealed);
+        let list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
+        let mut state = state_matching(&vault);
+
+        let kept = KeptThroughAdoption::capture(&state, &list, &vault).expect("kept");
+        let payload = vault.open_payload().expect("payload").clone();
+        adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
+        kept.apply(&mut state);
+
+        let new_key = vault.expose_vault_key(|key| Ok(*key)).expect("key");
+        assert_ne!(new_key, old_key);
+        let shown = super::super::sync::names_for(
+            &list,
+            &state.remembered_names(),
+            "fictionalVault00000001",
+            Some(&new_key),
+        );
+        assert_eq!(
+            shown.get(&creator.device_id).map(String::as_str),
+            Some("Fictional laptop")
+        );
+        assert!(!state.has_local_changes(&bytes_of(&vault)));
     }
 
     #[test]

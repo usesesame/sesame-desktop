@@ -59,6 +59,7 @@ pub struct BrowserIntegrationStatus {
     edge_registered: bool,
     firefox_registered: bool,
     ready: bool,
+    served_elsewhere: bool,
     #[ts(
         type = "'ready' | 'hostMissing' | 'manifestMissing' | 'registrationMissing' | 'unsupported'"
     )]
@@ -73,6 +74,7 @@ struct BrowserStatusInputs {
     chrome_registered: bool,
     edge_registered: bool,
     firefox_registered: bool,
+    served_elsewhere: bool,
 }
 
 struct RegistrationPlan {
@@ -225,6 +227,7 @@ pub fn status() -> BrowserIntegrationStatus {
         chrome_registered,
         edge_registered,
         firefox_registered,
+        served_elsewhere: crate::browser_pipe::served_elsewhere(),
     })
 }
 
@@ -351,6 +354,7 @@ fn browser_status(inputs: BrowserStatusInputs) -> BrowserIntegrationStatus {
         chrome_registered,
         edge_registered,
         firefox_registered,
+        served_elsewhere,
     } = inputs;
     let ready = supported
         && host_available
@@ -377,6 +381,7 @@ fn browser_status(inputs: BrowserStatusInputs) -> BrowserIntegrationStatus {
         edge_registered,
         firefox_registered,
         ready,
+        served_elsewhere,
         code,
     }
 }
@@ -1132,5 +1137,40 @@ mod boundary_tests {
         let error = serve_with_relay(&mut invalid_reader, &mut output, |_| unreachable!())
             .expect_err("invalid JSON fails");
         assert_eq!(error.kind(), ErrorKind::InvalidData);
+    }
+}
+
+#[cfg(test)]
+mod served_elsewhere_tests {
+    use super::*;
+
+    fn registered() -> BrowserStatusInputs {
+        BrowserStatusInputs {
+            supported: true,
+            host_available: true,
+            manifest_ready: true,
+            chrome_registered: true,
+            edge_registered: true,
+            firefox_registered: true,
+            served_elsewhere: false,
+        }
+    }
+
+    #[test]
+    fn a_connection_that_another_sesame_holds_does_not_make_the_registration_look_broken() {
+        let held = browser_status(BrowserStatusInputs {
+            served_elsewhere: true,
+            ..registered()
+        });
+        assert!(held.served_elsewhere);
+        assert!(held.ready);
+        assert_eq!(held.code, "ready");
+    }
+
+    #[test]
+    fn a_registered_connection_that_nobody_else_holds_says_nothing_extra() {
+        let free = browser_status(registered());
+        assert!(!free.served_elsewhere);
+        assert!(free.ready);
     }
 }

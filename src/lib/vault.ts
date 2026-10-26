@@ -820,13 +820,13 @@ export async function searchItems(query: string): Promise<string[]> {
 }
 
 /// Bounded disclosure: a short list crosses on focus, never every stored address.
-export async function suggestFieldValues(field: 'username' | 'email'): Promise<string[]> {
+export async function suggestFieldValues(field: 'username' | 'email', site?: string): Promise<string[]> {
   if (previewMode) {
     const values = Object.values(previewCards).map((card) => card[field])
       .concat(field === 'email' ? Object.values(previewIdentities).map((identity) => identity.email) : [])
     return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 8)
   }
-  return invoke<string[]>('suggest_field_values', { field })
+  return invoke<string[]>('suggest_field_values', { field, site })
 }
 
 function previewPasswordAnalysis(password: string): PasswordAnalysis {
@@ -1548,6 +1548,7 @@ export async function getBrowserIntegrationStatus(): Promise<BrowserIntegrationS
       edgeRegistered: false,
       firefoxRegistered: false,
       ready: false,
+      servedElsewhere: false,
       code: 'unsupported',
     }
   }

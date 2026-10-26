@@ -1,3 +1,7 @@
+<script module lang="ts">
+  let menuCount = 0
+</script>
+
 <script lang="ts">
   export let value: string
   export let options: Array<{ value: string; label: string }>
@@ -7,6 +11,7 @@
   export let disabled = false
   export let triggerClass = ''
 
+  const listId = `select-menu-${++menuCount}`
   let open = false
   let container: HTMLElement
   let trigger: HTMLButtonElement
@@ -32,6 +37,12 @@
   }
 
   function handleTriggerKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault()
+      event.stopPropagation()
+      close(true)
+      return
+    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
       open = true
@@ -56,6 +67,7 @@
     }
     if (event.key === 'Escape') {
       event.preventDefault()
+      event.stopPropagation()
       close(true)
       return
     }
@@ -73,7 +85,8 @@
     class="sort-select-trigger {triggerClass}"
     aria-haspopup="listbox"
     aria-expanded={open}
-    aria-label={label}
+    aria-controls={open ? listId : undefined}
+    aria-label={selectedLabel ? `${label}: ${selectedLabel}` : label}
     {disabled}
     on:click={() => (open = !open)}
     on:keydown={handleTriggerKeydown}
@@ -82,7 +95,7 @@
     <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
   </button>
   {#if open}
-    <div class="sort-menu" role="listbox" aria-label={label}>
+    <div class="sort-menu" id={listId} role="listbox" aria-label={label}>
       {#each options as option (option.value)}
         <button
           type="button"

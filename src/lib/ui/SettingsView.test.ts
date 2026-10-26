@@ -135,3 +135,25 @@ test('the Connections tab shows the server connection group once', () => {
   expect(screen.getAllByRole('heading', { name: 'Connect to your own server' })).toHaveLength(1)
   expect(screen.getAllByText('Pairing link or server address')).toHaveLength(1)
 })
+
+const registered = { supported: true, hostAvailable: true, manifestReady: true, chromeRegistered: true, edgeRegistered: true, firefoxRegistered: true, ready: true, servedElsewhere: false, code: 'ready' as const }
+
+test('a working browser connection hides the Browser group', () => {
+  renderSettings({ tab: 'connections', browserIntegration: registered })
+
+  expect(screen.queryByRole('heading', { name: 'Browser' })).toBeNull()
+})
+
+test('a browser connection that another Sesame holds keeps the Browser group visible', () => {
+  renderSettings({ tab: 'connections', browserIntegration: { ...registered, servedElsewhere: true } })
+
+  expect(screen.getByRole('heading', { name: 'Browser' })).toBeTruthy()
+  expect(screen.getByText('Used by another Sesame')).toBeTruthy()
+})
+
+test('Sync has its own group on the Connections tab, apart from the account', () => {
+  renderSettings({ tab: 'connections' })
+
+  expect(screen.getByRole('heading', { name: 'Sesame Sync' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Sesame account' })).toBeTruthy()
+})

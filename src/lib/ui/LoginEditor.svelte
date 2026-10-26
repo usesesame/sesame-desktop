@@ -1,5 +1,6 @@
 <script lang="ts">
   import { parseTags } from '../vault-items'
+  import { folderToSuggest, hostOf, loginsOnSite, nameFromUrl, tagsToSuggest } from '../login-suggestions'
   import ModalShell from './ModalShell.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import Icon from '../Icon.svelte'
@@ -10,23 +11,28 @@
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import type { Folder, LoginInput } from '../types'
 
-  // Fetched once per field on first focus; no store, so nothing survives a lock.
+  // Fetched on focus, and again when the website changes, because the vault ranks them for that site.
+  // No store, so nothing survives a lock.
   let usernameSuggestions: string[] = []
   let emailSuggestions: string[] = []
+  const loadedFor: Record<'username' | 'email', string | null> = { username: null, email: null }
 
   async function loadSuggestions(field: 'username' | 'email') {
-    const target = field === 'username' ? usernameSuggestions : emailSuggestions
-    if (target.length) return
+    const host = hostOf(loginDraft.url)
+    if (loadedFor[field] === host) return
+    loadedFor[field] = host
+    const current = () => loadedFor[field] === host
     try {
-      const values = await suggestFieldValues(field)
+      const values = await suggestFieldValues(field, host || undefined)
+      if (!current()) return
       if (field === 'username') usernameSuggestions = values
       else emailSuggestions = values
     } catch {
-      // Losing a suggestion list costs nothing; fail silently.
+      if (current()) loadedFor[field] = null
     }
   }
 
-  const { generator } = useAppStores()
+  const { generator, vault } = useAppStores()
 
   export let loginDraft: LoginInput
   export let folderOptions: Folder[] = []
@@ -42,6 +48,43 @@
 
   let nameInput: HTMLInputElement
   let urlInput: HTMLInputElement
+
+  let nameTouched = Boolean(loginDraft.id) || loginDraft.title.trim() !== ''
+  let suggestedName = ''
+  if (!nameTouched) {
+    suggestedName = nameFromUrl(loginDraft.url)
+    if (suggestedName) loginDraft = { ...loginDraft, title: suggestedName }
+  }
+
+  function onNameInput(event: Event & { currentTarget: HTMLInputElement }) {
+    nameTouched = event.currentTarget.value.trim() !== ''
+  }
+
+  function onUrlInput(event: Event & { currentTarget: HTMLInputElement }) {
+    const url = event.currentTarget.value
+    const mayRename = !nameTouched || (suggestedName !== '' && loginDraft.title === suggestedName)
+    const next = nameFromUrl(url)
+    loginDraft = mayRename ? { ...loginDraft, url, title: next } : { ...loginDraft, url }
+    if (mayRename) suggestedName = next
+  }
+
+  $: entries = $vault.snapshot?.entries ?? []
+  $: siteMatches = loginsOnSite(loginDraft.url, entries, loginDraft.id)
+  $: existingNote = describeExisting(siteMatches.map((match) => match.title))
+  $: folderHint = folderToSuggest(siteMatches, loginDraft.folderId)
+  $: tagHints = tagsToSuggest(siteMatches, entries, loginDraft.tags ?? [])
+
+  function describeExisting(titles: string[]): string {
+    if (titles.length === 0) return ''
+    if (titles.length === 1) return `You already have ${titles[0]} on this site.`
+    if (titles.length === 2) return `You already have ${titles[0]} and ${titles[1]} on this site.`
+    return `You already have ${titles[0]} and ${titles.length - 1} more on this site.`
+  }
+
+  function addTag(tag: string) {
+    loginDraft = { ...loginDraft, tags: [...(loginDraft.tags ?? []), tag] }
+    dirty = true
+  }
 
   // Tracked from input events, not a draft snapshot, which would hold a second copy of the password.
   let dirty = false
@@ -159,6 +202,7 @@
   function setFolder(folderId: string) {
     const folder = folderOptions.find((candidate) => candidate.id === folderId)
     loginDraft = { ...loginDraft, folderId: folder?.id, folder: folder?.name ?? '' }
+    dirty = true
   }
 </script>
 
@@ -178,10 +222,14 @@
   </header>
 
   <div class="editor-fields">
-    <label>Login name<input name="login-title" bind:this={nameInput} bind:value={loginDraft.title} required maxlength="160" placeholder="e.g. GitHub…" autocomplete="off" /></label>
-    <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} bind:value={loginDraft.url} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="off" spellcheck="false" /></label>
+    <label>Login name<input name="login-title" bind:this={nameInput} bind:value={loginDraft.title} on:input={onNameInput} required maxlength="160" placeholder="e.g. GitHub…" autocomplete="off" /></label>
+    <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} value={loginDraft.url} on:input={onUrlInput} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="off" spellcheck="false" /></label>
+    {#if existingNote}<p class="suggestion-note" role="status">{existingNote}</p>{/if}
     <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" autocomplete="off" spellcheck="false"></textarea></label>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
+    {#if tagHints.length}
+      <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${tag}`} on:click={() => addTag(tag)}>{tag}</button>{/each}</p>
+    {/if}
     <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
       <SelectMenu
         label="Folder"
@@ -190,6 +238,9 @@
         onChange={setFolder}
       />
     </label>
+    {#if folderHint}
+      <p class="suggestion-note">Your other logins for this site are in {folderHint.name}. <button type="button" class="text-button" on:click={() => setFolder(folderHint.id)}>Put it in {folderHint.name}</button></p>
+    {/if}
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
       <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="off" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>

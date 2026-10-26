@@ -65,7 +65,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Title <span class="field-hint">How this note appears in your list, e.g. “Home Wi-Fi”</span><input name="note-title" bind:this={titleInput} value={noteDraft.title} on:input={(event) => updateDraft({ title: event.currentTarget.value })} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
+    <label>Title <span class="field-hint">How this note appears in your list, e.g. "Home Wi-Fi"</span><input name="note-title" bind:this={titleInput} value={noteDraft.title} on:input={(event) => updateDraft({ title: event.currentTarget.value })} required maxlength="160" placeholder="e.g. Home Wi-Fi…" autocomplete="off" /></label>
     <label>Content<textarea name="note-content" value={noteDraft.content} on:input={(event) => updateDraft({ content: event.currentTarget.value })} rows="8" maxlength="20000" placeholder="What you want to keep…"></textarea></label>
     <KeptSecret draft={noteDraft} key="content" typed={noteDraft.content} onChange={(next) => updateDraft(next)} />
     <label class="lock-option"><input name="note-locked" type="checkbox" checked={noteDraft.locked} disabled={wasLocked === true || savingNote} on:change={(event) => updateDraft({ locked: event.currentTarget.checked })} /> <span>Ask for my master password to open this note</span></label>

@@ -236,12 +236,12 @@
   }
   .verify-groups {
     display: grid;
-    gap: 12px;
+    gap: var(--space-3);
     margin-bottom: 14px;
   }
   .verify-group {
     display: grid;
-    gap: 4px;
+    gap: var(--space-1);
     font-size: var(--type-2);
   }
   .verify-group input {

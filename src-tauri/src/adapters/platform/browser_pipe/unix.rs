@@ -132,6 +132,7 @@ fn bind_exclusive(path: &Path) -> io::Result<UnixListener> {
         Ok(listener) => Ok(listener),
         Err(error) if error.kind() == ErrorKind::AddrInUse => {
             if UnixStream::connect(path).is_ok() {
+                super::note_served_elsewhere();
                 return Err(io::Error::new(
                     ErrorKind::AddrInUse,
                     "another Sesame already serves the browser socket",
@@ -471,6 +472,22 @@ mod tests {
             .permissions()
             .mode()
             & 0o777
+    }
+
+    #[test]
+    fn a_second_sesame_leaves_a_live_socket_alone_and_records_that_it_was_refused() {
+        let socket = scratch_socket("second");
+        let this = std::env::current_exe().expect("this test binary");
+        serve_in_background(&socket, path_identity(&this));
+        let first =
+            request_at(&socket, &path_identity(&this), b"first").expect("a served response");
+        assert_eq!(first.as_slice(), b"first");
+
+        let refused = bind_exclusive(&socket).expect_err("a live socket is not taken over");
+        assert_eq!(refused.kind(), ErrorKind::AddrInUse);
+        assert!(crate::browser_pipe::served_elsewhere());
+        let still = request_at(&socket, &path_identity(&this), b"still").expect("still served");
+        assert_eq!(still.as_slice(), b"still");
     }
 
     #[test]

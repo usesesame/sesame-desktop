@@ -149,6 +149,11 @@ test('workspace changes and notifications are announced without moving focus', (
   assert.match(toast, /role="alert" aria-atomic="true"/)
 })
 
+test('the unlock screen shows the notice that explains why the vault locked', () => {
+  const unlockBranch = appSource.slice(appSource.indexOf('<UnlockScreen'), appSource.indexOf('<WorkspaceShell'))
+  assert.match(unlockBranch, /<Toast notice=\{\$feedbackState\.notice\}/)
+})
+
 test('interactive Svelte components do not introduce positive tabindex values', () => {
   for (const path of componentPaths) {
     assert.doesNotMatch(read(path), /tabindex\s*=\s*["'][1-9]\d*["']/, `${path} contains a positive tabindex`)
@@ -297,7 +302,9 @@ test('healthy desktop browser plumbing is not shown as extension installation', 
   assert.match(source, /Recheck desktop setup/)
   assert.doesNotMatch(source, /\? 'Installed'/)
   const settings = component('SettingsView.svelte')
-  assert.match(settings, /{#if !browserIntegration\?\.ready\}[\s\S]*?<BrowserIntegrationSetting/)
+  assert.match(settings, /{#if !browserIntegration\?\.ready \|\| browserIntegration\?\.servedElsewhere\}[\s\S]*?<BrowserIntegrationSetting/)
+  assert.match(source, /Another Sesame on this computer already serves the browser extension/)
+  assert.doesNotMatch(source, /heldElsewhere[^\n]*\? 'No repair needed'/)
 })
 
 test('PanelResizer is an operable window splitter, not a decorative bar', () => {

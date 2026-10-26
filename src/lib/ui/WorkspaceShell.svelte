@@ -13,6 +13,8 @@
   export let onNavigate: (view: View) => void
   export let onLock: () => void
   export let onDismissNotice: () => void
+  export let onHoldNotice: () => void = () => {}
+  export let onResumeNotice: () => void = () => {}
   export let onDismissError: () => void
   export let onNewLogin: () => void = () => {}
   export let onCopyPassword: () => void = () => {}
@@ -24,6 +26,10 @@
   export let onOpenSelectedSite: () => void = () => {}
 
   const { selection, settings, vault } = useAppStores()
+
+  function hasSelectedText() {
+    return (window.getSelection()?.toString() ?? '') !== ''
+  }
 
   function handleShortcut(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null
@@ -56,7 +62,7 @@
     } else if (key === 'n') {
       event.preventDefault()
       onNewLogin()
-    } else if (key === 'c' && $selection.activeView === 'vault' && $vault.loginCard) {
+    } else if (key === 'c' && $selection.activeView === 'vault' && $vault.loginCard && !hasSelectedText()) {
       event.preventDefault()
       if (event.shiftKey) onCopyUsername()
       else onCopyPassword()
@@ -94,7 +100,7 @@
 
     <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">Current section: {title}</p>
 
-    <Toast {notice} {errorMessage} {onDismissNotice} {onDismissError} />
+    <Toast {notice} {errorMessage} {onDismissNotice} {onDismissError} onHold={onHoldNotice} onResume={onResumeNotice} />
     <slot />
   </section>
 </main>

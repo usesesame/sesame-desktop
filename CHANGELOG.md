@@ -4,6 +4,98 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.5.1
+
+### Sync
+
+- A device shows what another device changed as soon as Sync applies it. The
+  Vault screen used to stay as it was until the vault was locked and unlocked.
+- Two devices no longer write new versions in turns while nobody is editing.
+  Sesame now records the vault as it stands after it applies a change from
+  another device, so it no longer takes that change for an edit of its own.
+  This also stops a false message that two devices changed the vault after a
+  device takes the new vault key.
+- A device that is waiting for the new vault key now says that it needs the
+  key. It used to say that it could not reach Sesame Sync.
+- Adding a device shows that a code is being made, instead of saying that
+  pairing could not start.
+- After the vault key changes, a device still shows the names of other devices
+  that it had read before. Sesame keeps those names on the device. A name it
+  never read still shows as a device.
+
+### Logins
+
+- The new login form helps with what you already have. Typing a website fills
+  the login name when you have not typed one, says if you already have logins
+  for that site, offers the folder those logins are in, and lists tags you have
+  used. Each offer is one click and nothing is filled in without it, apart from
+  the name.
+- The user name and email lists put values from the same site first, then the
+  ones used on the most logins, then the most recent. The lists still hold at
+  most eight values and are read only when you focus the field.
+
+### Quick access
+
+- The quick access window no longer closes the moment focus slips away. It
+  waits a little over a second for focus to come back, and up to eight seconds
+  while the pointer is still over it, so a window manager that follows the
+  pointer or a small mouse movement does not close it. It still closes once
+  focus has really gone, so decrypted titles do not stay on screen unattended.
+- A pointer that rests over the results no longer takes the selection from the
+  keyboard, and the arrow keys scroll the selected result into view.
+
+### Consistency and feedback
+
+- Escape and a click on the backdrop no longer close the Sync set up and
+  conflict dialogs while they are working, which matches their disabled buttons.
+- Errors in the backup check use the same style as every other form error. They
+  had a style name that nothing defined.
+- The change master password dialog uses one name for the password in its
+  labels and its button, and the field hints use straight quotes.
+- Exporting a backup with your master password now refreshes the recovery
+  health afterwards, and the backup buttons are off while one is running.
+- Cancelling a breach check that could not be cancelled says so, and quick
+  access says when it could not copy or open an item.
+
+### Everyday use
+
+- Ctrl+C copies the text you have selected. It copies the password of the open
+  login only when no text is selected.
+- Saving an edit to a login keeps your search and filters. A new login, or an
+  edit that moves a login to another folder, still shows the login in its
+  folder.
+- Locking the vault clears the search and filters, so the next unlock starts
+  from the whole vault.
+- Search accepts several words in any order and ignores accents, so "work
+  northwind" and "cafe" find "Café Northwind" in the Work folder.
+- Escape inside an open list, such as the sort order, closes only the list and
+  not the dialog around it. The list button now says its current value, and
+  Settings lists the slash key that opens search.
+- A notice stays on screen while the pointer or keyboard focus is on it.
+- The reason the vault locked now shows on the unlock screen, where it used to
+  disappear before anyone could read it.
+- Opening a saved site that Sesame refuses to open now shows an error, and the
+  login is not counted as used.
+
+### Browser
+
+- Settings says when another Sesame on the same computer already serves the
+  browser extension. The first Sesame to start keeps the connection, as it did
+  before, and a later one now says why the extension does not reach it.
+
+### Settings
+
+- The Sync part of the Connections tab is arranged as Sesame Sync, Devices and
+  Vault key, and the Devices list now includes this device.
+- A dialog that replaces another one, such as the login editor handing over to
+  the delete confirmation, no longer fades the dimmed background out and back
+  in.
+- The Sync panel says when Sesame checks the minimum Sync version, instead of
+  only saying that it has not.
+- A dialog is now moved into place before it is shown, so its entrance plays
+  once from where it ends up. A dialog that was created closed and opened later
+  was never moved at all.
+
 ## 0.5.0
 
 ### Notes
@@ -68,6 +160,12 @@ release cannot be published without saying what changed in it.
 
 ### Security
 
+- Sesame checks a signed statement that names the newest release. The update
+  screen says when a newer release exists that the update information on this
+  device does not list, and when Sesame has not confirmed in the last 30 days
+  that no update is waiting. The statement is signed with a key whose public
+  half is built into the app. During the 30 days after the last confirmation,
+  the check cannot show that someone is holding back an update.
 - The main and quick access windows are built in code and refuse to open new
   windows.
 - Website icons accept only ICO, PNG and JPEG files. WebP and GIF are no longer

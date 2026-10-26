@@ -9,7 +9,10 @@ use super::sync::{
     refresh, require_no_pending_key_change, save_state, this_identity, unix_now, vault_id_of,
     Refreshed,
 };
-use super::sync_adopt::{adopt, adopt_with, prepare_recovery, verify_master_password};
+use super::sync_adopt::{
+    adopt, adopt_with, digest_after_commit, prepare_recovery, verify_master_password,
+    KeptThroughAdoption,
+};
 use crate::sync::client::SyncClient;
 use crate::sync::devicelist::DeviceList;
 use crate::sync::engine::{
@@ -50,14 +53,15 @@ fn decode_bytes(value: &str) -> Result<Vec<u8>, String> {
         .map_err(|_| "A Sync value is not valid base64.".to_string())
 }
 
+const NOT_ACTIVATED: &str =
+    "This device has not taken the new vault key yet. Open Sync and take it.";
+
 fn require_activated(refreshed: &Refreshed) -> Result<(), String> {
     if refreshed.server.device_state != "approved" {
         return Err("This device is not approved to sync.".into());
     }
     if refreshed.server.activated_epoch != refreshed.server.vault_epoch {
-        return Err(
-            "This device has not taken the new vault key yet. Open Sync and take it.".into(),
-        );
+        return Err(NOT_ACTIVATED.into());
     }
     Ok(())
 }
@@ -253,6 +257,16 @@ fn decrypt_remote(
         .map_err(Into::into)
 }
 
+fn apply_remote_payload(
+    unlocked: &mut crate::vault::UnlockedVault,
+    payload: crate::vault::types::VaultPayload,
+) -> Result<(String, usize), String> {
+    let entries = payload.entries.len();
+    let digest = digest_after_commit(&payload)?;
+    crate::vault::storage::commit_payload_change(unlocked, payload)?;
+    Ok((digest, entries))
+}
+
 struct Remote {
     refreshed: Refreshed,
     header: Header,
@@ -323,15 +337,9 @@ async fn download_vault(
         }
         let authenticated = unlocked
             .expose_vault_key(|key| decrypt_remote(key, &remote.header, &remote.ciphertext))?;
-        let payload = authenticated.payload().clone();
-        let entries = payload.entries.len();
-        let digest = payload_digest(
-            &serde_json::to_vec(&payload)
-                .map_err(|_| "Sesame could not read the synced vault.".to_string())?,
-        );
-        crate::vault::storage::commit_payload_change(unlocked, payload)?;
+        let applied = apply_remote_payload(unlocked, authenticated.payload().clone())?;
         state.advance_session_epoch();
-        (digest, entries)
+        applied
     };
     crate::browser_fill::cancel_pending_approvals(&app);
     let mut next = local;
@@ -355,6 +363,17 @@ pub struct SyncTakeKeyResult {
 
 #[tauri::command]
 pub async fn sync_take_new_key(
+    app: AppHandle,
+    state: tauri::State<'_, VaultState>,
+    coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
+    master_password: String,
+) -> Result<SyncTakeKeyResult, String> {
+    let result = take_new_key(app, state, master_password).await?;
+    coordinator.key_taken();
+    Ok(result)
+}
+
+async fn take_new_key(
     app: AppHandle,
     state: tauri::State<'_, VaultState>,
     master_password: String,
@@ -399,7 +418,7 @@ pub async fn sync_take_new_key(
         .try_into()
         .map_err(|_| "The synced vault key is invalid.".to_string())?;
     opened.zeroize();
-    let recovery_kit = {
+    let (recovery_kit, kept) = {
         let mut session = state
             .session
             .lock()
@@ -408,10 +427,11 @@ pub async fn sync_take_new_key(
             .as_mut()
             .ok_or("Unlock Sesame before taking the new key.")?;
         verify_master_password(unlocked, &master_password)?;
+        let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
         let payload = unlocked.open_payload()?.clone();
         let kit = adopt(unlocked, key, payload, &master_password)?;
         state.advance_session_epoch();
-        kit
+        (kit, kept)
     };
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
@@ -424,6 +444,7 @@ pub async fn sync_take_new_key(
     let mut next = local;
     next.entries = refreshed.update.entries;
     next.activated_epoch = epoch;
+    kept.apply(&mut next);
     save_state(&app, &next)?;
     Ok(SyncTakeKeyResult { recovery_kit })
 }
@@ -475,6 +496,7 @@ async fn adopt_journal_key(
             .as_mut()
             .ok_or("Unlock Sesame before finishing the vault key change.")?;
         verify_master_password(unlocked, master_password).and_then(|()| {
+            let kept = KeptThroughAdoption::capture(&local, &refreshed.update.list, unlocked)?;
             let payload = unlocked.open_payload()?.clone();
             let kit = adopt_with(
                 unlocked,
@@ -484,11 +506,12 @@ async fn adopt_journal_key(
                 journal.recovery.clone(),
             )?;
             state.advance_session_epoch();
-            Ok(kit)
+            Ok((kit, kept))
         })
     };
     key.zeroize();
-    let recovery_kit = adopted?.unwrap_or_default();
+    let (kit, kept) = adopted?;
+    let recovery_kit = kit.unwrap_or_default();
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
     crate::commands::lifecycle::discard_pin_throttle_state(app, state);
@@ -496,6 +519,7 @@ async fn adopt_journal_key(
     let mut next = local;
     next.entries = refreshed.update.entries;
     next.activated_epoch = journal.epoch_after;
+    kept.apply(&mut next);
     save_state(app, &next)?;
     rekey_journal::forget(&journal_file(app)?)?;
     Ok(SyncTakeKeyResult { recovery_kit })
@@ -653,9 +677,11 @@ async fn rekey_without(
             let unlocked = session
                 .as_mut()
                 .ok_or("Unlock Sesame before removing a device.")?;
+            let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
             let payload = unlocked.open_payload()?.clone();
             adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             vault.advance_session_epoch();
+            kept.apply(&mut next);
         }
         vault.cache_pin_unlock(false);
         vault.cache_hello_unlock(false);
@@ -1005,21 +1031,17 @@ async fn resolve_conflict(
         });
     }
 
-    let payload = remote_authenticated.payload().clone();
-    let applied_digest = payload_digest(
-        &serde_json::to_vec(&payload)
-            .map_err(|_| "Sesame could not read the synced vault.".to_string())?,
-    );
-    {
+    let applied_digest = {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let unlocked = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
         confirm_unchanged(unlocked, &captured)?;
-        crate::vault::storage::commit_payload_change(unlocked, payload)?;
+        let (digest, _) = apply_remote_payload(unlocked, remote_authenticated.payload().clone())?;
         state.advance_session_epoch();
-    }
+        digest
+    };
     crate::browser_fill::cancel_pending_approvals(&app);
     let mut next = local;
     next.entries = remote.refreshed.update.entries;
@@ -1061,6 +1083,7 @@ pub struct SyncCoordinatorView {
     pub pending: bool,
     pub last_success_revision: i64,
     pub consecutive_failures: u32,
+    pub downloads_applied: u32,
 }
 
 #[tauri::command]
@@ -1085,6 +1108,7 @@ pub async fn sync_coordinator_status(
         Phase::Halted(Halt::Conflict { server_revision }) => {
             ("halted", "conflict", *server_revision)
         }
+        Phase::Halted(Halt::NeedsNewKey) => ("halted", "needs_new_key", 0),
     };
     Ok(SyncCoordinatorView {
         phase: phase.to_string(),
@@ -1093,6 +1117,7 @@ pub async fn sync_coordinator_status(
         pending: status.pending,
         last_success_revision: status.last_success_revision.unwrap_or(0),
         consecutive_failures: status.consecutive_failures,
+        downloads_applied: status.downloads_applied,
     })
 }
 
@@ -1542,5 +1567,64 @@ mod key_change_tests {
             reconcile_key_change(&path, &list, 2),
             Ok(KeyChange::Adopt(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod applied_digest_tests {
+    use super::*;
+    use crate::vault::UnlockedVault;
+    use sesame_core::api::create_vault;
+
+    const PASSWORD: &str = "fictional master password";
+
+    fn session() -> UnlockedVault {
+        let (opened, _) = create_vault(PASSWORD, "Fictional vault").expect("created vault");
+        let directory =
+            std::env::temp_dir().join(format!("sesame-applied-{}", crate::vault::random_id()));
+        std::fs::create_dir_all(&directory).expect("directory");
+        UnlockedVault::from_opened(directory.join("vault.sesame"), &opened).expect("unlocked vault")
+    }
+
+    fn remote_payload(vault: &UnlockedVault) -> crate::vault::types::VaultPayload {
+        let mut payload = vault.open_payload().expect("payload").clone();
+        payload.vault_name = "Fictional vault from another device".into();
+        payload.revision = 40;
+        payload
+    }
+
+    fn has_changes(state: &SyncState, vault: &UnlockedVault) -> bool {
+        let (plaintext, _) = local_payload_bytes(vault).expect("bytes");
+        state.has_local_changes(&plaintext)
+    }
+
+    #[test]
+    fn a_device_that_just_applied_a_remote_vault_has_no_changes_of_its_own() {
+        let mut vault = session();
+        let mut state = SyncState::new("fictionalVault00000001", "fictionalDevice001");
+        let remote = remote_payload(&vault);
+
+        let (digest, _) = apply_remote_payload(&mut vault, remote).expect("applied");
+        state.payload_digest = digest;
+
+        assert!(
+            !has_changes(&state, &vault),
+            "the stored digest must describe the vault as it is on disk after the commit"
+        );
+    }
+
+    #[test]
+    fn a_local_edit_after_applying_a_remote_vault_is_still_seen() {
+        let mut vault = session();
+        let mut state = SyncState::new("fictionalVault00000001", "fictionalDevice001");
+        let remote = remote_payload(&vault);
+        let (digest, _) = apply_remote_payload(&mut vault, remote).expect("applied");
+        state.payload_digest = digest;
+
+        let mut edited = vault.open_payload().expect("payload").clone();
+        edited.vault_name = "Fictional vault renamed here".into();
+        crate::vault::storage::commit_payload_change(&mut vault, edited).expect("edit");
+
+        assert!(has_changes(&state, &vault));
     }
 }

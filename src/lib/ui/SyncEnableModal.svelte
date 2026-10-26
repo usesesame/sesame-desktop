@@ -14,7 +14,7 @@
 </script>
 
 {#if open}
-  <ModalShell {open} onClose={onCancel} labelledby="sync-enable-title" describedby="sync-enable-body" ariaBusy={working}>
+  <ModalShell {open} onClose={() => { if (!working) onCancel() }} labelledby="sync-enable-title" describedby="sync-enable-body" ariaBusy={working}>
     <h2 id="sync-enable-title">Turn on Sync</h2>
     <div id="sync-enable-body">
       <p class="modal-lede">

@@ -271,6 +271,16 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     }
   }
 
+  async function tryOpenWebsite(url: string) {
+    try {
+      await openWebsite(url)
+      return true
+    } catch (error) {
+      feedback.setError(error)
+      return false
+    }
+  }
+
   async function markUsed(id: string) {
     try {
       const snapshot = await recordItemUse(id)
@@ -566,9 +576,12 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       feedback.clearError()
       try {
         const result = await saveLogin({ ...draft, totp: totpEntered ? draft.totp : undefined, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
+        const folderBefore = draft.id ? vault.value().snapshot?.entries.find((entry) => entry.id === draft.id)?.folderId : undefined
         vault.patch({ snapshot: result.snapshot })
         const savedEntry = result.snapshot.entries.find((entry) => entry.id === result.id)
-        selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
+        if (!draft.id || savedEntry?.folderId !== folderBefore) {
+          selection.patch({ collectionFilter: savedEntry?.folderId ?? null, securityFilter: null, searchQuery: '' })
+        }
         modal.close('login-editor')
         state.patch({ loginDraft: emptyLoginDraft() })
         await selectEntry(result.id)
@@ -591,13 +604,10 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     async openContextSite(id: string) {
       const card = await contextCard(id)
       state.patch({ entryMenu: null })
-      if (card?.url) {
-        await openWebsite(card.url)
-        void markUsed(id)
-      }
+      if (card?.url && await tryOpenWebsite(card.url)) void markUsed(id)
     },
     async openCurrentWebsite(url: string) {
-      await openWebsite(url)
+      if (!await tryOpenWebsite(url)) return
       const id = selection.value().activeItemId
       if (id) void markUsed(id)
     },

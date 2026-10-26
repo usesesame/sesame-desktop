@@ -25,7 +25,7 @@
 </script>
 
 {#if open}
-  <ModalShell {open} onClose={onCancel} labelledby="sync-conflict-title" describedby="sync-conflict-body" ariaBusy={working}>
+  <ModalShell {open} onClose={() => { if (!working) onCancel() }} labelledby="sync-conflict-title" describedby="sync-conflict-body" ariaBusy={working}>
     <h2 id="sync-conflict-title">Two devices changed this vault</h2>
     <div id="sync-conflict-body">
       <p class="modal-lede">

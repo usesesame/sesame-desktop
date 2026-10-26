@@ -8,6 +8,7 @@
   export let exportPresenceRequired = false
   export let exportPresencePassword = ''
   export let errorMessage = ''
+  export let backupBusy = false
   export let onExportBackup: () => void
   export let onConfirmPresence: () => void
   export let onBeginRestore: () => void
@@ -39,7 +40,7 @@
     </div>
   {/if}
   <div class="backup-list">
-    <article class="backup-card"><span class="backup-icon"><Icon name="archive" size={25} /></span><div><h3>Export an encrypted backup</h3><p>Choose where to save a copy of your vault.</p></div><button type="button" class="primary-button" on:click={onExportBackup}>Export backup <Icon name="chevron-right" size={16} /></button></article>
+    <article class="backup-card"><span class="backup-icon"><Icon name="archive" size={25} /></span><div><h3>Export an encrypted backup</h3><p>Choose where to save a copy of your vault.</p></div><button type="button" class="primary-button" disabled={backupBusy} on:click={onExportBackup}>Export backup <Icon name="chevron-right" size={16} /></button></article>
     {#if exportPresenceRequired}
       <article class="backup-card">
         <form class="presence-confirm" novalidate on:submit|preventDefault={onConfirmPresence}>
@@ -62,7 +63,7 @@
         </form>
       </article>
     {/if}
-    <article class="backup-card"><span class="backup-icon"><Icon name="folder" size={24} /></span><div><h3>Save a snapshot on this computer</h3><p>Copies the encrypted vault into Sesame's own backup folder. It helps after a mistake, not if this disk fails.</p></div><button type="button" class="secondary-button" on:click={onMakeBackup}>Save snapshot</button></article>
+    <article class="backup-card"><span class="backup-icon"><Icon name="folder" size={24} /></span><div><h3>Save a snapshot on this computer</h3><p>Copies the encrypted vault into Sesame's own backup folder. It helps after a mistake, not if this disk fails.</p></div><button type="button" class="secondary-button" disabled={backupBusy} on:click={onMakeBackup}>Save snapshot</button></article>
     <article class="backup-card"><span class="backup-icon"><Icon name="shield" size={24} /></span><div><h3>Run a recovery drill</h3><p>Open a backup without changing your vault, then optionally test the full restore.</p></div><button type="button" class="secondary-button" on:click={onOpenDrill}>Test a backup</button></article>
     <article class="backup-card"><span class="backup-icon"><Icon name="refresh" size={24} /></span><div><h3>Restore from a backup</h3><p>Checks the file and keeps a safety copy of the current vault before replacing it.</p></div><button type="button" class="secondary-button" on:click={onBeginRestore}>Choose backup</button></article>
   </div>

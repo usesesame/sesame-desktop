@@ -75,9 +75,9 @@
       <label>Recovery kit<input name="current-recovery-kit" type="password" bind:value={currentRecoveryKit} autocomplete="off" spellcheck="false" autocapitalize="characters" /></label>
       <button type="button" class="text-button change-password-forgot" disabled={working} on:click={onRequestNewKit}>No recovery kit? Request a new one</button>
       <label>New master password<input name="new-master-password" type="password" bind:value={newPassword} autocomplete="new-password" /></label>
-      <label>Confirm new password<input name="confirm-new-master-password" type="password" bind:value={confirmPassword} autocomplete="new-password" /></label>
+      <label>Confirm new master password<input name="confirm-new-master-password" type="password" bind:value={confirmPassword} autocomplete="new-password" /></label>
       {#if confirmPassword && !passwordsMatch}<p class="form-error" role="alert">Those new passwords do not match.</p>{:else if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
-      <div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={onBack}>Back</button><button type="submit" class="primary-button" disabled={working || !canSave}>{working ? 'Updating…' : 'Change password'}</button></div>
+      <div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={onBack}>Back</button><button type="submit" class="primary-button" disabled={working || !canSave}>{working ? 'Updating…' : 'Change master password'}</button></div>
     </form>
   {/if}
 </ModalShell>

@@ -293,6 +293,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
         await cancelLoginBreachScan()
       } catch {
         void recordDiagnostic('ui', 'handled_error')
+        state.patch({ breachScanError: 'Sesame could not cancel the breach check. It is still running.' })
       }
     },
     async refreshBreachScan() {

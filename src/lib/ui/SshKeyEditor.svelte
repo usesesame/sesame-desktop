@@ -84,7 +84,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this key appears in your list, e.g. “Deploy key”</span><input name="ssh-key-title" bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key…" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this key appears in your list, e.g. "Deploy key"</span><input name="ssh-key-title" bind:this={titleInput} bind:value={keyDraft.title} required maxlength="160" placeholder="e.g. Deploy key…" autocomplete="off" /></label>
     <label>Key type <span class="field-hint">Read from the key you paste</span><input name="ssh-key-type" bind:value={keyDraft.keyType} maxlength="32" autocomplete="off" placeholder="e.g. ed25519…" spellcheck="false" /></label>
     <label>Private key<textarea name="ssh-private-key" bind:value={keyDraft.privateKey} on:input={fillKeyType} rows="6" maxlength="16000" class="monospace-field" spellcheck="false"></textarea></label>
     <KeptSecret draft={keyDraft} key="privateKey" typed={keyDraft.privateKey} onChange={(next) => (keyDraft = { ...keyDraft, ...next })} />

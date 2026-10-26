@@ -1,3 +1,8 @@
+<script module lang="ts">
+  const HANDOVER_MS = 150
+  let lastClosedAt = Number.NEGATIVE_INFINITY
+</script>
+
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
 
@@ -10,9 +15,12 @@
   export let initialFocus: ((dialog: HTMLElement) => void) | null = null
   export let ariaBusy: boolean | undefined = undefined
 
+  const steady = typeof document !== 'undefined' && (document.querySelector('[data-modal-shell]') !== null || performance.now() - lastClosedAt < HANDOVER_MS)
+
   let dialog: HTMLDivElement
   let shell: HTMLDivElement
   let portaledShell: HTMLDivElement | null = null
+  let placed = false
   let returnFocus: HTMLElement | null = null
 
   const focusableSelector = [
@@ -90,21 +98,29 @@
     }
   }
 
-  onMount(() => {
-    // View containers can turn into containing blocks (entrance animations,
-    // layout containment), which would pin the backdrop to a panel. Portal to
-    // the app root instead of body: Svelte 5 registers delegated events on the
-    // mount root, so a node under body would never receive clicks.
+  // View containers can turn into containing blocks (entrance animations,
+  // layout containment), which would pin the backdrop to a panel. Portal to
+  // the app root instead of body: Svelte 5 registers delegated events on the
+  // mount root, so a node under body would never receive clicks. The shell stays
+  // hidden until it is there, so its entrance runs once from its final place.
+  $: if (shell && !placed) {
     const portalTarget = document.getElementById('app')
-    if (portalTarget && shell && shell.parentElement !== portalTarget) {
+    if (portalTarget && shell.parentElement !== portalTarget) {
       portalTarget.appendChild(shell)
       portaledShell = shell
     }
+    placed = true
+  } else if (!shell) {
+    placed = false
+  }
+
+  onMount(() => {
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     void focusModal()
   })
 
   onDestroy(() => {
+    lastClosedAt = performance.now()
     portaledShell?.remove()
     portaledShell = null
     restoreFocus()
@@ -114,7 +130,7 @@
 <svelte:window on:keydown={handleKeydown} />
 
 {#if open}
-  <div bind:this={shell} class="modal-backdrop{tone ? ` ${tone}-backdrop` : ''}" data-modal-shell role="presentation" on:click={closeOnBackdrop}>
+  <div bind:this={shell} class="modal-backdrop{tone ? ` ${tone}-backdrop` : ''}{steady ? ' modal-backdrop-steady' : ''}{placed ? '' : ' modal-backdrop-pending'}" data-modal-shell role="presentation" on:click={closeOnBackdrop}>
     <div bind:this={dialog} class="modal{modalClass ? ` ${modalClass}` : ''}" role="dialog" aria-modal="true" aria-labelledby={labelledby} aria-describedby={describedby || undefined} aria-busy={ariaBusy} tabindex="-1">
       <slot />
     </div>

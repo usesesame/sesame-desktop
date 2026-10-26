@@ -3,7 +3,7 @@
 
   export let open = false
   export let code = ''
-  export let phase: 'idle' | 'waiting' | 'done' = 'idle'
+  export let phase: 'idle' | 'starting' | 'waiting' | 'done' = 'idle'
   export let secondsLeft = 0
   export let doneLabel = ''
   export let error = ''
@@ -18,7 +18,7 @@
 </script>
 
 {#if open}
-  <ModalShell {open} {onClose} labelledby="sync-pairing-title" describedby="sync-pairing-body" ariaBusy={phase === 'waiting'}>
+  <ModalShell {open} {onClose} labelledby="sync-pairing-title" describedby="sync-pairing-body" ariaBusy={phase === 'waiting' || phase === 'starting'}>
     <h2 id="sync-pairing-title">Add a device</h2>
     <div id="sync-pairing-body">
       {#if phase === 'done'}
@@ -32,6 +32,8 @@
         <p class="pairing-note" role="status">
           The code works once and expires in {minutes}:{seconds}. It is never sent to the server.
         </p>
+      {:else if phase === 'starting'}
+        <p class="modal-lede" role="status">Getting a code…</p>
       {:else}
         <p class="modal-lede">Sesame could not start pairing.</p>
       {/if}

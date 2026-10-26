@@ -510,4 +510,82 @@ describe('secrets other than the password', () => {
 
     expect(vaultApi.saveLogin).toHaveBeenCalledWith(expect.objectContaining({ backupCodes: [], keepBackupCodes: true }))
   })
+  it('keeps the search and filters after editing a login that stays in its folder', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
+    const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    before.entries[0].folderId = 'folder-1'
+    stores.vault.patch({ snapshot: before })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    after.entries[0].folderId = 'folder-1'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-a'))
+
+    controller.openEditor()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
+  })
+
+  it('follows a login to its new folder when an edit moves it', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
+    const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    before.entries[0].folderId = 'folder-1'
+    stores.vault.patch({ snapshot: before })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
+    after.entries[0].folderId = 'folder-2'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-a'))
+
+    controller.openEditor()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-2', securityFilter: null, searchQuery: '' })
+  })
+
+  it('shows a new login by clearing the search and opening its folder', async () => {
+    const { controller, stores } = harness()
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
+    const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }, { id: 'login-new', title: 'Fresh' }])
+    after.entries[1].folderId = 'folder-2'
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-new', snapshot: after })
+    vaultApi.getLoginCard.mockResolvedValue(card('login-new'))
+
+    controller.openNew()
+    await controller.submit(false)
+
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-2', securityFilter: null, searchQuery: '' })
+  })
+  it('says so when the site cannot be opened from the page and does not count it as used', async () => {
+    const { controller, stores, feedback } = harness()
+    vaultApi.openWebsite.mockRejectedValue(new Error('That address cannot be opened.'))
+
+    await controller.openCurrentWebsite('northwind')
+
+    expect(feedback.state.value().errorMessage).toBe('That address cannot be opened.')
+    expect(vaultApi.recordItemUse).not.toHaveBeenCalled()
+    expect(stores.selection.value().activeItemId).toBe('login-a')
+  })
+
+  it('says so when the site cannot be opened from the item menu and does not count it as used', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.getLoginCard.mockResolvedValue({ ...card('login-a'), url: 'northwind' })
+    vaultApi.openWebsite.mockRejectedValue(new Error('That address cannot be opened.'))
+
+    await controller.openContextSite('login-a')
+
+    expect(feedback.state.value().errorMessage).toBe('That address cannot be opened.')
+    expect(vaultApi.recordItemUse).not.toHaveBeenCalled()
+  })
+
+  it('counts the login as used after the site opened', async () => {
+    const { controller } = harness()
+    vaultApi.openWebsite.mockResolvedValue(undefined)
+
+    await controller.openCurrentWebsite('https://northwind.example')
+
+    expect(vaultApi.openWebsite).toHaveBeenCalledWith('https://northwind.example')
+    expect(vaultApi.recordItemUse).toHaveBeenCalledWith('login-a')
+  })
 })

@@ -42,6 +42,7 @@
   import ModalHost from './lib/ui/ModalHost.svelte'
   import PasswordPresenceModal from './lib/ui/PasswordPresenceModal.svelte'
   import WorkspaceShell from './lib/ui/WorkspaceShell.svelte'
+  import Toast from './lib/ui/Toast.svelte'
   import UnlockScreen from './lib/ui/UnlockScreen.svelte'
   import WelcomeScreen from './lib/ui/WelcomeScreen.svelte'
   import RecoveryKitScreen from './lib/ui/RecoveryKitScreen.svelte'
@@ -480,7 +481,11 @@
     void $allItems
     syncController.vaultChanged()
   }
-  onDestroy(() => stopSyncBackground?.())
+  const stopShowingSyncedChanges = syncController.onVaultApplied(() => void unlockController.reloadAfterSync())
+  onDestroy(() => {
+    stopSyncBackground?.()
+    stopShowingSyncedChanges()
+  })
 
   onMount(() => {
     let stopQuickAccessOpen = () => {}
@@ -597,6 +602,7 @@
     onUnlockWithHello={unlockController.unlockUsingHello}
     onSubmitMasterPassword={unlockController.submitMasterPassword}
   />
+  <Toast notice={$feedbackState.notice} errorMessage="" onDismissNotice={feedbackController.dismissNotice} onDismissError={feedbackController.clearError} onHold={feedbackController.holdNotice} onResume={feedbackController.resumeNotice} />
 {:else}
   <WorkspaceShell
     {navigation}
@@ -608,6 +614,8 @@
     onNavigate={navigate}
     onLock={() => unlockController.lock()}
     onDismissNotice={feedbackController.dismissNotice}
+    onHoldNotice={feedbackController.holdNotice}
+    onResumeNotice={feedbackController.resumeNotice}
     onDismissError={feedbackController.clearError}
     onNewLogin={() => loginController.openNew()}
     onCopyPassword={() => void loginController.copySelectedField('password')}
@@ -753,7 +761,7 @@
         titleFor={historyItemTitle}
       />
     {:else if $selection.activeView === 'backups'}
-      <BackupsView health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
+      <BackupsView backupBusy={$backupState.backupBusy} health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
         theme={$settings.theme}

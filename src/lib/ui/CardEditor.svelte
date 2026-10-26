@@ -152,7 +152,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this card appears in your list, e.g. “Everyday card”</span><input name="card-title" bind:this={titleInput} bind:value={cardDraft.title} required maxlength="160" placeholder="e.g. Everyday card…" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this card appears in your list, e.g. "Everyday card"</span><input name="card-title" bind:this={titleInput} bind:value={cardDraft.title} required maxlength="160" placeholder="e.g. Everyday card…" autocomplete="off" /></label>
     <label>Cardholder name<input name="card-cardholder" bind:value={cardDraft.cardholderName} maxlength="256" autocomplete="off" /></label>
     <label>Card number
       {#if network}<span class="field-hint">{network.name}</span>{/if}
