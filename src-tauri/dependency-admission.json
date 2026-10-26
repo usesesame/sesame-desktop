@@ -103,7 +103,7 @@
     },
     {
       "name": "eslint",
-      "version": "10.12",
+      "version": "10.13",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -220,7 +220,7 @@
     },
     {
       "name": "svelte-eslint-parser",
-      "version": "1.8",
+      "version": "1.9",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
