@@ -1,3 +1,4 @@
+/* @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VaultSnapshot } from '../types'
 import { createAppStores } from '../stores/app-stores'
@@ -152,5 +153,16 @@ describe('showing what a sync applied', () => {
     release(snapshotOf(['earlier']))
     await Promise.all([first, second])
     expect(vaultApi.unlockVault).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('locking the vault', () => {
+  it('clears the search, the filters and the view so the next unlock starts clean', () => {
+    const { controller, stores } = harness({ selected: 'login-a' })
+    stores.selection.patch({ searchQuery: 'north', securityFilter: 'weak', collectionFilter: 'folder-1', activeView: 'security' })
+
+    controller.applyLockedUi('Vault locked.')
+
+    expect(stores.selection.value()).toMatchObject({ searchQuery: '', securityFilter: null, collectionFilter: null, activeView: 'vault' })
   })
 })

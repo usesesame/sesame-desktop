@@ -132,7 +132,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
     modal.lockCleared()
     onboarding.lockCleared()
     vault.patch({ snapshot: null, loginCard: null, status: { ...vault.value().status, unlocked: false } })
-    selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault', collectionFilter: null, categoryFilter: null })
+    selection.patch({ activeItemId: null, activeItemKind: null, activeView: 'vault', collectionFilter: null, categoryFilter: null, securityFilter: null, searchQuery: '' })
     feedback.showNotice('Vault locked', message)
   }
 
