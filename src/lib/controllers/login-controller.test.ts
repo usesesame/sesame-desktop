@@ -557,4 +557,35 @@ describe('secrets other than the password', () => {
 
     expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-2', securityFilter: null, searchQuery: '' })
   })
+  it('says so when the site cannot be opened from the page and does not count it as used', async () => {
+    const { controller, stores, feedback } = harness()
+    vaultApi.openWebsite.mockRejectedValue(new Error('That address cannot be opened.'))
+
+    await controller.openCurrentWebsite('northwind')
+
+    expect(feedback.state.value().errorMessage).toBe('That address cannot be opened.')
+    expect(vaultApi.recordItemUse).not.toHaveBeenCalled()
+    expect(stores.selection.value().activeItemId).toBe('login-a')
+  })
+
+  it('says so when the site cannot be opened from the item menu and does not count it as used', async () => {
+    const { controller, feedback } = harness()
+    vaultApi.getLoginCard.mockResolvedValue({ ...card('login-a'), url: 'northwind' })
+    vaultApi.openWebsite.mockRejectedValue(new Error('That address cannot be opened.'))
+
+    await controller.openContextSite('login-a')
+
+    expect(feedback.state.value().errorMessage).toBe('That address cannot be opened.')
+    expect(vaultApi.recordItemUse).not.toHaveBeenCalled()
+  })
+
+  it('counts the login as used after the site opened', async () => {
+    const { controller } = harness()
+    vaultApi.openWebsite.mockResolvedValue(undefined)
+
+    await controller.openCurrentWebsite('https://northwind.example')
+
+    expect(vaultApi.openWebsite).toHaveBeenCalledWith('https://northwind.example')
+    expect(vaultApi.recordItemUse).toHaveBeenCalledWith('login-a')
+  })
 })

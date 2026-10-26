@@ -271,6 +271,16 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     }
   }
 
+  async function tryOpenWebsite(url: string) {
+    try {
+      await openWebsite(url)
+      return true
+    } catch (error) {
+      feedback.setError(error)
+      return false
+    }
+  }
+
   async function markUsed(id: string) {
     try {
       const snapshot = await recordItemUse(id)
@@ -594,13 +604,10 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     async openContextSite(id: string) {
       const card = await contextCard(id)
       state.patch({ entryMenu: null })
-      if (card?.url) {
-        await openWebsite(card.url)
-        void markUsed(id)
-      }
+      if (card?.url && await tryOpenWebsite(card.url)) void markUsed(id)
     },
     async openCurrentWebsite(url: string) {
-      await openWebsite(url)
+      if (!await tryOpenWebsite(url)) return
       const id = selection.value().activeItemId
       if (id) void markUsed(id)
     },
