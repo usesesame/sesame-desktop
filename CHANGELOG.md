@@ -23,6 +23,17 @@ release cannot be published without saying what changed in it.
   that it had read before. Sesame keeps those names on the device. A name it
   never read still shows as a device.
 
+### Logins
+
+- The new login form helps with what you already have. Typing a website fills
+  the login name when you have not typed one, says if you already have logins
+  for that site, offers the folder those logins are in, and lists tags you have
+  used. Each offer is one click and nothing is filled in without it, apart from
+  the name.
+- The user name and email lists put values from the same site first, then the
+  ones used on the most logins, then the most recent. The lists still hold at
+  most eight values and are read only when you focus the field.
+
 ### Quick access
 
 - The quick access window no longer closes the moment focus slips away. It

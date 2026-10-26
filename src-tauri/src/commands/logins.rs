@@ -32,10 +32,87 @@ pub fn get_vault_snapshot(state: State<'_, VaultState>) -> VaultResult<VaultSnap
 /// Small on purpose: a shortcut for retyping an address, not a directory.
 const MAX_SUGGESTIONS: usize = 8;
 
+struct Candidate {
+    value: String,
+    same_site: bool,
+    last_used: u64,
+}
+
+fn host_of(text: &str) -> String {
+    let text = text.trim();
+    let rest = text.split_once("://").map_or(text, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = authority.to_ascii_lowercase();
+    let host = host.split(':').next().unwrap_or("");
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.contains('.') || host == "localhost" {
+        host.to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn sites_related(left: &str, right: &str) -> bool {
+    let (left, right) = (host_of(left), host_of(right));
+    !left.is_empty()
+        && !right.is_empty()
+        && (left == right
+            || left.ends_with(&format!(".{right}"))
+            || right.ends_with(&format!(".{left}")))
+}
+
+/// Values for this site first, then the ones used on the most logins, then the most recent.
+fn rank_suggestions(candidates: Vec<Candidate>) -> Vec<String> {
+    struct Tally {
+        value: String,
+        same_site: bool,
+        count: usize,
+        last_used: u64,
+        first_seen: usize,
+    }
+    let mut tallies: Vec<Tally> = Vec::new();
+    for (position, candidate) in candidates.into_iter().enumerate() {
+        match tallies
+            .iter_mut()
+            .find(|tally| tally.value == candidate.value)
+        {
+            Some(tally) => {
+                tally.same_site |= candidate.same_site;
+                tally.count += 1;
+                tally.last_used = tally.last_used.max(candidate.last_used);
+            }
+            None => tallies.push(Tally {
+                value: candidate.value,
+                same_site: candidate.same_site,
+                count: 1,
+                last_used: candidate.last_used,
+                first_seen: position,
+            }),
+        }
+    }
+    tallies.sort_by(|left, right| {
+        right
+            .same_site
+            .cmp(&left.same_site)
+            .then(right.count.cmp(&left.count))
+            .then(right.last_used.cmp(&left.last_used))
+            .then(left.first_seen.cmp(&right.first_seen))
+    });
+    tallies
+        .into_iter()
+        .take(MAX_SUGGESTIONS)
+        .map(|tally| tally.value)
+        .collect()
+}
+
 /// Deliberate bounded disclosure at the moment of typing, not a session-long leak.
 #[tauri::command]
 pub fn suggest_field_values(
     field: String,
+    site: Option<String>,
     state: State<'_, VaultState>,
 ) -> VaultResult<Vec<String>> {
     let session = state
@@ -46,34 +123,46 @@ pub fn suggest_field_values(
     if !matches!(field.as_str(), "username" | "email") {
         return Ok(Vec::new());
     }
+    let site = site.unwrap_or_default();
     let index = session.snapshot();
-    let ids = index.entries.iter().map(|item| item.id.as_str()).chain(
-        index
-            .items
-            .iter()
-            .filter(|item| field == "email" && item.kind == "identity")
-            .map(|item| item.id.as_str()),
-    );
-    let mut seen = HashSet::new();
-    let mut suggestions = Vec::new();
-    for id in ids {
-        let item = session.open_item(id)?;
-        let value = match (&*item, field.as_str()) {
-            (TaggedItem::Login(entry), "username") => entry.username.as_str(),
-            (TaggedItem::Login(entry), "email") => entry.email.as_str(),
-            (TaggedItem::Identity(identity), "email") => identity.email.as_str(),
-            _ => continue,
+    let mut candidates = Vec::new();
+    for summary in &index.entries {
+        let item = session.open_item(&summary.id)?;
+        let TaggedItem::Login(entry) = &*item else {
+            continue;
         };
-        let trimmed = value.trim();
-        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
+        let value = if field == "username" {
+            entry.username.as_str()
+        } else {
+            entry.email.as_str()
+        }
+        .trim();
+        if value.is_empty() {
             continue;
         }
-        suggestions.push(trimmed.to_string());
-        if suggestions.len() >= MAX_SUGGESTIONS {
-            break;
+        candidates.push(Candidate {
+            value: value.to_string(),
+            same_site: sites_related(&site, &summary.site),
+            last_used: summary.last_used_at.unwrap_or(0).max(summary.updated_at),
+        });
+    }
+    if field == "email" {
+        for summary in index.items.iter().filter(|item| item.kind == "identity") {
+            let item = session.open_item(&summary.id)?;
+            let TaggedItem::Identity(identity) = &*item else {
+                continue;
+            };
+            let value = identity.email.trim();
+            if !value.is_empty() {
+                candidates.push(Candidate {
+                    value: value.to_string(),
+                    same_site: false,
+                    last_used: 0,
+                });
+            }
         }
     }
-    Ok(suggestions)
+    Ok(rank_suggestions(candidates))
 }
 
 #[tauri::command]
@@ -1025,6 +1114,82 @@ mod reveal_login_secret_tests {
         assert_eq!(
             reveal_login_secret_in_state("login-a", &vault.state, &presence),
             Err(PRESENCE_REQUIRED.to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod suggestion_ranking_tests {
+    use super::*;
+
+    fn candidate(value: &str, same_site: bool, last_used: u64) -> Candidate {
+        Candidate {
+            value: value.to_string(),
+            same_site,
+            last_used,
+        }
+    }
+
+    #[test]
+    fn a_value_used_on_this_site_comes_before_one_used_more_often_elsewhere() {
+        let ranked = rank_suggestions(vec![
+            candidate("everywhere@example.test", false, 9),
+            candidate("everywhere@example.test", false, 9),
+            candidate("everywhere@example.test", false, 9),
+            candidate("here@example.test", true, 1),
+        ]);
+        assert_eq!(ranked, ["here@example.test", "everywhere@example.test"]);
+    }
+
+    #[test]
+    fn the_most_used_comes_first_then_the_most_recent_then_the_first_seen() {
+        let ranked = rank_suggestions(vec![
+            candidate("once-old", false, 1),
+            candidate("twice", false, 1),
+            candidate("once-new", false, 9),
+            candidate("twice", false, 1),
+            candidate("once-new-too", false, 9),
+        ]);
+        assert_eq!(ranked, ["twice", "once-new", "once-new-too", "once-old"]);
+    }
+
+    #[test]
+    fn a_value_is_listed_once_and_the_list_stays_small() {
+        let many: Vec<Candidate> = (0..20)
+            .map(|number| candidate(&format!("name{number}"), false, number))
+            .chain(std::iter::once(candidate("name0", false, 0)))
+            .collect();
+        let ranked = rank_suggestions(many);
+        assert_eq!(ranked.len(), MAX_SUGGESTIONS);
+        assert_eq!(ranked[0], "name0");
+        assert_eq!(
+            ranked
+                .iter()
+                .filter(|value| value.as_str() == "name0")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_site_is_matched_by_host_and_by_parent_domain_and_never_by_a_suffix_lookalike() {
+        assert!(sites_related(
+            "https://www.Example.test/login",
+            "example.test"
+        ));
+        assert!(sites_related("login.example.test", "example.test"));
+        assert!(sites_related("example.test:8443", "login.example.test"));
+        assert!(!sites_related("example.test", "notexample.test"));
+        assert!(!sites_related("gith", "gith"));
+        assert!(!sites_related("", "example.test"));
+        assert!(!sites_related("example.test", "No website saved"));
+    }
+
+    #[test]
+    fn a_password_typed_into_the_address_is_never_part_of_the_host() {
+        assert_eq!(
+            host_of("https://fictional-user:fictional-secret@example.test/x"),
+            "example.test"
         );
     }
 }
