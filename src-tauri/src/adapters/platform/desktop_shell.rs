@@ -2,6 +2,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
+use std::time::Duration;
 
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -27,6 +28,85 @@ const MAIN_MIN_WIDTH: f64 = 860.0;
 const MAIN_MIN_HEIGHT: f64 = 600.0;
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
+
+const BLUR_GRACE: Duration = Duration::from_millis(1200);
+const BLUR_POINTER_LINGER: Duration = Duration::from_secs(8);
+const BLUR_POLL: Duration = Duration::from_millis(100);
+
+static WATCHING_BLUR: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, PartialEq, Eq)]
+enum BlurStep {
+    Wait,
+    Hide,
+    Stop,
+}
+
+fn blur_step(lost_for: Duration, focused: bool, visible: bool, pointer_inside: bool) -> BlurStep {
+    if focused || !visible {
+        return BlurStep::Stop;
+    }
+    let allowed = if pointer_inside {
+        BLUR_POINTER_LINGER
+    } else {
+        BLUR_GRACE
+    };
+    if lost_for >= allowed {
+        BlurStep::Hide
+    } else {
+        BlurStep::Wait
+    }
+}
+
+fn contains_point(
+    point: tauri::PhysicalPosition<f64>,
+    origin: tauri::PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+) -> bool {
+    point.x >= f64::from(origin.x)
+        && point.y >= f64::from(origin.y)
+        && point.x < f64::from(origin.x) + f64::from(size.width)
+        && point.y < f64::from(origin.y) + f64::from(size.height)
+}
+
+fn pointer_over(window: &Window) -> bool {
+    match (
+        window.cursor_position(),
+        window.outer_position(),
+        window.outer_size(),
+    ) {
+        (Ok(point), Ok(origin), Ok(size)) => contains_point(point, origin, size),
+        _ => false,
+    }
+}
+
+fn hide_when_focus_stays_lost(window: Window) {
+    if WATCHING_BLUR.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut lost_for = Duration::ZERO;
+        loop {
+            std::thread::sleep(BLUR_POLL);
+            lost_for += BLUR_POLL;
+            let step = blur_step(
+                lost_for,
+                window.is_focused().unwrap_or(false),
+                window.is_visible().unwrap_or(false),
+                pointer_over(&window),
+            );
+            match step {
+                BlurStep::Wait => continue,
+                BlurStep::Hide => {
+                    let _ = window.hide();
+                    break;
+                }
+                BlurStep::Stop => break,
+            }
+        }
+        WATCHING_BLUR.store(false, Ordering::Release);
+    });
+}
 
 pub struct DesktopShellState {
     close_to_tray: AtomicBool,
@@ -170,10 +250,11 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
 }
 
 pub fn handle_window_event(window: &Window, event: &WindowEvent) {
-    // Losing focus closes the popup so decrypted titles never linger on screen unattended.
+    // Losing focus for good closes the popup so decrypted titles never linger on screen unattended.
+    // A short loss, such as a window manager that follows the pointer, does not.
     if window.label() == "quick-access" {
         if let WindowEvent::Focused(false) = event {
-            let _ = window.hide();
+            hide_when_focus_stays_lost(window.clone());
         }
         return;
     }
@@ -429,6 +510,42 @@ pub fn lock_vault_if_unlocked(app: &AppHandle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_short_loss_of_focus_does_not_hide_the_quick_access_window() {
+        let brief = Duration::from_millis(300);
+        assert_eq!(blur_step(brief, false, true, false), BlurStep::Wait);
+        assert_eq!(blur_step(BLUR_GRACE, false, true, false), BlurStep::Hide);
+    }
+
+    #[test]
+    fn regaining_focus_or_being_hidden_already_ends_the_wait() {
+        assert_eq!(blur_step(Duration::ZERO, true, true, false), BlurStep::Stop);
+        assert_eq!(blur_step(BLUR_GRACE, false, false, false), BlurStep::Stop);
+    }
+
+    #[test]
+    fn a_pointer_over_the_window_gets_longer_but_never_forever() {
+        assert_eq!(blur_step(BLUR_GRACE, false, true, true), BlurStep::Wait);
+        assert_eq!(
+            blur_step(BLUR_POINTER_LINGER, false, true, true),
+            BlurStep::Hide
+        );
+        assert!(BLUR_POINTER_LINGER > BLUR_GRACE);
+    }
+
+    #[test]
+    fn the_pointer_is_over_a_window_only_inside_its_edges() {
+        let origin = tauri::PhysicalPosition::new(100, 50);
+        let size = PhysicalSize::new(460, 440);
+        let at = |x: f64, y: f64| contains_point(tauri::PhysicalPosition::new(x, y), origin, size);
+        assert!(at(100.0, 50.0));
+        assert!(at(559.9, 489.9));
+        assert!(!at(560.0, 100.0));
+        assert!(!at(300.0, 490.0));
+        assert!(!at(99.0, 100.0));
+        assert!(!at(300.0, 49.0));
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
