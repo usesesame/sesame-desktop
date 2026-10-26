@@ -25,6 +25,10 @@
 
   const { selection, settings, vault } = useAppStores()
 
+  function hasSelectedText() {
+    return (window.getSelection()?.toString() ?? '') !== ''
+  }
+
   function handleShortcut(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null
     if (target?.closest('[role="dialog"]')) return
@@ -56,7 +60,7 @@
     } else if (key === 'n') {
       event.preventDefault()
       onNewLogin()
-    } else if (key === 'c' && $selection.activeView === 'vault' && $vault.loginCard) {
+    } else if (key === 'c' && $selection.activeView === 'vault' && $vault.loginCard && !hasSelectedText()) {
       event.preventDefault()
       if (event.shiftKey) onCopyUsername()
       else onCopyPassword()

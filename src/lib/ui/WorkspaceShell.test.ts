@@ -86,3 +86,27 @@ test('Ctrl J stays quiet while the vault is locked or another view is open', asy
   await fireEvent.keyDown(document.body, { key: 'j', ctrlKey: true })
   expect(props.onFocusResults).not.toHaveBeenCalled()
 })
+
+test('Ctrl C copies the password of the open login', async () => {
+  const { props, stores } = renderShell({ onCopyPassword: vi.fn(), onCopyUsername: vi.fn() })
+  stores.vault.patch({ loginCard: loginCard() })
+  await fireEvent.keyDown(document.body, { key: 'c', ctrlKey: true })
+  expect(props.onCopyPassword).toHaveBeenCalledOnce()
+})
+
+test('Ctrl C leaves text the person has selected to the ordinary copy instead of replacing the clipboard with the password', async () => {
+  const { props, stores } = renderShell({ onCopyPassword: vi.fn(), onCopyUsername: vi.fn() })
+  stores.vault.patch({ loginCard: loginCard() })
+  const note = document.createElement('p')
+  note.textContent = 'A line from the notes that I want to copy'
+  document.body.appendChild(note)
+  const range = document.createRange()
+  range.selectNodeContents(note)
+  window.getSelection()?.removeAllRanges()
+  window.getSelection()?.addRange(range)
+  const event = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+  document.body.dispatchEvent(event)
+  expect(props.onCopyPassword).not.toHaveBeenCalled()
+  expect(event.defaultPrevented).toBe(false)
+  window.getSelection()?.removeAllRanges()
+})
