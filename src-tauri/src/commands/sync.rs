@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -283,24 +284,40 @@ fn clean_label(label: &str) -> Result<String, String> {
     Ok(label)
 }
 
+pub(super) fn names_for(
+    list: &DeviceList,
+    remembered: &BTreeMap<String, String>,
+    vault_id: &str,
+    vault_key: Option<&[u8; 32]>,
+) -> BTreeMap<String, String> {
+    let usable = |name: &String| {
+        !name.is_empty() && name.chars().count() <= crate::sync::engine::MAX_LABEL_CHARS
+    };
+    list.all_members()
+        .into_iter()
+        .filter_map(|member| {
+            let opened = vault_key
+                .and_then(|key| open_label(key, vault_id, &member.device_id, &member.sealed_label));
+            opened
+                .or_else(|| remembered.get(&member.device_id).cloned())
+                .filter(usable)
+                .map(|name| (member.device_id.clone(), name))
+        })
+        .collect()
+}
+
 fn views_from(
     list: &DeviceList,
     state: &SyncState,
-    vault_key: Option<&[u8; 32]>,
+    names: &BTreeMap<String, String>,
 ) -> Vec<SyncDeviceView> {
     let mut devices: Vec<SyncDeviceView> = list
         .all_members()
         .into_iter()
         .map(|member| {
-            let label = vault_key
-                .and_then(|key| {
-                    open_label(
-                        key,
-                        &state.vault_id,
-                        &member.device_id,
-                        &member.sealed_label,
-                    )
-                })
+            let label = names
+                .get(&member.device_id)
+                .cloned()
                 .unwrap_or_else(|| "A device".to_string());
             SyncDeviceView {
                 device_id: member.device_id.clone(),
@@ -320,6 +337,15 @@ fn views_from(
         .collect();
     devices.sort_by_key(|device| device.added_index);
     devices
+}
+
+fn remember_names(app: &AppHandle, names: &BTreeMap<String, String>) {
+    let Ok(Some(mut current)) = load_state(app) else {
+        return;
+    };
+    if current.remember_names(names).is_ok() {
+        let _ = save_state(app, &current);
+    }
 }
 
 fn status(state: &str) -> SyncStatusView {
@@ -471,18 +497,23 @@ pub async fn sync_status(
             (list, local.clone())
         }
     };
-    view.devices = {
+    let remembered = state.remembered_names();
+    let names = {
         let session = vault
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         match session.as_ref() {
-            Some(unlocked) => {
-                unlocked.expose_vault_key(|key| Ok(views_from(&list, &state, Some(key))))?
-            }
-            None => views_from(&list, &state, None),
+            Some(unlocked) => unlocked.expose_vault_key(|key| {
+                Ok(names_for(&list, &remembered, &state.vault_id, Some(key)))
+            })?,
+            None => names_for(&list, &remembered, &state.vault_id, None),
         }
     };
+    if names != remembered && !names.is_empty() {
+        remember_names(&app, &names);
+    }
+    view.devices = views_from(&list, &state, &names);
     let this_device = list.member(&state.device_id);
     if this_device.is_none_or(|member| member.removed_index != 0)
         || server.device_state != "approved"
@@ -681,5 +712,177 @@ mod peer_history_tests {
         let (history, skipped) = peer_history_outcome(Some(Vec::new()), None);
         assert!(history.is_empty());
         assert!(skipped);
+    }
+}
+
+#[cfg(test)]
+mod device_name_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::sync::engine::{add_entry, seal_label, NewDevice};
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+    const FIRST_KEY: [u8; 32] = [3u8; 32];
+    const SECOND_KEY: [u8; 32] = [4u8; 32];
+
+    struct Pair {
+        list: DeviceList,
+        laptop: String,
+        desktop: String,
+    }
+
+    fn pair() -> Pair {
+        let laptop = DeviceIdentity::generate().expect("identity");
+        let desktop = DeviceIdentity::generate().expect("identity");
+        let sealed = |device: &DeviceIdentity, name: &str| {
+            seal_label(&FIRST_KEY, VAULT, &device.device_id, name).expect("label")
+        };
+        let create = create_entry(&laptop, VAULT, &sealed(&laptop, "Fictional laptop"));
+        let mut list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
+        let added = add_entry(
+            &laptop,
+            &list,
+            &NewDevice {
+                device_id: &desktop.device_id,
+                signing_key: &URL_SAFE_NO_PAD.encode(desktop.signing_public_key()),
+                package_key: &URL_SAFE_NO_PAD.encode(desktop.package_public_key()),
+            },
+            &sealed(&desktop, "Fictional desktop"),
+            0,
+        )
+        .expect("add");
+        list.extend(&added).expect("extend");
+        Pair {
+            list,
+            laptop: laptop.device_id.clone(),
+            desktop: desktop.device_id.clone(),
+        }
+    }
+
+    fn name_of(names: &BTreeMap<String, String>, id: &str) -> Option<String> {
+        names.get(id).cloned()
+    }
+
+    #[test]
+    fn names_are_read_with_the_key_that_sealed_them() {
+        let pair = pair();
+        let names = names_for(&pair.list, &BTreeMap::new(), VAULT, Some(&FIRST_KEY));
+        assert_eq!(
+            name_of(&names, &pair.laptop).as_deref(),
+            Some("Fictional laptop")
+        );
+        assert_eq!(
+            name_of(&names, &pair.desktop).as_deref(),
+            Some("Fictional desktop")
+        );
+    }
+
+    #[test]
+    fn after_a_key_change_a_name_this_device_already_read_is_still_shown() {
+        let pair = pair();
+        let remembered = names_for(&pair.list, &BTreeMap::new(), VAULT, Some(&FIRST_KEY));
+        let after = names_for(&pair.list, &remembered, VAULT, Some(&SECOND_KEY));
+        assert_eq!(after, remembered);
+    }
+
+    #[test]
+    fn a_name_that_was_never_readable_stays_unknown_and_nothing_is_guessed() {
+        let pair = pair();
+        let names = names_for(&pair.list, &BTreeMap::new(), VAULT, Some(&SECOND_KEY));
+        assert!(names.is_empty());
+        let locked = names_for(&pair.list, &BTreeMap::new(), VAULT, None);
+        assert!(locked.is_empty());
+    }
+
+    #[test]
+    fn a_remembered_name_for_a_device_that_is_not_in_the_list_is_dropped() {
+        let pair = pair();
+        let mut remembered = BTreeMap::new();
+        remembered.insert(
+            "someOtherDevice0000001".to_string(),
+            "Fictional phone".to_string(),
+        );
+        remembered.insert(pair.desktop.clone(), "Fictional desktop".to_string());
+        let names = names_for(&pair.list, &remembered, VAULT, Some(&SECOND_KEY));
+        assert_eq!(names.len(), 1);
+        assert_eq!(
+            name_of(&names, &pair.desktop).as_deref(),
+            Some("Fictional desktop")
+        );
+    }
+
+    #[test]
+    fn a_name_the_current_key_can_open_replaces_the_one_that_was_remembered() {
+        let pair = pair();
+        let mut remembered = BTreeMap::new();
+        remembered.insert(pair.laptop.clone(), "Old remembered name".to_string());
+        let names = names_for(&pair.list, &remembered, VAULT, Some(&FIRST_KEY));
+        assert_eq!(
+            name_of(&names, &pair.laptop).as_deref(),
+            Some("Fictional laptop")
+        );
+    }
+
+    #[test]
+    fn a_remembered_name_that_is_empty_or_too_long_is_not_shown() {
+        let pair = pair();
+        let mut remembered = BTreeMap::new();
+        remembered.insert(pair.laptop.clone(), String::new());
+        remembered.insert(
+            pair.desktop.clone(),
+            "x".repeat(crate::sync::engine::MAX_LABEL_CHARS + 1),
+        );
+        let names = names_for(&pair.list, &remembered, VAULT, Some(&SECOND_KEY));
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn the_device_view_uses_the_remembered_name_or_says_a_device() {
+        let pair = pair();
+        let state = SyncState::new(VAULT, &pair.laptop);
+        let mut names = BTreeMap::new();
+        names.insert(pair.laptop.clone(), "Fictional laptop".to_string());
+        let views = views_from(&pair.list, &state, &names);
+        assert_eq!(views.len(), 2);
+        let laptop = views
+            .iter()
+            .find(|view| view.device_id == pair.laptop)
+            .expect("laptop");
+        let desktop = views
+            .iter()
+            .find(|view| view.device_id == pair.desktop)
+            .expect("desktop");
+        assert_eq!(laptop.label, "Fictional laptop");
+        assert!(laptop.is_this_device);
+        assert_eq!(desktop.label, "A device");
+    }
+
+    #[test]
+    fn remembered_names_survive_a_save_and_are_not_written_as_plain_json() {
+        let pair = pair();
+        let mut state = SyncState::new(VAULT, &pair.laptop);
+        let mut names = BTreeMap::new();
+        names.insert(pair.desktop.clone(), "Fictional desktop".to_string());
+        state.remember_names(&names).expect("remembered");
+        let stored = serde_json::to_string(&state).expect("json");
+        assert!(stored.contains("names"));
+        assert!(!stored.contains("Fictional desktop"));
+        let reloaded: SyncState = serde_json::from_str(&stored).expect("state");
+        assert_eq!(reloaded.remembered_names(), names);
+        state.remember_names(&BTreeMap::new()).expect("cleared");
+        assert!(!serde_json::to_string(&state)
+            .expect("json")
+            .contains("names"));
+    }
+
+    #[test]
+    fn a_damaged_names_value_is_forgotten_and_does_not_break_the_state() {
+        let pair = pair();
+        let mut state = SyncState::new(VAULT, &pair.laptop);
+        state.names = Some("not base64 !!".to_string());
+        assert!(state.remembered_names().is_empty());
+        state.names = Some(URL_SAFE_NO_PAD.encode(b"not json"));
+        assert!(state.remembered_names().is_empty());
     }
 }

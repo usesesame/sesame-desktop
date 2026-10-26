@@ -112,6 +112,39 @@ pub(super) fn digest_kept_through_adoption(
     digest_after_commit(&payload).map(Some)
 }
 
+pub(super) struct KeptThroughAdoption {
+    digest: Option<String>,
+    names: std::collections::BTreeMap<String, String>,
+}
+
+impl KeptThroughAdoption {
+    pub(super) fn capture(
+        state: &crate::sync::state::SyncState,
+        list: &crate::sync::devicelist::DeviceList,
+        vault: &crate::vault::UnlockedVault,
+    ) -> Result<Self, String> {
+        let names = vault.expose_vault_key(|key| {
+            Ok(super::sync::names_for(
+                list,
+                &state.remembered_names(),
+                &state.vault_id,
+                Some(key),
+            ))
+        })?;
+        Ok(Self {
+            digest: digest_kept_through_adoption(state, vault)?,
+            names,
+        })
+    }
+
+    pub(super) fn apply(self, next: &mut crate::sync::state::SyncState) {
+        if let Some(digest) = self.digest {
+            next.payload_digest = digest;
+        }
+        let _ = next.remember_names(&self.names);
+    }
+}
+
 pub(super) fn prepare_recovery(
     key: &[u8; 32],
 ) -> Result<(String, crate::sync::key_change::PreparedRecovery), String> {
@@ -306,6 +339,46 @@ mod tests {
             crate::sync::state::payload_digest(&bytes_of(&vault)),
             expected
         );
+    }
+
+    #[test]
+    fn names_read_before_a_key_is_taken_are_still_shown_after_it() {
+        use crate::sync::devicelist::DeviceList;
+        use crate::sync::engine::{create_entry, seal_label};
+        use crate::sync::identity::DeviceIdentity;
+
+        let mut vault = session();
+        let old_key = vault.expose_vault_key(|key| Ok(*key)).expect("key");
+        let creator = DeviceIdentity::generate().expect("identity");
+        let sealed = seal_label(
+            &old_key,
+            "fictionalVault00000001",
+            &creator.device_id,
+            "Fictional laptop",
+        )
+        .expect("label");
+        let create = create_entry(&creator, "fictionalVault00000001", &sealed);
+        let list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
+        let mut state = state_matching(&vault);
+
+        let kept = KeptThroughAdoption::capture(&state, &list, &vault).expect("kept");
+        let payload = vault.open_payload().expect("payload").clone();
+        adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
+        kept.apply(&mut state);
+
+        let new_key = vault.expose_vault_key(|key| Ok(*key)).expect("key");
+        assert_ne!(new_key, old_key);
+        let shown = super::super::sync::names_for(
+            &list,
+            &state.remembered_names(),
+            "fictionalVault00000001",
+            Some(&new_key),
+        );
+        assert_eq!(
+            shown.get(&creator.device_id).map(String::as_str),
+            Some("Fictional laptop")
+        );
+        assert!(!state.has_local_changes(&bytes_of(&vault)));
     }
 
     #[test]

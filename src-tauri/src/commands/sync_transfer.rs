@@ -10,8 +10,8 @@ use super::sync::{
     Refreshed,
 };
 use super::sync_adopt::{
-    adopt, adopt_with, digest_after_commit, digest_kept_through_adoption, prepare_recovery,
-    verify_master_password,
+    adopt, adopt_with, digest_after_commit, prepare_recovery, verify_master_password,
+    KeptThroughAdoption,
 };
 use crate::sync::client::SyncClient;
 use crate::sync::devicelist::DeviceList;
@@ -418,7 +418,7 @@ async fn take_new_key(
         .try_into()
         .map_err(|_| "The synced vault key is invalid.".to_string())?;
     opened.zeroize();
-    let (recovery_kit, kept_digest) = {
+    let (recovery_kit, kept) = {
         let mut session = state
             .session
             .lock()
@@ -427,11 +427,11 @@ async fn take_new_key(
             .as_mut()
             .ok_or("Unlock Sesame before taking the new key.")?;
         verify_master_password(unlocked, &master_password)?;
-        let kept_digest = digest_kept_through_adoption(&local, unlocked)?;
+        let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
         let payload = unlocked.open_payload()?.clone();
         let kit = adopt(unlocked, key, payload, &master_password)?;
         state.advance_session_epoch();
-        (kit, kept_digest)
+        (kit, kept)
     };
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
@@ -444,9 +444,7 @@ async fn take_new_key(
     let mut next = local;
     next.entries = refreshed.update.entries;
     next.activated_epoch = epoch;
-    if let Some(digest) = kept_digest {
-        next.payload_digest = digest;
-    }
+    kept.apply(&mut next);
     save_state(&app, &next)?;
     Ok(SyncTakeKeyResult { recovery_kit })
 }
@@ -498,7 +496,7 @@ async fn adopt_journal_key(
             .as_mut()
             .ok_or("Unlock Sesame before finishing the vault key change.")?;
         verify_master_password(unlocked, master_password).and_then(|()| {
-            let kept_digest = digest_kept_through_adoption(&local, unlocked)?;
+            let kept = KeptThroughAdoption::capture(&local, &refreshed.update.list, unlocked)?;
             let payload = unlocked.open_payload()?.clone();
             let kit = adopt_with(
                 unlocked,
@@ -508,11 +506,11 @@ async fn adopt_journal_key(
                 journal.recovery.clone(),
             )?;
             state.advance_session_epoch();
-            Ok((kit, kept_digest))
+            Ok((kit, kept))
         })
     };
     key.zeroize();
-    let (kit, kept_digest) = adopted?;
+    let (kit, kept) = adopted?;
     let recovery_kit = kit.unwrap_or_default();
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
@@ -521,9 +519,7 @@ async fn adopt_journal_key(
     let mut next = local;
     next.entries = refreshed.update.entries;
     next.activated_epoch = journal.epoch_after;
-    if let Some(digest) = kept_digest {
-        next.payload_digest = digest;
-    }
+    kept.apply(&mut next);
     save_state(app, &next)?;
     rekey_journal::forget(&journal_file(app)?)?;
     Ok(SyncTakeKeyResult { recovery_kit })
@@ -681,13 +677,11 @@ async fn rekey_without(
             let unlocked = session
                 .as_mut()
                 .ok_or("Unlock Sesame before removing a device.")?;
-            let kept_digest = digest_kept_through_adoption(&local, unlocked)?;
+            let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
             let payload = unlocked.open_payload()?.clone();
             adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             vault.advance_session_epoch();
-            if let Some(digest) = kept_digest {
-                next.payload_digest = digest;
-            }
+            kept.apply(&mut next);
         }
         vault.cache_pin_unlock(false);
         vault.cache_hello_unlock(false);

@@ -96,6 +96,8 @@ pub struct SyncState {
     pub pending_confirmation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_upload: Option<PendingUpload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub names: Option<String>,
 }
 
 pub const STATE_VERSION: u8 = 3;
@@ -135,7 +137,32 @@ impl SyncState {
             pending_join: None,
             pending_confirmation: None,
             pending_upload: None,
+            names: None,
         }
+    }
+
+    /// Device names this device could open once. They are cosmetic, so a value that cannot be read is forgotten.
+    pub fn remembered_names(&self) -> std::collections::BTreeMap<String, String> {
+        self.names
+            .as_deref()
+            .and_then(|encoded| URL_SAFE_NO_PAD.decode(encoded).ok())
+            .and_then(|protected| unprotect(&protected).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn remember_names(
+        &mut self,
+        names: &std::collections::BTreeMap<String, String>,
+    ) -> VaultResult<()> {
+        if names.is_empty() {
+            self.names = None;
+            return Ok(());
+        }
+        let bytes = serde_json::to_vec(names)
+            .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
+        self.names = Some(URL_SAFE_NO_PAD.encode(protect(&bytes)?));
+        Ok(())
     }
 
     pub fn list(&self) -> Result<DeviceList, crate::sync::canonical::ProofError> {
