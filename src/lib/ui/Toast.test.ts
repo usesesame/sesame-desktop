@@ -36,4 +36,27 @@ describe('Toast', () => {
     await fireEvent.focusOut(dismiss)
     expect(onResume).toHaveBeenCalledOnce()
   })
+
+  it('stays held while the pointer is away but a control still has focus', async () => {
+    const { toast, onHold, onResume } = renderToast()
+    const dismiss = screen.getByRole('button', { name: 'Dismiss notification' })
+    await fireEvent.mouseEnter(toast)
+    await fireEvent.focusIn(dismiss)
+    await fireEvent.mouseLeave(toast)
+    expect(onResume).not.toHaveBeenCalled()
+    await fireEvent.focusOut(dismiss)
+    expect(onHold).toHaveBeenCalledOnce()
+    expect(onResume).toHaveBeenCalledOnce()
+  })
+
+  it('stays held while focus has left but the pointer is still over it', async () => {
+    const { toast, onResume } = renderToast()
+    const dismiss = screen.getByRole('button', { name: 'Dismiss notification' })
+    await fireEvent.focusIn(dismiss)
+    await fireEvent.mouseEnter(toast)
+    await fireEvent.focusOut(dismiss)
+    expect(onResume).not.toHaveBeenCalled()
+    await fireEvent.mouseLeave(toast)
+    expect(onResume).toHaveBeenCalledOnce()
+  })
 })

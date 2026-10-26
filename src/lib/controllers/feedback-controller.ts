@@ -20,6 +20,7 @@ export function createFeedbackController() {
   let noticeTimer: ReturnType<typeof window.setTimeout> | undefined
   let noticeStartedAt = 0
   let noticeRemainingMs = NOTICE_MS
+  let noticeHeld = false
 
   function clearNoticeTimer() {
     if (noticeTimer) window.clearTimeout(noticeTimer)
@@ -46,22 +47,31 @@ export function createFeedbackController() {
     },
     showNotice(title: string, message: string) {
       state.patch({ notice: { title, message } })
+      if (noticeHeld) {
+        clearNoticeTimer()
+        noticeRemainingMs = NOTICE_MS
+        return
+      }
       startNoticeTimer(NOTICE_MS)
     },
     holdNotice() {
+      noticeHeld = true
       if (!noticeTimer) return
       clearNoticeTimer()
       noticeRemainingMs = Math.max(NOTICE_MIN_READ_MS, noticeRemainingMs - (Date.now() - noticeStartedAt))
     },
     resumeNotice() {
+      noticeHeld = false
       if (noticeTimer || !state.value().notice) return
       startNoticeTimer(noticeRemainingMs)
     },
     dismissNotice() {
+      noticeHeld = false
       clearNoticeTimer()
       state.patch({ notice: null })
     },
     destroy() {
+      noticeHeld = false
       clearNoticeTimer()
       state.set({ errorMessage: '', notice: null })
     },

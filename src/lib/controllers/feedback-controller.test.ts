@@ -49,14 +49,27 @@ describe('notice timing', () => {
     expect(feedback.state.value().notice).toBeNull()
   })
 
-  it('starts a new notice with the full time even after a hold', () => {
+  it('keeps a replacement notice held while the pointer stays on the toast, then gives it the full time', () => {
     const feedback = createFeedbackController()
     feedback.showNotice('Copied', 'First')
     feedback.holdNotice()
     feedback.showNotice('Saved', 'Second')
+    vi.advanceTimersByTime(60_000)
+    expect(feedback.state.value().notice?.title).toBe('Saved')
+    feedback.resumeNotice()
     vi.advanceTimersByTime(4_799)
     expect(feedback.state.value().notice?.title).toBe('Saved')
     vi.advanceTimersByTime(1)
+    expect(feedback.state.value().notice).toBeNull()
+  })
+
+  it('forgets a hold when the notice is dismissed, so the next notice times out', () => {
+    const feedback = createFeedbackController()
+    feedback.showNotice('Copied', 'First')
+    feedback.holdNotice()
+    feedback.dismissNotice()
+    feedback.showNotice('Saved', 'Second')
+    vi.advanceTimersByTime(4_800)
     expect(feedback.state.value().notice).toBeNull()
   })
 
