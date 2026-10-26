@@ -36,6 +36,9 @@ release cannot be published without saying what changed in it.
 - A dialog that replaces another one, such as the login editor handing over to
   the delete confirmation, no longer fades the dimmed background out and back
   in.
+- A dialog is now moved into place before it is shown, so its entrance plays
+  once from where it ends up. A dialog that was created closed and opened later
+  was never moved at all.
 
 ## 0.5.0
 

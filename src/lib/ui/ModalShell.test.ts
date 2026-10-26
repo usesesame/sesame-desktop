@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 import { cleanup, render } from '@testing-library/svelte'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import ModalShell from './ModalShell.svelte'
 import SyncEnableModal from './SyncEnableModal.svelte'
 import SyncJoinModal from './SyncJoinModal.svelte'
 
@@ -60,4 +61,23 @@ test('a dialog that opens well after the last one closed fades in again', async 
   render(SyncJoinModal, join)
   await Promise.resolve()
   expect(steady()).toEqual([false])
+})
+
+test('a dialog is shown only once it sits in the app root, so its entrance runs once from there', async () => {
+  render(SyncEnableModal, enable)
+  await Promise.resolve()
+  const shell = document.querySelector('[data-modal-shell]') as HTMLElement
+  expect(shell.parentElement).toBe(document.getElementById('app'))
+  expect(shell.classList.contains('modal-backdrop-pending')).toBe(false)
+})
+
+test('a shell that is opened after it was created is moved and shown the same way', async () => {
+  const rendered = render(ModalShell, { open: false, onClose: vi.fn() })
+  await Promise.resolve()
+  expect(document.querySelector('[data-modal-shell]')).toBeNull()
+  await rendered.rerender({ open: true, onClose: vi.fn() })
+  await Promise.resolve()
+  const shell = document.querySelector('[data-modal-shell]') as HTMLElement
+  expect(shell.parentElement).toBe(document.getElementById('app'))
+  expect(shell.classList.contains('modal-backdrop-pending')).toBe(false)
 })
