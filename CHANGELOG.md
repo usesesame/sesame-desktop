@@ -6,6 +6,8 @@ release cannot be published without saying what changed in it.
 
 ## 0.5.1
 
+This version also carries everything listed under 0.5.0, which was never published.
+
 ### Sync
 
 - A device shows what another device changed as soon as Sync applies it. The
