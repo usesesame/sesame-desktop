@@ -54,7 +54,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Label <span class="field-hint">How this identity appears in your list, e.g. “Personal” or “Work”</span><input name="identity-label" bind:this={labelInput} bind:value={identityDraft.label} required maxlength="160" placeholder="e.g. Personal…" autocomplete="off" /></label>
+    <label>Label <span class="field-hint">How this identity appears in your list, e.g. "Personal" or "Work"</span><input name="identity-label" bind:this={labelInput} bind:value={identityDraft.label} required maxlength="160" placeholder="e.g. Personal…" autocomplete="off" /></label>
     <label>Full name<input name="identity-full-name" bind:value={identityDraft.fullName} maxlength="256" autocomplete="off" /></label>
     <div class="editor-two-column">
       <label>Email<input name="identity-email" type="email" bind:value={identityDraft.email} maxlength="320" autocomplete="off" spellcheck="false" /></label>

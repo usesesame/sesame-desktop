@@ -94,7 +94,7 @@
   </header>
 
   <div class="editor-fields">
-    <label>Name <span class="field-hint">How this document appears in your list, e.g. “Passport”</span><input name="document-title" bind:this={titleInput} bind:value={documentDraft.title} required maxlength="160" placeholder="e.g. Passport…" autocomplete="off" /></label>
+    <label>Name <span class="field-hint">How this document appears in your list, e.g. "Passport"</span><input name="document-title" bind:this={titleInput} bind:value={documentDraft.title} required maxlength="160" placeholder="e.g. Passport…" autocomplete="off" /></label>
     <label>Document type <span class="field-hint">Optional, e.g. Passport</span><input name="document-type" bind:value={documentDraft.documentType} maxlength="64" autocomplete="off" /></label>
     <label>Document number<input name="document-number" bind:value={documentDraft.documentNumber} maxlength="128" autocomplete="off" spellcheck="false" /></label>
     <KeptSecret draft={documentDraft} key="documentNumber" typed={documentDraft.documentNumber} onChange={(next) => (documentDraft = { ...documentDraft, ...next })} />

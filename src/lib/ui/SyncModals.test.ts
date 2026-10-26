@@ -164,3 +164,25 @@ test('the conflict screen shows both sides as they are', () => {
   expect(document.body.textContent).toMatch(/Revision 5/)
   expect(document.body.textContent).toMatch(/14 logins/)
 })
+
+test('Escape does not close the enable screen while Sync is being turned on', async () => {
+  const onCancel = vi.fn()
+  const view = render(SyncEnableModal, { open: true, working: true, onCancel, onEnable: vi.fn() })
+  await Promise.resolve()
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(onCancel).not.toHaveBeenCalled()
+  await view.rerender({ open: true, working: false, onCancel, onEnable: vi.fn() })
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(onCancel).toHaveBeenCalledOnce()
+})
+
+test('Escape does not close the conflict screen while a choice is being applied', async () => {
+  const onCancel = vi.fn()
+  const view = render(SyncConflictModal, { open: true, thisDevice: side(), otherDevice: side(), working: true, detailsLoaded: true, onCancel, onKeep: vi.fn() })
+  await Promise.resolve()
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(onCancel).not.toHaveBeenCalled()
+  await view.rerender({ open: true, thisDevice: side(), otherDevice: side(), working: false, detailsLoaded: true, onCancel, onKeep: vi.fn() })
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(onCancel).toHaveBeenCalledOnce()
+})

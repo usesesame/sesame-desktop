@@ -33,6 +33,19 @@ release cannot be published without saying what changed in it.
 - A pointer that rests over the results no longer takes the selection from the
   keyboard, and the arrow keys scroll the selected result into view.
 
+### Consistency and feedback
+
+- Escape and a click on the backdrop no longer close the Sync set up and
+  conflict dialogs while they are working, which matches their disabled buttons.
+- Errors in the backup check use the same style as every other form error. They
+  had a style name that nothing defined.
+- The change master password dialog uses one name for the password in its
+  labels and its button, and the field hints use straight quotes.
+- Exporting a backup with your master password now refreshes the recovery
+  health afterwards, and the backup buttons are off while one is running.
+- Cancelling a breach check that could not be cancelled says so, and quick
+  access says when it could not copy or open an item.
+
 ### Browser
 
 - Settings says when another Sesame on the same computer already serves the

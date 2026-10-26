@@ -63,7 +63,7 @@
     {#if formatCopy?.canRestore}
       <label class="drill-secret">Master password or recovery kit<input bind:this={secretInput} name="backup-drill-secret" bind:value={secret} type="password" autocomplete="off" spellcheck="false" disabled={working} /></label>
       <p class="drill-privacy"><Icon name="shield" size={14} /> Used locally for this check and cleared when the drill closes.</p>
-      {#if error}<p class="field-error" role="alert">{error}</p>{/if}
+      {#if error}<p class="form-error" role="alert">{error}</p>{/if}
       <div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={onClose}>Cancel</button><button type="button" class="primary-button" disabled={working || !secret.trim()} on:click={onVerify}>{working ? 'Verifying…' : 'Verify backup'}</button></div>
     {:else}
       <p class="drill-format-detail">{formatCopy?.detail}</p>
@@ -80,7 +80,7 @@
       <label class="drill-secret">Your current master password<input name="backup-drill-presence" type="password" bind:value={presencePassword} autocomplete="current-password" spellcheck="false" disabled={restoring} /></label>
       <p class="drill-privacy"><Icon name="shield" size={14} /> Sesame confirms it is replacing the vault you have open.</p>
     {/if}
-    {#if error}<p class="field-error" role="alert">{error}</p>{/if}
+    {#if error}<p class="form-error" role="alert">{error}</p>{/if}
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={restoring} on:click={onClose}>Done</button>
       {#if presenceRequired}

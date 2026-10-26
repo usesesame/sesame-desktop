@@ -127,3 +127,11 @@ test('a presence requirement asks for the current master password before restori
   expect(screen.getByRole('button', { name: 'Confirm and restore' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Restore verified backup' })).toBeNull()
 })
+
+test('a drill error uses the shared error style, which is the only one with a rule', async () => {
+  renderDrill({ selection: selection('current'), error: 'That did not open the backup.' })
+  await Promise.resolve()
+  const alert = screen.getByRole('alert')
+  expect(alert.classList.contains('form-error')).toBe(true)
+  expect(alert.classList.contains('field-error')).toBe(false)
+})
