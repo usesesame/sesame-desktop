@@ -21,12 +21,14 @@
     const host = hostOf(loginDraft.url)
     if (loadedFor[field] === host) return
     loadedFor[field] = host
+    const current = () => loadedFor[field] === host
     try {
       const values = await suggestFieldValues(field, host || undefined)
+      if (!current()) return
       if (field === 'username') usernameSuggestions = values
       else emailSuggestions = values
     } catch {
-      loadedFor[field] = null
+      if (current()) loadedFor[field] = null
     }
   }
 
@@ -200,6 +202,7 @@
   function setFolder(folderId: string) {
     const folder = folderOptions.find((candidate) => candidate.id === folderId)
     loginDraft = { ...loginDraft, folderId: folder?.id, folder: folder?.name ?? '' }
+    dirty = true
   }
 </script>
 

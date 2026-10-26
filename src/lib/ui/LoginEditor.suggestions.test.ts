@@ -154,3 +154,44 @@ test('a new login that opens with its own name keeps it', async () => {
   await Promise.resolve()
   expect(nameField().value).toBe('Mine')
 })
+
+test('choosing the suggested folder counts as an edit, so closing asks before discarding it', async () => {
+  open([summary('Northwind', { folderId: 'work', folder: 'Work' })], draft({ url: 'https://example.test' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Put it in Work' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(document.body.textContent).toContain('Discard your changes?')
+})
+
+test('a slow answer for an earlier website never replaces the list for the current one', async () => {
+  const answers: Array<(values: string[]) => void> = []
+  vaultApi.suggestFieldValues.mockImplementation(() => new Promise<string[]>((resolve) => answers.push(resolve)))
+  open([])
+  const username = document.querySelector<HTMLInputElement>('input[name="login-username"]')!
+  await typeInto(urlField(), 'first.test')
+  await fireEvent.focus(username)
+  await typeInto(urlField(), 'second.test')
+  await fireEvent.focus(username)
+  answers[1](['second@example.test'])
+  await new Promise((resolve) => setTimeout(resolve))
+  answers[0](['first@example.test'])
+  await new Promise((resolve) => setTimeout(resolve))
+  const values = [...document.querySelectorAll<HTMLOptionElement>('#username-suggestions option')].map((option) => option.value)
+  expect(values).toEqual(['second@example.test'])
+})
+
+test('a failed answer for an earlier website does not stop the current website from being asked for', async () => {
+  const answers: Array<{ resolve: (values: string[]) => void; reject: (error: Error) => void }> = []
+  vaultApi.suggestFieldValues.mockImplementation(() => new Promise<string[]>((resolve, reject) => answers.push({ resolve, reject })))
+  open([])
+  const username = document.querySelector<HTMLInputElement>('input[name="login-username"]')!
+  await typeInto(urlField(), 'first.test')
+  await fireEvent.focus(username)
+  await typeInto(urlField(), 'second.test')
+  await fireEvent.focus(username)
+  answers[1].resolve(['second@example.test'])
+  await new Promise((resolve) => setTimeout(resolve))
+  answers[0].reject(new Error('Fictional failure'))
+  await new Promise((resolve) => setTimeout(resolve))
+  await fireEvent.focus(username)
+  expect(vaultApi.suggestFieldValues).toHaveBeenCalledTimes(2)
+})
