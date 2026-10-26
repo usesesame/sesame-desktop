@@ -149,6 +149,11 @@ test('workspace changes and notifications are announced without moving focus', (
   assert.match(toast, /role="alert" aria-atomic="true"/)
 })
 
+test('the unlock screen shows the notice that explains why the vault locked', () => {
+  const unlockBranch = appSource.slice(appSource.indexOf('<UnlockScreen'), appSource.indexOf('<WorkspaceShell'))
+  assert.match(unlockBranch, /<Toast notice=\{\$feedbackState\.notice\}/)
+})
+
 test('interactive Svelte components do not introduce positive tabindex values', () => {
   for (const path of componentPaths) {
     assert.doesNotMatch(read(path), /tabindex\s*=\s*["'][1-9]\d*["']/, `${path} contains a positive tabindex`)

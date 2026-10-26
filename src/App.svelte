@@ -42,6 +42,7 @@
   import ModalHost from './lib/ui/ModalHost.svelte'
   import PasswordPresenceModal from './lib/ui/PasswordPresenceModal.svelte'
   import WorkspaceShell from './lib/ui/WorkspaceShell.svelte'
+  import Toast from './lib/ui/Toast.svelte'
   import UnlockScreen from './lib/ui/UnlockScreen.svelte'
   import WelcomeScreen from './lib/ui/WelcomeScreen.svelte'
   import RecoveryKitScreen from './lib/ui/RecoveryKitScreen.svelte'
@@ -601,6 +602,7 @@
     onUnlockWithHello={unlockController.unlockUsingHello}
     onSubmitMasterPassword={unlockController.submitMasterPassword}
   />
+  <Toast notice={$feedbackState.notice} errorMessage="" onDismissNotice={feedbackController.dismissNotice} onDismissError={feedbackController.clearError} onHold={feedbackController.holdNotice} onResume={feedbackController.resumeNotice} />
 {:else}
   <WorkspaceShell
     {navigation}
