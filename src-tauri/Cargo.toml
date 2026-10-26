@@ -24,7 +24,7 @@ overflow-checks = true
 
 [package]
 name = "sesame"
-version = "0.5.0"
+version = "0.5.1"
 license = "AGPL-3.0-or-later"
 default-run = "sesame"
 description = "A calm, local-first password and recovery vault"
