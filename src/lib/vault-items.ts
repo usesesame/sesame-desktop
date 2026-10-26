@@ -121,8 +121,14 @@ export function parseTags(value: string): string[] {
   return uniqueTags(value.split(','))
 }
 
+function foldForSearch(value: string): string {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
 /** Matches on metadata the snapshot already carries; Rust searches stored fields. */
 export function itemMatchesQuery(item: VaultItem, query: string): boolean {
-  if (!query) return true
-  return `${item.title} ${item.subtitle} ${item.folder} ${item.tags.join(' ')}`.toLowerCase().includes(query)
+  const words = foldForSearch(query).split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  const haystack = foldForSearch(`${item.title} ${item.subtitle} ${item.folder} ${item.tags.join(' ')}`)
+  return words.every((word) => haystack.includes(word))
 }
