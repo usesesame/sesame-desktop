@@ -57,6 +57,26 @@ release cannot be published without saying what changed in it.
 - Cancelling a breach check that could not be cancelled says so, and quick
   access says when it could not copy or open an item.
 
+### Everyday use
+
+- Ctrl+C copies the text you have selected. It copies the password of the open
+  login only when no text is selected.
+- Saving an edit to a login keeps your search and filters. A new login, or an
+  edit that moves a login to another folder, still shows the login in its
+  folder.
+- Locking the vault clears the search and filters, so the next unlock starts
+  from the whole vault.
+- Search accepts several words in any order and ignores accents, so "work
+  northwind" and "cafe" find "Café Northwind" in the Work folder.
+- Escape inside an open list, such as the sort order, closes only the list and
+  not the dialog around it. The list button now says its current value, and
+  Settings lists the slash key that opens search.
+- A notice stays on screen while the pointer or keyboard focus is on it.
+- The reason the vault locked now shows on the unlock screen, where it used to
+  disappear before anyone could read it.
+- Opening a saved site that Sesame refuses to open now shows an error, and the
+  login is not counted as used.
+
 ### Browser
 
 - Settings says when another Sesame on the same computer already serves the

@@ -512,7 +512,7 @@ describe('secrets other than the password', () => {
   })
   it('keeps the search and filters after editing a login that stays in its folder', async () => {
     const { controller, stores } = harness()
-    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
     const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
     before.entries[0].folderId = 'folder-1'
     stores.vault.patch({ snapshot: before })
@@ -524,12 +524,12 @@ describe('secrets other than the password', () => {
     controller.openEditor()
     await controller.submit(false)
 
-    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    expect(stores.selection.value()).toMatchObject({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
   })
 
   it('follows a login to its new folder when an edit moves it', async () => {
     const { controller, stores } = harness()
-    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
     const before = snapshotWith([{ id: 'login-a', title: 'Northwind' }])
     before.entries[0].folderId = 'folder-1'
     stores.vault.patch({ snapshot: before })
@@ -546,7 +546,7 @@ describe('secrets other than the password', () => {
 
   it('shows a new login by clearing the search and opening its folder', async () => {
     const { controller, stores } = harness()
-    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'weak', searchQuery: 'north' })
+    stores.selection.patch({ collectionFilter: 'folder-1', securityFilter: 'reused-password', searchQuery: 'north' })
     const after = snapshotWith([{ id: 'login-a', title: 'Northwind' }, { id: 'login-new', title: 'Fresh' }])
     after.entries[1].folderId = 'folder-2'
     vaultApi.saveLogin.mockResolvedValue({ id: 'login-new', snapshot: after })

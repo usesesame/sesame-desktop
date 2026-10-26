@@ -159,7 +159,7 @@ describe('showing what a sync applied', () => {
 describe('locking the vault', () => {
   it('clears the search, the filters and the view so the next unlock starts clean', () => {
     const { controller, stores } = harness({ selected: 'login-a' })
-    stores.selection.patch({ searchQuery: 'north', securityFilter: 'weak', collectionFilter: 'folder-1', activeView: 'security' })
+    stores.selection.patch({ searchQuery: 'north', securityFilter: 'reused-password', collectionFilter: 'folder-1', activeView: 'security' })
 
     controller.applyLockedUi('Vault locked.')
 

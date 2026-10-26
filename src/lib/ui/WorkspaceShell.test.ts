@@ -35,6 +35,8 @@ function renderShell(overrides: Record<string, unknown> = {}, stores = createApp
     onFocusResults: vi.fn(),
     onCopyTotp: vi.fn(),
     onOpenSelectedSite: vi.fn(),
+    onCopyPassword: vi.fn(),
+    onCopyUsername: vi.fn(),
     ...overrides,
   }
   const rendered = render(WorkspaceShell, {
@@ -88,14 +90,14 @@ test('Ctrl J stays quiet while the vault is locked or another view is open', asy
 })
 
 test('Ctrl C copies the password of the open login', async () => {
-  const { props, stores } = renderShell({ onCopyPassword: vi.fn(), onCopyUsername: vi.fn() })
+  const { props, stores } = renderShell()
   stores.vault.patch({ loginCard: loginCard() })
   await fireEvent.keyDown(document.body, { key: 'c', ctrlKey: true })
   expect(props.onCopyPassword).toHaveBeenCalledOnce()
 })
 
 test('Ctrl C leaves text the person has selected to the ordinary copy instead of replacing the clipboard with the password', async () => {
-  const { props, stores } = renderShell({ onCopyPassword: vi.fn(), onCopyUsername: vi.fn() })
+  const { props, stores } = renderShell()
   stores.vault.patch({ loginCard: loginCard() })
   const note = document.createElement('p')
   note.textContent = 'A line from the notes that I want to copy'
