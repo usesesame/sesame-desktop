@@ -17,6 +17,7 @@
   let doneLabel = ''
   let presenceItem: QuickAccessItem | null = null
   let searchInput: HTMLInputElement | undefined
+  let resultList: HTMLUListElement | undefined
   let searchSequence = 0
 
   $: if (selectedIndex >= items.length) selectedIndex = Math.max(0, items.length - 1)
@@ -106,6 +107,12 @@
     return item.actions[0]
   }
 
+  async function keepSelectionInView() {
+    await tick()
+    const row = resultList?.children[selectedIndex]
+    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
+  }
+
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -120,9 +127,11 @@
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       selectedIndex = Math.min(items.length - 1, selectedIndex + 1)
+      void keepSelectionInView()
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       selectedIndex = Math.max(0, selectedIndex - 1)
+      void keepSelectionInView()
     } else if (event.key === 'Enter') {
       event.preventDefault()
       const item = items[selectedIndex]
@@ -171,10 +180,10 @@
       <input bind:this={searchInput} name="quick-access-search" bind:value={query} on:input={() => void updateSearch()} type="search" autocomplete="off" spellcheck="false" placeholder="Search Sesame…" aria-label="Search saved items" />
     </label>
     {#if items.length}
-      <ul class="quick-access-results">
+      <ul class="quick-access-results" bind:this={resultList}>
         {#each items as item, index (item.id)}
           <li class="quick-access-result-row" class:active={index === selectedIndex}>
-            <button type="button" class:active={index === selectedIndex} on:mouseenter={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
+            <button type="button" class:active={index === selectedIndex} on:mousemove={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
               <span class="entry-avatar" aria-hidden="true">
                 {#if item.kind === 'login'}{item.initials}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
@@ -189,7 +198,7 @@
                 aria-label={`${action.label} for ${item.title}`}
                 title={action.label}
                 disabled={Boolean(workingId) && workingId !== item.id}
-                on:mouseenter={() => (selectedIndex = index)}
+                on:mousemove={() => (selectedIndex = index)}
                 on:click|stopPropagation={() => void runAction(item, action)}
               >
                 <Icon name="copy" size={14} />
