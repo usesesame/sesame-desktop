@@ -1145,7 +1145,7 @@ checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "zeroize",
 ]
@@ -3987,7 +3987,7 @@ dependencies = [
  "serde_json",
  "sesame-core",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sha3 0.11.0",
  "tauri",
  "tauri-build",
@@ -4027,7 +4027,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "totp-rs",
  "ts-rs",
  "unicode-normalization",
@@ -4061,9 +4061,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
@@ -5099,7 +5099,7 @@ dependencies = [
  "rand",
  "serde",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "url",
  "zeroize",
 ]
