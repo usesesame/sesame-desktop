@@ -343,7 +343,7 @@ test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', 
     assert.match(step, /if ! xvfb-run -a node tools\/linux-shipped-package-gate\.mjs[\s\S]*; then/, `the ${format} evidence must be printed only when the gate fails`)
     assert.match(step, new RegExp(`cat ${directory}/${log.replaceAll('.', '\\.')} 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} launch log when its gate fails`)
     assert.match(step, new RegExp(`cat ${directory}/\\*\\.json 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} record when its gate fails`)
-    assert.match(step, /\n            exit 1\n          fi/, `the ${format} failure reporting must preserve a failing exit status`)
+    assert.match(step, /\n {12}exit 1\n {10}fi/, `the ${format} failure reporting must preserve a failing exit status`)
   }
 })
 
