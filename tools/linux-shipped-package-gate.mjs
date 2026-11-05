@@ -59,6 +59,12 @@ export const evidenceFilenameByFormat = {
   appimage: 'linux-appimage-shipped-package.json',
 }
 
+export function shippedPackageWorkRootBase(tempDirectory = tmpdir()) {
+  const resolved = path.posix.resolve(tempDirectory)
+  const privateMount = ['/tmp', '/home'].find((root) => resolved === root || resolved.startsWith(`${root}/`))
+  return privateMount ? '/var/tmp' : tempDirectory
+}
+
 export function formatForPackage(packagePath) {
   const name = path.basename(packagePath)
   if (name.endsWith('.deb')) return 'deb'
@@ -549,7 +555,7 @@ async function main() {
   const version = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8')).version
   const startedAt = new Date().toISOString()
 
-  const workRoot = await mkdtemp(path.join(tmpdir(), 'sesame-shipped-package-'))
+  const workRoot = await mkdtemp(path.join(shippedPackageWorkRootBase(), 'sesame-shipped-package-'))
   const staging = path.join(workRoot, 'staging')
   const rpmDatabase = path.join(workRoot, 'rpmdb')
   const environment = linuxBrowserEnvironment(workRoot)
