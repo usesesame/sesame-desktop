@@ -5,7 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { architectureName, browserHostName, chromeHostManifestMatches, launchApp, linuxBrowserEnvironment, platformName, readChromeHostManifest, sha256, stopApp } from './desktop-e2e-bridge.mjs'
+import { appProcessAlive, architectureName, browserHostName, chromeHostManifestMatches, launchApp, linuxBrowserEnvironment, platformName, readChromeHostManifest, sha256, stopApp } from './desktop-e2e-bridge.mjs'
 import { repositoryRoot } from './vault-compatibility-gate.mjs'
 
 const run = promisify(execFile)
@@ -63,6 +63,11 @@ export function shippedPackageWorkRootBase(tempDirectory = tmpdir()) {
   const resolved = path.posix.resolve(tempDirectory)
   const privateMount = ['/tmp', '/home'].find((root) => resolved === root || resolved.startsWith(`${root}/`))
   return privateMount ? '/var/tmp' : tempDirectory
+}
+
+export function shippedPackageRuntimeRootBase(tempDirectory = tmpdir()) {
+  const resolved = path.posix.resolve(tempDirectory)
+  return resolved === '/var/tmp' || resolved.startsWith('/var/tmp/') ? '/tmp' : resolved
 }
 
 export function formatForPackage(packagePath) {
@@ -260,7 +265,7 @@ async function launchAndStop(binary, { launchSeconds, logPath, environment, extr
   const log = []
   const child = launchApp({ binary, root: path.dirname(logPath), bridge: { port: 0, token: 'shipped-package-gate' }, log, env: { ...environment, ...extraEnv } })
   await new Promise((resolve) => setTimeout(resolve, launchSeconds * 1000))
-  const alive = child.exitCode === null
+  const alive = appProcessAlive(child)
   if (alive && whileRunning) await whileRunning()
   await stopApp(child)
   await writeFile(logPath, log.join(''))
@@ -556,9 +561,10 @@ async function main() {
   const startedAt = new Date().toISOString()
 
   const workRoot = await mkdtemp(path.join(shippedPackageWorkRootBase(), 'sesame-shipped-package-'))
+  const runtimeRoot = await mkdtemp(path.join(shippedPackageRuntimeRootBase(), 'sesame-shipped-runtime-'))
   const staging = path.join(workRoot, 'staging')
   const rpmDatabase = path.join(workRoot, 'rpmdb')
-  const environment = linuxBrowserEnvironment(workRoot)
+  const environment = linuxBrowserEnvironment(workRoot, runtimeRoot)
   await mkdir(staging, { recursive: true })
   await mkdir(rpmDatabase, { recursive: true })
 
@@ -590,6 +596,7 @@ async function main() {
     process.stdout.write(`Linux shipped ${options.format}: ${evidence.result}, ${context.steps.filter((step) => step.ok).length}/${context.steps.length} steps passed.\n`)
     return evidence.result === 'passed' ? 0 : 1
   } finally {
+    await rm(runtimeRoot, { recursive: true, force: true })
     if (!options.keep) await rm(workRoot, { recursive: true, force: true })
   }
 }

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
-import { chromeHostManifestMatches, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
+import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
 
@@ -284,6 +285,63 @@ test('the shipped package work root stays outside the RPM scriptlet private moun
   assert.equal(shippedPackageWorkRootBase('/var/tmp/sesame-run'), '/var/tmp/sesame-run')
   const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
   assert.match(source, /mkdtemp\(path\.join\(shippedPackageWorkRootBase\(\), 'sesame-shipped-package-'\)\)/)
+})
+
+test('the shipped package runtime stays outside the WebKit symlink target', async () => {
+  assert.equal(shippedPackageRuntimeRootBase('/tmp'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/home/runner'), '/home/runner')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp/sesame-run'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp-other'), '/var/tmp-other')
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /mkdtemp\(path\.join\(shippedPackageRuntimeRootBase\(\), 'sesame-shipped-runtime-'\)\)/)
+  assert.match(source, /linuxBrowserEnvironment\(workRoot, runtimeRoot\)/)
+  assert.match(source, /rm\(runtimeRoot, \{ recursive: true, force: true \}\)/)
+})
+
+test('the browser environment can keep its runtime outside the fixture root', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sesame-environment-root-'))
+  const runtimeRoot = await mkdtemp(path.join(tmpdir(), 'sesame-environment-runtime-'))
+  try {
+    const environment = linuxBrowserEnvironment(root, runtimeRoot)
+    assert.equal(environment.HOME, path.join(root, 'browser-home'))
+    assert.equal(environment.XDG_CONFIG_HOME, path.join(root, 'browser-config'))
+    assert.equal(environment.XDG_DATA_HOME, path.join(root, 'browser-data'))
+    assert.equal(environment.XDG_CACHE_HOME, path.join(root, 'browser-cache'))
+    assert.equal(environment.XDG_RUNTIME_DIR, path.join(runtimeRoot, 'browser-runtime'))
+    assert.equal(linuxBrowserEnvironment(root).XDG_RUNTIME_DIR, path.join(root, 'browser-runtime'))
+    if (process.platform !== 'win32') {
+      for (const directory of Object.values(environment)) {
+        assert.equal((await stat(directory)).mode & 0o777, 0o700, `${directory} is not private`)
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('a signal-terminated app is not counted as alive', async () => {
+  assert.equal(appProcessAlive({ exitCode: null, signalCode: 'SIGABRT' }), false)
+  assert.equal(appProcessAlive({ exitCode: null, signalCode: null }), true)
+  assert.equal(appProcessAlive({ exitCode: 0, signalCode: null }), false)
+  assert.equal(appProcessAlive(null), false)
+  if (process.platform === 'win32') return
+  const terminated = spawn(process.execPath, ['-e', 'setTimeout(() => process.kill(process.pid, "SIGTERM"), 50)'], { stdio: 'ignore' })
+  const terminatedExit = new Promise((resolve) => terminated.once('exit', resolve))
+  await terminatedExit
+  assert.equal(terminated.exitCode, null)
+  assert.equal(terminated.signalCode, 'SIGTERM')
+  assert.equal(appProcessAlive(terminated), false)
+  const running = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: 'ignore' })
+  const runningExit = new Promise((resolve) => running.once('exit', resolve))
+  try {
+    assert.equal(appProcessAlive(running), true)
+  } finally {
+    running.kill('SIGKILL')
+    await runningExit
+  }
+  assert.equal(appProcessAlive(running), false)
 })
 
 test('the release lane gates every shipped format before freezing evidence', async () => {

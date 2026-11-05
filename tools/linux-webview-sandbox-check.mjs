@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { linuxBrowserEnvironment } from './desktop-e2e-bridge.mjs'
+import { appProcessAlive, linuxBrowserEnvironment } from './desktop-e2e-bridge.mjs'
 
 const NAMESPACES = ['mnt', 'pid', 'user', 'net']
 const REFUSAL_TEXT = 'the sandbox for its web view is not available'
@@ -161,10 +161,10 @@ async function check(options) {
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 500))
     pids = descendantsNamed(child.pid, 'WebKitWebProcess')
-    if (pids.length >= 2 || child.exitCode !== null) break
+    if (pids.length >= 2 || !appProcessAlive(child)) break
   }
   const result = judge({ webProcesses: pids.map(observe), host: hostNamespaces(), logText: log.join('') })
-  const alive = child.exitCode === null
+  const alive = appProcessAlive(child)
   try {
     process.kill(-child.pid, 'SIGTERM')
   } catch {
