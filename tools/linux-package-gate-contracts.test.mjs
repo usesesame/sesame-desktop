@@ -333,6 +333,20 @@ test('Linux CI exercises the shipped rpm and AppImage gates before tagging', asy
   assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
 })
 
+test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
+  for (const [format, log] of [['rpm', 'linux-rpm-launch.log'], ['appimage', 'linux-appimage-launch.log']]) {
+    const directory = `linux-${format}-shipped-evidence`
+    const step = job.split('\n      - name:').find((entry) => entry.includes(`--format ${format}`))
+    assert.ok(step, `the Linux CI job does not run the ${format} gate`)
+    assert.match(step, /if ! xvfb-run -a node tools\/linux-shipped-package-gate\.mjs[\s\S]*; then/, `the ${format} evidence must be printed only when the gate fails`)
+    assert.match(step, new RegExp(`cat ${directory}/${log.replaceAll('.', '\\.')} 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} launch log when its gate fails`)
+    assert.match(step, new RegExp(`cat ${directory}/\\*\\.json 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} record when its gate fails`)
+    assert.match(step, /\n            exit 1\n          fi/, `the ${format} failure reporting must preserve a failing exit status`)
+  }
+})
+
 test('the bundling tools are verified before the bundler can download its own', async () => {
   const source = await readFile(path.join(repository, 'tools', 'prepare-linux-bundle-tools.mjs'), 'utf8')
   assert.match(source, /createHash\('sha256'\)/)
