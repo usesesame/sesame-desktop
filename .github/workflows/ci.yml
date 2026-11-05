@@ -481,10 +481,16 @@ jobs:
 
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
-          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
             --format rpm \
             --package "$(ls src-tauri/target/release/bundle/rpm/*.rpm)" \
-            --out linux-rpm-shipped-evidence
+            --out linux-rpm-shipped-evidence; then
+            echo "--- launch log ---"
+            cat linux-rpm-shipped-evidence/linux-rpm-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-rpm-shipped-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Prove the shipped AppImage launches and stages its browser helper
         run: |
