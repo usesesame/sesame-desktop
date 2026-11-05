@@ -158,13 +158,13 @@ export function launchApp({ binary, root, bridge, log, env = {} }) {
   return child
 }
 
-export function linuxBrowserEnvironment(root) {
+export function linuxBrowserEnvironment(root, runtimeRoot = root) {
   const directories = {
     HOME: path.join(root, 'browser-home'),
     XDG_CONFIG_HOME: path.join(root, 'browser-config'),
     XDG_DATA_HOME: path.join(root, 'browser-data'),
     XDG_CACHE_HOME: path.join(root, 'browser-cache'),
-    XDG_RUNTIME_DIR: path.join(root, 'browser-runtime'),
+    XDG_RUNTIME_DIR: path.join(runtimeRoot, 'browser-runtime'),
   }
   for (const directory of Object.values(directories)) mkdirSync(directory, { recursive: true, mode: 0o700 })
   return directories
@@ -192,8 +192,12 @@ export function chromeHostManifestMatches(manifest, expectedHost) {
     && trustedChromeOrigins.every((origin, index) => manifest.allowed_origins[index] === origin)
 }
 
+export function appProcessAlive(child) {
+  return Boolean(child) && child.exitCode === null && child.signalCode === null
+}
+
 export async function stopApp(child) {
-  if (!child || child.exitCode !== null) return
+  if (!appProcessAlive(child)) return
   if (process.platform === 'win32') {
     try {
       await run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
@@ -209,7 +213,7 @@ export async function stopApp(child) {
   }
   await new Promise((resolve) => {
     const timer = setTimeout(() => {
-      if (child.exitCode === null) child.kill('SIGKILL')
+      if (appProcessAlive(child)) child.kill('SIGKILL')
       resolve()
     }, 10_000)
     child.once('exit', () => {
