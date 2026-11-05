@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { chromeHostManifestMatches, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
@@ -272,6 +272,18 @@ test('the gate exercises rpm installs, AppImage extraction, and both cleanup pat
     assert.ok(steps.includes('browser.host_reaches_app'), 'a shipped format does not prove its browser helper reaches the running app')
   }
   assert.match(source, /hostReachesApp\(environment, context\.capabilitiesRequest\)/)
+})
+
+test('the shipped package work root stays outside the RPM scriptlet private mounts', async () => {
+  assert.equal(shippedPackageWorkRootBase('/tmp'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/tmp/sesame-run'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/home/runner'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/home'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/tmp-other'), '/tmp-other')
+  assert.equal(shippedPackageWorkRootBase('/home-other'), '/home-other')
+  assert.equal(shippedPackageWorkRootBase('/var/tmp/sesame-run'), '/var/tmp/sesame-run')
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /mkdtemp\(path\.join\(shippedPackageWorkRootBase\(\), 'sesame-shipped-package-'\)\)/)
 })
 
 test('the release lane gates every shipped format before freezing evidence', async () => {
