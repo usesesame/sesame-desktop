@@ -5,6 +5,7 @@
   import Icon from '../Icon.svelte'
   import SyncPanel from './SyncPanel.svelte'
   import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
+  import PcLinkPanel from './PcLinkPanel.svelte'
   import { appVersion } from '../app-meta'
   import { SHORTCUTS } from '../shortcuts'
   import { platformCapabilities } from '../platform'
@@ -364,6 +365,12 @@
           </section>
         {/if}
         <SyncPanel />
+        <section class="settings-group" aria-labelledby="settings-group-connections-phone">
+          <h3 id="settings-group-connections-phone">Phone</h3>
+          <div class="settings-list">
+            <PcLinkPanel />
+          </div>
+        </section>
         <section class="settings-group" aria-labelledby="settings-group-connections-server">
           <h3 id="settings-group-connections-server">Connect to your own server</h3>
           <div class="settings-list">

@@ -313,6 +313,40 @@ export interface NavigationGroup {
 
 export type Theme = 'auto' | 'light' | 'dark'
 
+export type PcLinkPairingState = 'pending_confirmation' | 'confirmed' | 'pending_commit' | 'active' | 'rejected' | 'expired'
+
+export interface PcLinkEnrollment {
+  enrollmentId: string
+  label: string
+  phonePublicKeyFingerprint: string
+  state: PcLinkPairingState
+}
+
+export interface PcLinkPairingWindow {
+  code: string
+  port: number
+  expiresAt: number
+  enrollments: PcLinkEnrollment[]
+}
+
+export interface PcLinkedPhone {
+  linkId: string
+  label: string
+  phonePublicKeyFingerprint: string
+  approvedAt: number
+  notAfter: number
+}
+
+export interface PcLinkStatus {
+  desktopFingerprint: string | null
+  retrievalPort: number | null
+  discoveryAvailable: boolean
+  discoveryHostname?: string | null
+  discoveryError?: string | null
+  links: PcLinkedPhone[]
+  pairing: PcLinkPairingWindow | null
+}
+
 export type SecurityFilter = IssueKind | null
 
 export type GeneratorOption = 'lowercase' | 'uppercase' | 'numbers' | 'symbols'

@@ -68,11 +68,13 @@ tauri-build = { version = "2", features = [] }
 sesame-core = { path = "sesame-core" }
 argon2 = { version = "0.6", features = ["zeroize"] }
 base64 = "0.23"
+bytes = "=1.12.1"
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 ed25519-dalek = "3"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1.3"
 rand = "0.10"
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "zeroize"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
@@ -96,6 +98,12 @@ zeroize = { version = "1.8", features = ["derive"] }
 curve25519-dalek = "5"
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hkdf = "0.13"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.11.1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "=0.1.20", default-features = false, features = ["tokio"] }
+mdns-sd = { version = "=0.21.7", default-features = false }
+tokio = { version = "=1.53.3", default-features = false, features = ["net", "io-util", "time", "sync"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring"] }
 ts-rs = "12.0.1"
 ml-kem = { version = "=0.3.3", features = ["zeroize"] }
 sha3 = "=0.12.0"

@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PcLinkStatus, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -1442,6 +1442,60 @@ export async function grantPresence(secret: string): Promise<void> {
 export async function checkReleasePresence(): Promise<void> {
   if (previewMode) return
   await invoke('check_release_presence')
+}
+
+const previewPcLinkFingerprint = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+function previewPcLinkStatus(): PcLinkStatus {
+  return {
+    desktopFingerprint: previewPcLinkFingerprint,
+    retrievalPort: 43123,
+    discoveryAvailable: true,
+    discoveryHostname: 'sesame-pc-01234567.local',
+    discoveryError: null,
+    links: [],
+    pairing: null,
+  }
+}
+
+export async function getPcLinkStatus(): Promise<PcLinkStatus> {
+  if (previewMode) return previewPcLinkStatus()
+  return invoke<PcLinkStatus>('get_pc_link_status')
+}
+
+export async function startPcLinkPairing(): Promise<PcLinkStatus> {
+  if (previewMode) {
+    return {
+      ...previewPcLinkStatus(),
+      pairing: {
+        code: 'ABCDEFGHJK',
+        port: 43124,
+        expiresAt: Math.floor(Date.now() / 1000) + 120,
+        enrollments: [],
+      },
+    }
+  }
+  return invoke<PcLinkStatus>('start_pc_link_pairing')
+}
+
+export async function confirmPcLinkPairing(enrollmentId: string): Promise<PcLinkStatus> {
+  if (previewMode) return previewPcLinkStatus()
+  return invoke<PcLinkStatus>('confirm_pc_link_pairing', { enrollmentId })
+}
+
+export async function rejectPcLinkPairing(enrollmentId: string): Promise<PcLinkStatus> {
+  if (previewMode) return previewPcLinkStatus()
+  return invoke<PcLinkStatus>('reject_pc_link_pairing', { enrollmentId })
+}
+
+export async function cancelPcLinkPairing(): Promise<PcLinkStatus> {
+  if (previewMode) return previewPcLinkStatus()
+  return invoke<PcLinkStatus>('cancel_pc_link_pairing')
+}
+
+export async function revokePcLink(linkId: string): Promise<PcLinkStatus> {
+  if (previewMode) return previewPcLinkStatus()
+  return invoke<PcLinkStatus>('revoke_pc_link', { linkId })
 }
 
 export async function revealLoginSecret(id: string): Promise<string> {

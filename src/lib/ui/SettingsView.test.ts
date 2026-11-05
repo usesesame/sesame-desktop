@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { platformCapabilities } from '../platform'
 import type { DesktopUpdateProgress, DesktopUpdateStatus, PlatformCapabilities } from '../types'
@@ -12,6 +12,22 @@ class ResizeObserverStub {
 }
 
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
+const pcLinkMocks = vi.hoisted(() => ({
+  getPcLinkStatus: vi.fn(),
+  startPcLinkPairing: vi.fn(),
+  confirmPcLinkPairing: vi.fn(),
+  rejectPcLinkPairing: vi.fn(),
+  cancelPcLinkPairing: vi.fn(),
+  revokePcLink: vi.fn(),
+  grantPresence: vi.fn(),
+  PRESENCE_REQUIRED: 'presenceRequired',
+}))
+
+vi.mock('../vault', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../vault')>()
+  return { ...actual, ...pcLinkMocks }
+})
 
 const linux = (overrides: Partial<PlatformCapabilities> = {}): PlatformCapabilities => ({
   os: 'linux',
@@ -31,6 +47,10 @@ const linux = (overrides: Partial<PlatformCapabilities> = {}): PlatformCapabilit
 
 beforeEach(() => {
   platformCapabilities.set(linux())
+  pcLinkMocks.getPcLinkStatus.mockReset()
+  pcLinkMocks.startPcLinkPairing.mockReset()
+  pcLinkMocks.grantPresence.mockReset()
+  pcLinkMocks.rejectPcLinkPairing.mockReset()
 })
 
 afterEach(() => {
@@ -156,4 +176,100 @@ test('Sync has its own group on the Connections tab, apart from the account', ()
 
   expect(screen.getByRole('heading', { name: 'Sesame Sync' })).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Sesame account' })).toBeTruthy()
+})
+
+test('Connections links a phone only after master-password presence and shows the pairing code', async () => {
+  const unlocked = {
+    desktopFingerprint: '01234567'.repeat(8),
+    retrievalPort: 43123,
+    discoveryAvailable: true,
+    discoveryHostname: 'sesame-pc-01234567.local',
+    discoveryError: null,
+    links: [],
+    pairing: {
+      code: 'ABCDEFGHJK',
+      port: 43124,
+      expiresAt: Math.floor(Date.now() / 1000) + 120,
+      enrollments: [],
+    },
+  }
+  pcLinkMocks.getPcLinkStatus
+    .mockResolvedValueOnce({
+      desktopFingerprint: null,
+      retrievalPort: null,
+      discoveryAvailable: false,
+      discoveryError: null,
+      links: [],
+      pairing: null,
+    })
+    .mockResolvedValue(unlocked)
+  pcLinkMocks.startPcLinkPairing
+    .mockRejectedValueOnce(new Error(pcLinkMocks.PRESENCE_REQUIRED))
+    .mockResolvedValueOnce(unlocked)
+  pcLinkMocks.grantPresence.mockResolvedValue(undefined)
+
+  renderSettings({ tab: 'connections' })
+
+  const link = await screen.findByRole('button', { name: 'Link phone' })
+  await fireEvent.click(link)
+
+  expect(await screen.findByText('Confirm your master password')).toBeTruthy()
+  const continueButton = screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement
+  expect(continueButton.disabled).toBe(true)
+
+  const password = screen.getByLabelText('Master password') as HTMLInputElement
+  expect(password.type).toBe('password')
+  await fireEvent.input(password, { target: { value: 'fictional master password' } })
+  expect(continueButton.disabled).toBe(false)
+  await fireEvent.click(continueButton)
+
+  await waitFor(() =>
+    expect(pcLinkMocks.grantPresence).toHaveBeenCalledWith('fictional master password'),
+  )
+  await waitFor(() => expect(pcLinkMocks.startPcLinkPairing).toHaveBeenCalledTimes(2))
+  expect(pcLinkMocks.grantPresence.mock.invocationCallOrder[0]).toBeLessThan(
+    pcLinkMocks.startPcLinkPairing.mock.invocationCallOrder[1],
+  )
+  expect(await screen.findByText('Pairing window open')).toBeTruthy()
+  expect(await screen.findByText('ABCDEFGHJK')).toBeTruthy()
+  expect(screen.getByText(/Retrieval endpoint sesame-pc-01234567\.local:43123/)).toBeTruthy()
+  expect(screen.getByText(/Pairing endpoint sesame-pc-01234567\.local:43124/)).toBeTruthy()
+})
+
+test('rejecting a phone explains that the consumed pairing code must be replaced', async () => {
+  const pending = {
+    desktopFingerprint: '01234567'.repeat(8),
+    retrievalPort: 43123,
+    discoveryAvailable: true,
+    discoveryHostname: 'sesame-pc-01234567.local',
+    discoveryError: null,
+    links: [],
+    pairing: {
+      code: 'ABCDEFGHJK',
+      port: 43124,
+      expiresAt: Math.floor(Date.now() / 1000) + 120,
+      enrollments: [{
+        enrollmentId: 'preview-enrollment',
+        label: 'Example phone',
+        phonePublicKeyFingerprint: '89abcdef'.repeat(8),
+        state: 'pending_confirmation',
+      }],
+    },
+  }
+  const rejected = {
+    ...pending,
+    pairing: {
+      ...pending.pairing,
+      enrollments: [{ ...pending.pairing.enrollments[0], state: 'rejected' }],
+    },
+  }
+  pcLinkMocks.getPcLinkStatus.mockResolvedValueOnce(pending).mockResolvedValue(rejected)
+  pcLinkMocks.rejectPcLinkPairing.mockResolvedValue(rejected)
+
+  renderSettings({ tab: 'connections' })
+  await fireEvent.click(await screen.findByRole('button', { name: 'Reject' }))
+
+  expect(pcLinkMocks.rejectPcLinkPairing).toHaveBeenCalledWith('preview-enrollment')
+  expect(await screen.findByText('Rejected. Close pairing and choose Link phone to create a new code.')).toBeTruthy()
+  expect(screen.queryByText('Waiting for a phone to enter the code.')).toBeNull()
 })

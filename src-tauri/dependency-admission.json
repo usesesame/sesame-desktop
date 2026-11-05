@@ -77,6 +77,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "bytes",
+      "version": "1.12.1",
+      "reason": "Bounded HTTP byte buffers for the local PC link service, using the already locked version."
+    },
+    {
       "name": "chacha20poly1305",
       "version": "0.11",
       "reason": "In use before this gate was adopted."
@@ -131,6 +136,21 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "http-body-util",
+      "version": "0.1.5",
+      "reason": "Bounded request collection and fixed response bodies for the approved local PC link HTTP service, using the already locked version."
+    },
+    {
+      "name": "hyper",
+      "version": "1.11.1",
+      "reason": "HTTP/1.1 server for the approved local PC link service, using the already locked version with only server and http1 features."
+    },
+    {
+      "name": "hyper-util",
+      "version": "0.1.20",
+      "reason": "Tokio adapter for hyper's server connection, using the already locked version with only the tokio feature."
+    },
+    {
       "name": "idna",
       "version": "1",
       "reason": "Decodes punycode host labels for the lookalike host comparison; psl reads only ASCII and does not decode. Already in the lock through url."
@@ -145,6 +165,11 @@
       "name": "libc",
       "version": "0.2",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "mdns-sd",
+      "version": "0.21.7",
+      "reason": "Advertises the approved generic _sesame-pc._tcp service so a remembered PC can change address. The desktop certificate pin remains the identity."
     },
     {
       "name": "minisign-verify",
@@ -170,6 +195,11 @@
       "name": "rand",
       "version": "0.10",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "rcgen",
+      "version": "0.14.10",
+      "reason": "Generates the persistent P-256 desktop certificate and self-signed identity for the approved local PC link. Features are limited to crypto, ring, and zeroize so it uses the existing ring provider without the AWS-LC, FIPS, or PEM stacks."
     },
     {
       "name": "reqwest",
@@ -268,6 +298,16 @@
       "name": "tauri-plugin-updater",
       "version": "2",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "tokio",
+      "version": "1.53.3",
+      "reason": "Existing locked runtime for the approved local PC link listeners, with only net, io-util, time, and sync features."
+    },
+    {
+      "name": "tokio-rustls",
+      "version": "0.26.4",
+      "reason": "TLS adapter for the approved local PC link listeners, using the existing ring provider with default features off."
     },
     {
       "name": "totp-rs",

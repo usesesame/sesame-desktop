@@ -8,6 +8,7 @@ mod commands;
 #[cfg(feature = "wdio")]
 mod desktop_e2e;
 mod diagnostics;
+pub mod pc_link;
 mod release;
 mod rollback_guard;
 mod sync;
@@ -138,6 +139,12 @@ macro_rules! sesame_invoke_handler {
             commands::get_recovery_health,
             commands::grant_presence,
             commands::check_release_presence,
+            commands::get_pc_link_status,
+            commands::start_pc_link_pairing,
+            commands::confirm_pc_link_pairing,
+            commands::reject_pc_link_pairing,
+            commands::cancel_pc_link_pairing,
+            commands::revoke_pc_link,
             commands::reveal_login_secret,
             commands::check_login_breach,
             commands::release_item_field,
@@ -289,6 +296,7 @@ pub fn run() {
                 .build(),
         )
         .manage(vault::VaultState::default())
+        .manage(pc_link::service::PcLinkService::default())
         .manage(commands::BreachScanState::default())
         .manage(commands::FileSelectionState::default())
         .manage(browser_fill::BrowserFillState::default())
@@ -327,6 +335,19 @@ pub fn run() {
                 diagnostics::record_browser_host_registration(app.handle(), "pipe_server_failed");
             }
             session_guard::start(app.handle().clone());
+            {
+                use tauri::Manager;
+                let handle = app.handle().clone();
+                let service = handle
+                    .state::<pc_link::service::PcLinkService>()
+                    .inner()
+                    .clone();
+                if let Ok(host) = pc_link::service::AppHandleHost::shared(&handle) {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let _ = service.status(&host);
+                    });
+                }
+            }
             Ok(())
         })
         .on_window_event(desktop_shell::handle_window_event);
