@@ -1,8 +1,8 @@
 use ml_kem::kem::{Decapsulate as _, KeyExport as _};
 use ml_kem::ml_kem_768::{DecapsulationKey, EncapsulationKey};
 use ml_kem::{FromSeed, MlKem768};
-use sha3::digest::{ExtendableOutput, Update, XofReader};
-use sha3::{Digest, Sha3_256, Shake256};
+use sha3::{Digest, Sha3_256};
+use shake::{ExtendableOutput, Shake256, Update, XofReader};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
 
