@@ -54,6 +54,11 @@ impl PairingWindow {
         self.deadline
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_deadline(&mut self, deadline: Instant) {
+        self.deadline = deadline;
+    }
+
     pub(crate) fn is_expired(&self) -> bool {
         self.is_expired_at(Instant::now())
     }
@@ -63,6 +68,9 @@ impl PairingWindow {
     }
 
     pub(crate) fn verify_code(&mut self, code: &str) -> bool {
+        if self.is_expired() {
+            return false;
+        }
         if bytes_match(code.as_bytes(), self.code.as_bytes()) {
             return true;
         }
@@ -152,8 +160,18 @@ mod tests {
             assert!(!window.verify_code("AAAAAAAAAA"));
         }
         assert!(window.is_expired());
-        assert!(!window.is_expired() || window.failed_attempts >= MAX_CODE_FAILURES);
-        assert!(window.verify_code(&expected));
+        assert_eq!(window.failed_attempts, MAX_CODE_FAILURES);
+        assert!(!window.verify_code(&expected));
+        assert_eq!(window.failed_attempts, MAX_CODE_FAILURES);
+    }
+
+    #[test]
+    fn the_correct_code_cannot_reopen_an_expired_window() {
+        let mut window = PairingWindow::new(u64::MAX).expect("window");
+        let expected = window.code.clone();
+        window.set_deadline(Instant::now() - Duration::from_secs(1));
+        assert!(!window.verify_code(&expected));
+        assert_eq!(window.failed_attempts, 0);
     }
 
     #[test]

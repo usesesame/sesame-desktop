@@ -221,10 +221,19 @@ struct PairingRuntime {
     generation: u64,
     port: u16,
     expires_at: u64,
-    deadline: Instant,
     window: Arc<Mutex<Option<PairingWindow>>>,
     tls: Arc<RwLock<Option<Arc<rustls::ServerConfig>>>>,
     listener: ListenerSet,
+}
+
+impl PairingRuntime {
+    fn is_expired(&self) -> VaultResult<bool> {
+        let window = self
+            .window
+            .lock()
+            .map_err(|_| "Sesame could not read the pairing window.".to_string())?;
+        Ok(window.as_ref().is_none_or(PairingWindow::is_expired))
+    }
 }
 
 #[derive(Clone)]
@@ -421,7 +430,9 @@ impl PcLinkService {
         if inner
             .pairing
             .as_ref()
-            .is_some_and(|pairing| pairing.deadline <= Instant::now())
+            .map(PairingRuntime::is_expired)
+            .transpose()?
+            .unwrap_or(false)
         {
             stop_pairing_locked(inner);
         }
@@ -529,7 +540,6 @@ impl PcLinkService {
             generation,
             port,
             expires_at,
-            deadline,
             window,
             tls,
             listener,
@@ -575,7 +585,7 @@ impl PcLinkService {
                 .pairing
                 .as_ref()
                 .ok_or_else(|| "Open the pairing window before confirming a phone.".to_string())?;
-            if pairing.deadline <= Instant::now() {
+            if pairing.is_expired()? {
                 return Err("This pairing window has expired. Start pairing again.".to_string());
             }
             (
@@ -592,6 +602,10 @@ impl PcLinkService {
             let window = window
                 .as_mut()
                 .ok_or_else(|| "This pairing window has closed.".to_string())?;
+            if window.is_expired() {
+                state.cancel_pairing(enrollment_id);
+                return Err("This pairing window has expired. Start pairing again.".to_string());
+            }
             let enrollment = window
                 .enrollment_mut(enrollment_id)
                 .ok_or_else(|| "This pairing request is no longer available.".to_string())?;
@@ -877,23 +891,29 @@ fn spawn_pairing_watchdog(
     generation: u64,
     deadline: Instant,
 ) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep_until(tokio::time::Instant::from_std(
-            deadline + Duration::from_secs(PAIRING_GRACE_SECONDS),
-        ))
-        .await;
-        if let Ok(mut guard) = inner.lock() {
-            if let Some(inner) = guard.as_mut() {
-                if inner
-                    .pairing
-                    .as_ref()
-                    .is_some_and(|pairing| pairing.generation == generation)
-                {
-                    stop_pairing_locked(inner);
-                }
+    tauri::async_runtime::spawn(pairing_watchdog(inner, generation, deadline));
+}
+
+async fn pairing_watchdog(
+    inner: Arc<Mutex<Option<ServiceInner>>>,
+    generation: u64,
+    deadline: Instant,
+) {
+    tokio::time::sleep_until(tokio::time::Instant::from_std(
+        deadline + Duration::from_secs(PAIRING_GRACE_SECONDS),
+    ))
+    .await;
+    if let Ok(mut guard) = inner.lock() {
+        if let Some(inner) = guard.as_mut() {
+            if inner
+                .pairing
+                .as_ref()
+                .is_some_and(|pairing| pairing.generation == generation)
+            {
+                stop_pairing_locked(inner);
             }
         }
-    });
+    }
 }
 
 fn bind_listeners(preferred: u16) -> VaultResult<(u16, Vec<StdTcpListener>)> {
@@ -1928,6 +1948,233 @@ mod tests {
         assert!(!crate::pc_link::has_authority_file(&root));
         assert!(!root.join("pc-link").exists());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    struct PairingFixture {
+        service: PcLinkService,
+        host: Arc<dyn PcLinkHost>,
+        state: Arc<PcLinkState>,
+        _cleanup: FixtureCleanup,
+    }
+
+    impl PairingFixture {
+        fn new(name: &str) -> Self {
+            let (vault, _, root) = arc_vault(name);
+            let pc_root = root.join("desktop");
+            let presence = Arc::new(ReleasePresence::default());
+            presence.grant_until(
+                vault.session_epoch(),
+                Instant::now() + Duration::from_secs(600),
+            );
+            let host: Arc<dyn PcLinkHost> =
+                Arc::new(InjectedHost::new(pc_root.clone(), vault, presence));
+            let state = Arc::new(
+                PcLinkState::open_with_protection(
+                    &pc_root,
+                    Box::new(TestProtection { fail: false }),
+                )
+                .expect("state"),
+            );
+            let service = PcLinkService::default();
+            service
+                .inject_state_for_test(Arc::clone(&state))
+                .expect("injected state");
+            service.start_pairing(&host).expect("pairing");
+            Self {
+                service,
+                host,
+                state,
+                _cleanup: FixtureCleanup(root),
+            }
+        }
+
+        fn with_window(&self, change: impl FnOnce(&mut PairingWindow)) {
+            let guard = self.service.inner.lock().expect("service");
+            let pairing = guard
+                .as_ref()
+                .expect("inner")
+                .pairing
+                .as_ref()
+                .expect("pairing");
+            let mut window = pairing.window.lock().expect("window");
+            change(window.as_mut().expect("open window"));
+        }
+
+        fn enroll(&self) -> String {
+            let key = rcgen::KeyPair::generate().expect("phone key");
+            let id = "ABCDEFGHIJKLMNOPQRSTUV".to_string();
+            self.host
+                .begin_pairing(
+                    &self.state,
+                    key.der_bytes(),
+                    "Fictional phone",
+                    id.clone(),
+                    unix_timestamp(),
+                )
+                .expect("pending");
+            self.with_window(|window| {
+                window
+                    .enroll(
+                        id.clone(),
+                        "Fictional phone".to_string(),
+                        key.der_bytes().to_vec(),
+                    )
+                    .expect("enrolled");
+            });
+            id
+        }
+    }
+
+    impl Drop for PairingFixture {
+        fn drop(&mut self) {
+            self.service.on_vault_locked();
+        }
+    }
+
+    #[test]
+    fn status_closes_a_locked_out_window_and_allows_a_fresh_code() {
+        let fixture = PairingFixture::new("status-lockout");
+        fixture.with_window(|window| {
+            for _ in 0..5 {
+                assert!(!window.verify_code("wrong"));
+            }
+        });
+        let status = fixture.service.status(&fixture.host).expect("status");
+        assert!(status.pairing.is_none());
+        assert!(status.retrieval_port.is_none());
+        assert!(fixture
+            .state
+            .all_active_link_authorities()
+            .expect("grants")
+            .is_empty());
+        let fresh = fixture
+            .service
+            .start_pairing(&fixture.host)
+            .expect("restart");
+        assert!(fresh.pairing.is_some());
+        fixture.with_window(|window| {
+            assert_eq!(window.failed_attempts, 0);
+            let code = window.code.clone();
+            assert!(window.verify_code(&code));
+        });
+    }
+
+    #[test]
+    fn status_and_confirmation_ignore_an_expired_wall_clock_display() {
+        let fixture = PairingFixture::new("status-wall-clock");
+        let id = fixture.enroll();
+        fixture.with_window(|window| window.expires_at = 0);
+        let status = fixture.service.status(&fixture.host).expect("status");
+        assert!(status.pairing.is_some());
+        let confirmed = fixture
+            .service
+            .confirm_pairing(&fixture.host, &id)
+            .expect("confirmed");
+        assert_eq!(
+            confirmed.pairing.expect("pairing").enrollments[0].state,
+            PairingState::Confirmed
+        );
+        assert!(confirmed.links.is_empty());
+    }
+
+    #[test]
+    fn confirmation_and_status_refuse_an_expired_monotonic_deadline() {
+        let fixture = PairingFixture::new("confirm-deadline");
+        let id = fixture.enroll();
+        fixture.with_window(|window| {
+            window.expires_at = u64::MAX;
+            window.set_deadline(Instant::now() - Duration::from_secs(1));
+        });
+        assert_eq!(
+            fixture
+                .service
+                .confirm_pairing(&fixture.host, &id)
+                .err()
+                .expect("expired"),
+            "This pairing window has expired. Start pairing again."
+        );
+        let status = fixture.service.status(&fixture.host).expect("status");
+        assert!(status.pairing.is_none());
+        assert!(status.retrieval_port.is_none());
+        assert!(fixture
+            .state
+            .pairing_trust_authorities()
+            .expect("pending grants")
+            .is_empty());
+        assert!(fixture
+            .state
+            .all_active_link_authorities()
+            .expect("grants")
+            .is_empty());
+    }
+
+    #[test]
+    fn rejection_is_returned_in_native_status_and_cannot_be_confirmed() {
+        let fixture = PairingFixture::new("rejection-status");
+        let id = fixture.enroll();
+        let rejected = fixture
+            .service
+            .reject_pairing(&fixture.host, &id)
+            .expect("rejected");
+        let enrollment = rejected.pairing.expect("pairing").enrollments.remove(0);
+        assert_eq!(enrollment.enrollment_id, id);
+        assert_eq!(enrollment.state, PairingState::Rejected);
+        assert!(fixture.service.confirm_pairing(&fixture.host, &id).is_err());
+        let status = fixture.service.status(&fixture.host).expect("status");
+        assert_eq!(
+            status.pairing.expect("pairing").enrollments[0].state,
+            PairingState::Rejected
+        );
+        assert!(fixture
+            .state
+            .all_active_link_authorities()
+            .expect("grants")
+            .is_empty());
+    }
+
+    #[test]
+    fn watchdog_uses_the_monotonic_deadline_and_matches_the_window_generation() {
+        let fixture = PairingFixture::new("watchdog-deadline");
+        let deadline = Instant::now() - Duration::from_secs(PAIRING_GRACE_SECONDS + 1);
+        fixture.with_window(|window| {
+            window.expires_at = u64::MAX;
+            window.set_deadline(deadline);
+        });
+        let generation = fixture
+            .service
+            .inner
+            .lock()
+            .expect("service")
+            .as_ref()
+            .expect("inner")
+            .pairing
+            .as_ref()
+            .expect("pairing")
+            .generation;
+        tauri::async_runtime::block_on(pairing_watchdog(
+            Arc::clone(&fixture.service.inner),
+            generation + 1,
+            deadline,
+        ));
+        assert!(fixture
+            .service
+            .inner
+            .lock()
+            .expect("service")
+            .as_ref()
+            .expect("inner")
+            .pairing
+            .is_some());
+        tauri::async_runtime::block_on(pairing_watchdog(
+            Arc::clone(&fixture.service.inner),
+            generation,
+            deadline,
+        ));
+        let guard = fixture.service.inner.lock().expect("service");
+        let inner = guard.as_ref().expect("inner");
+        assert!(inner.pairing.is_none());
+        assert!(inner.retrieval.is_none());
+        assert!(inner.discovery.is_none());
     }
 
     #[test]
