@@ -404,7 +404,7 @@ jobs:
 
   linux-bundles:
     needs: [lint, typecheck]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -445,7 +445,8 @@ jobs:
           sudo apt-get install --only-upgrade --no-install-recommends -y \
             curl \
             libcurl3t64-gnutls \
-            libcurl4t64
+            libcurl4t64 \
+            libpcre2-8-0
 
       - name: Allow unprivileged user namespaces for the web view sandbox
         run: |
@@ -515,7 +516,7 @@ jobs:
 
   linux-installed:
     needs: [lint, typecheck]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

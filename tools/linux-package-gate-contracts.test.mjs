@@ -12,6 +12,12 @@ import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pi
 
 const repository = process.cwd()
 
+function workflowJob(workflow, name) {
+  const job = workflow.split(/\r?\n {2}(?=[\w-]+:)/).find((entry) => entry.startsWith(`${name}:`))
+  assert.ok(job, `the workflow has no ${name} job`)
+  return job
+}
+
 const bundlerFetchedToolNames = [
   'AppRun-x86_64',
   'linuxdeploy-07333c6-x86_64.AppImage',
@@ -401,6 +407,24 @@ test('Linux CI exercises the shipped rpm and AppImage gates before tagging', asy
     assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
   }
   assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
+})
+
+test('Linux package validation uses the pinned release build image', async () => {
+  const ci = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const release = await readFile(path.join(repository, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  const image = workflowJob(release, 'build-and-test').match(/^ {4}runs-on: (\S+)/m)?.[1]
+  assert.match(image ?? '', /^ubuntu-\d{2}\.\d{2}$/)
+  for (const name of ['linux-bundles', 'linux-installed']) {
+    assert.equal(workflowJob(ci, name).match(/^ {4}runs-on: (\S+)/m)?.[1], image, `${name} must validate the release build image`)
+  }
+})
+
+test('Linux bundle builders upgrade the existing PCRE2 runtime from vendor updates', async () => {
+  for (const [filename, name] of [['ci.yml', 'linux-bundles'], ['release-linux-early-access.yml', 'build-and-test']]) {
+    const workflow = await readFile(path.join(repository, '.github', 'workflows', filename), 'utf8')
+    const upgrade = workflowJob(workflow, name).match(/sudo apt-get install --only-upgrade[^\r\n]*(?:\r?\n {12}[^\r\n]*)*/)?.[0]
+    assert.match(upgrade ?? '', /\blibpcre2-8-0\b/, `${filename} must pick up the vendor's PCRE2 security update before bundling`)
+  }
 })
 
 test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', async () => {
