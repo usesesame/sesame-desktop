@@ -1,15 +1,37 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
-import { chromeHostManifestMatches, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
+import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
+
+function workflowJob(workflow, name) {
+  const job = workflow.split(/\r?\n {2}(?=[\w-]+:)/).find((entry) => entry.startsWith(`${name}:`))
+  assert.ok(job, `the workflow has no ${name} job`)
+  return job
+}
+
+function workflowRunSteps(job) {
+  return job.split(/\r?\n {6}- /).slice(1).map((step) => {
+    const lines = step.split(/\r?\n/)
+    const start = lines.findIndex((line) => /^(?: {8})?run:/.test(line))
+    if (start === -1) return ''
+    const first = lines[start].trim().slice('run:'.length).trim()
+    const body = ['|', '|-', '>', '>-'].includes(first) ? [] : [first]
+    for (const line of lines.slice(start + 1)) {
+      if (line.trim() && !/^ {10}/.test(line)) break
+      body.push(line.trimStart())
+    }
+    return body.filter((line) => !line.startsWith('#')).join('\n').replace(/\\\r?\n/g, ' ')
+  })
+}
 
 const bundlerFetchedToolNames = [
   'AppRun-x86_64',
@@ -274,6 +296,75 @@ test('the gate exercises rpm installs, AppImage extraction, and both cleanup pat
   assert.match(source, /hostReachesApp\(environment, context\.capabilitiesRequest\)/)
 })
 
+test('the shipped package work root stays outside the RPM scriptlet private mounts', async () => {
+  assert.equal(shippedPackageWorkRootBase('/tmp'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/tmp/sesame-run'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/home/runner'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/home'), '/var/tmp')
+  assert.equal(shippedPackageWorkRootBase('/tmp-other'), '/tmp-other')
+  assert.equal(shippedPackageWorkRootBase('/home-other'), '/home-other')
+  assert.equal(shippedPackageWorkRootBase('/var/tmp/sesame-run'), '/var/tmp/sesame-run')
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /mkdtemp\(path\.join\(shippedPackageWorkRootBase\(\), 'sesame-shipped-package-'\)\)/)
+})
+
+test('the shipped package runtime stays outside the WebKit symlink target', async () => {
+  assert.equal(shippedPackageRuntimeRootBase('/tmp'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/home/runner'), '/home/runner')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp/sesame-run'), '/tmp')
+  assert.equal(shippedPackageRuntimeRootBase('/var/tmp-other'), '/var/tmp-other')
+  const source = await readFile(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(source, /mkdtemp\(path\.join\(shippedPackageRuntimeRootBase\(\), 'sesame-shipped-runtime-'\)\)/)
+  assert.match(source, /linuxBrowserEnvironment\(workRoot, runtimeRoot\)/)
+  assert.match(source, /rm\(runtimeRoot, \{ recursive: true, force: true \}\)/)
+})
+
+test('the browser environment can keep its runtime outside the fixture root', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'sesame-environment-root-'))
+  const runtimeRoot = await mkdtemp(path.join(tmpdir(), 'sesame-environment-runtime-'))
+  try {
+    const environment = linuxBrowserEnvironment(root, runtimeRoot)
+    assert.equal(environment.HOME, path.join(root, 'browser-home'))
+    assert.equal(environment.XDG_CONFIG_HOME, path.join(root, 'browser-config'))
+    assert.equal(environment.XDG_DATA_HOME, path.join(root, 'browser-data'))
+    assert.equal(environment.XDG_CACHE_HOME, path.join(root, 'browser-cache'))
+    assert.equal(environment.XDG_RUNTIME_DIR, path.join(runtimeRoot, 'browser-runtime'))
+    assert.equal(linuxBrowserEnvironment(root).XDG_RUNTIME_DIR, path.join(root, 'browser-runtime'))
+    if (process.platform !== 'win32') {
+      for (const directory of Object.values(environment)) {
+        assert.equal((await stat(directory)).mode & 0o777, 0o700, `${directory} is not private`)
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+    await rm(runtimeRoot, { recursive: true, force: true })
+  }
+})
+
+test('a signal-terminated app is not counted as alive', async () => {
+  assert.equal(appProcessAlive({ exitCode: null, signalCode: 'SIGABRT' }), false)
+  assert.equal(appProcessAlive({ exitCode: null, signalCode: null }), true)
+  assert.equal(appProcessAlive({ exitCode: 0, signalCode: null }), false)
+  assert.equal(appProcessAlive(null), false)
+  if (process.platform === 'win32') return
+  const terminated = spawn(process.execPath, ['-e', 'setTimeout(() => process.kill(process.pid, "SIGTERM"), 50)'], { stdio: 'ignore' })
+  const terminatedExit = new Promise((resolve) => terminated.once('exit', resolve))
+  await terminatedExit
+  assert.equal(terminated.exitCode, null)
+  assert.equal(terminated.signalCode, 'SIGTERM')
+  assert.equal(appProcessAlive(terminated), false)
+  const running = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: 'ignore' })
+  const runningExit = new Promise((resolve) => running.once('exit', resolve))
+  try {
+    assert.equal(appProcessAlive(running), true)
+  } finally {
+    running.kill('SIGKILL')
+    await runningExit
+  }
+  assert.equal(appProcessAlive(running), false)
+})
+
 test('the release lane gates every shipped format before freezing evidence', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
   assert.equal((workflow.match(/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'the lane does not gate each shipped format')
@@ -331,6 +422,44 @@ test('Linux CI exercises the shipped rpm and AppImage gates before tagging', asy
     assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
   }
   assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
+})
+
+test('Linux package validation uses the pinned release build image', async () => {
+  const ci = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const release = await readFile(path.join(repository, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  const image = workflowJob(release, 'build-and-test').match(/^ {4}runs-on: (\S+)/m)?.[1]
+  assert.match(image ?? '', /^ubuntu-\d{2}\.\d{2}$/)
+  for (const name of ['linux-bundles', 'linux-installed']) {
+    const job = workflowJob(ci, name)
+    assert.equal(job.match(/^ {4}runs-on: (\S+)/m)?.[1], image, `${name} must validate the release build image`)
+    assert.equal(job.match(/^ {10}key: (\S+)/m)?.[1], `${name}-${image}`, `${name} must separate build caches by release image`)
+  }
+})
+
+test('Linux bundle builders upgrade the existing PCRE2 runtime from vendor updates', async () => {
+  for (const [filename, name] of [['ci.yml', 'linux-bundles'], ['release-linux-early-access.yml', 'build-and-test']]) {
+    const workflow = await readFile(path.join(repository, '.github', 'workflows', filename), 'utf8')
+    const steps = workflowRunSteps(workflowJob(workflow, name))
+    const upgrade = steps.findIndex((script) => /^sudo apt-get install --only-upgrade[^\r\n]*\blibpcre2-8-0\b/m.test(script))
+    const build = steps.findIndex((script) => /^(?:npm run tauri -- build|npx tauri build) --bundles\b/m.test(script))
+    assert.ok(upgrade >= 0, `${filename} must run the vendor's PCRE2 upgrade command`)
+    assert.ok(build >= 0, `${filename} must run the bundle build command`)
+    assert.ok(upgrade < build, `${filename} must upgrade PCRE2 before building the bundle`)
+  }
+})
+
+test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', async () => {
+  const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
+  for (const [format, log] of [['rpm', 'linux-rpm-launch.log'], ['appimage', 'linux-appimage-launch.log']]) {
+    const directory = `linux-${format}-shipped-evidence`
+    const step = job.split('\n      - name:').find((entry) => entry.includes(`--format ${format}`))
+    assert.ok(step, `the Linux CI job does not run the ${format} gate`)
+    assert.match(step, /if ! xvfb-run -a node tools\/linux-shipped-package-gate\.mjs[\s\S]*; then/, `the ${format} evidence must be printed only when the gate fails`)
+    assert.match(step, new RegExp(`cat ${directory}/${log.replaceAll('.', '\\.')} 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} launch log when its gate fails`)
+    assert.match(step, new RegExp(`cat ${directory}/\\*\\.json 2>/dev/null \\|\\| true`), `the Linux CI job does not print the ${format} record when its gate fails`)
+    assert.match(step, /\n {12}exit 1\n {10}fi/, `the ${format} failure reporting must preserve a failing exit status`)
+  }
 })
 
 test('the bundling tools are verified before the bundler can download its own', async () => {

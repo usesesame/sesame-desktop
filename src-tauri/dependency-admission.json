@@ -203,8 +203,13 @@
     },
     {
       "name": "sha3",
-      "version": "0.11",
-      "reason": "SHA3-256 for the X-Wing key combiner and SHAKE256 for its seed expansion. It is already locked through ml-kem, so naming it directly adds no crate or version, and it is used at the exact version 0.11.0."
+      "version": "0.12",
+      "reason": "SHA3-256 for the X-Wing key combiner. Version 0.12.0 removes the SHAKE APIs, so SHAKE256 seed expansion now uses the shake crate."
+    },
+    {
+      "name": "shake",
+      "version": "0.1",
+      "reason": "SHAKE256 seed expansion for X-Wing. It is already locked through ml-kem at 0.1.0, so naming it directly adds no crate or version."
     },
     {
       "name": "svelte",
@@ -220,7 +225,7 @@
     },
     {
       "name": "svelte-eslint-parser",
-      "version": "1.9",
+      "version": "1.10",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -282,7 +287,7 @@
     },
     {
       "name": "typescript-eslint",
-      "version": "8.71",
+      "version": "8.72",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },

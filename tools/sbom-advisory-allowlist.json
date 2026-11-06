@@ -715,55 +715,6 @@
       "expires": "2027-01-18"
     },
     {
-      "id": "UBUNTU-CVE-2026-103111",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-86145",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-89156",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-89157",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-89158",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-89160",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-89161",
-      "package": "pcre2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
       "id": "UBUNTU-CVE-2023-37769",
       "package": "pixman",
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
