@@ -18,6 +18,21 @@ function workflowJob(workflow, name) {
   return job
 }
 
+function workflowRunSteps(job) {
+  return job.split(/\r?\n {6}- /).slice(1).map((step) => {
+    const lines = step.split(/\r?\n/)
+    const start = lines.findIndex((line) => /^(?: {8})?run:/.test(line))
+    if (start === -1) return ''
+    const first = lines[start].trim().slice('run:'.length).trim()
+    const body = ['|', '|-', '>', '>-'].includes(first) ? [] : [first]
+    for (const line of lines.slice(start + 1)) {
+      if (line.trim() && !/^ {10}/.test(line)) break
+      body.push(line.trimStart())
+    }
+    return body.filter((line) => !line.startsWith('#')).join('\n').replace(/\\\r?\n/g, ' ')
+  })
+}
+
 const bundlerFetchedToolNames = [
   'AppRun-x86_64',
   'linuxdeploy-07333c6-x86_64.AppImage',
@@ -415,15 +430,21 @@ test('Linux package validation uses the pinned release build image', async () =>
   const image = workflowJob(release, 'build-and-test').match(/^ {4}runs-on: (\S+)/m)?.[1]
   assert.match(image ?? '', /^ubuntu-\d{2}\.\d{2}$/)
   for (const name of ['linux-bundles', 'linux-installed']) {
-    assert.equal(workflowJob(ci, name).match(/^ {4}runs-on: (\S+)/m)?.[1], image, `${name} must validate the release build image`)
+    const job = workflowJob(ci, name)
+    assert.equal(job.match(/^ {4}runs-on: (\S+)/m)?.[1], image, `${name} must validate the release build image`)
+    assert.equal(job.match(/^ {10}key: (\S+)/m)?.[1], `${name}-${image}`, `${name} must separate build caches by release image`)
   }
 })
 
 test('Linux bundle builders upgrade the existing PCRE2 runtime from vendor updates', async () => {
   for (const [filename, name] of [['ci.yml', 'linux-bundles'], ['release-linux-early-access.yml', 'build-and-test']]) {
     const workflow = await readFile(path.join(repository, '.github', 'workflows', filename), 'utf8')
-    const upgrade = workflowJob(workflow, name).match(/sudo apt-get install --only-upgrade[^\r\n]*(?:\r?\n {12}[^\r\n]*)*/)?.[0]
-    assert.match(upgrade ?? '', /\blibpcre2-8-0\b/, `${filename} must pick up the vendor's PCRE2 security update before bundling`)
+    const steps = workflowRunSteps(workflowJob(workflow, name))
+    const upgrade = steps.findIndex((script) => /^sudo apt-get install --only-upgrade[^\r\n]*\blibpcre2-8-0\b/m.test(script))
+    const build = steps.findIndex((script) => /^(?:npm run tauri -- build|npx tauri build) --bundles\b/m.test(script))
+    assert.ok(upgrade >= 0, `${filename} must run the vendor's PCRE2 upgrade command`)
+    assert.ok(build >= 0, `${filename} must run the bundle build command`)
+    assert.ok(upgrade < build, `${filename} must upgrade PCRE2 before building the bundle`)
   }
 })
 
