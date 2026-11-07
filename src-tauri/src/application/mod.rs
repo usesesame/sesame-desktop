@@ -8,6 +8,7 @@ use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
+pub(crate) mod browser_fill;
 pub(crate) mod file_choices;
 pub(crate) mod lifecycle;
 pub(crate) mod quick_access;
@@ -21,6 +22,9 @@ pub(crate) mod sync_recovery;
 
 #[cfg(test)]
 mod backups_tests;
+
+#[cfg(test)]
+mod browser_fill_tests;
 
 #[cfg(test)]
 mod quick_access_tests;
@@ -53,4 +57,11 @@ pub(crate) trait DesktopEffects {
     fn discard_pin_throttle_state(&self, state: &VaultState);
     fn cancel_pending_approvals(&self);
     fn report_backup_io_error(&self);
+    fn record_browser_host_registration(&self, code: &'static str);
+    fn emit_browser_approval_cancelled(
+        &self,
+        kind: browser_fill::ApprovalKind,
+        approval_id: &str,
+        reason: &'static str,
+    );
 }

@@ -1560,3 +1560,41 @@ test('the sync commands hand their policy to the application module', () => {
   assert.match(application, /fn disable_needs_leave\(/, 'the disable decision is missing from the application module')
   assert.match(application, /fn refuse_self_removal\(/, 'the self-removal rule is missing from the application module')
 })
+
+test('the browser approval commands hand their decisions to the application module', () => {
+  const commands = read('src-tauri', 'src', 'commands', 'support.rs')
+  const application = withoutComments(read('src-tauri', 'src', 'application', 'browser_fill.rs').split('#[cfg(test)]')[0])
+
+  const routes = [
+    ['resolve_browser_fill', /resolve_browser_fill_in_state\(/],
+    ['resolve_browser_save', /resolve_browser_save_in_state\(/],
+    ['resolve_browser_identity_fill', /resolve_browser_identity_fill_in_state\(/],
+    ['resolve_browser_card_fill', /resolve_browser_card_fill_in_state\(/],
+    ['resolve_browser_totp_fill', /resolve_browser_totp_fill_in_state\(/],
+  ]
+  for (const [name, call] of routes) {
+    assert.match(braceBody(commands, commands.indexOf(`fn ${name}(`)), call, `${name} does not call its application rule`)
+    assert.match(application, new RegExp(`fn ${name}_in_state\\(`), `${name}_in_state is missing from the application module`)
+  }
+  for (const name of ['resolve', 'resolve_save', 'resolve_identity', 'resolve_card', 'resolve_totp']) {
+    assert.doesNotMatch(commands, new RegExp(`browser_fill::${name}\\(`), `${name} still runs in the command layer`)
+  }
+
+  const save = braceBody(application, application.indexOf('fn resolve_browser_save_in_state('))
+  assert.match(save, /if !approved \{[\s\S]*resolve_save\(state, effects, approval_id, false\)\?;[\s\S]*return Ok\(None\);/, 'a denied save no longer resolves the broker before returning')
+  assert.match(save, /ensure_save_approval_ready\(state, approval_id\)\?;/, 'a save is committed before the approval is ready')
+  assert.match(save, /save_payload\(state, approval_id\)[\s\S]*ok_or\(APPROVAL_EXPIRED\)\?/, 'a save runs without the bound payload')
+  for (const name of ['save_new_login', 'save_login_update']) {
+    assert.match(application, new RegExp(`fn ${name}\\(`), `${name} is missing from the application module`)
+  }
+
+  const update = braceBody(application, application.indexOf('fn save_login_update('))
+  assert.match(update, /payload[\s\S]*\.candidates[\s\S]*\.any\(\|candidate\| candidate\.id == \*id\)/, 'an update can target a login outside the broker candidates')
+  assert.match(update, /if !verify_update_target\(&current\.entries, &payload\.origin, &target_id\)/, 'an update no longer re-verifies the saved origin under the lock')
+  assert.match(application, /fn verify_update_target\(/, 'the update origin check is missing from the application module')
+
+  assert.match(application, /fn card_supports_fields\(/, 'the card field rule is missing from the application module')
+  const card = braceBody(application, application.indexOf('fn selected_card_fields('))
+  assert.match(card, /for key in requested/, 'a card fill no longer releases only the requested fields')
+  assert.match(application, /state\.decide\(approval_id, decision\)/, 'the approval decision is no longer consumed through the broker')
+})

@@ -11,19 +11,25 @@ use std::{
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use url::{Host, Url};
+use url::Host;
 use zeroize::Zeroize;
 
 use crate::{
     browser_pipe::PipePeer,
     browser_protocol::{
         fill_carries_match_kind, parse_card_fields, parse_identity_fields, BrowserRequest,
-        BrowserResponse, CardFillFields, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION,
+        BrowserResponse, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION,
         MAX_CREDENTIAL_FIELD_BYTES, MAX_NATIVE_MESSAGE_BYTES,
     },
     diagnostics,
     vault::snapshot::{current_totp, totp_from_value},
-    vault::{random_id, Card, Identity, TaggedItem, VaultEntry, VaultState},
+    vault::{random_id, Identity, TaggedItem, VaultEntry, VaultState},
+};
+
+pub(crate) use crate::application::browser_fill::{
+    bounded_display, card_candidate, card_supports_fields, origin_match_kind, selected_card_fields,
+    ApprovalDecision, ApprovalKind, BrowserFillCandidate, CardFillCandidate, NormalizedOrigin,
+    OriginMatchKind, SaveKind, SavePayload, APPROVAL_TOO_SOON,
 };
 
 use crate::browser_host::HOST_FILE_NAME;
@@ -33,131 +39,6 @@ const APPROVAL_POLL: Duration = Duration::from_millis(200);
 const ACTIVATE_MIN_INTERVAL: Duration = Duration::from_secs(5);
 const REPLAY_CACHE_SIZE: usize = 128;
 const MAX_MATCHING_CANDIDATES: usize = 32;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NormalizedOrigin {
-    scheme: &'static str,
-    hostname: String,
-    port: u16,
-}
-
-impl NormalizedOrigin {
-    fn from_request(value: &str) -> Option<Self> {
-        let url = Url::parse(value).ok()?;
-        if url.path() != "/"
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || !url.username().is_empty()
-            || url.password().is_some()
-        {
-            return None;
-        }
-        Self::from_url(&url)
-    }
-
-    fn from_saved_url(value: &str) -> Option<Self> {
-        let url = Url::parse(value.trim()).ok()?;
-        if !url.username().is_empty() || url.password().is_some() {
-            return None;
-        }
-        Self::from_url(&url)
-    }
-
-    fn from_url(url: &Url) -> Option<Self> {
-        let host = url.host()?;
-        let local_development_host = matches!(
-            &host,
-            Host::Domain(domain) if domain.eq_ignore_ascii_case("localhost")
-        ) || matches!(&host, Host::Ipv4(address) if address.octets() == [127, 0, 0, 1])
-            || matches!(&host, Host::Ipv6(address) if address.is_loopback());
-        let scheme = match url.scheme() {
-            "https" => "https",
-            "http" if local_development_host => "http",
-            _ => return None,
-        };
-        let hostname = match host {
-            // A trailing-dot host is a distinct origin; reject it rather than silently matching.
-            Host::Domain(domain) if domain.ends_with('.') => return None,
-            Host::Domain(domain) => domain.to_ascii_lowercase(),
-            Host::Ipv4(address) => address.to_string(),
-            Host::Ipv6(address) => address.to_string(),
-        };
-        if hostname.is_empty() || hostname.len() > 253 || hostname.chars().any(char::is_control) {
-            return None;
-        }
-        Some(Self {
-            scheme,
-            hostname,
-            port: url.port_or_known_default()?,
-        })
-    }
-
-    fn canonical(&self) -> String {
-        let hostname = if self.hostname.contains(':') {
-            format!("[{}]", self.hostname)
-        } else {
-            self.hostname.clone()
-        };
-        if (self.scheme == "https" && self.port == 443)
-            || (self.scheme == "http" && self.port == 80)
-        {
-            format!("{}://{}", self.scheme, hostname)
-        } else {
-            format!("{}://{}:{}", self.scheme, hostname, self.port)
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OriginMatchKind {
-    Exact,
-    WwwAlias,
-}
-
-impl OriginMatchKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Exact => "exact",
-            Self::WwwAlias => "wwwAlias",
-        }
-    }
-}
-
-fn origin_match_kind(
-    saved: &NormalizedOrigin,
-    requested: &NormalizedOrigin,
-) -> Option<OriginMatchKind> {
-    if saved == requested {
-        return Some(OriginMatchKind::Exact);
-    }
-    if saved.scheme != requested.scheme || saved.port != requested.port {
-        return None;
-    }
-
-    let saved_without_www = saved.hostname.strip_prefix("www.");
-    let requested_without_www = requested.hostname.strip_prefix("www.");
-    let base = match (saved_without_www, requested_without_www) {
-        (Some(saved_base), None) if saved_base == requested.hostname => saved_base,
-        (None, Some(requested_base)) if saved.hostname == requested_base => requested_base,
-        _ => return None,
-    };
-    // Do not apply this convenience rule to localhost or single-label hosts.
-    base.contains('.').then_some(OriginMatchKind::WwwAlias)
-}
-
-#[derive(Clone, Serialize, ts_rs::TS)]
-#[ts(export, optional_fields)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserFillCandidate {
-    pub(crate) id: String,
-    pub(crate) title: String,
-    pub(crate) username: String,
-    /// Never crosses the pipe to the extension; only the desktop's own approval modal.
-    email: String,
-    saved_origin: String,
-    #[ts(type = "'exact' | 'wwwAlias'")]
-    match_kind: &'static str,
-}
 
 #[cfg(test)]
 pub(crate) fn test_update_candidate(id: &str, saved_origin: &str) -> BrowserFillCandidate {
@@ -187,30 +68,6 @@ pub struct BrowserFillRequestEvent {
 struct BrowserApprovalCancelledEvent {
     approval_id: String,
     reason: &'static str,
-}
-
-/// `new` versus `update`, decided by the extension from the page's own form structure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SaveKind {
-    New,
-    Update,
-}
-
-impl SaveKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::New => "new",
-            Self::Update => "update",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "new" => Some(Self::New),
-            "update" => Some(Self::Update),
-            _ => None,
-        }
-    }
 }
 
 /// Display-safe save prompt: the captured password never appears, and `candidates` are exact-origin targets for `update` only.
@@ -246,15 +103,6 @@ pub struct BrowserIdentityRequestEvent {
     candidates: Vec<IdentityFillCandidate>,
     expires_in_seconds: u64,
     expires_at_unix_ms: u64,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CardFillCandidate {
-    id: String,
-    title: String,
-    brand: String,
-    last_four: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -324,133 +172,8 @@ pub fn start(app: AppHandle) -> io::Result<()> {
     Ok(())
 }
 
-/// Releases the approval after the vault commit succeeds or is declined.
-pub fn resolve_save(
-    app: &AppHandle,
-    state: &BrowserFillState,
-    approval_id: &str,
-    approved: bool,
-) -> Result<(), String> {
-    if approval_id.is_empty() || approval_id.len() > 64 {
-        return Err("That browser approval is no longer available.".into());
-    }
-    let decision = if approved {
-        ApprovalDecision::Saved
-    } else {
-        ApprovalDecision::Denied
-    };
-    match state.decide(approval_id, decision) {
-        Ok(()) => {
-            diagnostics::record_browser_host_registration(
-                app,
-                if approved {
-                    "save_approved"
-                } else {
-                    "save_denied"
-                },
-            );
-            if !approved {
-                emit_approval_cancelled(app, ApprovalKind::Save, approval_id, "denied");
-            }
-            Ok(())
-        }
-        Err(error) => Err(rejected_decision(
-            app,
-            ApprovalKind::Save,
-            approval_id,
-            error,
-        )),
-    }
-}
-
-/// The approval stays registered; the caller must finish with `resolve_save` either way.
-pub fn save_payload(state: &BrowserFillState, approval_id: &str) -> Option<SavePayload> {
-    state.save_payload_if_bound(approval_id)
-}
-
-/// Re-verifies at commit time that the target is still a saved login at this exact origin (or its www. alias).
-pub fn verify_update_target(
-    entries: &[VaultEntry],
-    origin_canonical: &str,
-    target_id: &str,
-) -> bool {
-    let Some(origin) = NormalizedOrigin::from_request(origin_canonical) else {
-        return false;
-    };
-    entries.iter().any(|entry| {
-        entry.id == target_id
-            && NormalizedOrigin::from_saved_url(&entry.url)
-                .as_ref()
-                .and_then(|saved| origin_match_kind(saved, &origin))
-                .is_some()
-    })
-}
-
 pub fn pending_save(state: State<'_, BrowserFillState>) -> Option<BrowserSaveRequestEvent> {
     state.pending_save_request()
-}
-
-pub fn resolve(
-    app: &AppHandle,
-    state: State<'_, BrowserFillState>,
-    approval_id: String,
-    login_id: Option<String>,
-) -> Result<(), String> {
-    if approval_id.is_empty() || approval_id.len() > 64 {
-        return Err("That browser approval is no longer available.".into());
-    }
-    let denied = login_id.is_none();
-    let decision = login_id
-        .map(ApprovalDecision::Selected)
-        .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision) {
-        Ok(()) => {
-            diagnostics::record_browser_host_registration(
-                app,
-                if denied {
-                    "fill_denied"
-                } else {
-                    "fill_approved"
-                },
-            );
-            if denied {
-                emit_approval_cancelled(app, ApprovalKind::Fill, &approval_id, "denied");
-            }
-            Ok(())
-        }
-        Err(error) => Err(rejected_decision(
-            app,
-            ApprovalKind::Fill,
-            &approval_id,
-            error,
-        )),
-    }
-}
-
-fn rejected_decision(
-    app: &AppHandle,
-    kind: ApprovalKind,
-    approval_id: &str,
-    error: &str,
-) -> String {
-    if error == APPROVAL_TOO_SOON {
-        return APPROVAL_TOO_SOON_MESSAGE.to_string();
-    }
-    emit_approval_cancelled(app, kind, approval_id, "expired");
-    "That browser approval expired or is no longer available.".to_string()
-}
-
-pub fn ensure_save_approval_ready(
-    state: &BrowserFillState,
-    approval_id: &str,
-) -> Result<(), String> {
-    state.require_ready(approval_id).map_err(|error| {
-        if error == APPROVAL_TOO_SOON {
-            APPROVAL_TOO_SOON_MESSAGE.to_string()
-        } else {
-            "That browser approval expired or is no longer available.".to_string()
-        }
-    })
 }
 
 pub fn pending(state: State<'_, BrowserFillState>) -> Option<BrowserFillRequestEvent> {
@@ -467,118 +190,6 @@ pub fn pending_card(state: State<'_, BrowserFillState>) -> Option<BrowserCardReq
 
 pub fn pending_totp(state: State<'_, BrowserFillState>) -> Option<BrowserTotpRequestEvent> {
     state.pending_totp_request()
-}
-
-pub fn resolve_identity(
-    app: &AppHandle,
-    state: State<'_, BrowserFillState>,
-    approval_id: String,
-    identity_id: Option<String>,
-) -> Result<(), String> {
-    if approval_id.is_empty() || approval_id.len() > 64 {
-        return Err("That browser approval is no longer available.".into());
-    }
-    let denied = identity_id.is_none();
-    let decision = identity_id
-        .map(ApprovalDecision::Selected)
-        .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision) {
-        Ok(()) => {
-            diagnostics::record_browser_host_registration(
-                app,
-                if denied {
-                    "identity_denied"
-                } else {
-                    "identity_approved"
-                },
-            );
-            if denied {
-                emit_approval_cancelled(app, ApprovalKind::Identity, &approval_id, "denied");
-            }
-            Ok(())
-        }
-        Err(error) => Err(rejected_decision(
-            app,
-            ApprovalKind::Identity,
-            &approval_id,
-            error,
-        )),
-    }
-}
-
-pub fn resolve_card(
-    app: &AppHandle,
-    state: State<'_, BrowserFillState>,
-    approval_id: String,
-    card_id: Option<String>,
-) -> Result<(), String> {
-    if approval_id.is_empty() || approval_id.len() > 64 {
-        return Err("That browser approval is no longer available.".into());
-    }
-    let denied = card_id.is_none();
-    let decision = card_id
-        .map(ApprovalDecision::Selected)
-        .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision) {
-        Ok(()) => {
-            diagnostics::record_browser_host_registration(
-                app,
-                if denied {
-                    "card_denied"
-                } else {
-                    "card_approved"
-                },
-            );
-            if denied {
-                emit_approval_cancelled(app, ApprovalKind::Card, &approval_id, "denied");
-            }
-            Ok(())
-        }
-        Err(error) => Err(rejected_decision(
-            app,
-            ApprovalKind::Card,
-            &approval_id,
-            error,
-        )),
-    }
-}
-
-/// Every TOTP release needs its own approval; no grant is ever recorded.
-pub fn resolve_totp(
-    app: &AppHandle,
-    state: State<'_, BrowserFillState>,
-    approval_id: String,
-    login_id: Option<String>,
-) -> Result<(), String> {
-    if approval_id.is_empty() || approval_id.len() > 64 {
-        return Err("That browser approval is no longer available.".into());
-    }
-    let denied = login_id.is_none();
-    let decision = login_id
-        .map(ApprovalDecision::Selected)
-        .unwrap_or(ApprovalDecision::Denied);
-    match state.decide(&approval_id, decision) {
-        Ok(()) => {
-            diagnostics::record_browser_host_registration(
-                app,
-                if denied {
-                    "totp_denied"
-                } else {
-                    "totp_approved"
-                },
-            );
-            if denied {
-                emit_approval_cancelled(app, ApprovalKind::Totp, &approval_id, "denied");
-            }
-            Ok(())
-        }
-        Err(error) => Err(rejected_decision(
-            app,
-            ApprovalKind::Totp,
-            &approval_id,
-            error,
-        )),
-    }
 }
 
 fn handle_pipe_payload(
@@ -1055,63 +666,6 @@ fn card_response(app: &AppHandle, request: &BrowserRequest, peer: &PipePeer) -> 
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     }
     BrowserResponse::card_for(request, selected_card_fields(card, &requested_fields))
-}
-
-fn card_candidate(card: &Card) -> CardFillCandidate {
-    let digits = card
-        .number
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect::<String>();
-    let last_four = digits
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    CardFillCandidate {
-        id: card.id.clone(),
-        title: bounded_display(&card.title, 128),
-        brand: bounded_display(&card.brand, 64),
-        last_four,
-    }
-}
-
-fn card_supports_fields(card: &Card, requested: &[String]) -> bool {
-    requested.iter().all(|field| match field.as_str() {
-        "cardholderName" => {
-            !card.cardholder_name.is_empty()
-                && card.cardholder_name.len() <= MAX_CREDENTIAL_FIELD_BYTES
-        }
-        "number" => !card.number.is_empty() && card.number.len() <= MAX_CREDENTIAL_FIELD_BYTES,
-        "expiryMonth" => {
-            !card.expiry_month.is_empty() && card.expiry_month.len() <= MAX_CREDENTIAL_FIELD_BYTES
-        }
-        "expiryYear" => {
-            !card.expiry_year.is_empty() && card.expiry_year.len() <= MAX_CREDENTIAL_FIELD_BYTES
-        }
-        "securityCode" => {
-            !card.security_code.is_empty() && card.security_code.len() <= MAX_CREDENTIAL_FIELD_BYTES
-        }
-        _ => false,
-    })
-}
-
-fn selected_card_fields(card: &Card, requested: &[String]) -> CardFillFields {
-    let mut fields = CardFillFields::default();
-    for key in requested {
-        match key.as_str() {
-            "cardholderName" => fields.cardholder_name = Some(card.cardholder_name.clone()),
-            "number" => fields.number = Some(card.number.clone()),
-            "expiryMonth" => fields.expiry_month = Some(card.expiry_month.clone()),
-            "expiryYear" => fields.expiry_year = Some(card.expiry_year.clone()),
-            "securityCode" => fields.security_code = Some(card.security_code.clone()),
-            _ => {}
-        }
-    }
-    fields
 }
 
 include!("browser_fill_identity_approval.rs");

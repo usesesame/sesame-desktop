@@ -11,6 +11,7 @@ use crate::vault::{
     random_id, Card, TaggedItem, UnlockedVault, VaultResult, VaultSnapshot, VaultState, WifiNetwork,
 };
 
+use super::browser_fill::ApprovalKind;
 use super::lifecycle::{lock_and_notify, unlock_vault_in_state};
 use super::records::{
     login_card_in_state, login_summary_in_state, record_view_in_state, redacted_view,
@@ -60,6 +61,12 @@ pub(super) enum Effect {
     DiscardPinThrottle,
     CancelPendingApprovals,
     ReportBackupIoError,
+    RecordBrowserHostRegistration(String),
+    EmitBrowserApprovalCancelled {
+        kind: ApprovalKind,
+        approval_id: String,
+        reason: &'static str,
+    },
 }
 
 pub(super) struct FakeEffects<'a> {
@@ -211,6 +218,23 @@ impl DesktopEffects for FakeEffects<'_> {
 
     fn report_backup_io_error(&self) {
         self.record(Effect::ReportBackupIoError);
+    }
+
+    fn record_browser_host_registration(&self, code: &'static str) {
+        self.record(Effect::RecordBrowserHostRegistration(code.to_string()));
+    }
+
+    fn emit_browser_approval_cancelled(
+        &self,
+        kind: ApprovalKind,
+        approval_id: &str,
+        reason: &'static str,
+    ) {
+        self.record(Effect::EmitBrowserApprovalCancelled {
+            kind,
+            approval_id: approval_id.to_string(),
+            reason,
+        });
     }
 }
 
