@@ -35,6 +35,7 @@ pub(crate) struct BrowserApproval {
     pub(crate) epoch: u64,
     pub(crate) kind: ApprovalKind,
     pub(crate) event: ApprovalEvent,
+    pub(crate) requested_fields: Vec<String>,
 }
 
 pub(crate) struct BrowserApprovalOffer {
@@ -172,6 +173,7 @@ pub(crate) fn fill_response_in_state(
             epoch,
             kind: ApprovalKind::Fill,
             event: ApprovalEvent::Fill(event),
+            requested_fields: Vec::new(),
         },
         deadline,
         receiver,
@@ -395,6 +397,7 @@ pub(crate) fn save_response_in_state(
             epoch,
             kind: ApprovalKind::Save,
             event: ApprovalEvent::Save(event),
+            requested_fields: Vec::new(),
         },
         deadline,
         receiver,
@@ -509,6 +512,7 @@ pub(crate) fn card_response_in_state(
             epoch,
             kind: ApprovalKind::Card,
             event: ApprovalEvent::Card(event),
+            requested_fields,
         },
         deadline,
         receiver,
@@ -524,9 +528,7 @@ pub(crate) fn complete_card_in_state(
     decision: ApprovalDecision,
     peer_connected: bool,
 ) -> BrowserResponse {
-    let Some(requested_fields) = request.fields.as_deref().and_then(parse_card_fields) else {
-        return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
-    };
+    let requested_fields = &approval.requested_fields;
     let card_id = match decision {
         ApprovalDecision::Selected(card_id) => card_id,
         ApprovalDecision::Denied => {
@@ -582,7 +584,7 @@ pub(crate) fn complete_card_in_state(
         );
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     };
-    if !card_supports_fields(card, &requested_fields) {
+    if !card_supports_fields(card, requested_fields) {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -590,7 +592,7 @@ pub(crate) fn complete_card_in_state(
         );
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     }
-    BrowserResponse::card_for(request, selected_card_fields(card, &requested_fields))
+    BrowserResponse::card_for(request, selected_card_fields(card, requested_fields))
 }
 
 pub(crate) fn identity_response_in_state(
@@ -692,6 +694,7 @@ pub(crate) fn identity_response_in_state(
             epoch,
             kind: ApprovalKind::Identity,
             event: ApprovalEvent::Identity(event),
+            requested_fields,
         },
         deadline,
         receiver,
@@ -707,9 +710,7 @@ pub(crate) fn complete_identity_in_state(
     decision: ApprovalDecision,
     peer_connected: bool,
 ) -> BrowserResponse {
-    let Some(requested_fields) = request.fields.as_deref().and_then(parse_identity_fields) else {
-        return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
-    };
+    let requested_fields = &approval.requested_fields;
     let identity_id = match decision {
         ApprovalDecision::Selected(identity_id) => identity_id,
         ApprovalDecision::Denied => {
@@ -772,7 +773,7 @@ pub(crate) fn complete_identity_in_state(
     };
     BrowserResponse::identity_for(
         request,
-        selected_identity_fields(identity, &requested_fields),
+        selected_identity_fields(identity, requested_fields),
     )
 }
 
@@ -886,6 +887,7 @@ pub(crate) fn totp_response_in_state(
             epoch,
             kind: ApprovalKind::Totp,
             event: ApprovalEvent::Totp(event),
+            requested_fields: Vec::new(),
         },
         deadline,
         receiver,
