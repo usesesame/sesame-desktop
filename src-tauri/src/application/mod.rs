@@ -12,6 +12,7 @@ pub(crate) mod backups;
 pub(crate) mod breach_scan;
 pub(crate) mod browser_fill;
 pub(crate) mod browser_fill_broker;
+pub(crate) mod browser_replies;
 pub(crate) mod file_choices;
 pub(crate) mod history;
 pub(crate) mod imports;
@@ -38,6 +39,9 @@ pub(crate) mod broker_tests;
 
 #[cfg(test)]
 mod browser_fill_tests;
+
+#[cfg(test)]
+mod browser_replies_tests;
 
 #[cfg(test)]
 mod imports_tests;
