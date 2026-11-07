@@ -1018,6 +1018,7 @@ test('the vault key page fallback is reported once per installed key', () => {
   const applicationUnlock = read('src-tauri', 'src', 'application', 'unlock.rs')
   const effects = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs')
   const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
+  const applicationSyncAdopt = read('src-tauri', 'src', 'application', 'sync_adopt.rs')
   const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
 
   assert.match(vault, /pub fn report_key_page_fallback\(app: &tauri::AppHandle, unlocked: &UnlockedVault\)/)
@@ -1056,12 +1057,17 @@ test('the vault key page fallback is reported once per installed key', () => {
     /crate::vault::report_key_page_fallback\(/,
     'the desktop effect no longer reports the key page fallback',
   )
-  const adopt = syncAdopt.indexOf('fn finish_adoption(')
-  assert.ok(adopt >= 0, 'finish_adoption is missing from sync_adopt.rs')
+  const adopt = applicationSyncAdopt.indexOf('fn finish_adoption_in_state(')
+  assert.ok(adopt >= 0, 'finish_adoption_in_state is missing from the application sync_adopt')
   assert.match(
-    braceBody(syncAdopt, adopt),
+    braceBody(applicationSyncAdopt, adopt),
     /report_key_page_fallback\(/,
-    'finish_adoption does not report a key page fallback',
+    'finish_adoption_in_state does not report a key page fallback',
+  )
+  assert.match(
+    braceBody(syncAdopt, syncAdopt.indexOf('fn finish_adoption(')),
+    /finish_adoption_in_state\(/,
+    'the finish_adoption command does not run the application rule',
   )
 
   const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
@@ -1533,7 +1539,7 @@ test('vault key material is drawn from the system random source', () => {
     ['src-tauri/sesame-core/src/platform/linux.rs', 'create_linux_device_key'],
     ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
     ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
-    ['src-tauri/src/commands/sync_transfer.rs', 'rekey_without'],
+    ['src-tauri/src/application/sync_transfer.rs', 'rekey_without_in_state'],
     ['src-tauri/src/application/sync.rs', 'prepare_recovery'],
     ['src-tauri/src/application/sync.rs', 'prepare_key_change_in_state'],
   ]
@@ -1562,16 +1568,25 @@ test('the sync commands hand their policy to the application module', () => {
   const recovery = read('src-tauri', 'src', 'application', 'sync_recovery.rs')
   const recoveryCommands = read('src-tauri', 'src', 'commands', 'sync_transfer_recovery.rs')
   const applicationPairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
+  const applicationTransfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
 
   const routes = [
     [sync, 'sync_status', /sync_status_in_state\(/],
     [sync, 'sync_local_status', /local_status_in_state\(/],
     [sync, 'sync_create_vault', /create_vault_in_state\(/],
     [sync, 'sync_reset_vault', /reset_vault_in_state\(/],
+    [sync, 'sync_disable', /leave_vault\(/],
+    [transfer, 'sync_upload_vault', /upload_vault\(/],
+    [transfer, 'sync_download_vault', /download_vault\(/],
+    [transfer, 'sync_take_new_key', /take_new_key_in_state\(/],
+    [transfer, 'sync_conflict_details', /sync_conflict_details_in_state\(/],
+    [transfer, 'sync_resolve_conflict', /resolve_conflict_in_state\(/],
     [transfer, 'sync_prepare_key_change', /prepare_key_change_in_state\(/],
     [transfer, 'sync_upgrade_device_key', /upgrade_device_key_in_state\(/],
-    [transfer, 'sync_coordinator_status', /coordinator_view\(/],
     [transfer, 'sync_remove_device', /refuse_self_removal\(/],
+    [transfer, 'sync_rotate_vault_key', /rekey_without_in_state\(/],
+    [transfer, 'sync_coordinator_status', /coordinator_view\(/],
+    [transfer, 'sync_now', /run_one_transfer\(/],
     [pairing, 'sync_pairing_code', /pairing_code\(/],
     [pairing, 'sync_cancel_pairing', /cancel_pairing\(/],
     [pairing, 'sync_join_with_code', /verify_master_password_now_in_state\(/],
@@ -1588,6 +1603,30 @@ test('the sync commands hand their policy to the application module', () => {
   assert.match(application, /fn prepare_key_change_in_state\(/, 'the key change rule is missing from the application module')
   assert.match(application, /fn disable_needs_leave\(/, 'the disable decision is missing from the application module')
   assert.match(application, /fn refuse_self_removal\(/, 'the self-removal rule is missing from the application module')
+  for (const [name, call] of [
+    ['upload_vault', /upload_vault_in_state\(/],
+    ['download_vault', /download_vault_in_state\(/],
+    ['run_one_transfer', /run_one_transfer_in_state\(/],
+    ['leave_vault', /leave_vault_in_state\(/],
+  ]) {
+    assert.match(
+      braceBody(transfer, transfer.indexOf(`fn ${name}(`)),
+      call,
+      `${name} does not hand its policy to the application module`,
+    )
+  }
+  for (const name of [
+    'upload_vault_in_state',
+    'download_vault_in_state',
+    'take_new_key_in_state',
+    'sync_conflict_details_in_state',
+    'resolve_conflict_in_state',
+    'rekey_without_in_state',
+    'leave_vault_in_state',
+    'run_one_transfer_in_state',
+  ]) {
+    assert.match(applicationTransfer, new RegExp(`fn ${name}\\(`), `${name} is missing from the application module`)
+  }
 })
 
 test('the browser approval commands hand their decisions to the application module', () => {

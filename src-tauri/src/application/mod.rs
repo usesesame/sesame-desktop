@@ -25,8 +25,10 @@ pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
 pub(crate) mod sync;
+pub(crate) mod sync_adopt;
 pub(crate) mod sync_pairing;
 pub(crate) mod sync_recovery;
+pub(crate) mod sync_transfer;
 pub(crate) mod unlock;
 
 #[cfg(test)]
@@ -54,12 +56,15 @@ mod record_writes_tests;
 mod sync_tests;
 
 #[cfg(test)]
+mod sync_transfer_tests;
+
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 mod unlock_lifecycle_tests;
 
-pub(crate) trait DesktopEffects {
+pub(crate) trait DesktopEffects: Sync {
     fn vault_path(&self) -> VaultResult<PathBuf>;
     fn report_key_page_fallback(&self, unlocked: &UnlockedVault);
     fn observe_unlock(&self, snapshot: &VaultSnapshot);

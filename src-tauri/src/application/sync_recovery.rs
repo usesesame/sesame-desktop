@@ -24,7 +24,11 @@ pub(crate) fn backup_stamp() -> String {
     format!("{seconds}")
 }
 
-fn prune_and_report(effects: &dyn DesktopEffects, directory: &Path, keep: &[PathBuf]) -> usize {
+pub(crate) fn prune_and_report(
+    effects: &dyn DesktopEffects,
+    directory: &Path,
+    keep: &[PathBuf],
+) -> usize {
     let pruned = crate::sync::conflict_backup::prune_counting(directory, keep);
     if pruned.failed > 0 {
         effects.report_backup_io_error();

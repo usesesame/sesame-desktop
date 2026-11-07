@@ -3,18 +3,15 @@ use std::path::PathBuf;
 use tauri::AppHandle;
 
 use crate::application::sync::SyncStore;
-use crate::sync::checkpoint::Checkpoint;
 use crate::sync::client::SyncClient;
 use crate::sync::identity::DeviceIdentity;
 use crate::sync::state::SyncState;
 use crate::vault::{VaultResult, VaultState};
 
 pub(super) use crate::application::sync::{
-    clean_label, names_for, present, present_proof, refresh, require_activated, signed_revision,
-    transfer_result, unix_now, vault_id_of, Refreshed, NOT_ACTIVATED,
+    clean_label, present, present_proof, refresh, vault_id_of,
 };
 pub use crate::application::sync::{SyncLocalStatusView, SyncStatusView};
-pub(super) use crate::application::sync_recovery::backup_stamp;
 
 pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
     use tauri::Manager;
@@ -43,62 +40,12 @@ pub(super) fn save_state(app: &AppHandle, state: &SyncState) -> VaultResult<()> 
     SyncStore::new(local_data_dir(app)?).save_state(state)
 }
 
-pub(super) fn journal_file(app: &AppHandle) -> VaultResult<PathBuf> {
-    Ok(SyncStore::new(local_data_dir(app)?).journal_path())
-}
-
 pub(super) fn require_no_pending_key_change(app: &AppHandle) -> VaultResult<()> {
     SyncStore::new(local_data_dir(app)?).require_no_pending_key_change()
 }
 
 pub(super) fn forget_everything(app: &AppHandle) -> VaultResult<()> {
     SyncStore::new(local_data_dir(app)?).forget_everything()
-}
-
-pub(super) async fn record_checkpoint_if_due(
-    app: &AppHandle,
-    client: &SyncClient,
-    local: &SyncState,
-    refreshed: &Refreshed,
-) {
-    if refreshed.server.device_state != "approved"
-        || refreshed.server.activated_epoch != refreshed.server.vault_epoch
-        || require_no_pending_key_change(app).is_err()
-    {
-        return;
-    }
-    let list = &refreshed.update.list;
-    let head = refreshed.update.head.as_ref();
-    let now = unix_now();
-    let revision = head.map_or(0, |header| header.revision);
-    if !crate::sync::state::checkpoint_due(
-        local.last_checkpoint.as_ref(),
-        list.head(),
-        revision,
-        now,
-    ) {
-        return;
-    }
-    let Ok(identity) = this_identity(app) else {
-        return;
-    };
-    let checkpoint =
-        identity.sign_checkpoint(Checkpoint::observe(list, head, &local.device_id, now));
-    if client
-        .post_checkpoint(&identity, &checkpoint)
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let mut next = local.clone();
-    next.entries = refreshed.update.entries.clone();
-    next.last_checkpoint = Some(crate::sync::state::PostedCheckpoint {
-        device_list_index: checkpoint.device_list_index,
-        header_revision: checkpoint.header_revision,
-        at: now,
-    });
-    let _ = save_state(app, &next);
 }
 
 #[tauri::command]
