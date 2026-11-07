@@ -112,20 +112,16 @@ test('capabilities answer desktop availability only on a new tagged contract', (
   const fill = readFileSync(join(root, 'src-tauri', 'src', 'browser_fill.rs'), 'utf8')
   assert.doesNotMatch(fill, /capabilities\s*\([^)]*locked/)
 
+  const replies = readFileSync(
+    join(root, 'src-tauri', 'src', 'application', 'browser_replies.rs'),
+    'utf8',
+  )
   const preApprovalSlices = [
-    ['browser_fill.rs', fill, 'fn fill_response'],
-    ['browser_fill.rs', fill, 'fn save_response'],
-    ['browser_fill.rs', fill, 'fn card_response'],
-    [
-      'browser_fill_identity_approval.rs',
-      readFileSync(join(root, 'src-tauri', 'src', 'browser_fill_identity_approval.rs'), 'utf8'),
-      'fn identity_response',
-    ],
-    [
-      'browser_fill_totp_approval.rs',
-      readFileSync(join(root, 'src-tauri', 'src', 'browser_fill_totp_approval.rs'), 'utf8'),
-      'fn totp_response',
-    ],
+    ['application/browser_replies.rs', replies, 'fn fill_response_in_state'],
+    ['application/browser_replies.rs', replies, 'fn save_response_in_state'],
+    ['application/browser_replies.rs', replies, 'fn card_response_in_state'],
+    ['application/browser_replies.rs', replies, 'fn identity_response_in_state'],
+    ['application/browser_replies.rs', replies, 'fn totp_response_in_state'],
   ]
   for (const [file, source, functionName] of preApprovalSlices) {
     const start = source.indexOf(functionName)
@@ -135,6 +131,24 @@ test('capabilities answer desktop availability only on a new tagged contract', (
       source.slice(start, end),
       /"locked"|"multipleMatches"/,
       `${functionName} answers before approval with a distinguishable reason`,
+    )
+  }
+  for (const name of [
+    'fill_response_in_state',
+    'save_response_in_state',
+    'card_response_in_state',
+    'identity_response_in_state',
+    'totp_response_in_state',
+    'complete_fill_in_state',
+    'complete_save_in_state',
+    'complete_card_in_state',
+    'complete_identity_in_state',
+    'complete_totp_in_state',
+  ]) {
+    assert.match(
+      fill,
+      new RegExp(`browser_replies::${name}\\(`),
+      `browser_fill.rs does not call ${name}`,
     )
   }
 })
