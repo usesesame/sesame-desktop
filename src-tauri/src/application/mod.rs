@@ -9,6 +9,7 @@ use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
+pub(crate) mod browser_fill;
 pub(crate) mod file_choices;
 pub(crate) mod history;
 pub(crate) mod lifecycle;
@@ -27,6 +28,9 @@ pub(crate) mod unlock;
 
 #[cfg(test)]
 mod backups_tests;
+
+#[cfg(test)]
+mod browser_fill_tests;
 
 #[cfg(test)]
 mod logins_tests;
@@ -73,4 +77,11 @@ pub(crate) trait DesktopEffects {
     fn recovery_replacement_path(&self) -> VaultResult<PathBuf>;
     fn discard_recovery_replacement(&self);
     fn reset_rollback_record(&self, vault_id: &str, revision: u64) -> VaultResult<()>;
+    fn record_browser_host_registration(&self, code: &'static str);
+    fn emit_browser_approval_cancelled(
+        &self,
+        kind: browser_fill::ApprovalKind,
+        approval_id: &str,
+        reason: &'static str,
+    );
 }

@@ -1,4 +1,4 @@
-enum ApprovalRequest {
+pub(crate) enum ApprovalRequest {
     Fill {
         candidate_ids: HashSet<String>,
     },
@@ -30,64 +30,6 @@ impl ApprovalRequest {
             Self::Save { .. } => false,
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ApprovalKind {
-    Fill,
-    Save,
-    Identity,
-    Card,
-    Totp,
-}
-
-impl ApprovalKind {
-    fn cancelled_event(self) -> &'static str {
-        match self {
-            Self::Fill => "browser-fill-cancelled",
-            Self::Save => "browser-save-cancelled",
-            Self::Identity => "browser-identity-cancelled",
-            Self::Card => "browser-card-cancelled",
-            Self::Totp => "browser-totp-cancelled",
-        }
-    }
-
-    fn timeout_code(self) -> &'static str {
-        match self {
-            Self::Fill => "fill_timeout",
-            Self::Save => "save_timeout",
-            Self::Identity => "identity_timeout",
-            Self::Card => "card_timeout",
-            Self::Totp => "totp_timeout",
-        }
-    }
-
-    fn connection_closed_code(self) -> &'static str {
-        match self {
-            Self::Fill => "fill_connection_closed",
-            Self::Save => "save_connection_closed",
-            Self::Identity => "identity_connection_closed",
-            Self::Card => "card_connection_closed",
-            Self::Totp => "totp_connection_closed",
-        }
-    }
-
-    fn vault_changed_code(self) -> &'static str {
-        match self {
-            Self::Fill => "fill_vault_changed",
-            Self::Save => "save_vault_changed",
-            Self::Identity => "identity_vault_changed",
-            Self::Card => "card_vault_changed",
-            Self::Totp => "totp_vault_changed",
-        }
-    }
-}
-
-enum ApprovalDecision {
-    Denied,
-    InvalidSelection,
-    Selected(String),
-    Saved,
 }
 
 enum ApprovalEvent {
@@ -125,17 +67,6 @@ impl Drop for PendingApproval {
     }
 }
 
-/// Held credential, returned to the command layer only while the approval is still bound.
-pub struct SavePayload {
-    pub kind: SaveKind,
-    pub title: String,
-    pub username: String,
-    pub password: zeroize::Zeroizing<String>,
-    pub origin: String,
-    pub epoch: u64,
-    pub candidates: Vec<BrowserFillCandidate>,
-}
-
 #[derive(Default)]
 struct FillInner {
     pending: Option<PendingApproval>,
@@ -151,7 +82,7 @@ pub struct BrowserFillState {
 
 impl BrowserFillState {
     #[cfg(test)]
-    fn with_clock(clock: Arc<dyn Clock>) -> Self {
+    pub(crate) fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
             inner: Mutex::new(FillInner {
                 focus: FocusDelay::new(clock),
@@ -172,7 +103,7 @@ impl BrowserFillState {
             .map_or(APPROVAL_FOCUS_DELAY, |inner| inner.focus.remaining())
     }
 
-    fn require_ready(&self, approval_id: &str) -> Result<(), &'static str> {
+    pub(crate) fn require_ready(&self, approval_id: &str) -> Result<(), &'static str> {
         let inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let bound = inner
             .pending
@@ -188,6 +119,15 @@ impl BrowserFillState {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(pending) = inner.pending.take() {
                 let _ = pending.sender.send(ApprovalDecision::Denied);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expire_pending(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            if let Some(pending) = inner.pending.as_mut() {
+                pending.deadline = Instant::now() - Duration::from_secs(1);
             }
         }
     }
@@ -221,7 +161,7 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn begin(
+    pub(crate) fn begin(
         &self,
         request_id: &str,
         origin: NormalizedOrigin,
@@ -295,7 +235,7 @@ impl BrowserFillState {
     }
 
     /// Credential only while bound; `decide` still releases the broker.
-    fn save_payload_if_bound(&self, approval_id: &str) -> Option<SavePayload> {
+    pub(crate) fn save_payload_if_bound(&self, approval_id: &str) -> Option<SavePayload> {
         let inner = self.inner.lock().ok()?;
         let pending = inner.pending.as_ref()?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -332,7 +272,11 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn decide(&self, approval_id: &str, decision: ApprovalDecision) -> Result<(), &'static str> {
+    pub(crate) fn decide(
+        &self,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<(), &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let pending = inner.pending.as_ref().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -450,7 +394,7 @@ fn wait_for_decision(
 include!("browser_fill_matching.rs");
 include!("browser_fill_lookalike.rs");
 
-fn emit_approval_cancelled(
+pub(crate) fn emit_approval_cancelled(
     app: &AppHandle,
     kind: ApprovalKind,
     approval_id: &str,

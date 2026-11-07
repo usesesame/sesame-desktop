@@ -1,9 +1,6 @@
 const APPROVAL_FOCUS_DELAY: Duration = Duration::from_millis(750);
-const APPROVAL_TOO_SOON: &str = "approvalTooSoon";
-const APPROVAL_TOO_SOON_MESSAGE: &str =
-    "Wait a moment after Sesame comes forward, then approve again.";
 
-trait Clock: Send + Sync {
+pub(crate) trait Clock: Send + Sync {
     fn now(&self) -> Instant;
 }
 

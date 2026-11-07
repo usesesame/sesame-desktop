@@ -71,7 +71,3 @@ fn matching_totp_entries(
     }
     candidates
 }
-
-fn bounded_display(value: &str, max_chars: usize) -> String {
-    value.chars().take(max_chars).collect()
-}

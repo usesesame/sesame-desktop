@@ -133,4 +133,17 @@ impl DesktopEffects for DesktopHostEffects<'_> {
             .ok_or("Sesame could not find its data folder.")?;
         crate::rollback_guard::reset(&dir, vault_id, revision)
     }
+
+    fn record_browser_host_registration(&self, code: &'static str) {
+        crate::diagnostics::record_browser_host_registration(self.app, code);
+    }
+
+    fn emit_browser_approval_cancelled(
+        &self,
+        kind: crate::application::browser_fill::ApprovalKind,
+        approval_id: &str,
+        reason: &'static str,
+    ) {
+        crate::browser_fill::emit_approval_cancelled(self.app, kind, approval_id, reason);
+    }
 }
