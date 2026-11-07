@@ -14,12 +14,18 @@ pub(crate) mod records;
 pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
+pub(crate) mod sync;
+pub(crate) mod sync_pairing;
+pub(crate) mod sync_recovery;
 
 #[cfg(test)]
 mod backups_tests;
 
 #[cfg(test)]
 mod quick_access_tests;
+
+#[cfg(test)]
+mod sync_tests;
 
 #[cfg(test)]
 mod tests;
@@ -44,4 +50,6 @@ pub(crate) trait DesktopEffects {
     fn recovery_health(&self, current_vault_id: Option<&str>) -> VaultResult<RecoveryHealth>;
     fn reset_rollback_after_restore(&self, vault_id: Option<&str>, revision: u64);
     fn discard_pin_throttle_state(&self, state: &VaultState);
+    fn cancel_pending_approvals(&self);
+    fn report_backup_io_error(&self);
 }

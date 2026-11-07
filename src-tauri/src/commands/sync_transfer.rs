@@ -5,18 +5,20 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use super::sync::{
-    journal_file, load_state, local_data_dir, present, present_proof, record_checkpoint_if_due,
-    refresh, require_no_pending_key_change, save_state, this_identity, unix_now, vault_id_of,
-    Refreshed,
+    backup_stamp, journal_file, load_state, local_data_dir, present, present_proof,
+    record_checkpoint_if_due, refresh, require_activated, require_no_pending_key_change,
+    save_state, signed_revision, this_identity, transfer_result, unix_now, vault_id_of, Refreshed,
+    NOT_ACTIVATED,
 };
 use super::sync_adopt::{
-    adopt, adopt_with, digest_after_commit, prepare_recovery, verify_master_password,
-    KeptThroughAdoption,
+    adopt, adopt_with, digest_after_commit, verify_master_password, KeptThroughAdoption,
 };
+use crate::adapters::desktop_effects::DesktopHostEffects;
+use crate::application::sync::SyncStore;
 use crate::sync::client::SyncClient;
 use crate::sync::devicelist::DeviceList;
 use crate::sync::engine::{
-    build_header, key_entry, open_label, plan_header, remove_entry, rotate_entry, verify_accepted,
+    build_header, open_label, plan_header, remove_entry, rotate_entry, verify_accepted,
 };
 use crate::sync::header::Header;
 use crate::sync::key_change::PreparedKeyChange;
@@ -25,54 +27,16 @@ use crate::sync::request::KeyPackageV3;
 use crate::sync::state::{payload_digest, SyncState};
 use crate::vault::{VaultResult, VaultState};
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncTransferResult {
-    pub revision: i64,
-    pub vault_epoch: i64,
-    pub entry_count: usize,
-}
+pub(super) use crate::application::sync::local_payload_bytes;
+pub use crate::application::sync::{SyncCoordinatorView, SyncPreparedKit, SyncTransferResult};
+pub use crate::application::sync_recovery::SyncBackupView;
 
 const SEAL_OVERHEAD_BYTES: usize = 16;
-
-fn signed_revision(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
-
-fn transfer_result(revision: u64, epoch: u64, entries: usize) -> SyncTransferResult {
-    SyncTransferResult {
-        revision: signed_revision(revision),
-        vault_epoch: signed_revision(epoch),
-        entry_count: entries,
-    }
-}
 
 fn decode_bytes(value: &str) -> Result<Vec<u8>, String> {
     URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| "A Sync value is not valid base64.".to_string())
-}
-
-const NOT_ACTIVATED: &str =
-    "This device has not taken the new vault key yet. Open Sync and take it.";
-
-fn require_activated(refreshed: &Refreshed) -> Result<(), String> {
-    if refreshed.server.device_state != "approved" {
-        return Err("This device is not approved to sync.".into());
-    }
-    if refreshed.server.activated_epoch != refreshed.server.vault_epoch {
-        return Err(NOT_ACTIVATED.into());
-    }
-    Ok(())
-}
-
-pub(super) fn local_payload_bytes(
-    vault: &crate::vault::UnlockedVault,
-) -> Result<(Vec<u8>, usize), String> {
-    let payload = vault.open_payload()?;
-    let bytes = serde_json::to_vec(&*payload)
-        .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-    Ok((bytes, payload.entries.len()))
 }
 
 fn persist(
@@ -560,11 +524,7 @@ fn every_member_has_the_newer_key(list: &DeviceList) -> bool {
         .all(|member| is_newer_key(&member.package_key))
 }
 
-fn is_newer_key(encoded: &str) -> bool {
-    URL_SAFE_NO_PAD
-        .decode(encoded)
-        .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES)
-}
+pub(super) use crate::application::sync::is_newer_key;
 
 fn refused_before_commit(error: &crate::sync::client::SyncError) -> bool {
     use crate::sync::client::SyncError;
@@ -697,12 +657,6 @@ async fn rekey_without(
     Ok(())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncPreparedKit {
-    pub recovery_kit: String,
-}
-
 #[tauri::command]
 pub async fn sync_prepare_key_change(
     app: AppHandle,
@@ -710,27 +664,13 @@ pub async fn sync_prepare_key_change(
     prepared: tauri::State<'_, PreparedKeyChange>,
     master_password: String,
 ) -> Result<SyncPreparedKit, String> {
-    require_no_pending_key_change(&app)?;
-    load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
-    {
-        let session = state
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let unlocked = session
-            .as_ref()
-            .ok_or("Unlock Sesame before changing the vault key.")?;
-        verify_master_password(unlocked, &master_password)?;
-    }
-    let mut key = [0u8; 32];
-    crate::vault::util::fill_secret(&mut key)?;
-    let made = prepare_recovery(&key);
-    let result = made.map(|(kit, recovery)| {
-        prepared.stage(&key, recovery, std::time::Instant::now());
-        SyncPreparedKit { recovery_kit: kit }
-    });
-    key.zeroize();
-    result
+    let store = SyncStore::new(local_data_dir(&app)?);
+    crate::application::sync::prepare_key_change_in_state(
+        &state,
+        &store,
+        &prepared,
+        &master_password,
+    )
 }
 
 #[tauri::command]
@@ -747,9 +687,7 @@ pub async fn sync_remove_device(
     master_password: String,
 ) -> Result<(), String> {
     let identity = this_identity(&app)?;
-    if device_id == identity.device_id {
-        return Err("Turn Sesame Sync off on this device instead of removing it.".into());
-    }
+    crate::application::sync::refuse_self_removal(&device_id, &identity.device_id)?;
     rekey_without(
         &app,
         &state,
@@ -774,36 +712,8 @@ pub async fn sync_rotate_vault_key(
 #[tauri::command]
 pub async fn sync_upgrade_device_key(app: AppHandle) -> Result<(), String> {
     let client = SyncClient::connect(&app).await?;
-    require_no_pending_key_change(&app)?;
-    let identity = this_identity(&app)?;
-    let local = load_state(&app)?.ok_or("Set up Sesame Sync on this device first.")?;
-    let refreshed = refresh(&client, &local).await?;
-    require_activated(&refreshed)?;
-    let list = &refreshed.update.list;
-    let member = list
-        .member(&identity.device_id)
-        .filter(|member| member.removed_index == 0)
-        .ok_or("This device is not part of the vault.")?;
-    if is_newer_key(&member.package_key) {
-        return Err("This device already has the newer key.".into());
-    }
-    let identity = identity.with_hybrid_key()?;
-    identity.save(&super::sync::identity_file(&app)?)?;
-    let entry = key_entry(
-        &identity,
-        list,
-        &URL_SAFE_NO_PAD.encode(identity.package_public_key()),
-    )
-    .map_err(present_proof)?;
-    client
-        .upgrade_device_key(&identity, &entry)
-        .await
-        .map_err(present)?;
-    let mut next = local;
-    next.entries = refreshed.update.entries;
-    next.entries.push(entry);
-    save_state(&app, &next)?;
-    Ok(())
+    let store = SyncStore::new(local_data_dir(&app)?);
+    crate::application::sync::upgrade_device_key_in_state(&store, &client).await
 }
 
 pub(super) async fn leave_vault(
@@ -1066,59 +976,13 @@ fn confirm_unchanged(vault: &crate::vault::UnlockedVault, captured: &str) -> Res
     Ok(())
 }
 
-fn backup_stamp() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or(0);
-    format!("{seconds}")
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncCoordinatorView {
-    pub phase: String,
-    pub halt: String,
-    pub conflict_revision: i64,
-    pub pending: bool,
-    pub last_success_revision: i64,
-    pub consecutive_failures: u32,
-    pub downloads_applied: u32,
-}
-
 #[tauri::command]
 pub async fn sync_coordinator_status(
     coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
 ) -> Result<SyncCoordinatorView, String> {
-    use crate::sync::coordinator::{Halt, Phase};
-
-    let status = coordinator.status();
-    let (phase, halt, conflict_revision) = match &status.phase {
-        Phase::Idle => ("idle", "", 0),
-        Phase::Working => ("working", "", 0),
-        Phase::Retrying { .. } => ("retrying", "", 0),
-        Phase::GaveUp => ("gave_up", "", 0),
-        Phase::Paused => ("paused", "locked", 0),
-        Phase::Halted(Halt::Revoked) => ("halted", "revoked", 0),
-        Phase::Halted(Halt::NotEntitled) => ("halted", "not_entitled", 0),
-        Phase::Halted(Halt::Incompatible) => ("halted", "incompatible", 0),
-        Phase::Halted(Halt::FloorDamaged) => ("halted", "floor_damaged", 0),
-        Phase::Halted(Halt::Fork) => ("halted", "fork", 0),
-        Phase::Halted(Halt::Locked) => ("halted", "locked", 0),
-        Phase::Halted(Halt::Conflict { server_revision }) => {
-            ("halted", "conflict", *server_revision)
-        }
-        Phase::Halted(Halt::NeedsNewKey) => ("halted", "needs_new_key", 0),
-    };
-    Ok(SyncCoordinatorView {
-        phase: phase.to_string(),
-        halt: halt.to_string(),
-        conflict_revision,
-        pending: status.pending,
-        last_success_revision: status.last_success_revision.unwrap_or(0),
-        consecutive_failures: status.consecutive_failures,
-        downloads_applied: status.downloads_applied,
-    })
+    Ok(crate::application::sync::coordinator_view(
+        &coordinator.status(),
+    ))
 }
 
 #[tauri::command]
@@ -1350,7 +1214,7 @@ mod key_change_tests {
     use super::*;
     use crate::sync::client::SyncError;
     use crate::sync::devicelist::DeviceListEntry;
-    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::engine::{add_entry, create_entry, key_entry, seal_label, NewDevice};
     use crate::sync::identity::DeviceIdentity;
     use crate::sync::key_change::fictional_recovery;
 

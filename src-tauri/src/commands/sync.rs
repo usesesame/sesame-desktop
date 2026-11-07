@@ -1,49 +1,20 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::sync::canonical::{ProofError, ProofKind};
+use crate::application::sync::SyncStore;
 use crate::sync::checkpoint::Checkpoint;
-use crate::sync::client::{StateView, SyncClient, SyncError};
-use crate::sync::devicelist::DeviceList;
-use crate::sync::engine::{
-    check_peer_checkpoints, create_entry, oldest_revision_to_compare, open_label, seal_label,
-    verify_server_view, PeerView, ServedCheckpoint, ServerView, VerifiedUpdate,
-};
-use crate::sync::header::{verify_header_chain, Header};
+use crate::sync::client::SyncClient;
 use crate::sync::identity::DeviceIdentity;
 use crate::sync::state::SyncState;
 use crate::vault::{VaultResult, VaultState};
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncDeviceView {
-    pub device_id: String,
-    pub label: String,
-    pub state: String,
-    pub is_this_device: bool,
-    pub added_index: u64,
-    pub newer_key: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncStatusView {
-    pub enrolled: bool,
-    pub state: String,
-    pub vault_epoch: u64,
-    pub revision: u64,
-    pub devices: Vec<SyncDeviceView>,
-    pub needs_new_key: bool,
-    pub alarm: Option<String>,
-    pub confirmed_at: Option<u64>,
-    pub peer_checks_skipped: bool,
-    pub floor_confirmed_at: Option<u64>,
-}
+pub(super) use crate::application::sync::{
+    clean_label, names_for, present, present_proof, refresh, require_activated, signed_revision,
+    transfer_result, unix_now, vault_id_of, Refreshed, NOT_ACTIVATED,
+};
+pub use crate::application::sync::{SyncLocalStatusView, SyncStatusView};
+pub(super) use crate::application::sync_recovery::backup_stamp;
 
 pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
     use tauri::Manager;
@@ -52,175 +23,36 @@ pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
         .map_err(|_| "Sesame could not locate its local data folder.".to_string())
 }
 
-pub(super) fn present(error: SyncError) -> String {
-    match error {
-        SyncError::NotEntitled => format!("sync_not_entitled:{}", SyncError::NotEntitled),
-        SyncError::Conflict => "sync_conflict:0".to_string(),
-        other => other.to_string(),
-    }
-}
-
-pub(super) fn present_proof(error: ProofError) -> String {
-    match error.kind {
-        ProofKind::Invalid => error.to_string(),
-        ProofKind::DeviceList | ProofKind::History => format!("sync_fork:{error}"),
-    }
-}
-
 pub(super) fn identity_file(app: &AppHandle) -> VaultResult<PathBuf> {
-    Ok(crate::sync::identity::identity_path(&local_data_dir(app)?))
+    Ok(SyncStore::new(local_data_dir(app)?).identity_path())
 }
 
 pub(super) fn this_identity(app: &AppHandle) -> VaultResult<DeviceIdentity> {
-    DeviceIdentity::load(&identity_file(app)?)
-        .map_err(|_| "Set up Sesame Sync on this device first.".to_string())
-}
-
-pub(super) fn state_file(app: &AppHandle) -> VaultResult<PathBuf> {
-    Ok(crate::sync::state::state_path(&local_data_dir(app)?))
+    SyncStore::new(local_data_dir(app)?).this_identity()
 }
 
 pub(super) fn load_state(app: &AppHandle) -> VaultResult<Option<SyncState>> {
-    let state = load_join_state(app)?;
-    if let Some(state) = &state {
-        state.require_join_complete()?;
-    }
-    Ok(state)
+    SyncStore::new(local_data_dir(app)?).load_state()
 }
 
 pub(super) fn load_join_state(app: &AppHandle) -> VaultResult<Option<SyncState>> {
-    Ok(crate::sync::state::read_protected(&state_file(app)?))
+    SyncStore::new(local_data_dir(app)?).load_join_state()
 }
 
 pub(super) fn save_state(app: &AppHandle, state: &SyncState) -> VaultResult<()> {
-    crate::sync::state::write_protected(&state_file(app)?, state)
+    SyncStore::new(local_data_dir(app)?).save_state(state)
 }
 
-pub(super) const KEY_CHANGE_PENDING: &str =
-    "This device has not finished changing the vault key. Open Sync and finish it before syncing.";
-
 pub(super) fn journal_file(app: &AppHandle) -> VaultResult<PathBuf> {
-    Ok(crate::sync::rekey_journal::journal_path(&local_data_dir(
-        app,
-    )?))
+    Ok(SyncStore::new(local_data_dir(app)?).journal_path())
 }
 
 pub(super) fn require_no_pending_key_change(app: &AppHandle) -> VaultResult<()> {
-    if crate::sync::rekey_journal::is_pending(&journal_file(app)?) {
-        return Err(KEY_CHANGE_PENDING.to_string());
-    }
-    Ok(())
+    SyncStore::new(local_data_dir(app)?).require_no_pending_key_change()
 }
 
 pub(super) fn forget_everything(app: &AppHandle) -> VaultResult<()> {
-    crate::sync::rekey_journal::forget(&journal_file(app)?)?;
-    crate::sync::identity::forget(&identity_file(app)?)?;
-    crate::sync::state::forget_protected(&state_file(app)?)
-}
-
-pub(super) struct Refreshed {
-    pub server: StateView,
-    pub update: VerifiedUpdate,
-    pub confirmed_at: Option<u64>,
-    pub peer_checks_skipped: bool,
-}
-
-pub(super) fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs())
-}
-
-fn peer_history_outcome(
-    fetched: Option<Vec<Header>>,
-    head: Option<&Header>,
-) -> (Vec<Header>, bool) {
-    let Some(plain) = fetched else {
-        return (Vec::new(), true);
-    };
-    let reaches_head = match (plain.last(), head) {
-        (Some(last), Some(head)) => last.digest() == head.digest(),
-        _ => false,
-    };
-    if reaches_head {
-        (plain, false)
-    } else {
-        (Vec::new(), true)
-    }
-}
-
-async fn history_for_peers(
-    client: &SyncClient,
-    update: &VerifiedUpdate,
-    own_device_id: &str,
-    checkpoints: &[ServedCheckpoint],
-) -> Result<(Vec<Header>, bool), String> {
-    let Some(oldest) = oldest_revision_to_compare(update.head.as_ref(), own_device_id, checkpoints)
-    else {
-        return Ok((Vec::new(), false));
-    };
-    let Ok(served) = client.headers(oldest.saturating_sub(1)).await else {
-        return Ok(peer_history_outcome(None, update.head.as_ref()));
-    };
-    let plain: Vec<Header> = served.into_iter().map(|item| item.header).collect();
-    verify_header_chain(&update.list, None, &plain).map_err(present_proof)?;
-    Ok(peer_history_outcome(Some(plain), update.head.as_ref()))
-}
-
-pub(super) async fn refresh(client: &SyncClient, state: &SyncState) -> Result<Refreshed, String> {
-    let peer_checkpoints = client.checkpoints().await.ok();
-    let mut peer_checks_skipped = peer_checkpoints.is_none();
-    let server = client.state().await.map_err(present)?;
-    if server.vault_id != state.vault_id {
-        return Err("This device is set up for a different synced vault.".into());
-    }
-    let known = u64::try_from(state.entries.len())
-        .map_err(|_| "The stored device list is too long.".to_string())?;
-    let entries_after = client.device_list(known).await.map_err(present)?;
-    let after = match &state.head {
-        Some(head) => head.revision.saturating_sub(1),
-        None => server.current_revision.saturating_sub(1),
-    };
-    let headers = if server.current_revision == 0 {
-        Vec::new()
-    } else {
-        client.headers(after).await.map_err(present)?
-    };
-    let update = verify_server_view(
-        state,
-        client.instance_key(),
-        &ServerView {
-            entries_after: &entries_after,
-            headers: &headers,
-            latest_revision: server.current_revision,
-        },
-    )
-    .map_err(present_proof)?;
-    let confirmed_at = match peer_checkpoints {
-        Some(checkpoints) if !checkpoints.is_empty() => {
-            let (history, history_missing) =
-                history_for_peers(client, &update, &state.device_id, &checkpoints).await?;
-            peer_checks_skipped |= history_missing;
-            check_peer_checkpoints(
-                &update.list,
-                update.head.as_ref(),
-                &state.device_id,
-                &PeerView {
-                    checkpoints: &checkpoints,
-                    history: &history,
-                },
-                unix_now(),
-            )
-            .map_err(present_proof)?
-        }
-        _ => None,
-    };
-    Ok(Refreshed {
-        server,
-        update,
-        confirmed_at,
-        peer_checks_skipped,
-    })
+    SyncStore::new(local_data_dir(app)?).forget_everything()
 }
 
 pub(super) async fn record_checkpoint_if_due(
@@ -269,177 +101,13 @@ pub(super) async fn record_checkpoint_if_due(
     let _ = save_state(app, &next);
 }
 
-pub(super) fn vault_id_of(vault: &crate::vault::UnlockedVault) -> Result<String, String> {
-    let payload = vault.open_payload()?;
-    payload.vault_id.clone().ok_or_else(|| {
-        "This vault has no identity yet. Lock and unlock it once, then try again.".to_string()
-    })
-}
-
-fn clean_label(label: &str) -> Result<String, String> {
-    let label = label.trim().to_string();
-    if label.is_empty() || label.chars().count() > crate::sync::engine::MAX_LABEL_CHARS {
-        return Err("Give this device a name of 1 to 64 characters.".into());
-    }
-    Ok(label)
-}
-
-pub(super) fn names_for(
-    list: &DeviceList,
-    remembered: &BTreeMap<String, String>,
-    vault_id: &str,
-    vault_key: Option<&[u8; 32]>,
-) -> BTreeMap<String, String> {
-    let usable = |name: &String| {
-        !name.is_empty() && name.chars().count() <= crate::sync::engine::MAX_LABEL_CHARS
-    };
-    list.all_members()
-        .into_iter()
-        .filter_map(|member| {
-            let opened = vault_key
-                .and_then(|key| open_label(key, vault_id, &member.device_id, &member.sealed_label));
-            opened
-                .or_else(|| remembered.get(&member.device_id).cloned())
-                .filter(usable)
-                .map(|name| (member.device_id.clone(), name))
-        })
-        .collect()
-}
-
-fn views_from(
-    list: &DeviceList,
-    state: &SyncState,
-    names: &BTreeMap<String, String>,
-) -> Vec<SyncDeviceView> {
-    let mut devices: Vec<SyncDeviceView> = list
-        .all_members()
-        .into_iter()
-        .map(|member| {
-            let label = names
-                .get(&member.device_id)
-                .cloned()
-                .unwrap_or_else(|| "A device".to_string());
-            SyncDeviceView {
-                device_id: member.device_id.clone(),
-                label,
-                state: if member.removed_index == 0 {
-                    "approved".to_string()
-                } else {
-                    "removed".to_string()
-                },
-                is_this_device: member.device_id == state.device_id,
-                added_index: member.added_index,
-                newer_key: URL_SAFE_NO_PAD
-                    .decode(&member.package_key)
-                    .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES),
-            }
-        })
-        .collect();
-    devices.sort_by_key(|device| device.added_index);
-    devices
-}
-
-fn remember_names(app: &AppHandle, names: &BTreeMap<String, String>) {
-    let Ok(Some(mut current)) = load_state(app) else {
-        return;
-    };
-    if current.remember_names(names).is_ok() {
-        let _ = save_state(app, &current);
-    }
-}
-
-fn status(state: &str) -> SyncStatusView {
-    SyncStatusView {
-        enrolled: false,
-        state: state.to_string(),
-        vault_epoch: 0,
-        revision: 0,
-        devices: Vec::new(),
-        needs_new_key: false,
-        alarm: None,
-        confirmed_at: None,
-        peer_checks_skipped: false,
-        floor_confirmed_at: None,
-    }
-}
-
-async fn initial_status(
-    client: &SyncClient,
-    identity_present: bool,
-) -> Result<SyncStatusView, String> {
-    match client.state().await {
-        Ok(server) => {
-            let mut view = status(if identity_present {
-                "pairing"
-            } else {
-                "not_enrolled"
-            });
-            view.vault_epoch = server.vault_epoch;
-            Ok(view)
-        }
-        Err(SyncError::NotApproved) => Ok(status("not_enrolled")),
-        Err(SyncError::NotFound) => Ok(status("no_vault")),
-        Err(other) => Err(present(other)),
-    }
-}
-
-pub(super) fn never_turned_on(has_state: bool, has_identity: bool) -> bool {
-    !has_state && !has_identity
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncLocalStatusView {
-    pub state: String,
-    pub revision: u64,
-    pub unsynced: bool,
-}
-
-pub(super) fn local_status_for(
-    state: Option<&SyncState>,
-    has_identity: bool,
-    unsynced: bool,
-) -> SyncLocalStatusView {
-    match state {
-        Some(state) => SyncLocalStatusView {
-            state: "approved".to_string(),
-            revision: state.head_revision(),
-            unsynced,
-        },
-        None if has_identity => SyncLocalStatusView {
-            state: "pairing".to_string(),
-            revision: 0,
-            unsynced: false,
-        },
-        None => SyncLocalStatusView {
-            state: "not_enrolled".to_string(),
-            revision: 0,
-            unsynced: false,
-        },
-    }
-}
-
 #[tauri::command]
 pub async fn sync_local_status(
     app: AppHandle,
     vault: tauri::State<'_, VaultState>,
 ) -> Result<SyncLocalStatusView, String> {
-    let local = load_state(&app)?;
-    let identity_present = identity_file(&app)?.exists();
-    let unsynced = match &local {
-        Some(state) => {
-            let session = vault
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-            session
-                .as_ref()
-                .and_then(|unlocked| super::sync_transfer::local_payload_bytes(unlocked).ok())
-                .is_some_and(|(plaintext, _)| state.has_local_changes(&plaintext))
-        }
-        None => false,
-    };
-    Ok(local_status_for(local.as_ref(), identity_present, unsynced))
+    let store = SyncStore::new(local_data_dir(&app)?);
+    crate::application::sync::local_status_in_state(&vault, &store)
 }
 
 #[tauri::command]
@@ -447,83 +115,15 @@ pub async fn sync_status(
     app: AppHandle,
     vault: tauri::State<'_, VaultState>,
 ) -> Result<SyncStatusView, String> {
-    let local = load_join_state(&app)?;
-    let identity_present = identity_file(&app)?.exists();
-    if never_turned_on(local.is_some(), identity_present) {
-        return Ok(status("not_enrolled"));
+    let store = SyncStore::new(local_data_dir(&app)?);
+    let local = store.load_join_state()?;
+    let identity_present = store.identity_present();
+    if !crate::application::sync::sync_status_needs_service(local.is_some(), identity_present) {
+        return Ok(crate::application::sync::never_enrolled_status());
     }
     let client = SyncClient::connect(&app).await?;
-    let Some(local) = local else {
-        return initial_status(&client, identity_present).await;
-    };
-    let server = match client.state().await {
-        Ok(server) => server,
-        Err(SyncError::NotFound) => {
-            let mut view = status("no_vault");
-            view.enrolled = true;
-            view.alarm = Some(
-                "The service no longer has this vault. It was reset and your local vault is untouched."
-                    .to_string(),
-            );
-            return Ok(view);
-        }
-        Err(other) => return Err(present(other)),
-    };
-    if local.pending_join.is_some() {
-        let mut view = status("joining");
-        view.vault_epoch = server.vault_epoch;
-        return Ok(view);
-    }
-    let mut view = status("approved");
-    view.enrolled = true;
-    view.vault_epoch = server.vault_epoch;
-    view.revision = server.current_revision;
-    view.floor_confirmed_at =
-        crate::adapters::network::sync_floor::floor_confirmed_at(&local_data_dir(&app)?);
-    let (list, state) = match refresh(&client, &local).await {
-        Ok(refreshed) => {
-            view.confirmed_at = refreshed.confirmed_at;
-            view.peer_checks_skipped = refreshed.peer_checks_skipped;
-            let mut next = local.clone();
-            next.entries = refreshed.update.entries.clone();
-            if next.entries != local.entries {
-                save_state(&app, &next)?;
-            }
-            (refreshed.update.list, next)
-        }
-        Err(message) => {
-            let list = local.list().map_err(present_proof)?;
-            view.alarm = Some(message.trim_start_matches("sync_fork:").to_string());
-            (list, local.clone())
-        }
-    };
-    let remembered = state.remembered_names();
-    let names = {
-        let session = vault
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        match session.as_ref() {
-            Some(unlocked) => unlocked.expose_vault_key(|key| {
-                Ok(names_for(&list, &remembered, &state.vault_id, Some(key)))
-            })?,
-            None => names_for(&list, &remembered, &state.vault_id, None),
-        }
-    };
-    if names != remembered && !names.is_empty() {
-        remember_names(&app, &names);
-    }
-    view.devices = views_from(&list, &state, &names);
-    let this_device = list.member(&state.device_id);
-    if this_device.is_none_or(|member| member.removed_index != 0)
-        || server.device_state != "approved"
-    {
-        view.state = "removed".to_string();
-    }
-    view.needs_new_key = server.device_state == "approved"
-        && (server.activated_epoch < server.vault_epoch
-            || crate::sync::rekey_journal::is_pending(&journal_file(&app)?));
-    Ok(view)
+    crate::application::sync::sync_status_in_state(&vault, &store, local, identity_present, &client)
+        .await
 }
 
 #[tauri::command]
@@ -534,49 +134,8 @@ pub async fn sync_create_vault(
 ) -> Result<SyncStatusView, String> {
     let label = clean_label(&label)?;
     let client = SyncClient::connect(&app).await?;
-    if load_state(&app)?.is_some() {
-        return Err("Sesame Sync is already set up on this device.".into());
-    }
-    match client.state().await {
-        Err(SyncError::NotFound) => {}
-        Ok(_) => {
-            return Err(
-                "This account already has a synced vault. Join it with a code from another device."
-                    .into(),
-            )
-        }
-        Err(other) => return Err(present(other)),
-    }
-    let path = identity_file(&app)?;
-    let identity = crate::sync::identity::load_or_create(&path)?;
-    let (vault_id, sealed) = {
-        let session = vault
-            .session
-            .lock()
-            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let unlocked = session
-            .as_ref()
-            .ok_or("Unlock Sesame before setting up Sync.")?;
-        let vault_id = vault_id_of(unlocked)?;
-        let sealed = unlocked.expose_vault_key(|key| {
-            seal_label(key, &vault_id, &identity.device_id, &label).map_err(present_proof)
-        })?;
-        (vault_id, sealed)
-    };
-    let entry = create_entry(&identity, &vault_id, &sealed);
-    DeviceList::verify(std::slice::from_ref(&entry)).map_err(present_proof)?;
-    client
-        .create_vault(&identity, &entry)
-        .await
-        .map_err(present)?;
-    let mut state = SyncState::new(&vault_id, &identity.device_id);
-    state.entries = vec![entry];
-    state.activated_epoch = 1;
-    save_state(&app, &state)?;
-    let mut view = status("approved");
-    view.enrolled = true;
-    view.vault_epoch = 1;
-    Ok(view)
+    let store = SyncStore::new(local_data_dir(&app)?);
+    crate::application::sync::create_vault_in_state(&vault, &store, &client, &label).await
 }
 
 #[tauri::command]
@@ -588,7 +147,7 @@ pub async fn sync_disable(
     force: Option<bool>,
 ) -> Result<(), String> {
     let local = load_join_state(&app)?;
-    if local.is_some() && !force.unwrap_or(false) {
+    if crate::application::sync::disable_needs_leave(local.is_some(), force.unwrap_or(false)) {
         super::sync_transfer::leave_vault(&app, &vault, &master_password).await?;
     }
     forget_everything(&app)?;
@@ -599,19 +158,15 @@ pub async fn sync_disable(
 #[tauri::command]
 pub async fn sync_reset_vault(app: AppHandle) -> Result<(), String> {
     let client = SyncClient::connect(&app).await?;
-    let identity = this_identity(&app)?;
-    let server = client.state().await.map_err(present)?;
-    client
-        .reset(&identity, server.vault_epoch)
-        .await
-        .map_err(present)?;
-    crate::sync::state::forget_protected(&state_file(&app)?)
+    let store = SyncStore::new(local_data_dir(&app)?);
+    crate::application::sync::reset_vault_in_state(&store, &client).await
 }
 
 #[cfg(test)]
 mod status_tests {
     use super::*;
     use crate::adapters::network::test_server::{Reply, TestServer};
+    use crate::application::sync::initial_status;
 
     #[test]
     fn an_unpaired_device_shows_setup_without_claiming_membership_or_reading_history() {
@@ -646,7 +201,7 @@ mod status_tests {
 
 #[cfg(test)]
 mod local_status_tests {
-    use super::{local_status_for, never_turned_on};
+    use crate::application::sync::{local_status_for, never_turned_on};
     use crate::sync::state::SyncState;
 
     #[test]
@@ -686,6 +241,7 @@ mod local_status_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync::client::SyncError;
 
     #[test]
     fn an_entitlement_refusal_carries_its_code_and_a_readable_message() {
@@ -698,7 +254,7 @@ mod tests {
 
 #[cfg(test)]
 mod peer_history_tests {
-    use super::*;
+    use crate::application::sync::peer_history_outcome;
 
     #[test]
     fn a_failed_history_fetch_is_reported_as_skipped_and_never_as_checked() {
@@ -719,8 +275,13 @@ mod peer_history_tests {
 mod device_name_tests {
     use std::collections::BTreeMap;
 
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+
     use super::*;
-    use crate::sync::engine::{add_entry, seal_label, NewDevice};
+    use crate::application::sync::{names_for, views_from};
+    use crate::sync::devicelist::DeviceList;
+    use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
     const FIRST_KEY: [u8; 32] = [3u8; 32];

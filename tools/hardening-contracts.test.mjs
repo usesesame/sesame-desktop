@@ -1502,8 +1502,8 @@ test('vault key material is drawn from the system random source', () => {
     ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
     ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
     ['src-tauri/src/commands/sync_transfer.rs', 'rekey_without'],
-    ['src-tauri/src/commands/sync_adopt.rs', 'prepare_recovery'],
-    ['src-tauri/src/commands/sync_transfer.rs', 'sync_prepare_key_change'],
+    ['src-tauri/src/application/sync.rs', 'prepare_recovery'],
+    ['src-tauri/src/application/sync.rs', 'prepare_key_change_in_state'],
   ]
   const offenders = []
   for (const [path, name] of secretSites) {
@@ -1519,4 +1519,41 @@ test('vault key material is drawn from the system random source', () => {
     }
   }
   assert.deepEqual(offenders, [], `secret material sources regressed:\n  ${offenders.join('\n  ')}`)
+})
+
+test('the sync commands hand their policy to the application module', () => {
+  const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  const pairing = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
+  const account = read('src-tauri', 'src', 'adapters', 'network', 'account_api.rs')
+  const application = read('src-tauri', 'src', 'application', 'sync.rs')
+  const recovery = read('src-tauri', 'src', 'application', 'sync_recovery.rs')
+  const recoveryCommands = read('src-tauri', 'src', 'commands', 'sync_transfer_recovery.rs')
+  const applicationPairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
+
+  const routes = [
+    [sync, 'sync_status', /sync_status_in_state\(/],
+    [sync, 'sync_local_status', /local_status_in_state\(/],
+    [sync, 'sync_create_vault', /create_vault_in_state\(/],
+    [sync, 'sync_reset_vault', /reset_vault_in_state\(/],
+    [transfer, 'sync_prepare_key_change', /prepare_key_change_in_state\(/],
+    [transfer, 'sync_upgrade_device_key', /upgrade_device_key_in_state\(/],
+    [transfer, 'sync_coordinator_status', /coordinator_view\(/],
+    [transfer, 'sync_remove_device', /refuse_self_removal\(/],
+    [pairing, 'sync_pairing_code', /pairing_code\(/],
+    [pairing, 'sync_cancel_pairing', /cancel_pairing\(/],
+    [pairing, 'sync_join_with_code', /verify_master_password_now_in_state\(/],
+    [account, 'link_custom_server', /require_no_service_connection\(/],
+  ]
+  for (const [source, name, call] of routes) {
+    assert.match(braceBody(source, source.indexOf(`fn ${name}(`)), call, `${name} does not call its application rule`)
+  }
+  assert.match(recoveryCommands, /list_conflict_backups_in_state\(/, 'listing recovery copies bypasses the application rule')
+  assert.match(recoveryCommands, /restore_conflict_backup_in_state\(/, 'restoring a recovery copy bypasses the application rule')
+  assert.match(recovery, /fn restore_conflict_backup_in_state\(/, 'the recovery copy rule is missing from the application module')
+  assert.match(recovery, /fn list_conflict_backups_in_state\(/, 'the recovery copy listing rule is missing from the application module')
+  assert.match(applicationPairing, /fn pairing_code\(/, 'the pairing code rule is missing from the application module')
+  assert.match(application, /fn prepare_key_change_in_state\(/, 'the key change rule is missing from the application module')
+  assert.match(application, /fn disable_needs_leave\(/, 'the disable decision is missing from the application module')
+  assert.match(application, /fn refuse_self_removal\(/, 'the self-removal rule is missing from the application module')
 })

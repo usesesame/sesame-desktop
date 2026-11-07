@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -12,8 +10,8 @@ use super::sync::{
     forget_everything, identity_file, load_join_state, load_state, present, present_proof, refresh,
     save_state, this_identity, vault_id_of,
 };
-use super::sync_adopt::{finish_adoption, verify_master_password, SyncAdoptResult};
-use crate::sync::client::{PairingRecord, SyncClient, SyncError};
+use super::sync_adopt::{finish_adoption, SyncAdoptResult};
+use crate::sync::client::{SyncClient, SyncError};
 use crate::sync::engine::{
     add_entry, floor_for, seal_label, verify_join, verify_server_view, JoinCheck, NewDevice,
     ServerView,
@@ -25,24 +23,12 @@ use crate::sync::request::KeyPackageV3;
 use crate::sync::state::SyncState;
 use crate::vault::VaultState;
 
-const PAIRING_WINDOW: Duration = Duration::from_secs(10 * 60);
-const APPROVAL_WAIT: Duration = Duration::from_secs(2 * 60);
-const POLL: Duration = Duration::from_secs(2);
-
-struct ShownCode {
-    code: String,
-    shown_at: Instant,
-}
-
-static SHOWN: Mutex<Option<ShownCode>> = Mutex::new(None);
-static CANCELLED: AtomicBool = AtomicBool::new(false);
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairingCodeView {
-    pub code: String,
-    pub expires_in_seconds: u64,
-}
+pub use crate::application::sync_pairing::PairingCodeView;
+pub(super) use crate::application::sync_pairing::{
+    cancel_pairing, cancelled, clean_join_label, clear_shown_code, newcomer_matches_offer,
+    pairing_code, refuse_classical_downgrade, reset_cancellation, take_shown_code,
+    verify_master_password_now_in_state, PAIRING_WINDOW,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,89 +36,21 @@ pub struct ApprovedDeviceView {
     pub label: String,
 }
 
-fn take_shown_code() -> Result<String, String> {
-    let guard = SHOWN
-        .lock()
-        .map_err(|_| "Sesame could not read the pairing code.".to_string())?;
-    let shown = guard
-        .as_ref()
-        .ok_or("Show a pairing code on this device first.")?;
-    if shown.shown_at.elapsed() >= PAIRING_WINDOW {
-        return Err("That pairing code expired. Show a new one.".into());
-    }
-    Ok(shown.code.clone())
-}
-
-fn clear_shown_code() {
-    if let Ok(mut guard) = SHOWN.lock() {
-        if let Some(mut shown) = guard.take() {
-            shown.code.zeroize();
-        }
-    }
-}
+const APPROVAL_WAIT: Duration = Duration::from_secs(2 * 60);
+const POLL: Duration = Duration::from_secs(2);
 
 async fn pause() {
     let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(POLL)).await;
 }
 
-fn cancelled() -> Result<(), String> {
-    if CANCELLED.load(Ordering::SeqCst) {
-        return Err("Pairing was cancelled.".into());
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn sync_pairing_code() -> Result<PairingCodeView, String> {
-    let code = pake::generate_code()?;
-    CANCELLED.store(false, Ordering::SeqCst);
-    let mut guard = SHOWN
-        .lock()
-        .map_err(|_| "Sesame could not prepare a pairing code.".to_string())?;
-    *guard = Some(ShownCode {
-        code: code.clone(),
-        shown_at: Instant::now(),
-    });
-    Ok(PairingCodeView {
-        code,
-        expires_in_seconds: PAIRING_WINDOW.as_secs(),
-    })
+    pairing_code()
 }
 
 #[tauri::command]
 pub async fn sync_cancel_pairing() -> Result<(), String> {
-    CANCELLED.store(true, Ordering::SeqCst);
-    clear_shown_code();
-    Ok(())
-}
-
-pub(crate) const CLASSICAL_KEY_REFUSAL: &str = "This device only supports the older key exchange, and this vault already uses the newer one. Update Sesame on the new device, or allow the older key exchange and try again.";
-
-pub(crate) fn refuse_classical_downgrade<'a>(
-    offered_package_key: &str,
-    member_package_keys: impl Iterator<Item = &'a str>,
-    allow_classical: bool,
-) -> Result<(), String> {
-    let length = |encoded: &str| {
-        URL_SAFE_NO_PAD
-            .decode(encoded)
-            .map_or(0, |bytes| bytes.len())
-    };
-    let offered_is_classical = length(offered_package_key) == crate::sync::keys::X25519_KEY_BYTES;
-    let vault_has_hybrid = member_package_keys
-        .into_iter()
-        .any(|key| length(key) == crate::sync::xwing::PUBLIC_KEY_BYTES);
-    if offered_is_classical && vault_has_hybrid && !allow_classical {
-        return Err(CLASSICAL_KEY_REFUSAL.to_string());
-    }
-    Ok(())
-}
-
-fn newcomer_matches_offer(newcomer: &NewDeviceIdentity, offered: &PairingRecord) -> bool {
-    newcomer.device_id == offered.device_id
-        && newcomer.signing_key == offered.signing_key
-        && newcomer.package_key
-            == crate::sync::pairing::package_key_commitment(&offered.package_key)
+    cancel_pairing()
 }
 
 #[tauri::command]
@@ -329,11 +247,8 @@ pub async fn sync_join_with_code(
 ) -> Result<SyncAdoptResult, String> {
     let code = zeroize::Zeroizing::new(code);
     let master_password = zeroize::Zeroizing::new(master_password);
-    CANCELLED.store(false, Ordering::SeqCst);
-    let label = label.trim().to_string();
-    if label.is_empty() || label.len() > crate::sync::pairing::MAX_FIELD_BYTES {
-        return Err("Give this device a short name.".into());
-    }
+    reset_cancellation();
+    let label = clean_join_label(&label)?;
     let pending = load_join_state(&app)?;
     if pending
         .as_ref()
@@ -341,7 +256,7 @@ pub async fn sync_join_with_code(
     {
         return Err("Sesame Sync is already set up on this device.".into());
     }
-    verify_master_password_now(&vault, &master_password)?;
+    verify_master_password_now_in_state(&vault, &master_password)?;
     let client = SyncClient::connect(&app).await?;
     check_join_available(&client).await?;
     let path = identity_file(&app)?;
@@ -401,20 +316,6 @@ async fn check_join_available(client: &SyncClient) -> Result<(), String> {
         ),
         Err(other) => Err(present(other)),
     }
-}
-
-fn verify_master_password_now(
-    vault: &tauri::State<'_, VaultState>,
-    master_password: &str,
-) -> Result<(), String> {
-    let session = vault
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-    let unlocked = session
-        .as_ref()
-        .ok_or("Unlock Sesame before joining a synced vault.")?;
-    verify_master_password(unlocked, master_password)
 }
 
 async fn join(
@@ -684,7 +585,7 @@ async fn finish_join_transaction<T>(
 #[cfg(test)]
 mod join_transaction_tests {
     use std::cell::Cell;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     use super::*;
@@ -976,6 +877,8 @@ mod join_transaction_tests {
 #[cfg(test)]
 mod downgrade_tests {
     use super::*;
+    use crate::application::sync_pairing::CLASSICAL_KEY_REFUSAL;
+    use crate::sync::client::PairingRecord;
 
     fn key(length: usize) -> String {
         URL_SAFE_NO_PAD.encode(vec![5u8; length])

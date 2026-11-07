@@ -58,6 +58,8 @@ pub(super) enum Effect {
         revision: u64,
     },
     DiscardPinThrottle,
+    CancelPendingApprovals,
+    ReportBackupIoError,
 }
 
 pub(super) struct FakeEffects<'a> {
@@ -201,6 +203,14 @@ impl DesktopEffects for FakeEffects<'_> {
 
     fn discard_pin_throttle_state(&self, _state: &VaultState) {
         self.record(Effect::DiscardPinThrottle);
+    }
+
+    fn cancel_pending_approvals(&self) {
+        self.record(Effect::CancelPendingApprovals);
+    }
+
+    fn report_backup_io_error(&self) {
+        self.record(Effect::ReportBackupIoError);
     }
 }
 
