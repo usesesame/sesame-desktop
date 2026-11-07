@@ -8,6 +8,7 @@ use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
+pub(crate) mod file_choices;
 pub(crate) mod lifecycle;
 pub(crate) mod quick_access;
 pub(crate) mod records;

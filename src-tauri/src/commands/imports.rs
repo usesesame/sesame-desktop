@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use tauri::State;
 
-use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
+use crate::application::file_choices::{resolve_path, FilePurpose, FileSelectionState};
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{parse_import_entries, read_import_file, validate_import_entries};
 use crate::vault::pending_import::{take_matching, PendingImport};

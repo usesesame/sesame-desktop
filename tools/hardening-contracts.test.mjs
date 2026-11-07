@@ -779,7 +779,10 @@ test('every file command resolves its path through a Rust-issued choice', () => 
   }
 
   const selection = read('src-tauri', 'src', 'commands', 'file_selection.rs')
-  const resolveBody = braceBody(selection, selection.indexOf('pub(crate) fn resolve_path('))
+  const choices = read('src-tauri', 'src', 'application', 'file_choices.rs')
+  const resolveStart = choices.indexOf('pub(crate) fn resolve_path(')
+  assert.ok(resolveStart >= 0, 'resolve_path is missing from the application module')
+  const resolveBody = braceBody(choices, resolveStart)
   assert.match(
     resolveBody,
     /#\[cfg\(feature = "wdio"\)\][\s\S]*PathBuf::from\(path\)[\s\S]*#\[cfg\(not\(feature = "wdio"\)\)\]/,

@@ -159,6 +159,15 @@ test('the application policy module does not depend on the desktop host', () => 
     [],
     `the application module mentions the desktop host:\n${offenders.join('\n')}`,
   )
+  const layered = files
+    .filter((path) => !/(?:^|[\\/])(?:tests|\w+_tests)\.rs$/.test(path))
+    .filter((path) => /crate::(?:commands|adapters)\b/.test(readFileSync(path, 'utf8').split('#[cfg(test)]')[0]))
+    .map((path) => relative(root, path).replaceAll('\\', '/'))
+  assert.deepEqual(
+    layered,
+    [],
+    `the application module reaches into the command or adapter layer:\n${layered.join('\n')}`,
+  )
 })
 
 test('desktop Sync fixtures are digest-bound local snapshots', () => {

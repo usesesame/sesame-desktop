@@ -1,7 +1,7 @@
 use tauri::{AppHandle, State};
 
+use crate::application::file_choices::{resolve_path, FilePurpose, FileSelectionState};
 use crate::browser_fill::SaveKind;
-use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
 use crate::vault::imports::entry_from_input;
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;

@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::application::file_choices::{resolve_path, FilePurpose, FileSelectionState};
 use crate::application::release::require_release_presence;
 use crate::application::DesktopEffects;
-use crate::commands::{resolve_path, FilePurpose, FileSelectionState};
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
     apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, inspect_backup_file,

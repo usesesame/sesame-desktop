@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -37,10 +37,6 @@ impl SyncStore {
         Self { data_dir }
     }
 
-    pub(crate) fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-
     pub(crate) fn state_path(&self) -> PathBuf {
         crate::sync::state::state_path(&self.data_dir)
     }
@@ -55,6 +51,10 @@ impl SyncStore {
 
     pub(crate) fn backup_dir(&self) -> PathBuf {
         crate::sync::conflict_backup::backup_dir(&self.data_dir)
+    }
+
+    pub(crate) fn floor_confirmed_at(&self) -> Option<u64> {
+        crate::sync::floor::confirmed_at(&crate::sync::floor::floor_path(&self.data_dir))
     }
 
     pub(crate) fn load_join_state(&self) -> VaultResult<Option<SyncState>> {
@@ -545,8 +545,7 @@ pub(crate) async fn sync_status_in_state(
     view.enrolled = true;
     view.vault_epoch = server.vault_epoch;
     view.revision = server.current_revision;
-    view.floor_confirmed_at =
-        crate::adapters::network::sync_floor::floor_confirmed_at(store.data_dir());
+    view.floor_confirmed_at = store.floor_confirmed_at();
     let (list, state) = match refresh(client, &local).await {
         Ok(refreshed) => {
             view.confirmed_at = refreshed.confirmed_at;

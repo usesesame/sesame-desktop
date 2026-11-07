@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::application::file_choices::{FilePurpose, FileSelectionState};
 use crate::commands::test_support::TestVault;
-use crate::commands::{FilePurpose, FileSelectionState};
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::{random_id, Identity, RestoreBackupRequest, VaultState};
