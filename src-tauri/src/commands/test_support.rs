@@ -94,3 +94,7 @@ pub(crate) fn login_input(id: Option<&str>, url: &str, password: &str) -> LoginI
         notes: String::new(),
     }
 }
+
+pub(crate) fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tauri::async_runtime::block_on(future)
+}

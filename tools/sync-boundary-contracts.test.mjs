@@ -33,12 +33,13 @@ function sourceFiles(dir, pattern) {
 
 test('Sync is off by default: a device that never turned it on contacts nothing', () => {
   const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const application = read('src-tauri', 'src', 'application', 'sync.rs')
   const status = commands.match(/pub async fn sync_status\([\s\S]*?\n\}\n/)
   assert.ok(status, 'sync_status is no longer a single function this test can read')
-  const offline = status[0].indexOf('never_turned_on(')
+  const offline = status[0].indexOf('sync_status_needs_service(')
   const connect = status[0].indexOf('SyncClient::connect(')
   assert.ok(offline !== -1 && connect !== -1 && offline < connect, 'sync_status must decide a never enrolled device is off before it connects')
-  assert.match(commands, /fn never_turned_on\(has_state: bool, has_identity: bool\) -> bool \{\s*!has_state && !has_identity\s*\}/)
+  assert.match(application, /fn never_turned_on\(has_state: bool, has_identity: bool\) -> bool \{\s*!has_state && !has_identity\s*\}/)
 
   const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   const coordinatorStatus = transfer.match(/pub async fn sync_coordinator_status\([\s\S]*?\n\}\n/)
@@ -283,7 +284,9 @@ test('the Go and Rust sides share one v3 fixture and the Rust tests read it', ()
 })
 
 test('a device list and every header are verified from the stored chain, never from the service listing', () => {
-  const refresh = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const refresh = read('src-tauri', 'src', 'application', 'sync.rs')
+  const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
+  assert.match(commands, /refresh/, 'the commands no longer reach the shared refresh')
   const body = refresh.match(/async fn refresh\([\s\S]*?\n}\n/)
   assert.ok(body, 'refresh is no longer a single function this test can read')
   assert.match(body[0], /verify_server_view\(/, 'refresh must verify the service view through the engine')
@@ -433,7 +436,9 @@ test('the lifecycle is reachable from the interface', () => {
 
 test('a fork or a disagreement stops Sync and is shown, never applied', () => {
   const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
-  assert.match(sync, /sync_fork:/)
+  const application = read('src-tauri', 'src', 'application', 'sync.rs')
+  assert.match(application, /sync_fork:/)
+  assert.match(sync, /present_proof/)
   const coordinator = read('src-tauri', 'src', 'commands', 'sync_transfer_coordinator.rs')
   assert.match(coordinator, /starts_with\("sync_fork:"\)[\s\S]*Halt::Fork/)
   const panel = read('src', 'lib', 'ui', 'SyncPanel.svelte')

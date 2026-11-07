@@ -11,6 +11,12 @@ pub(crate) mod records;
 pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
+pub(crate) mod sync;
+pub(crate) mod sync_pairing;
+pub(crate) mod sync_recovery;
+
+#[cfg(test)]
+mod sync_tests;
 
 #[cfg(test)]
 mod tests;
@@ -30,4 +36,6 @@ pub(crate) trait DesktopEffects {
     fn cancel_breach_scan(&self);
     fn emit_vault_locked(&self) -> Result<(), ()>;
     fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()>;
+    fn cancel_pending_approvals(&self);
+    fn report_backup_io_error(&self);
 }

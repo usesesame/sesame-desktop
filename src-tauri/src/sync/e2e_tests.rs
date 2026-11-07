@@ -475,16 +475,16 @@ fn a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it() {
         .into_iter()
         .map(|member| member.package_key.clone())
         .collect::<Vec<_>>();
-    let refused = crate::commands::sync_pairing::refuse_classical_downgrade(
+    let refused = crate::application::sync_pairing::refuse_classical_downgrade(
         &offered.package_key,
         members.iter().map(String::as_str),
         false,
     );
     assert_eq!(
         refused,
-        Err(crate::commands::sync_pairing::CLASSICAL_KEY_REFUSAL.to_string())
+        Err(crate::application::sync_pairing::CLASSICAL_KEY_REFUSAL.to_string())
     );
-    crate::commands::sync_pairing::refuse_classical_downgrade(
+    crate::application::sync_pairing::refuse_classical_downgrade(
         &offered.package_key,
         members.iter().map(String::as_str),
         true,

@@ -75,4 +75,12 @@ impl DesktopEffects for DesktopHostEffects<'_> {
     fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()> {
         crate::commands::establish_pin_throttle_state(self.app, state)
     }
+
+    fn cancel_pending_approvals(&self) {
+        crate::browser_fill::cancel_pending_approvals(self.app);
+    }
+
+    fn report_backup_io_error(&self) {
+        crate::diagnostics::record_backup_io_error(self.app);
+    }
 }

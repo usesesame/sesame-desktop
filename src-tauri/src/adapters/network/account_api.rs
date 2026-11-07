@@ -19,6 +19,8 @@ use crate::vault::{
     ServiceConnectionStatus, VaultResult, SERVICE_CONNECTION_FORMAT_VERSION,
 };
 
+pub(crate) use crate::application::sync::connection_ended_state as ended_state;
+
 const LINK_CODE_MIN_LENGTH: usize = 32;
 const LINK_CODE_MAX_LENGTH: usize = 128;
 const MAX_SERVICE_RESPONSE_BYTES: usize = 64 * 1024;
@@ -48,15 +50,6 @@ fn expiry_seconds(value: Option<&str>) -> Option<u64> {
     value
         .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
         .and_then(|moment| u64::try_from(moment.timestamp()).ok())
-}
-
-fn ended_state(connection: &ServiceConnectionFile, now: i64) -> &'static str {
-    match connection.expires_at {
-        Some(expires_at) if i64::try_from(expires_at).is_ok_and(|expires_at| expires_at <= now) => {
-            "expired"
-        }
-        _ => "revoked",
-    }
 }
 
 fn validated_link_code(raw: &str) -> VaultResult<String> {
@@ -313,12 +306,7 @@ pub async fn link_custom_server(
     confirmed_fingerprint: String,
 ) -> VaultResult<ServiceConnectionStatus> {
     let parsed = parse_custom_input(&input)?;
-    if read_service_connection(&app).is_ok() {
-        return Err(
-            "This desktop is already connected. Disconnect it before pairing with another server."
-                .into(),
-        );
-    }
+    crate::application::sync::require_no_service_connection(read_service_connection(&app).is_ok())?;
     let client = client_for_base(parsed.address.as_str())?;
     let (info, linked) = pair_with_server(
         &client,

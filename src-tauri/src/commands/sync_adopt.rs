@@ -3,11 +3,10 @@ use tauri::AppHandle;
 use zeroize::Zeroize;
 
 use super::sync::local_data_dir;
-use crate::vault::crypto::{
-    bytes_match, default_kdf_params, derive_key, encrypt_bytes, master_password_kdf_params,
-};
-use crate::vault::util::generate_recovery_kit;
-use crate::vault::{VaultState, RECOVERY_WRAP_AAD, WRAP_AAD};
+use crate::vault::crypto::{derive_key, encrypt_bytes, master_password_kdf_params};
+use crate::vault::{VaultState, WRAP_AAD};
+
+pub(super) use crate::application::sync::{prepare_recovery, verify_master_password};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,25 +14,6 @@ pub struct SyncAdoptResult {
     pub entry_count: usize,
     pub revision: u64,
     pub recovery_kit: String,
-}
-
-pub(super) fn verify_master_password(
-    vault: &crate::vault::UnlockedVault,
-    master_password: &str,
-) -> Result<(), String> {
-    let mut confirmed = crate::vault::crypto::unwrap_with_password(
-        master_password,
-        &vault.kdf,
-        &vault.key_wrap,
-        WRAP_AAD,
-    )?
-    .ok_or("That master password is not correct.")?;
-    let matches = vault.expose_vault_key(|key| Ok(bytes_match(confirmed.as_slice(), key)))?;
-    confirmed.zeroize();
-    if !matches {
-        return Err("That master password is not correct.".into());
-    }
-    Ok(())
 }
 
 pub(super) fn finish_adoption(
@@ -145,16 +125,6 @@ impl KeptThroughAdoption {
     }
 }
 
-pub(super) fn prepare_recovery(
-    key: &[u8; 32],
-) -> Result<(String, crate::sync::key_change::PreparedRecovery), String> {
-    let kit = generate_recovery_kit()?;
-    let kdf = default_kdf_params();
-    let wrapping_key = zeroize::Zeroizing::new(derive_key(&kit, &kdf)?);
-    let wrap = encrypt_bytes(&wrapping_key, key, RECOVERY_WRAP_AAD)?;
-    Ok((kit, crate::sync::key_change::PreparedRecovery { wrap, kdf }))
-}
-
 pub(super) fn adopt(
     vault: &mut crate::vault::UnlockedVault,
     key: [u8; 32],
@@ -223,6 +193,7 @@ mod tests {
     use super::*;
     use crate::vault::crypto::decrypt_bytes;
     use crate::vault::UnlockedVault;
+    use crate::vault::RECOVERY_WRAP_AAD;
     use sesame_core::api::create_vault;
 
     const PASSWORD: &str = "fictional master password";
