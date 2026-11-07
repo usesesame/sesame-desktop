@@ -9,8 +9,10 @@ use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
 pub(crate) mod file_choices;
+pub(crate) mod history;
 pub(crate) mod lifecycle;
 pub(crate) mod quick_access;
+pub(crate) mod record_writes;
 pub(crate) mod records;
 pub(crate) mod release;
 pub(crate) mod reveal;
@@ -24,6 +26,9 @@ mod backups_tests;
 
 #[cfg(test)]
 mod quick_access_tests;
+
+#[cfg(test)]
+mod record_writes_tests;
 
 #[cfg(test)]
 mod sync_tests;

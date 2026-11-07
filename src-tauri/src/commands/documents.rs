@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
@@ -6,16 +5,11 @@ use crate::application::document_attachments::attachment_for_save;
 use crate::commands::file_selection::path_from_file;
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
-    Attachment, DeleteDocumentMetadataResult, DocumentMetadata, DocumentMetadataInput,
+    DeleteDocumentMetadataResult, DocumentMetadata, DocumentMetadataInput,
     SaveDocumentMetadataResult,
 };
 use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::{VaultResult, VaultState};
-
-/// Local-only storage inside the encrypted payload blob, so worst-case growth stays bounded.
-pub const MAX_ATTACHMENT_BYTES: usize = 5 * 1024 * 1024;
-/// Bounds per-document storage to 25 MB total.
-pub const MAX_ATTACHMENTS_PER_DOCUMENT: usize = 5;
 
 fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMetadata> {
     let title = input.title.trim();
@@ -98,43 +92,6 @@ impl_record_commands! {
     extra_carry: |item, existing| item.attachments = existing.attachments.clone(),
 }
 
-fn attachment_from_input(
-    filename: &str,
-    content_type: &str,
-    data: &str,
-) -> VaultResult<Attachment> {
-    let filename = filename.trim();
-    if filename.is_empty() {
-        return Err("Name this attachment before adding it.".into());
-    }
-    if filename.chars().count() > 200 {
-        return Err("That attachment's name is too long.".into());
-    }
-    let content_type = content_type.trim();
-    if content_type.chars().count() > 128 {
-        return Err("That attachment's type is too long.".into());
-    }
-    let bytes = URL_SAFE_NO_PAD
-        .decode(data.as_bytes())
-        .map_err(|_| "That file could not be read.".to_string())?;
-    if bytes.is_empty() {
-        return Err("Choose a file to attach.".into());
-    }
-    if bytes.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!(
-            "Attachments are limited to {} MB.",
-            MAX_ATTACHMENT_BYTES / (1024 * 1024)
-        ));
-    }
-    Ok(Attachment {
-        id: random_id(),
-        filename: filename.to_string(),
-        content_type: content_type.to_string(),
-        size: bytes.len() as u64,
-        data: bytes,
-    })
-}
-
 /// No history capture: 20 full versions of binary attachments would multiply storage by 20x.
 #[tauri::command]
 pub fn add_document_attachment(
@@ -144,37 +101,16 @@ pub fn add_document_attachment(
     data: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<SaveDocumentMetadataResult> {
-    let attachment = attachment_from_input(&filename, &content_type, &data)?;
-
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before adding an attachment.")?;
-    let payload = session.open_payload()?;
-    let mut next_payload = payload.clone();
-    let index = next_payload
-        .documents
-        .iter()
-        .position(|document| document.id == document_id)
-        .ok_or("That saved document no longer exists.")?;
-    if next_payload.documents[index].attachments.len() >= MAX_ATTACHMENTS_PER_DOCUMENT {
-        return Err(format!(
-            "A document can hold up to {MAX_ATTACHMENTS_PER_DOCUMENT} attachments."
-        ));
-    }
-    let document = &mut next_payload.documents[index];
-    document.attachments.push(attachment);
-    document.updated_at = unix_timestamp();
-    document.revision = document.revision.saturating_add(1);
-
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
+    let saved = crate::application::record_writes::add_document_attachment_in_state(
+        &state,
+        &document_id,
+        &filename,
+        &content_type,
+        &data,
+    )?;
     Ok(SaveDocumentMetadataResult {
-        id: document_id,
-        snapshot: session.snapshot(),
+        id: saved.id,
+        snapshot: saved.snapshot,
     })
 }
 
@@ -225,33 +161,13 @@ pub fn remove_document_attachment(
     attachment_id: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<SaveDocumentMetadataResult> {
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before removing an attachment.")?;
-    let payload = session.open_payload()?;
-    let mut next_payload = payload.clone();
-    let index = next_payload
-        .documents
-        .iter()
-        .position(|document| document.id == document_id)
-        .ok_or("That saved document no longer exists.")?;
-    let document = &mut next_payload.documents[index];
-    let before = document.attachments.len();
-    document.attachments.retain(|item| item.id != attachment_id);
-    if document.attachments.len() == before {
-        return Err("That attachment no longer exists.".into());
-    }
-    document.updated_at = unix_timestamp();
-    document.revision = document.revision.saturating_add(1);
-
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
+    let saved = crate::application::record_writes::remove_document_attachment_in_state(
+        &state,
+        &document_id,
+        &attachment_id,
+    )?;
     Ok(SaveDocumentMetadataResult {
-        id: document_id,
-        snapshot: session.snapshot(),
+        id: saved.id,
+        snapshot: saved.snapshot,
     })
 }

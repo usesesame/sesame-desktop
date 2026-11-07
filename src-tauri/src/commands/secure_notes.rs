@@ -1,10 +1,10 @@
 use tauri::State;
 
+use crate::application::record_writes::set_secure_note_lock_in_state;
 use crate::commands::record_commands::impl_record_commands;
-use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::types::{
-    DeleteSecureNoteResult, SaveSecureNoteResult, SecureNote, SecureNoteInput, TaggedItem,
+    DeleteSecureNoteResult, SaveSecureNoteResult, SecureNote, SecureNoteInput,
 };
 use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::{VaultResult, VaultState};
@@ -78,49 +78,10 @@ pub fn set_secure_note_lock(
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<SaveSecureNoteResult> {
-    set_secure_note_lock_in_state(&id, locked, &state, &presence)
-}
-
-pub(crate) fn set_secure_note_lock_in_state(
-    id: &str,
-    locked: bool,
-    state: &VaultState,
-    presence: &ReleasePresence,
-) -> VaultResult<SaveSecureNoteResult> {
-    if !locked {
-        require_release_presence(state, presence)?;
-    }
-    let id = id.trim();
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before changing a note lock.")?;
-    let payload = session.open_payload()?;
-    let mut next_payload = payload.clone();
-    let mut tagged = next_payload
-        .take_active_item(id)
-        .ok_or("That saved note no longer exists.")?;
-    let TaggedItem::SecureNote(note) = &mut tagged else {
-        return Err("That item id belongs to a different kind of saved item.".into());
-    };
-    if note.locked == locked {
-        return Ok(SaveSecureNoteResult {
-            id: id.to_string(),
-            snapshot: session.snapshot(),
-        });
-    }
-    note.locked = locked;
-    note.updated_at = unix_timestamp();
-    note.revision = note.revision.saturating_add(1);
-    next_payload.insert_active_item(&mut tagged)?;
-    crate::vault::storage::commit_payload_change(session, next_payload)?;
-    state.advance_session_epoch();
+    let saved = set_secure_note_lock_in_state(&id, locked, &state, &presence)?;
     Ok(SaveSecureNoteResult {
-        id: id.to_string(),
-        snapshot: session.snapshot(),
+        id: saved.id,
+        snapshot: saved.snapshot,
     })
 }
 

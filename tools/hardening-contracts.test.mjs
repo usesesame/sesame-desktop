@@ -596,7 +596,10 @@ test('the record read macro redacts and the gated commands require presence', ()
   const copyInState = braceBody(reveal, reveal.indexOf('pub(crate) fn copy_item_field_in_state('))
   assert.match(copyInState, /item_field_in_state\(state, presence, id, kind, field\)\?/)
   assert.match(copyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
-  assert.match(macro, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
+  const recordWrites = read('src-tauri', 'src', 'application', 'record_writes.rs').split('#[cfg(test)]')[0]
+  assert.match(recordWrites, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
+  assert.match(braceBody(macro, macro.indexOf('pub(crate) fn $save_in_state_fn(')), /save_record_in_state\(/, 'the record save wrapper does not run the application rule')
+  assert.match(braceBody(macro, macro.indexOf('pub fn $delete_fn(')), /delete_record_in_state::<\$Item>\(/, 'the record delete command does not run the application rule')
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs').split('#[cfg(test)]')[0]
   const quickRules = read('src-tauri', 'src', 'application', 'quick_access.rs').split('#[cfg(test)]')[0]
   assert.match(braceBody(quickRules, quickRules.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
@@ -612,8 +615,10 @@ test('the record read macro redacts and the gated commands require presence', ()
 
 test('turning a note lock off needs the presence check and turning it on does not', () => {
   const notes = read('src-tauri', 'src', 'commands', 'secure_notes.rs').split('#[cfg(test)]')[0]
-  const body = braceBody(notes, notes.indexOf('pub(crate) fn set_secure_note_lock_in_state('))
+  const rules = read('src-tauri', 'src', 'application', 'record_writes.rs').split('#[cfg(test)]')[0]
+  const body = braceBody(rules, rules.indexOf('pub(crate) fn set_secure_note_lock_in_state('))
   assert.match(body, /if !locked \{\s*require_release_presence\(state, presence\)\?;\s*\}/, 'unlocking a note no longer needs the presence check')
+  assert.match(braceBody(notes, notes.indexOf('pub fn set_secure_note_lock(')), /set_secure_note_lock_in_state\(/, 'set_secure_note_lock does not run the application rule')
   assert.match(notes, /item\.locked \|= existing\.locked;/, 'a save can now turn a note lock off')
   assert.match(read('src-tauri', 'src', 'lib.rs'), /commands::set_secure_note_lock,/, 'set_secure_note_lock is not registered')
 })
