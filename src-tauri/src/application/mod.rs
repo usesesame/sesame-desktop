@@ -7,10 +7,14 @@ use zeroize::Zeroizing;
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod lifecycle;
+pub(crate) mod quick_access;
 pub(crate) mod records;
 pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
+
+#[cfg(test)]
+mod quick_access_tests;
 
 #[cfg(test)]
 mod tests;

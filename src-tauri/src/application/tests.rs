@@ -23,10 +23,10 @@ const MASTER_PASSWORD: &str = "fictional master password";
 const WRONG_PASSWORD: &str = "fictional wrong password";
 const EMIT_ERROR: &str = "Sesame could not notify the interface that the vault locked.";
 const CANARY: &str = "fictional-secret-canary";
-const COPY_EPOCH: u64 = 41;
+pub(super) const COPY_EPOCH: u64 = 41;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Effect {
+pub(super) enum Effect {
     ReportKeyPageFallback,
     ObserveUnlock,
     ObserveLock {
@@ -43,7 +43,7 @@ enum Effect {
     EmitVaultLocked,
 }
 
-struct FakeEffects<'a> {
+pub(super) struct FakeEffects<'a> {
     path: PathBuf,
     presence: Option<&'a ReleasePresence>,
     fail_emit: bool,
@@ -52,7 +52,7 @@ struct FakeEffects<'a> {
 }
 
 impl<'a> FakeEffects<'a> {
-    fn new(path: PathBuf) -> Self {
+    pub(super) fn new(path: PathBuf) -> Self {
         Self {
             path,
             presence: None,
@@ -76,7 +76,7 @@ impl<'a> FakeEffects<'a> {
         }
     }
 
-    fn calls(&self) -> Vec<Effect> {
+    pub(super) fn calls(&self) -> Vec<Effect> {
         self.calls.borrow().clone()
     }
 
@@ -169,7 +169,7 @@ impl Drop for TempVault {
     }
 }
 
-fn grant(vault: &TestVault, presence: &ReleasePresence) {
+pub(super) fn grant(vault: &TestVault, presence: &ReleasePresence) {
     let session = vault.state.session.lock().expect("session lock");
     presence
         .grant_with_password(

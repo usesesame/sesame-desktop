@@ -333,9 +333,21 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   assert.doesNotMatch(quickView, /copyToClipboard|getQuickAccessField/, 'the quick-access window holds a copied value')
   assert.match(quickView, /openQuickAccessItem/)
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs')
-  assert.match(quickCommands, /window\.label\(\) == QUICK_ACCESS_WINDOW/)
-  assert.match(quickCommands, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
-  assert.doesNotMatch(quickCommands.split('#[cfg(test)]\nmod tests')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
+  const quickRules = read('src-tauri', 'src', 'application', 'quick_access.rs').split('#[cfg(test)]')[0]
+  assert.match(quickRules, /window_label == QUICK_ACCESS_WINDOW/)
+  assert.match(quickRules, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
+  for (const name of ['get_quick_access_status', 'search_quick_access_items', 'copy_quick_access_field', 'open_quick_access_item']) {
+    const start = quickCommands.indexOf(`fn ${name}(`)
+    assert.ok(start >= 0, `${name} is missing`)
+    assert.match(braceBody(quickCommands, start), /require_quick_access\(window\.label\(\)\)\?;/, `${name} no longer requires the quick-access window`)
+  }
+  assert.match(quickCommands, /quick_access_status_in_state\(/, 'get_quick_access_status no longer runs the application status rule')
+  assert.match(quickCommands, /search_quick_access_items_in_state\(/, 'search_quick_access_items no longer runs the application search rule')
+  assert.match(quickCommands, /copy_quick_access_field_in_state\(/, 'copy_quick_access_field no longer runs the application copy rule')
+  assert.match(quickCommands, /open_quick_access_item_in_state\(/, 'open_quick_access_item no longer runs the application open rule')
+  for (const [source, text] of [['command', quickCommands], ['application', quickRules]]) {
+    assert.doesNotMatch(text, /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/, `the quick-access ${source} gained a secret-bearing record shape`)
+  }
 })
 
 function assertNoUpdaterPermissions(projectRoot) {
@@ -586,7 +598,13 @@ test('the record read macro redacts and the gated commands require presence', ()
   assert.match(copyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
   assert.match(macro, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs').split('#[cfg(test)]')[0]
-  assert.match(braceBody(quickCommands, quickCommands.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
+  const quickRules = read('src-tauri', 'src', 'application', 'quick_access.rs').split('#[cfg(test)]')[0]
+  assert.match(braceBody(quickRules, quickRules.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
+  const quickCopy = braceBody(quickCommands, quickCommands.indexOf('fn copy_quick_access_field('))
+  assert.match(quickCopy, /copy_quick_access_field_in_state\(/, 'copy_quick_access_field does not go through the application rule')
+  const quickCopyInState = braceBody(quickRules, quickRules.indexOf('fn copy_quick_access_field_in_state('))
+  assert.match(quickCopyInState, /quick_access_field_in_state\(state, presence, id, field\)\?/)
+  assert.match(quickCopyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
   for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach', 'copy_quick_access_field']) {
     assert.match(read('src-tauri', 'src', 'lib.rs'), new RegExp(`commands::${name},`), `${name} is not registered`)
   }
