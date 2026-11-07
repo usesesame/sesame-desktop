@@ -73,8 +73,22 @@ test('the saved password is revealed only through a presence gate', () => {
   const logins = read('src-tauri', 'src', 'commands', 'logins.rs')
   const start = logins.indexOf('pub fn reveal_login_secret(')
   assert.ok(start >= 0, 'reveal_login_secret does not exist')
-  const body = logins.slice(start, logins.indexOf('\n#[cfg(test)]', start))
-  assert.match(body, /require_release_presence\(&?state, &?presence\)/)
+  const next = logins.indexOf('\n#[tauri::command]', start)
+  const command = logins.slice(start, next === -1 ? logins.length : next)
+  assert.match(
+    command,
+    /reveal_login_secret_in_state\(/,
+    'reveal_login_secret does not call its application rule',
+  )
+  const rules = read('src-tauri', 'src', 'application', 'logins.rs')
+  const ruleStart = rules.indexOf('pub(crate) fn reveal_login_secret_in_state(')
+  assert.ok(ruleStart >= 0, 'reveal_login_secret_in_state is missing from the application module')
+  const body = rules.slice(ruleStart, rules.indexOf('\npub(crate) fn ', ruleStart))
+  assert.match(body, /require_release_presence\(state, presence\)\?/)
+  assert.ok(
+    body.indexOf('require_release_presence(state, presence)?') < body.indexOf('session.open_item('),
+    'reveal_login_secret opens the item before the presence check',
+  )
   const vault = read('src', 'lib', 'vault.ts')
   assert.match(vault, /invoke(<[^>]+>)?\('reveal_login_secret', \{ id \}\)/)
 })
@@ -119,6 +133,15 @@ test('a blank password on edit keeps the stored secret', () => {
   const saveBody = logins.slice(saveStart, saveNext === -1 ? logins.length : saveNext)
   assert.match(
     saveBody,
+    /save_login_in_state\(/,
+    'save_login does not call its application rule',
+  )
+  const rules = read('src-tauri', 'src', 'application', 'logins.rs')
+  const ruleStart = rules.indexOf('pub(crate) fn save_login_in_state(')
+  assert.ok(ruleStart >= 0, 'save_login_in_state is missing from the application module')
+  const ruleBody = rules.slice(ruleStart, rules.indexOf('\npub(crate) fn ', ruleStart))
+  assert.match(
+    ruleBody,
     /payload_with_saved_login\(/,
     'save_login must write through the one vault-domain mutation',
   )

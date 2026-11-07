@@ -11,6 +11,7 @@ pub(crate) mod backups;
 pub(crate) mod file_choices;
 pub(crate) mod history;
 pub(crate) mod lifecycle;
+pub(crate) mod logins;
 pub(crate) mod quick_access;
 pub(crate) mod record_writes;
 pub(crate) mod records;
@@ -23,6 +24,9 @@ pub(crate) mod sync_recovery;
 
 #[cfg(test)]
 mod backups_tests;
+
+#[cfg(test)]
+mod logins_tests;
 
 #[cfg(test)]
 mod quick_access_tests;
