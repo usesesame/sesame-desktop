@@ -27,6 +27,7 @@ pub(crate) mod reveal;
 pub(crate) mod search;
 pub(crate) mod sync;
 pub(crate) mod sync_adopt;
+pub(crate) mod sync_join;
 pub(crate) mod sync_pairing;
 pub(crate) mod sync_recovery;
 pub(crate) mod sync_transfer;
@@ -56,6 +57,9 @@ mod quick_access_tests;
 
 #[cfg(test)]
 mod record_writes_tests;
+
+#[cfg(test)]
+mod sync_pairing_tests;
 
 #[cfg(test)]
 mod sync_tests;

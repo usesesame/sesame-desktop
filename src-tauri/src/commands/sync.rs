@@ -2,15 +2,11 @@ use std::path::PathBuf;
 
 use tauri::AppHandle;
 
-use crate::application::sync::SyncStore;
+use crate::application::sync::{clean_label, SyncStore};
 use crate::sync::client::SyncClient;
-use crate::sync::identity::DeviceIdentity;
 use crate::sync::state::SyncState;
 use crate::vault::{VaultResult, VaultState};
 
-pub(super) use crate::application::sync::{
-    clean_label, present, present_proof, refresh, vault_id_of,
-};
 pub use crate::application::sync::{SyncLocalStatusView, SyncStatusView};
 
 pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
@@ -20,28 +16,8 @@ pub(super) fn local_data_dir(app: &AppHandle) -> VaultResult<PathBuf> {
         .map_err(|_| "Sesame could not locate its local data folder.".to_string())
 }
 
-pub(super) fn identity_file(app: &AppHandle) -> VaultResult<PathBuf> {
-    Ok(SyncStore::new(local_data_dir(app)?).identity_path())
-}
-
-pub(super) fn this_identity(app: &AppHandle) -> VaultResult<DeviceIdentity> {
-    SyncStore::new(local_data_dir(app)?).this_identity()
-}
-
-pub(super) fn load_state(app: &AppHandle) -> VaultResult<Option<SyncState>> {
-    SyncStore::new(local_data_dir(app)?).load_state()
-}
-
 pub(super) fn load_join_state(app: &AppHandle) -> VaultResult<Option<SyncState>> {
     SyncStore::new(local_data_dir(app)?).load_join_state()
-}
-
-pub(super) fn save_state(app: &AppHandle, state: &SyncState) -> VaultResult<()> {
-    SyncStore::new(local_data_dir(app)?).save_state(state)
-}
-
-pub(super) fn require_no_pending_key_change(app: &AppHandle) -> VaultResult<()> {
-    SyncStore::new(local_data_dir(app)?).require_no_pending_key_change()
 }
 
 pub(super) fn forget_everything(app: &AppHandle) -> VaultResult<()> {
@@ -187,7 +163,7 @@ mod local_status_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::application::sync::present;
     use crate::sync::client::SyncError;
 
     #[test]
@@ -225,10 +201,11 @@ mod device_name_tests {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
 
-    use super::*;
     use crate::application::sync::{names_for, views_from};
     use crate::sync::devicelist::DeviceList;
     use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
+    use crate::sync::identity::DeviceIdentity;
+    use crate::sync::state::SyncState;
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
     const FIRST_KEY: [u8; 32] = [3u8; 32];

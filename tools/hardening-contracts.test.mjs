@@ -1029,7 +1029,6 @@ test('the vault key page fallback is reported once per installed key', () => {
   const applicationLifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs')
   const applicationUnlock = read('src-tauri', 'src', 'application', 'unlock.rs')
   const effects = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs')
-  const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
   const applicationSyncAdopt = read('src-tauri', 'src', 'application', 'sync_adopt.rs')
   const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
 
@@ -1076,10 +1075,17 @@ test('the vault key page fallback is reported once per installed key', () => {
     /report_key_page_fallback\(/,
     'finish_adoption_in_state does not report a key page fallback',
   )
+  const applicationJoin = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const syncPairingCommand = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
   assert.match(
-    braceBody(syncAdopt, syncAdopt.indexOf('fn finish_adoption(')),
+    braceBody(applicationJoin, applicationJoin.indexOf('fn complete_join(')),
     /finish_adoption_in_state\(/,
-    'the finish_adoption command does not run the application rule',
+    'the join rule does not adopt through the application rule that reports the key page fallback',
+  )
+  assert.match(
+    syncPairingCommand,
+    /join_with_code_in_state\(/,
+    'the join command does not run the application join rule',
   )
 
   const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
@@ -1580,6 +1586,7 @@ test('the sync commands hand their policy to the application module', () => {
   const recovery = read('src-tauri', 'src', 'application', 'sync_recovery.rs')
   const recoveryCommands = read('src-tauri', 'src', 'commands', 'sync_transfer_recovery.rs')
   const applicationPairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
+  const applicationJoin = read('src-tauri', 'src', 'application', 'sync_join.rs')
   const applicationTransfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
 
   const routes = [
@@ -1601,7 +1608,8 @@ test('the sync commands hand their policy to the application module', () => {
     [transfer, 'sync_now', /run_one_transfer\(/],
     [pairing, 'sync_pairing_code', /pairing_code\(/],
     [pairing, 'sync_cancel_pairing', /cancel_pairing\(/],
-    [pairing, 'sync_join_with_code', /verify_master_password_now_in_state\(/],
+    [pairing, 'sync_approve_with_code', /approve\(/],
+    [pairing, 'sync_join_with_code', /join_preflight_in_state\(/],
     [account, 'link_custom_server', /require_no_service_connection\(/],
   ]
   for (const [source, name, call] of routes) {
@@ -1627,6 +1635,24 @@ test('the sync commands hand their policy to the application module', () => {
       `${name} does not hand its policy to the application module`,
     )
   }
+  for (const [name, call] of [['approve', /approve_in_state\(/]]) {
+    assert.match(
+      braceBody(pairing, pairing.indexOf(`fn ${name}(`)),
+      call,
+      `${name} does not hand its policy to the application module`,
+    )
+  }
+  const joinCommand = braceBody(pairing, pairing.indexOf('fn sync_join_with_code('))
+  assert.match(joinCommand, /join_with_code_in_state\(/, 'sync_join_with_code does not run the application join rule')
+  assert.ok(
+    joinCommand.indexOf('join_preflight_in_state(') < joinCommand.indexOf('SyncClient::connect('),
+    'the master password must be checked before the service is contacted',
+  )
+  assert.match(applicationJoin, /fn join_preflight_in_state\(/, 'the join preflight is missing from the application module')
+  assert.match(applicationJoin, /verify_master_password_now_in_state\(/, 'the join preflight no longer checks the master password')
+  assert.match(applicationJoin, /fn join_with_code_in_state/, 'the join rule is missing from the application module')
+  assert.match(applicationJoin, /fn finish_join_transaction/, 'the join transaction is missing from the application module')
+  assert.match(applicationPairing, /fn approve_in_state/, 'the approval rule is missing from the application module')
   for (const name of [
     'upload_vault_in_state',
     'download_vault_in_state',
