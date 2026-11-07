@@ -746,24 +746,23 @@ test('desktop updates use an account-independent signed static manifest', () => 
 
 test('every file command resolves its path through a Rust-issued choice', () => {
   const commands = [
-    ['backups.rs', 'export_backup'],
-    ['backups.rs', 'export_vault_csv'],
-    ['backups.rs', 'export_recovery_kit'],
-    ['backups.rs', 'inspect_backup'],
-    ['backups.rs', 'verify_backup'],
-    ['backups.rs', 'restore_backup'],
-    ['imports.rs', 'preview_import'],
-    ['support.rs', 'export_diagnostics'],
+    ['backups.rs', 'backups.rs', 'export_backup'],
+    ['backups.rs', 'backups.rs', 'export_vault_csv'],
+    ['backups.rs', 'backups.rs', 'export_recovery_kit'],
+    ['backups.rs', 'backups.rs', 'inspect_backup'],
+    ['backups.rs', 'backups.rs', 'verify_backup'],
+    ['backups.rs', 'backups.rs', 'restore_backup'],
+    ['imports.rs', 'imports.rs', 'preview_import'],
+    ['support.rs', null, 'export_diagnostics'],
   ]
-  const application = read('src-tauri', 'src', 'application', 'backups.rs')
-  for (const [file, command] of commands) {
+  for (const [file, applicationFile, command] of commands) {
     const source = read('src-tauri', 'src', 'commands', file)
     const start = source.indexOf(`pub fn ${command}(`)
     assert.ok(start >= 0, `${command} does not exist in ${file}`)
     const next = source.indexOf('\n#[tauri::command]', start)
     const body = source.slice(start, next === -1 ? source.length : next)
     const resolution = command === 'restore_backup' ? /claim\(/ : /resolve_path\(/
-    if (file !== 'backups.rs') {
+    if (applicationFile === null) {
       assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
       continue
     }
@@ -772,6 +771,7 @@ test('every file command resolves its path through a Rust-issued choice', () => 
       new RegExp(`\\b${command}_in_state\\(`),
       `${command} does not call its application rule`,
     )
+    const application = read('src-tauri', 'src', 'application', applicationFile)
     const applicationStart = application.indexOf(`pub(crate) fn ${command}_in_state(`)
     assert.ok(applicationStart >= 0, `${command}_in_state does not exist in the application module`)
     const applicationNext = application.indexOf('\npub(crate) fn ', applicationStart)

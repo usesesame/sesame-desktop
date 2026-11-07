@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use zeroize::Zeroizing;
 
+use crate::application::breach_scan::{
+    BreachScanProgress, BreachScanState, BREACH_SCAN_FINISHED_EVENT, BREACH_SCAN_PROGRESS_EVENT,
+};
 use crate::application::DesktopEffects;
-use crate::commands::BreachScanState;
 use crate::release::ReleasePresence;
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
@@ -145,5 +147,16 @@ impl DesktopEffects for DesktopHostEffects<'_> {
         reason: &'static str,
     ) {
         crate::browser_fill::emit_approval_cancelled(self.app, kind, approval_id, reason);
+    }
+
+    fn emit_breach_scan_progress(&self, checked: usize, total: usize) {
+        let _ = self.app.emit(
+            BREACH_SCAN_PROGRESS_EVENT,
+            BreachScanProgress { checked, total },
+        );
+    }
+
+    fn emit_breach_scan_finished(&self) {
+        let _ = self.app.emit(BREACH_SCAN_FINISHED_EVENT, ());
     }
 }
