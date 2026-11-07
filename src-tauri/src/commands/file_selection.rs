@@ -58,7 +58,7 @@ impl FileClaim {
 }
 
 impl FileSelectionState {
-    fn issue(&self, purpose: FilePurpose, path: PathBuf) -> VaultResult<String> {
+    pub(crate) fn issue(&self, purpose: FilePurpose, path: PathBuf) -> VaultResult<String> {
         let mut bytes = [0_u8; 32];
         fill_random(&mut bytes);
         let token = URL_SAFE_NO_PAD.encode(bytes);

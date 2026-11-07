@@ -432,7 +432,7 @@ pub(crate) fn retire_unlock_methods_after_key_rotation(
     state.advance_session_epoch();
 }
 
-pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &State<'_, VaultState>) {
+pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &VaultState) {
     if let Ok(mut guard) = state.pin_guard.lock() {
         guard.record_success();
         state.mark_pin_throttle_loaded();

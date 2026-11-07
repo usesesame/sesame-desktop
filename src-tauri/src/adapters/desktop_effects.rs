@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 use crate::application::DesktopEffects;
 use crate::commands::BreachScanState;
 use crate::release::ReleasePresence;
+use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) struct DesktopHostEffects<'a> {
@@ -74,5 +75,29 @@ impl DesktopEffects for DesktopHostEffects<'_> {
 
     fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()> {
         crate::commands::establish_pin_throttle_state(self.app, state)
+    }
+
+    fn record_recovery_export(&self, vault_id: &str, revision: u64) {
+        let _ = crate::vault::recovery_health::update_after_export_with_payload(
+            self.app, vault_id, revision,
+        );
+    }
+
+    fn record_recovery_verification(&self, vault_id: &str, revision: u64) {
+        let _ = crate::vault::recovery_health::update_after_verification_with_payload(
+            self.app, vault_id, revision,
+        );
+    }
+
+    fn recovery_health(&self, current_vault_id: Option<&str>) -> VaultResult<RecoveryHealth> {
+        crate::vault::recovery_health::get_health(self.app, current_vault_id)
+    }
+
+    fn reset_rollback_after_restore(&self, vault_id: Option<&str>, revision: u64) {
+        crate::rollback_guard::reset_after_restore(self.app, vault_id, revision);
+    }
+
+    fn discard_pin_throttle_state(&self, state: &VaultState) {
+        crate::commands::discard_pin_throttle_state(self.app, state);
     }
 }

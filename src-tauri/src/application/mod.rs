@@ -4,14 +4,19 @@ use std::path::PathBuf;
 
 use zeroize::Zeroizing;
 
+use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
+pub(crate) mod backups;
 pub(crate) mod lifecycle;
 pub(crate) mod quick_access;
 pub(crate) mod records;
 pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
+
+#[cfg(test)]
+mod backups_tests;
 
 #[cfg(test)]
 mod quick_access_tests;
@@ -34,4 +39,9 @@ pub(crate) trait DesktopEffects {
     fn cancel_breach_scan(&self);
     fn emit_vault_locked(&self) -> Result<(), ()>;
     fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()>;
+    fn record_recovery_export(&self, vault_id: &str, revision: u64);
+    fn record_recovery_verification(&self, vault_id: &str, revision: u64);
+    fn recovery_health(&self, current_vault_id: Option<&str>) -> VaultResult<RecoveryHealth>;
+    fn reset_rollback_after_restore(&self, vault_id: Option<&str>, revision: u64);
+    fn discard_pin_throttle_state(&self, state: &VaultState);
 }

@@ -750,6 +750,7 @@ test('every file command resolves its path through a Rust-issued choice', () => 
     ['imports.rs', 'preview_import'],
     ['support.rs', 'export_diagnostics'],
   ]
+  const application = read('src-tauri', 'src', 'application', 'backups.rs')
   for (const [file, command] of commands) {
     const source = read('src-tauri', 'src', 'commands', file)
     const start = source.indexOf(`pub fn ${command}(`)
@@ -757,7 +758,24 @@ test('every file command resolves its path through a Rust-issued choice', () => 
     const next = source.indexOf('\n#[tauri::command]', start)
     const body = source.slice(start, next === -1 ? source.length : next)
     const resolution = command === 'restore_backup' ? /claim\(/ : /resolve_path\(/
-    assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
+    if (file !== 'backups.rs') {
+      assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
+      continue
+    }
+    assert.match(
+      body,
+      new RegExp(`\\b${command}_in_state\\(`),
+      `${command} does not call its application rule`,
+    )
+    const applicationStart = application.indexOf(`pub(crate) fn ${command}_in_state(`)
+    assert.ok(applicationStart >= 0, `${command}_in_state does not exist in the application module`)
+    const applicationNext = application.indexOf('\npub(crate) fn ', applicationStart)
+    const applicationBody = application.slice(applicationStart, applicationNext === -1 ? application.length : applicationNext)
+    assert.match(
+      applicationBody,
+      resolution,
+      `${command} takes a file path without a Rust-issued choice`,
+    )
   }
 
   const selection = read('src-tauri', 'src', 'commands', 'file_selection.rs')
