@@ -563,17 +563,27 @@ test('the record read macro redacts and the gated commands require presence', ()
   assert.ok(getStart >= 0, 'the record read command is missing from the macro')
   const getBody = macro.slice(getStart, macro.indexOf('#[tauri::command]', getStart))
   assert.match(getBody, /RecordView<\$Item>/)
-  assert.match(getBody, /redacted_view\(item\.clone\(\)\)/)
+  assert.match(getBody, /record_view_in_state\(/)
   assert.doesNotMatch(getBody, /Ok\(item\.clone\(\)\)/)
 
+  const records = read('src-tauri', 'src', 'application', 'records.rs').split('#[cfg(test)]')[0]
+  assert.match(records, /pub struct RecordView<T>/)
+  assert.match(records, /redacted_view\(record\.clone\(\)\)/)
+
   const release = read('src-tauri', 'src', 'commands', 'secret_release.rs').split('#[cfg(test)]')[0]
-  const field = release.slice(release.indexOf('pub(crate) fn item_field_in_state('), release.indexOf('#[tauri::command]'))
+  const reveal = read('src-tauri', 'src', 'application', 'reveal.rs').split('#[cfg(test)]')[0]
+  const field = reveal.slice(reveal.indexOf('pub(crate) fn item_field_in_state('))
   assert.match(field, /require_release_presence\(state, presence\)\?/)
-  for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach']) {
+  for (const name of ['release_item_field', 'check_login_breach']) {
     const start = release.indexOf(`fn ${name}(`)
     assert.ok(start >= 0, `${name} is missing`)
     assert.match(braceBody(release, start), /item_field_in_state\(/, `${name} does not go through the presence-checked release`)
   }
+  const copy = braceBody(release, release.indexOf('fn copy_item_field('))
+  assert.match(copy, /copy_item_field_in_state\(/, 'copy_item_field does not go through the presence-checked release')
+  const copyInState = braceBody(reveal, reveal.indexOf('pub(crate) fn copy_item_field_in_state('))
+  assert.match(copyInState, /item_field_in_state\(state, presence, id, kind, field\)\?/)
+  assert.match(copyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
   assert.match(macro, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs').split('#[cfg(test)]')[0]
   assert.match(braceBody(quickCommands, quickCommands.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
@@ -595,11 +605,13 @@ test('only a master password unlock counts as the presence check', () => {
     .filter((path) => /grant_after_unlock\(/.test(read(relative(root, path)).split('#[cfg(test)]')[0]))
     .map((path) => relative(root, path).split('\\').join('/'))
     .sort()
-  assert.deepEqual(callers, ['src-tauri/src/commands/lifecycle.rs', 'src-tauri/src/release.rs'])
-  const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  assert.deepEqual(callers, ['src-tauri/src/application/lifecycle.rs', 'src-tauri/src/release.rs'])
+  const lifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
-  const body = braceBody(lifecycle, lifecycle.indexOf('pub fn unlock_vault('))
+  const body = braceBody(lifecycle, lifecycle.indexOf('pub(crate) fn unlock_vault_in_state('))
   assert.match(body, /if result\.is_ok\(\) \{[\s\S]*presence\.grant_after_unlock\(state\.session_epoch\(\)\);/, 'a master password unlock no longer grants the presence check after it succeeds')
+  const command = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  assert.match(braceBody(command, command.indexOf('pub fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
 })
 
 test('the window never keeps a secret value in a record view', () => {
@@ -958,6 +970,8 @@ test('every diagnostic code the app can emit stays on the diagnostics allowlist'
 test('the vault key page fallback is reported once per installed key', () => {
   const vault = read('src-tauri', 'src', 'vault', 'mod.rs')
   const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs')
+  const applicationLifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs')
+  const effects = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs')
   const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
   const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
 
@@ -966,7 +980,7 @@ test('the vault key page fallback is reported once per installed key', () => {
   assert.match(vault, /record_vault_key_fallback\(app, "key_page_fallback"\)/)
   assert.match(diagnostics, /"key_page_fallback" => "warn"/)
 
-  for (const name of ['create_vault', 'install_unlocked_session', 'change_master_password']) {
+  for (const name of ['create_vault', 'change_master_password']) {
     const start = lifecycle.indexOf(`fn ${name}(`)
     assert.ok(start >= 0, `${name} is missing from lifecycle.rs`)
     assert.match(
@@ -975,6 +989,18 @@ test('the vault key page fallback is reported once per installed key', () => {
       `${name} does not report a key page fallback`,
     )
   }
+  const install = applicationLifecycle.indexOf('fn install_unlocked_session(')
+  assert.ok(install >= 0, 'install_unlocked_session is missing from the application lifecycle')
+  assert.match(
+    braceBody(applicationLifecycle, install),
+    /report_key_page_fallback\(/,
+    'install_unlocked_session does not report a key page fallback',
+  )
+  assert.match(
+    braceBody(effects, effects.indexOf('fn report_key_page_fallback(')),
+    /crate::vault::report_key_page_fallback\(/,
+    'the desktop effect no longer reports the key page fallback',
+  )
   const adopt = syncAdopt.indexOf('fn finish_adoption(')
   assert.ok(adopt >= 0, 'finish_adoption is missing from sync_adopt.rs')
   assert.match(

@@ -2,10 +2,13 @@ use std::collections::HashSet;
 
 use tauri::State;
 
+use crate::application::records::{
+    login_card_in_state, login_summary_in_state, vault_snapshot_in_state,
+};
 use crate::release::ReleasePresence;
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{entry_from_input, resolved_totp};
-use crate::vault::snapshot::{current_totp, login_card_for, login_summary_for};
+use crate::vault::snapshot::{current_totp, login_summary_for};
 use crate::vault::storage::{
     commit_payload_change, materialize_entry_folder, payload_with_added_item_tag,
     payload_with_item_favourite, payload_with_item_folder_id, payload_with_recorded_item_use,
@@ -21,12 +24,7 @@ use crate::vault::{
 
 #[tauri::command]
 pub fn get_vault_snapshot(state: State<'_, VaultState>) -> VaultResult<VaultSnapshot> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    Ok(session.snapshot())
+    vault_snapshot_in_state(&state)
 }
 
 /// Small on purpose: a shortcut for retyping an address, not a directory.
@@ -170,17 +168,7 @@ pub fn get_login_card(
     id: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<crate::vault::types::LoginCard> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let item = session.open_item(&id)?;
-    let TaggedItem::Login(entry) = &*item else {
-        return Err("That saved login no longer exists.".into());
-    };
-    let index = session.snapshot();
-    Ok(login_card_for(&index.folders, entry))
+    login_card_in_state(&state, &id)
 }
 
 #[tauri::command]
@@ -188,16 +176,7 @@ pub fn get_login_summary(
     id: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<crate::vault::types::LoginSummary> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let item = session.open_item(&id)?;
-    let TaggedItem::Login(entry) = &*item else {
-        return Err("That saved login no longer exists.".into());
-    };
-    Ok(login_summary_for(entry))
+    login_summary_in_state(&state, &id)
 }
 
 #[tauri::command]

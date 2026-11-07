@@ -127,7 +127,7 @@ pub(crate) fn set_secure_note_lock_in_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::secret_release::item_field_in_state;
+    use crate::application::reveal::item_field_in_state;
     use crate::commands::test_support::TestVault;
     use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
     use crate::vault::types::TaggedItem;

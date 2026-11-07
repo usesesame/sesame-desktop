@@ -144,6 +144,23 @@ test('desktop code and owned checks do not read a former product sibling', () =>
   assert.deepEqual(offenders, [], `desktop code reads a former sibling:\n${offenders.join('\n')}`)
 })
 
+test('the application policy module does not depend on the desktop host', () => {
+  const directory = join(root, 'src-tauri', 'src', 'application')
+  assert.ok(statSync(directory).isDirectory(), 'the application module is missing')
+  assert.match(read('src-tauri', 'src', 'lib.rs'), /^mod application;$/m)
+
+  const files = filesUnder(directory)
+  assert.ok(files.length > 0, 'the application module contains no files')
+  const offenders = files
+    .filter((path) => /tauri/i.test(readFileSync(path, 'utf8')))
+    .map((path) => relative(root, path).replaceAll('\\', '/'))
+  assert.deepEqual(
+    offenders,
+    [],
+    `the application module mentions the desktop host:\n${offenders.join('\n')}`,
+  )
+})
+
 test('desktop Sync fixtures are digest-bound local snapshots', () => {
   const contractRoot = join(root, 'src-tauri', 'contracts', 'sync', 'v3')
   const source = JSON.parse(readFileSync(join(contractRoot, 'source.json'), 'utf8'))

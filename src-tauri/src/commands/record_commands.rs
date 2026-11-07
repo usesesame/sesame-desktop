@@ -43,19 +43,16 @@ macro_rules! impl_record_commands {
         pub fn $get_fn(
             id: String,
             state: tauri::State<'_, crate::vault::VaultState>,
-        ) -> crate::vault::VaultResult<crate::commands::secret_release::RecordView<$Item>> {
-            let session = state
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-            let session = session.as_ref().ok_or("Unlock your vault first.")?;
-            let item = session.open_item(&id)?;
-            match &*item {
-                crate::vault::types::TaggedItem::$Variant(item) => {
-                    Ok(crate::commands::secret_release::redacted_view(item.clone()))
-                }
-                _ => Err(format!("That saved {} no longer exists.", $missing_noun)),
-            }
+        ) -> crate::vault::VaultResult<crate::application::records::RecordView<$Item>> {
+            crate::application::records::record_view_in_state(
+                &state,
+                &id,
+                $missing_noun,
+                |item| match item {
+                    crate::vault::types::TaggedItem::$Variant(record) => Some(record),
+                    _ => None,
+                },
+            )
         }
 
         #[tauri::command]

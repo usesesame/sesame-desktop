@@ -82,17 +82,8 @@ pub fn report_key_page_fallback(app: &tauri::AppHandle, unlocked: &UnlockedVault
 
 /// The desktop event half of locking; every lock entry point calls this so the behavior cannot drift.
 pub fn lock_and_notify(state: &VaultState, app: &tauri::AppHandle) -> VaultResult<()> {
-    use tauri::{Emitter, Manager};
-    crate::rollback_guard::observe_lock(app, state);
-    state.lock_for_lifecycle()?;
-    let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(app);
-    if let Some(presence) = app.try_state::<crate::release::ReleasePresence>() {
-        presence.revoke();
-    }
-    if let Some(scan) = app.try_state::<crate::commands::BreachScanState>() {
-        scan.cancel();
-    }
-    app.emit("vault-locked", ())
-        .map_err(|_| "Sesame could not notify the interface that the vault locked.".to_string())?;
-    Ok(())
+    crate::application::lifecycle::lock_and_notify(
+        state,
+        &crate::adapters::desktop_effects::DesktopHostEffects::new(app),
+    )
 }

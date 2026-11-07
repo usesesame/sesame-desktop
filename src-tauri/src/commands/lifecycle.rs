@@ -1,14 +1,13 @@
-use std::path::PathBuf;
-
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tauri::{AppHandle, State};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::release::ReleasePresence;
 use crate::vault::crypto::decrypt_bytes;
 use crate::vault::storage::{
     clear_pin_throttle_state, complete_recovery_setup_for_session, derive_pin_wrapping_key,
-    persist_session, read_pin_throttle_state, remove_hello_for_session, remove_pin_for_session,
+    read_pin_throttle_state, remove_hello_for_session, remove_pin_for_session,
     resume_recovery_setup_for_session, set_hello_for_session, set_pin_for_session,
     validate_new_unlock_pin, validate_unlock_pin, vault_path, write_pin_throttle_state,
     write_vault_file,
@@ -17,9 +16,8 @@ use crate::vault::util::random_id;
 use crate::vault::windows_hello;
 use crate::vault::{
     ChangeMasterPasswordRequest, ChangeMasterPasswordResult, HelloWrap, MasterPasswordRequest,
-    RecoveryKitRequest, UnlockPinRequest, UnlockedVault, VaultFile, VaultResult, VaultSetup,
-    VaultSnapshot, VaultState, VaultStatus, HELLO_KEY_NAME_PREFIX, MAX_VAULT_FILE_BYTES,
-    PIN_WRAP_AAD,
+    RecoveryKitRequest, UnlockPinRequest, UnlockedVault, VaultResult, VaultSetup, VaultSnapshot,
+    VaultState, VaultStatus, HELLO_KEY_NAME_PREFIX, MAX_VAULT_FILE_BYTES, PIN_WRAP_AAD,
 };
 
 #[tauri::command]
@@ -146,40 +144,6 @@ pub fn create_vault(
     })
 }
 
-/// Shared unlock tail: persist any migration, install the session, advance the epoch.
-fn install_unlocked_session(
-    app: &AppHandle,
-    state: &State<'_, VaultState>,
-    session: &mut Option<UnlockedVault>,
-    path: PathBuf,
-    mut key_array: [u8; 32],
-    file: VaultFile,
-) -> VaultResult<VaultSnapshot> {
-    let opened = sesame_core::api::open_vault_with_key(&file, key_array);
-    key_array.zeroize();
-    let opened = opened?;
-    let pin_unlock_available = opened.file.pin_wrap.is_some();
-    let hello_unlock_available = opened.file.hello_wrap.is_some();
-    // Same zeroize-on-drop workaround `create_vault` uses.
-    let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
-    crate::vault::report_key_page_fallback(app, &unlocked);
-    if opened.migrated {
-        if let Err(error) = persist_session(&mut unlocked) {
-            return Err(format!(
-                "Sesame upgraded your vault but could not save the upgrade: {error}"
-            ));
-        }
-    }
-    let snapshot = unlocked.snapshot();
-    crate::rollback_guard::observe_unlock(app, &snapshot);
-    *session = Some(unlocked);
-    // Fresh session epoch invalidates approvals bound to the previous one.
-    state.advance_session_epoch();
-    state.cache_pin_unlock(pin_unlock_available);
-    state.cache_hello_unlock(hello_unlock_available);
-    Ok(snapshot)
-}
-
 /// Replacement kit for an interrupted setup; only the still-empty pending vault can use this path.
 #[tauri::command]
 pub fn resume_recovery_setup(state: State<'_, VaultState>) -> VaultResult<String> {
@@ -225,7 +189,15 @@ pub fn unlock_recovery_vault(
     let file = sesame_core::loader::VaultLoader::read(&path)?;
     let supplied_kit = Zeroizing::new(request.recovery_kit);
     let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &supplied_kit)?;
-    install_unlocked_session(&app, &state, &mut session, path, key_array, file)
+    let effects = DesktopHostEffects::new(&app);
+    crate::application::lifecycle::install_unlocked_session(
+        &state,
+        &mut session,
+        path,
+        key_array,
+        file,
+        &effects,
+    )
 }
 
 #[tauri::command]
@@ -326,12 +298,19 @@ pub fn unlock_with_windows_hello(
         .decode(&wrap.ciphertext)
         .map_err(|_| "The Windows Hello unlock data for this vault is invalid.".to_string())?;
     let mut key_array = windows_hello::open_and_unwrap(&wrap.key_name, &ciphertext)?;
-    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file).map_err(
-        |_| {
-            "Windows Hello unlock no longer matches this vault. Use your master password or recovery kit."
-                .to_string()
-        },
-    );
+    let effects = DesktopHostEffects::new(&app);
+    let result = crate::application::lifecycle::install_unlocked_session(
+        &state,
+        &mut session,
+        path,
+        key_array,
+        file,
+        &effects,
+    )
+    .map_err(|_| {
+        "Windows Hello unlock no longer matches this vault. Use your master password or recovery kit."
+            .to_string()
+    });
     key_array.zeroize();
     drop(session);
     if result.is_ok() {
@@ -395,7 +374,15 @@ fn unlock_pin_vault_inner(
         .try_into()
         .map_err(|_| "The local vault key is invalid.".to_string())?;
     vault_key.zeroize();
-    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file);
+    let effects = DesktopHostEffects::new(&app);
+    let result = crate::application::lifecycle::install_unlocked_session(
+        &state,
+        &mut session,
+        path,
+        key_array,
+        file,
+        &effects,
+    );
     drop(session);
     if result.is_ok() {
         if let Ok(mut guard) = state.pin_guard.lock() {
@@ -423,10 +410,7 @@ fn ensure_pin_throttle_loaded(app: &AppHandle, state: &State<'_, VaultState>) ->
     Ok(())
 }
 
-pub(super) fn establish_pin_throttle_state(
-    app: &AppHandle,
-    state: &State<'_, VaultState>,
-) -> VaultResult<()> {
+pub(crate) fn establish_pin_throttle_state(app: &AppHandle, state: &VaultState) -> VaultResult<()> {
     let mut guard = state
         .pin_guard
         .lock()
@@ -463,22 +447,12 @@ pub fn unlock_vault(
     presence: State<'_, ReleasePresence>,
     request: MasterPasswordRequest,
 ) -> VaultResult<VaultSnapshot> {
-    // One lifecycle critical section from file read to install.
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
-    let path = vault_path(&app)?;
-    let file = sesame_core::loader::VaultLoader::read(&path)?;
-    let master_password = Zeroizing::new(request.master_password);
-    let key_array = sesame_core::api::unwrap_key_with_password(&file, &master_password)?;
-    let result = install_unlocked_session(&app, &state, &mut session, path, key_array, file);
-    drop(session);
-    if result.is_ok() {
-        let _ = establish_pin_throttle_state(&app, &state);
-        presence.grant_after_unlock(state.session_epoch());
-    }
-    result
+    crate::application::lifecycle::unlock_vault_in_state(
+        &state,
+        &presence,
+        &DesktopHostEffects::new(&app),
+        Zeroizing::new(request.master_password),
+    )
 }
 
 #[tauri::command]

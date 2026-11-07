@@ -1,65 +1,10 @@
-use serde::Serialize;
-use sesame_core::secret_fields::{redact, secret_value, SecretSlots};
 use tauri::{AppHandle, State};
-use zeroize::Zeroizing;
 
+use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::adapters::network::breach;
-use crate::adapters::platform::clipboard::{copy_secret_value, ClipboardGuard};
-use crate::commands::require_release_presence;
+use crate::application::reveal::{copy_item_field_in_state, item_field_in_state};
 use crate::release::ReleasePresence;
-use crate::vault::{TaggedItem, VaultResult, VaultState};
-
-const BACKUP_CODES: &str = "backupCodes";
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecordView<T> {
-    #[serde(flatten)]
-    pub record: T,
-    pub secret_fields: Vec<String>,
-}
-
-pub fn redacted_view<T: SecretSlots>(mut record: T) -> RecordView<T> {
-    let secret_fields = redact(&mut record);
-    RecordView {
-        record,
-        secret_fields,
-    }
-}
-
-fn record_item(state: &VaultState, id: &str, kind: &str) -> VaultResult<TaggedItem> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    let item = session.open_item(id.trim())?;
-    if item.kind() != kind {
-        return Err("That saved item no longer exists.".into());
-    }
-    Ok((*item).clone())
-}
-
-pub(crate) fn item_field_in_state(
-    state: &VaultState,
-    presence: &ReleasePresence,
-    id: &str,
-    kind: &str,
-    field: &str,
-) -> VaultResult<Zeroizing<String>> {
-    require_release_presence(state, presence)?;
-    let item = record_item(state, id, kind)?;
-    let field = field.trim();
-    let value = match &item {
-        TaggedItem::Login(entry) if field == BACKUP_CODES => {
-            Some(Zeroizing::new(entry.backup_codes.join("\n")))
-        }
-        _ => secret_value(&item, field),
-    };
-    value
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())
-}
+use crate::vault::{VaultResult, VaultState};
 
 #[tauri::command]
 pub fn release_item_field(
@@ -81,10 +26,16 @@ pub fn copy_item_field(
     clear_after_ms: Option<u64>,
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
-    clipboard: State<'_, ClipboardGuard>,
 ) -> VaultResult<u64> {
-    let value = item_field_in_state(&state, &presence, &id, &kind, &field)?;
-    copy_secret_value(app, &clipboard, value.to_string(), clear_after_ms)
+    copy_item_field_in_state(
+        &state,
+        &presence,
+        &DesktopHostEffects::new(&app),
+        &id,
+        &kind,
+        &field,
+        clear_after_ms,
+    )
 }
 
 #[tauri::command]
@@ -107,7 +58,7 @@ mod tests {
     use crate::release::PRESENCE_REQUIRED;
     use crate::vault::{
         Card, CardInput, CustomFieldEntry, CustomRecord, CustomRecordInput, LegacyField,
-        SoftwareLicense, SshKey, SshKeyInput, WifiNetwork,
+        SoftwareLicense, SshKey, SshKeyInput, TaggedItem, WifiNetwork,
     };
     use std::time::{Duration, Instant};
 
@@ -200,20 +151,6 @@ mod tests {
         ("fictional-login", "login", "backupCodes"),
         ("fictional-login", "login", "legacy:0"),
     ];
-
-    #[test]
-    fn a_redacted_view_names_the_secrets_and_carries_none() {
-        let mut card = Card::default();
-        card.number = format!("{CANARY}-number");
-        card.security_code = format!("{CANARY}-code");
-        card.title = "Fictional card".to_string();
-        let view = redacted_view(card);
-        let json = serde_json::to_string(&view).expect("serialized view");
-
-        assert!(!json.contains(CANARY));
-        assert!(json.contains("\"secretFields\":[\"number\",\"securityCode\"]"));
-        assert!(json.contains("Fictional card"));
-    }
 
     #[test]
     fn revealing_and_copying_a_field_need_a_grant_every_time() {

@@ -4,6 +4,8 @@ use zeroize::Zeroizing;
 use crate::release::ReleasePresence;
 use crate::vault::{VaultResult, VaultState};
 
+pub(crate) use crate::application::release::require_release_presence;
+
 #[tauri::command]
 pub fn grant_presence(
     secret: String,
@@ -26,11 +28,4 @@ pub fn check_release_presence(
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<()> {
     require_release_presence(&state, &presence)
-}
-
-pub(crate) fn require_release_presence(
-    state: &VaultState,
-    presence: &ReleasePresence,
-) -> VaultResult<()> {
-    presence.require(state.session_epoch())
 }
