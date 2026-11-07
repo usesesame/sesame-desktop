@@ -4,6 +4,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::application::file_choices::{resolve_path, FilePurpose, FileSelectionState};
 use crate::application::release::require_release_presence;
+use crate::application::unlock::require_older_confirmation;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
 use crate::vault::backup::{
@@ -416,11 +417,7 @@ pub(crate) fn restore_backup_in_state(
             None => (prepared.revision(), None),
         };
 
-        crate::rollback_guard::require_older_confirmation(
-            restored_revision,
-            replaced_revision,
-            confirm_older,
-        )?;
+        require_older_confirmation(restored_revision, replaced_revision, confirm_older)?;
 
         let installed = state
             .apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;

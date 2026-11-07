@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use zeroize::Zeroizing;
 
 use crate::vault::recovery_health::RecoveryHealth;
+use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
@@ -15,12 +16,14 @@ pub(crate) mod logins;
 pub(crate) mod quick_access;
 pub(crate) mod record_writes;
 pub(crate) mod records;
+pub(crate) mod recovery_replacement;
 pub(crate) mod release;
 pub(crate) mod reveal;
 pub(crate) mod search;
 pub(crate) mod sync;
 pub(crate) mod sync_pairing;
 pub(crate) mod sync_recovery;
+pub(crate) mod unlock;
 
 #[cfg(test)]
 mod backups_tests;
@@ -39,6 +42,9 @@ mod sync_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod unlock_lifecycle_tests;
 
 pub(crate) trait DesktopEffects {
     fn vault_path(&self) -> VaultResult<PathBuf>;
@@ -62,4 +68,9 @@ pub(crate) trait DesktopEffects {
     fn discard_pin_throttle_state(&self, state: &VaultState);
     fn cancel_pending_approvals(&self);
     fn report_backup_io_error(&self);
+    fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>>;
+    fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()>;
+    fn recovery_replacement_path(&self) -> VaultResult<PathBuf>;
+    fn discard_recovery_replacement(&self);
+    fn reset_rollback_record(&self, vault_id: &str, revision: u64) -> VaultResult<()>;
 }

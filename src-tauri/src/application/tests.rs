@@ -5,8 +5,10 @@ use zeroize::Zeroizing;
 
 use crate::commands::test_support::TestVault;
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
+use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::storage::write_vault_file;
+use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{
     random_id, Card, TaggedItem, UnlockedVault, VaultResult, VaultSnapshot, VaultState, WifiNetwork,
 };
@@ -60,6 +62,15 @@ pub(super) enum Effect {
     DiscardPinThrottle,
     CancelPendingApprovals,
     ReportBackupIoError,
+    WritePinThrottle {
+        failures: u32,
+        locked_until_unix_ms: Option<u64>,
+    },
+    ResetRollbackRecord {
+        vault_id: String,
+        revision: u64,
+    },
+    DiscardRecoveryReplacement,
 }
 
 pub(super) struct FakeEffects<'a> {
@@ -68,6 +79,7 @@ pub(super) struct FakeEffects<'a> {
     fail_emit: bool,
     copy_epoch: u64,
     health: RecoveryHealth,
+    throttle: RefCell<Option<PersistedPinThrottle>>,
     calls: RefCell<Vec<Effect>>,
 }
 
@@ -79,6 +91,7 @@ impl<'a> FakeEffects<'a> {
             fail_emit: false,
             copy_epoch: COPY_EPOCH,
             health: RecoveryHealth::default(),
+            throttle: RefCell::new(None),
             calls: RefCell::new(Vec::new()),
         }
     }
@@ -97,6 +110,13 @@ impl<'a> FakeEffects<'a> {
         }
     }
 
+    pub(super) fn with_pin_throttle(path: PathBuf, throttle: PersistedPinThrottle) -> Self {
+        Self {
+            throttle: RefCell::new(Some(throttle)),
+            ..Self::new(path)
+        }
+    }
+
     fn failing_emit(path: PathBuf) -> Self {
         Self {
             fail_emit: true,
@@ -106,6 +126,10 @@ impl<'a> FakeEffects<'a> {
 
     pub(super) fn calls(&self) -> Vec<Effect> {
         self.calls.borrow().clone()
+    }
+
+    pub(super) fn pin_throttle(&self) -> Option<PersistedPinThrottle> {
+        self.throttle.borrow().clone()
     }
 
     fn record(&self, effect: Effect) {
@@ -211,6 +235,40 @@ impl DesktopEffects for FakeEffects<'_> {
 
     fn report_backup_io_error(&self) {
         self.record(Effect::ReportBackupIoError);
+    }
+
+    fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>> {
+        Ok(self.throttle.borrow().clone())
+    }
+
+    fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()> {
+        let persisted = guard.persisted();
+        self.record(Effect::WritePinThrottle {
+            failures: persisted.failures,
+            locked_until_unix_ms: persisted.locked_until_unix_ms,
+        });
+        *self.throttle.borrow_mut() = Some(persisted);
+        Ok(())
+    }
+
+    fn recovery_replacement_path(&self) -> VaultResult<PathBuf> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or("Sesame could not locate the vault folder.")?;
+        Ok(parent.join(RECOVERY_REPLACEMENT_FILE))
+    }
+
+    fn discard_recovery_replacement(&self) {
+        self.record(Effect::DiscardRecoveryReplacement);
+    }
+
+    fn reset_rollback_record(&self, vault_id: &str, revision: u64) -> VaultResult<()> {
+        self.record(Effect::ResetRollbackRecord {
+            vault_id: vault_id.to_string(),
+            revision,
+        });
+        Ok(())
     }
 }
 

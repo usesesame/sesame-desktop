@@ -1015,6 +1015,7 @@ test('the vault key page fallback is reported once per installed key', () => {
   const vault = read('src-tauri', 'src', 'vault', 'mod.rs')
   const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs')
   const applicationLifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs')
+  const applicationUnlock = read('src-tauri', 'src', 'application', 'unlock.rs')
   const effects = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs')
   const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
   const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
@@ -1024,13 +1025,23 @@ test('the vault key page fallback is reported once per installed key', () => {
   assert.match(vault, /record_vault_key_fallback\(app, "key_page_fallback"\)/)
   assert.match(diagnostics, /"key_page_fallback" => "warn"/)
 
-  for (const name of ['create_vault', 'change_master_password']) {
-    const start = lifecycle.indexOf(`fn ${name}(`)
-    assert.ok(start >= 0, `${name} is missing from lifecycle.rs`)
+  for (const [name, rule] of [
+    ['create_vault', 'create_vault_in_state'],
+    ['change_master_password', 'change_master_password_in_state'],
+  ]) {
+    const ruleStart = applicationUnlock.indexOf(`fn ${rule}(`)
+    assert.ok(ruleStart >= 0, `${rule} is missing from the application unlock rules`)
     assert.match(
-      braceBody(lifecycle, start),
+      braceBody(applicationUnlock, ruleStart),
       /report_key_page_fallback\(/,
-      `${name} does not report a key page fallback`,
+      `${rule} does not report a key page fallback`,
+    )
+    const commandStart = lifecycle.indexOf(`fn ${name}(`)
+    assert.ok(commandStart >= 0, `${name} is missing from lifecycle.rs`)
+    assert.match(
+      braceBody(lifecycle, commandStart),
+      new RegExp(`${rule}\\(`),
+      `${name} does not run the application rule`,
     )
   }
   const install = applicationLifecycle.indexOf('fn install_unlocked_session(')
@@ -1098,9 +1109,22 @@ test('the C ABI exports only the intended sesame_core symbols', () => {
 
 test('the recovery kit wait reads server time, never the local clock', () => {
   const source = readFileSync(join(root, 'src-tauri', 'src', 'commands', 'recovery_replacement.rs'), 'utf8')
+  const rules = readFileSync(join(root, 'src-tauri', 'src', 'application', 'recovery_replacement.rs'), 'utf8')
   assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.latest/, 'a recovery kit request must record the later server time')
   assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
-  assert.doesNotMatch(source, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+  for (const file of [source, rules]) {
+    assert.doesNotMatch(file, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+  }
+  for (const rule of [
+    'pending_recovery_replacement_in_state',
+    'begin_recovery_replacement_request_in_state',
+    'begin_recovery_replacement_completion_in_state',
+    'cancel_recovery_replacement_in_state',
+    'complete_recovery_replacement_in_state',
+    'recovery_replacement_status',
+  ]) {
+    assert.match(source, new RegExp(`${rule}\\(`), `the recovery replacement commands do not run ${rule}`)
+  }
   const time = readFileSync(join(root, 'src-tauri', 'src', 'adapters', 'network', 'trusted_time.rs'), 'utf8').split('#[cfg(test)]\nmod tests')[0]
   assert.doesNotMatch(time, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the time sources read the local clock')
   assert.match(time, /COMPANY_SOURCES: \[&str; 2\]/, 'the wait no longer starts from the two company sources')
