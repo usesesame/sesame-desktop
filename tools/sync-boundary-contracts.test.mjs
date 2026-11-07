@@ -227,12 +227,19 @@ test('the local Sync state is authenticated', () => {
     'the tag helper no longer routes through the platform device protection',
   )
 
-  for (const file of ['sync_transfer.rs', 'sync.rs', 'sync_adopt.rs']) {
-    const source = read('src-tauri', 'src', 'commands', file)
+  for (const file of [
+    ['commands', 'sync_transfer.rs'],
+    ['commands', 'sync.rs'],
+    ['commands', 'sync_adopt.rs'],
+    ['application', 'sync_transfer.rs'],
+    ['application', 'sync_adopt.rs'],
+    ['application', 'sync.rs'],
+  ]) {
+    const source = read('src-tauri', 'src', ...file)
     for (const forbidden of ['sync::state::write(', 'sync::state::read(', 'sync::state::forget(']) {
       assert.ok(
         !source.includes(forbidden),
-        `${file} uses ${forbidden}, which skips the tag that makes the state trustworthy`,
+        `${file.join('/')} uses ${forbidden}, which skips the tag that makes the state trustworthy`,
       )
     }
   }
@@ -302,19 +309,23 @@ test('a device list and every header are verified from the stored chain, never f
 })
 
 test('an upload is numbered from the local head and its header is planned before it is encrypted', () => {
-  const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   assert.match(transfer, /decide_upload\(\s*local\.head_revision\(\),\s*refreshed\.server\.current_revision/, 'the upload decision must compare the local head with the verified service revision')
   assert.match(transfer, /plan_header\([^)]*previous\.as_ref\(\)/, 'the header must name the previous header the device holds')
   const plan = transfer.indexOf('plan.aad()')
   const encrypt = transfer.indexOf('encrypt_bytes(key, &padded, &aad)')
   assert.ok(plan > 0 && encrypt > plan, 'the context that binds a snapshot must be fixed before the vault is encrypted')
   assert.match(transfer, /verify_accepted\(/, 'an accepted upload must be checked against the header that was sent')
+  assert.match(commands, /upload_vault_in_state\(/, 'the upload command does not run the application rule')
 })
 
 test('one canonical AEAD context, shared by encryption and decryption', () => {
-  const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   assert.match(transfer, /header\.aad\(\)/, 'decryption must use the header context')
   assert.match(transfer, /plan\.aad\(\)/, 'encryption must use the planned header context')
+  assert.match(commands, /download_vault_in_state\(/, 'the download command does not run the application rule')
   const pairing = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
   assert.match(pairing, /head\.aad\(\)/, 'a joining device must decrypt with the header context')
   const header = read('src-tauri', 'src', 'sync', 'header.rs')
@@ -396,9 +407,11 @@ test('the service must say it offers Sync in a signed document before this devic
 })
 
 test('removing a device rotates the vault key and leaving does the same', () => {
-  const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
-  const rekey = transfer.match(/async fn rekey_without\([\s\S]*?\n}\n/)
-  assert.ok(rekey, 'rekey_without is no longer one function this test can read')
+  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const rekey = transfer.match(/async fn rekey_without_in_state\([\s\S]*?\n}\n/)
+  assert.ok(rekey, 'rekey_without_in_state is no longer one function this test can read')
   assert.match(rekey[0], /fill_secret\(&mut new_key\)/)
   assert.match(rekey[0], /prepared\.take\(/, 'a vault key change must use the key and kit the person was shown')
   assert.match(rekey[0], /remove_entry\(/)
@@ -409,7 +422,14 @@ test('removing a device rotates the vault key and leaving does the same', () => 
   assert.match(rekey[0], /survivor_packages\(/)
   assert.match(rekey[0], /verify_master_password\(/)
   assert.match(transfer, /seal_for_recipient\(new_key, &recipient, vault_id, epoch\)/)
-  assert.match(transfer, /rekey_without\(\s*app,\s*state,\s*&PreparedKeyChange::default\(\),\s*Some\(&identity\.device_id\),\s*master_password,\s*false,?\s*\)/, 'leaving must rekey for the devices that stay')
+  const leave = transfer.match(/async fn leave_vault_in_state\([\s\S]*?\n}\n/)
+  assert.ok(leave, 'leave_vault_in_state is no longer one function this test can read')
+  assert.match(leave[0], /rekey_without_in_state\(/, 'leaving must rekey for the devices that stay')
+  assert.match(leave[0], /subject: Some\(own_device_id\)/, 'leaving must remove this device from the rekey')
+  assert.match(leave[0], /adopt_locally: false/, 'a leaving device must not adopt the new vault key')
+  assert.match(commands, /leave_vault_in_state\(/, 'the leave command does not run the application rule')
+  assert.match(commands, /rekey_without_in_state\(/, 'the remove and rotate commands do not run the application rule')
+  assert.match(sync, /leave_vault\(/, 'turning Sync off no longer leaves the vault')
 })
 
 test('the lifecycle is reachable from the interface', () => {
@@ -439,8 +459,10 @@ test('a fork or a disagreement stops Sync and is shown, never applied', () => {
   const application = read('src-tauri', 'src', 'application', 'sync.rs')
   assert.match(application, /sync_fork:/)
   assert.match(sync, /present_proof/)
-  const coordinator = read('src-tauri', 'src', 'commands', 'sync_transfer_coordinator.rs')
-  assert.match(coordinator, /starts_with\("sync_fork:"\)[\s\S]*Halt::Fork/)
+  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  assert.match(transfer, /starts_with\("sync_fork:"\)[\s\S]*Halt::Fork/)
+  const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  assert.match(commands, /classify_transfer_failure\(/, 'sync_now no longer classifies a failed transfer in the application module')
   const panel = read('src', 'lib', 'ui', 'SyncPanel.svelte')
   assert.match(panel, /describeCoordinatorState\(\$syncPanel\.coordinator\)/)
   const host = read('src', 'lib', 'controllers', 'sync-controller.ts')
@@ -448,8 +470,9 @@ test('a fork or a disagreement stops Sync and is shown, never applied', () => {
 })
 
 test('Sync does not post a checkpoint while a vault key change is unfinished', () => {
-  const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
-  const checkpoint = commands.match(/pub\(super\) async fn record_checkpoint_if_due\([\s\S]*?\n\}\n/)
-  assert.ok(checkpoint, 'record_checkpoint_if_due is no longer one function this test can read')
-  assert.match(checkpoint[0], /require_no_pending_key_change\(app\)/)
+  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const checkpoint = transfer.match(/pub\(crate\) async fn record_checkpoint_if_due_in_state\([\s\S]*?\n}\n/)
+  assert.ok(checkpoint, 'record_checkpoint_if_due_in_state is no longer one function this test can read')
+  assert.match(checkpoint[0], /require_no_pending_key_change\(\)/)
+  assert.match(transfer, /record_checkpoint_if_due_in_state\(store, client, &local, &refreshed\)/, 'the transfer rule no longer records a due checkpoint')
 })

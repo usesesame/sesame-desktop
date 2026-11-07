@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use zeroize::Zeroizing;
 
@@ -91,8 +91,8 @@ pub(super) struct FakeEffects<'a> {
     fail_emit: bool,
     copy_epoch: u64,
     health: RecoveryHealth,
-    throttle: RefCell<Option<PersistedPinThrottle>>,
-    calls: RefCell<Vec<Effect>>,
+    throttle: Mutex<Option<PersistedPinThrottle>>,
+    calls: Mutex<Vec<Effect>>,
 }
 
 impl<'a> FakeEffects<'a> {
@@ -103,8 +103,8 @@ impl<'a> FakeEffects<'a> {
             fail_emit: false,
             copy_epoch: COPY_EPOCH,
             health: RecoveryHealth::default(),
-            throttle: RefCell::new(None),
-            calls: RefCell::new(Vec::new()),
+            throttle: Mutex::new(None),
+            calls: Mutex::new(Vec::new()),
         }
     }
 
@@ -124,7 +124,7 @@ impl<'a> FakeEffects<'a> {
 
     pub(super) fn with_pin_throttle(path: PathBuf, throttle: PersistedPinThrottle) -> Self {
         Self {
-            throttle: RefCell::new(Some(throttle)),
+            throttle: Mutex::new(Some(throttle)),
             ..Self::new(path)
         }
     }
@@ -137,15 +137,15 @@ impl<'a> FakeEffects<'a> {
     }
 
     pub(super) fn calls(&self) -> Vec<Effect> {
-        self.calls.borrow().clone()
+        self.calls.lock().expect("calls lock").clone()
     }
 
     pub(super) fn pin_throttle(&self) -> Option<PersistedPinThrottle> {
-        self.throttle.borrow().clone()
+        self.throttle.lock().expect("throttle lock").clone()
     }
 
     fn record(&self, effect: Effect) {
-        self.calls.borrow_mut().push(effect);
+        self.calls.lock().expect("calls lock").push(effect);
     }
 }
 
@@ -250,7 +250,7 @@ impl DesktopEffects for FakeEffects<'_> {
     }
 
     fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>> {
-        Ok(self.throttle.borrow().clone())
+        Ok(self.throttle.lock().expect("throttle lock").clone())
     }
 
     fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()> {
@@ -259,7 +259,7 @@ impl DesktopEffects for FakeEffects<'_> {
             failures: persisted.failures,
             locked_until_unix_ms: persisted.locked_until_unix_ms,
         });
-        *self.throttle.borrow_mut() = Some(persisted);
+        *self.throttle.lock().expect("throttle lock") = Some(persisted);
         Ok(())
     }
 
