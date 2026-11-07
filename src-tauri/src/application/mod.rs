@@ -10,6 +10,7 @@ use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
 pub(crate) mod browser_fill;
+pub(crate) mod browser_fill_broker;
 pub(crate) mod file_choices;
 pub(crate) mod history;
 pub(crate) mod lifecycle;
@@ -28,6 +29,9 @@ pub(crate) mod unlock;
 
 #[cfg(test)]
 mod backups_tests;
+
+#[cfg(test)]
+pub(crate) mod broker_tests;
 
 #[cfg(test)]
 mod browser_fill_tests;

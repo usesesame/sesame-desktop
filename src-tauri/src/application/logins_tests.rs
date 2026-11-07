@@ -412,7 +412,7 @@ fn revealing_works_with_a_current_grant() {
     let revealed =
         reveal_login_secret_in_state(&vault.state, &presence, "login-a").expect("revealed");
 
-    assert_eq!(revealed, "fictional-stored-secret");
+    assert_eq!(revealed.as_str(), "fictional-stored-secret");
 }
 
 #[test]

@@ -1,10 +1,7 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     io,
-    sync::{
-        mpsc::{self, Receiver, SyncSender, TryRecvError},
-        Arc, Mutex,
-    },
+    sync::mpsc::{Receiver, TryRecvError},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -12,7 +9,6 @@ use std::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use url::Host;
-use zeroize::Zeroize;
 
 use crate::{
     browser_pipe::PipePeer,
@@ -23,21 +19,23 @@ use crate::{
     },
     diagnostics,
     vault::snapshot::{current_totp, totp_from_value},
-    vault::{random_id, Identity, TaggedItem, VaultEntry, VaultState},
+    vault::{Identity, TaggedItem, VaultEntry, VaultState},
 };
 
 pub(crate) use crate::application::browser_fill::{
     bounded_display, card_candidate, card_supports_fields, origin_match_kind, selected_card_fields,
-    ApprovalDecision, ApprovalKind, BrowserFillCandidate, CardFillCandidate, NormalizedOrigin,
-    OriginMatchKind, SaveKind, SavePayload, APPROVAL_TOO_SOON,
+    ApprovalDecision, ApprovalKind, BrowserCardRequestEvent, BrowserFillCandidate,
+    BrowserFillRequestEvent, BrowserIdentityRequestEvent, BrowserSaveRequestEvent,
+    BrowserTotpRequestEvent, IdentityFillCandidate, NormalizedOrigin, OriginMatchKind, SaveKind,
+    TotpFillCandidate,
+};
+pub(crate) use crate::application::browser_fill_broker::{
+    ApprovalEvent, ApprovalRequest, BrowserFillState, APPROVAL_TIMEOUT,
 };
 
 use crate::browser_host::HOST_FILE_NAME;
 
-const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
 const APPROVAL_POLL: Duration = Duration::from_millis(200);
-const ACTIVATE_MIN_INTERVAL: Duration = Duration::from_secs(5);
-const REPLAY_CACHE_SIZE: usize = 128;
 const MAX_MATCHING_CANDIDATES: usize = 32;
 
 #[cfg(test)]
@@ -54,91 +52,82 @@ pub(crate) fn test_update_candidate(id: &str, saved_origin: &str) -> BrowserFill
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BrowserFillRequestEvent {
-    approval_id: String,
-    origin: String,
-    hostname: String,
-    candidates: Vec<BrowserFillCandidate>,
-    expires_in_seconds: u64,
-    expires_at_unix_ms: u64,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct BrowserApprovalCancelledEvent {
     approval_id: String,
     reason: &'static str,
 }
 
-/// Display-safe save prompt: the captured password never appears, and `candidates` are exact-origin targets for `update` only.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserSaveRequestEvent {
-    approval_id: String,
-    origin: String,
-    hostname: String,
-    kind: &'static str,
-    title: String,
-    username: String,
-    candidates: Vec<BrowserFillCandidate>,
-    expires_in_seconds: u64,
-    expires_at_unix_ms: u64,
+include!("browser_fill_matching.rs");
+include!("browser_fill_lookalike.rs");
+
+pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
+    app.state::<BrowserFillState>().cancel_pending();
 }
 
-/// Names only; identity values are read from the vault after the user picks.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdentityFillCandidate {
-    id: String,
-    label: String,
+#[allow(clippy::too_many_arguments)]
+fn wait_for_decision(
+    app: &AppHandle,
+    fill_state: &BrowserFillState,
+    vault: &VaultState,
+    approval_id: &str,
+    request_id: &str,
+    origin: &NormalizedOrigin,
+    epoch: u64,
+    deadline: Instant,
+    receiver: Receiver<ApprovalDecision>,
+    peer: &PipePeer,
+    kind: ApprovalKind,
+) -> Result<ApprovalDecision, &'static str> {
+    loop {
+        match receiver.try_recv() {
+            Ok(decision) => return Ok(decision),
+            Err(TryRecvError::Disconnected) => return Err("approvalUnavailable"),
+            Err(TryRecvError::Empty) => {}
+        }
+        if !peer.is_connected() {
+            fill_state.revoke(approval_id);
+            emit_approval_cancelled(app, kind, approval_id, "connectionClosed");
+            diagnostics::record_browser_host_registration(app, kind.connection_closed_code());
+            return Err("staleRequest");
+        }
+        if Instant::now() >= deadline {
+            fill_state.revoke(approval_id);
+            emit_approval_cancelled(app, kind, approval_id, "expired");
+            diagnostics::record_browser_host_registration(app, kind.timeout_code());
+            return Err("approvalTimeout");
+        }
+        if !fill_state.is_bound(approval_id, request_id, origin, epoch) {
+            if let Ok(decision) = receiver.try_recv() {
+                return Ok(decision);
+            }
+            fill_state.revoke(approval_id);
+            emit_approval_cancelled(app, kind, approval_id, "expired");
+            return Err("approvalUnavailable");
+        }
+        if vault.session_epoch() != epoch {
+            fill_state.revoke(approval_id);
+            emit_approval_cancelled(app, kind, approval_id, "vaultChanged");
+            diagnostics::record_browser_host_registration(app, kind.vault_changed_code());
+            return Err("staleRequest");
+        }
+        thread::sleep(APPROVAL_POLL.min(deadline.saturating_duration_since(Instant::now())));
+    }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserIdentityRequestEvent {
-    approval_id: String,
-    origin: String,
-    hostname: String,
-    requested_fields: Vec<String>,
-    candidates: Vec<IdentityFillCandidate>,
-    expires_in_seconds: u64,
-    expires_at_unix_ms: u64,
+pub(crate) fn emit_approval_cancelled(
+    app: &AppHandle,
+    kind: ApprovalKind,
+    approval_id: &str,
+    reason: &'static str,
+) {
+    let _ = app.emit(
+        kind.cancelled_event(),
+        BrowserApprovalCancelledEvent {
+            approval_id: approval_id.to_string(),
+            reason,
+        },
+    );
 }
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserCardRequestEvent {
-    approval_id: String,
-    origin: String,
-    hostname: String,
-    requested_fields: Vec<String>,
-    candidates: Vec<CardFillCandidate>,
-    expires_in_seconds: u64,
-    expires_at_unix_ms: u64,
-}
-
-/// Display fields only: neither the seed nor a derived code enters the prompt.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TotpFillCandidate {
-    id: String,
-    title: String,
-    username: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BrowserTotpRequestEvent {
-    approval_id: String,
-    origin: String,
-    hostname: String,
-    candidates: Vec<TotpFillCandidate>,
-    expires_in_seconds: u64,
-    expires_at_unix_ms: u64,
-}
-
-include!("browser_fill_focus_delay.rs");
-include!("browser_fill_broker.rs");
 
 pub fn start(app: AppHandle) -> io::Result<()> {
     if !crate::browser_host::is_supported() {
@@ -702,264 +691,6 @@ fn response_bytes(response: BrowserResponse) -> zeroize::Zeroizing<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod approval_tests {
-    use super::focus_delay_tests::{let_delay_pass, state_with_clock};
-    use super::*;
-
-    fn origin(value: &str) -> NormalizedOrigin {
-        NormalizedOrigin::from_request(value).expect("origin")
-    }
-
-    fn ids(values: &[&str]) -> HashSet<String> {
-        values.iter().map(|value| value.to_string()).collect()
-    }
-
-    fn begin_fill(
-        state: &BrowserFillState,
-        request_id: &str,
-        epoch: u64,
-    ) -> (String, Receiver<ApprovalDecision>) {
-        let (approval_id, _, receiver) = state
-            .begin(
-                request_id,
-                origin("https://example.test"),
-                epoch,
-                ApprovalRequest::Fill {
-                    candidate_ids: ids(&["login-a"]),
-                },
-            )
-            .expect("begin");
-        (approval_id, receiver)
-    }
-
-    fn begin_card(
-        state: &BrowserFillState,
-        request_id: &str,
-    ) -> (String, Receiver<ApprovalDecision>) {
-        let (approval_id, _, receiver) = state
-            .begin(
-                request_id,
-                origin("https://checkout.example.test"),
-                7,
-                ApprovalRequest::Card {
-                    candidate_ids: ids(&["card-a"]),
-                },
-            )
-            .expect("begin card");
-        (approval_id, receiver)
-    }
-
-    #[test]
-    fn a_card_approval_is_consumed_and_cannot_be_replayed() {
-        let (state, clock) = state_with_clock();
-        let (approval_id, receiver) = begin_card(&state, "card-request-1");
-        let_delay_pass(&state, &clock);
-
-        state
-            .decide(
-                &approval_id,
-                ApprovalDecision::Selected("card-a".to_string()),
-            )
-            .expect("approve card");
-        assert!(
-            matches!(receiver.recv(), Ok(ApprovalDecision::Selected(card_id)) if card_id == "card-a")
-        );
-        assert!(state.pending_card_request().is_none());
-        assert!(matches!(
-            state.begin(
-                "card-request-1",
-                origin("https://checkout.example.test"),
-                7,
-                ApprovalRequest::Card {
-                    candidate_ids: ids(&["card-a"]),
-                },
-            ),
-            Err("staleRequest")
-        ));
-    }
-
-    #[test]
-    fn a_card_not_offered_for_approval_is_never_released() {
-        let (state, clock) = state_with_clock();
-        let (approval_id, receiver) = begin_card(&state, "card-request-2");
-        let_delay_pass(&state, &clock);
-
-        assert_eq!(
-            state.decide(
-                &approval_id,
-                ApprovalDecision::Selected("card-b".to_string()),
-            ),
-            Err("selectionNotOffered")
-        );
-        assert!(matches!(
-            receiver.recv(),
-            Ok(ApprovalDecision::InvalidSelection)
-        ));
-        assert!(state.pending_card_request().is_none());
-    }
-
-    #[test]
-    fn a_second_prompt_is_refused_while_one_waits() {
-        let state = BrowserFillState::default();
-        let (_approval_id, _receiver) = begin_fill(&state, "req-1", 7);
-
-        assert!(matches!(
-            state.begin(
-                "req-2",
-                origin("https://example.test"),
-                7,
-                ApprovalRequest::Save {
-                    kind: SaveKind::New,
-                    title: "Fictional".to_string(),
-                    username: String::new(),
-                    password: zeroize::Zeroizing::new(String::new()),
-                    candidates: Vec::new(),
-                },
-            ),
-            Err("approvalUnavailable")
-        ));
-        assert!(matches!(
-            state.begin(
-                "req-1",
-                origin("https://example.test"),
-                7,
-                ApprovalRequest::Card {
-                    candidate_ids: ids(&["card-a"]),
-                },
-            ),
-            Err("staleRequest")
-        ));
-    }
-
-    #[test]
-    fn a_stale_or_replayed_decision_is_refused() {
-        let state = BrowserFillState::default();
-        let (approval_id, _receiver) = begin_fill(&state, "req-1", 7);
-
-        assert_eq!(
-            state.decide("not-the-approval", ApprovalDecision::Denied),
-            Err("approvalExpired")
-        );
-        assert!(state.decide(&approval_id, ApprovalDecision::Denied).is_ok());
-        assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied),
-            Err("approvalExpired")
-        );
-    }
-
-    #[test]
-    fn an_expired_approval_refuses_every_step() {
-        let state = BrowserFillState::default();
-        let (approval_id, _receiver) = begin_fill(&state, "req-1", 7);
-        {
-            let mut inner = state.inner.lock().expect("inner");
-            let pending = inner.pending.as_mut().expect("pending");
-            pending.deadline = Instant::now() - Duration::from_secs(1);
-        }
-
-        assert_eq!(
-            state.decide(&approval_id, ApprovalDecision::Denied),
-            Err("approvalExpired")
-        );
-        assert!(state.save_payload_if_bound(&approval_id).is_none());
-        assert!(state.pending_fill_request().is_none());
-    }
-
-    #[test]
-    fn cancelling_wakes_the_waiter_and_clears_the_binding() {
-        let state = BrowserFillState::default();
-        let (approval_id, receiver) = begin_fill(&state, "req-1", 7);
-
-        state.cancel_pending();
-
-        assert!(matches!(receiver.recv(), Ok(ApprovalDecision::Denied)));
-        assert!(!state.is_bound(&approval_id, "req-1", &origin("https://example.test"), 7));
-    }
-
-    #[test]
-    fn a_binding_requires_the_same_request_origin_and_epoch() {
-        let state = BrowserFillState::default();
-        let (approval_id, _receiver) = begin_fill(&state, "req-1", 7);
-
-        assert!(state.is_bound(&approval_id, "req-1", &origin("https://example.test"), 7));
-        assert!(!state.is_bound(&approval_id, "req-2", &origin("https://example.test"), 7));
-        assert!(!state.is_bound(&approval_id, "req-1", &origin("https://other.test"), 7));
-        assert!(!state.is_bound(&approval_id, "req-1", &origin("https://example.test"), 8));
-    }
-
-    #[test]
-    fn a_save_payload_is_only_returned_for_its_own_pending_save() {
-        let state = BrowserFillState::default();
-        let (approval_id, _, _receiver) = state
-            .begin(
-                "save-1",
-                origin("https://example.test"),
-                7,
-                ApprovalRequest::Save {
-                    kind: SaveKind::Update,
-                    title: "Fictional".to_string(),
-                    username: "casey".to_string(),
-                    password: zeroize::Zeroizing::new("fictional-secret".to_string()),
-                    candidates: Vec::new(),
-                },
-            )
-            .expect("begin save");
-
-        let payload = state.save_payload_if_bound(&approval_id).expect("payload");
-        assert_eq!(payload.password.as_str(), "fictional-secret");
-        assert_eq!(payload.kind, SaveKind::Update);
-        assert!(state.save_payload_if_bound("not-the-approval").is_none());
-
-        state
-            .decide(&approval_id, ApprovalDecision::Saved)
-            .expect("decide");
-        assert!(state.save_payload_if_bound(&approval_id).is_none());
-    }
-
-    #[test]
-    fn a_published_prompt_is_readable_until_it_is_decided() {
-        let state = BrowserFillState::default();
-        let (approval_id, _receiver) = begin_fill(&state, "req-1", 7);
-        assert!(state.pending_fill_request().is_none());
-
-        let event = BrowserFillRequestEvent {
-            approval_id: approval_id.clone(),
-            origin: "https://example.test".to_string(),
-            hostname: "example.test".to_string(),
-            candidates: Vec::new(),
-            expires_in_seconds: APPROVAL_TIMEOUT.as_secs(),
-            expires_at_unix_ms: 0,
-        };
-        state
-            .publish(&approval_id, ApprovalEvent::Fill(event))
-            .expect("publish");
-        assert!(state.pending_fill_request().is_some());
-        assert!(state.pending_save_request().is_none());
-
-        state
-            .decide(&approval_id, ApprovalDecision::Denied)
-            .expect("decide");
-        assert!(state.pending_fill_request().is_none());
-    }
-}
-
-#[cfg(test)]
-mod activation_tests {
-    use super::*;
-
-    #[test]
-    fn activation_raises_are_rate_limited_to_one_per_interval() {
-        let state = BrowserFillState::default();
-        let now = Instant::now();
-
-        assert!(state.note_activation(now));
-        assert!(!state.note_activation(now));
-        assert!(!state.note_activation(now + ACTIVATE_MIN_INTERVAL - Duration::from_millis(1)));
-        assert!(state.note_activation(now + ACTIVATE_MIN_INTERVAL));
-    }
-}
-
-#[cfg(test)]
 mod origin_attacks {
     use super::*;
 
@@ -1233,8 +964,8 @@ mod origin_attacks {
 
 #[cfg(test)]
 mod totp_flow_tests {
-    use super::focus_delay_tests::{let_delay_pass, state_with_clock};
     use super::*;
+    use crate::application::broker_tests::{let_delay_pass, state_with_clock};
     use crate::browser_protocol::TOTP_PROTOCOL_VERSION;
 
     const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -1441,11 +1172,7 @@ mod totp_flow_tests {
     fn an_expired_totp_approval_refuses_every_step() {
         let state = BrowserFillState::default();
         let (approval_id, _receiver) = begin_totp(&state, "totp-1", 7);
-        {
-            let mut inner = state.inner.lock().expect("inner");
-            let pending = inner.pending.as_mut().expect("pending");
-            pending.deadline = Instant::now() - Duration::from_secs(1);
-        }
+        state.expire_pending();
 
         assert_eq!(
             state.decide(&approval_id, ApprovalDecision::Denied),

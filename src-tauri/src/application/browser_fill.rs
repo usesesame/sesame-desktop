@@ -2,12 +2,13 @@ use serde::Serialize;
 use url::{Host, Url};
 
 use crate::application::DesktopEffects;
-use crate::browser_fill::BrowserFillState;
 use crate::browser_protocol::{CardFillFields, MAX_CREDENTIAL_FIELD_BYTES};
 use crate::vault::imports::entry_from_input;
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;
 use crate::vault::{Card, LoginInput, SaveLoginResult, VaultEntry, VaultResult, VaultState};
+
+use super::browser_fill_broker::BrowserFillState;
 
 const APPROVAL_GONE: &str = "That browser approval is no longer available.";
 const APPROVAL_EXPIRED: &str = "That browser approval expired or is no longer available.";
@@ -147,6 +148,84 @@ pub(crate) struct CardFillCandidate {
     title: String,
     brand: String,
     pub(crate) last_four: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserFillRequestEvent {
+    pub(crate) approval_id: String,
+    pub(crate) origin: String,
+    pub(crate) hostname: String,
+    pub(crate) candidates: Vec<BrowserFillCandidate>,
+    pub(crate) expires_in_seconds: u64,
+    pub(crate) expires_at_unix_ms: u64,
+}
+
+/// Display-safe save prompt: the captured password never appears, and `candidates` are exact-origin targets for `update` only.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserSaveRequestEvent {
+    pub(crate) approval_id: String,
+    pub(crate) origin: String,
+    pub(crate) hostname: String,
+    pub(crate) kind: &'static str,
+    pub(crate) title: String,
+    pub(crate) username: String,
+    pub(crate) candidates: Vec<BrowserFillCandidate>,
+    pub(crate) expires_in_seconds: u64,
+    pub(crate) expires_at_unix_ms: u64,
+}
+
+/// Names only; identity values are read from the vault after the user picks.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IdentityFillCandidate {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserIdentityRequestEvent {
+    pub(crate) approval_id: String,
+    pub(crate) origin: String,
+    pub(crate) hostname: String,
+    pub(crate) requested_fields: Vec<String>,
+    pub(crate) candidates: Vec<IdentityFillCandidate>,
+    pub(crate) expires_in_seconds: u64,
+    pub(crate) expires_at_unix_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserCardRequestEvent {
+    pub(crate) approval_id: String,
+    pub(crate) origin: String,
+    pub(crate) hostname: String,
+    pub(crate) requested_fields: Vec<String>,
+    pub(crate) candidates: Vec<CardFillCandidate>,
+    pub(crate) expires_in_seconds: u64,
+    pub(crate) expires_at_unix_ms: u64,
+}
+
+/// Display fields only: neither the seed nor a derived code enters the prompt.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TotpFillCandidate {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) username: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BrowserTotpRequestEvent {
+    pub(crate) approval_id: String,
+    pub(crate) origin: String,
+    pub(crate) hostname: String,
+    pub(crate) candidates: Vec<TotpFillCandidate>,
+    pub(crate) expires_in_seconds: u64,
+    pub(crate) expires_at_unix_ms: u64,
 }
 
 /// `new` versus `update`, decided by the extension from the page's own form structure.

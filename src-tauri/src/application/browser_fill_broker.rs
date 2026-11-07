@@ -1,3 +1,88 @@
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::{
+        mpsc::{self, Receiver, SyncSender},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+
+use zeroize::Zeroize;
+
+use crate::vault::random_id;
+
+use super::browser_fill::{
+    ApprovalDecision, BrowserCardRequestEvent, BrowserFillCandidate, BrowserFillRequestEvent,
+    BrowserIdentityRequestEvent, BrowserSaveRequestEvent, BrowserTotpRequestEvent,
+    NormalizedOrigin, SaveKind, SavePayload, APPROVAL_TOO_SOON,
+};
+
+pub(crate) const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const APPROVAL_FOCUS_DELAY: Duration = Duration::from_millis(750);
+pub(super) const ACTIVATE_MIN_INTERVAL: Duration = Duration::from_secs(5);
+const REPLAY_CACHE_SIZE: usize = 128;
+
+pub(crate) trait Clock: Send + Sync {
+    fn now(&self) -> Instant;
+}
+
+struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
+
+pub(super) struct FocusDelay {
+    clock: Arc<dyn Clock>,
+    focused_since: Option<Instant>,
+    shown_at: Option<Instant>,
+}
+
+impl Default for FocusDelay {
+    fn default() -> Self {
+        Self::new(Arc::new(SystemClock))
+    }
+}
+
+impl FocusDelay {
+    pub(super) fn new(clock: Arc<dyn Clock>) -> Self {
+        Self {
+            clock,
+            focused_since: None,
+            shown_at: None,
+        }
+    }
+
+    pub(super) fn window_focus_changed(&mut self, focused: bool) {
+        if !focused {
+            self.focused_since = None;
+        } else if self.focused_since.is_none() {
+            self.focused_since = Some(self.clock.now());
+        }
+    }
+
+    pub(super) fn approval_shown(&mut self) {
+        self.shown_at = Some(self.clock.now());
+    }
+
+    pub(super) fn remaining(&self) -> Duration {
+        let Some(focused_since) = self.focused_since else {
+            return APPROVAL_FOCUS_DELAY;
+        };
+        let counted_from = self
+            .shown_at
+            .map_or(focused_since, |shown_at| shown_at.max(focused_since));
+        APPROVAL_FOCUS_DELAY
+            .saturating_sub(self.clock.now().saturating_duration_since(counted_from))
+    }
+
+    pub(super) fn is_ready(&self) -> bool {
+        self.remaining().is_zero()
+    }
+}
+
 pub(crate) enum ApprovalRequest {
     Fill {
         candidate_ids: HashSet<String>,
@@ -32,7 +117,7 @@ impl ApprovalRequest {
     }
 }
 
-enum ApprovalEvent {
+pub(crate) enum ApprovalEvent {
     Fill(BrowserFillRequestEvent),
     Save(BrowserSaveRequestEvent),
     Identity(BrowserIdentityRequestEvent),
@@ -115,7 +200,7 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn cancel_pending(&self) {
+    pub(crate) fn cancel_pending(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(pending) = inner.pending.take() {
                 let _ = pending.sender.send(ApprovalDecision::Denied);
@@ -132,7 +217,7 @@ impl BrowserFillState {
         }
     }
 
-    fn note_activation(&self, now: Instant) -> bool {
+    pub(crate) fn note_activation(&self, now: Instant) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return false;
         };
@@ -199,35 +284,35 @@ impl BrowserFillState {
         pick(pending.request_event.as_ref()?)
     }
 
-    fn pending_fill_request(&self) -> Option<BrowserFillRequestEvent> {
+    pub(crate) fn pending_fill_request(&self) -> Option<BrowserFillRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Fill(event) => Some(event.clone()),
             _ => None,
         })
     }
 
-    fn pending_save_request(&self) -> Option<BrowserSaveRequestEvent> {
+    pub(crate) fn pending_save_request(&self) -> Option<BrowserSaveRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Save(event) => Some(event.clone()),
             _ => None,
         })
     }
 
-    fn pending_identity_request(&self) -> Option<BrowserIdentityRequestEvent> {
+    pub(crate) fn pending_identity_request(&self) -> Option<BrowserIdentityRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Identity(event) => Some(event.clone()),
             _ => None,
         })
     }
 
-    fn pending_card_request(&self) -> Option<BrowserCardRequestEvent> {
+    pub(crate) fn pending_card_request(&self) -> Option<BrowserCardRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Card(event) => Some(event.clone()),
             _ => None,
         })
     }
 
-    fn pending_totp_request(&self) -> Option<BrowserTotpRequestEvent> {
+    pub(crate) fn pending_totp_request(&self) -> Option<BrowserTotpRequestEvent> {
         self.pending_event(|event| match event {
             ApprovalEvent::Totp(event) => Some(event.clone()),
             _ => None,
@@ -262,7 +347,11 @@ impl BrowserFillState {
         })
     }
 
-    fn publish(&self, approval_id: &str, request_event: ApprovalEvent) -> Result<(), &'static str> {
+    pub(crate) fn publish(
+        &self,
+        approval_id: &str,
+        request_event: ApprovalEvent,
+    ) -> Result<(), &'static str> {
         let mut inner = self.inner.lock().map_err(|_| "approvalUnavailable")?;
         let pending = inner.pending.as_mut().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
@@ -303,7 +392,7 @@ impl BrowserFillState {
         Ok(())
     }
 
-    fn revoke(&self, approval_id: &str) {
+    pub(crate) fn revoke(&self, approval_id: &str) {
         if let Ok(mut inner) = self.inner.lock() {
             if inner
                 .pending
@@ -315,7 +404,7 @@ impl BrowserFillState {
         }
     }
 
-    fn is_bound(
+    pub(crate) fn is_bound(
         &self,
         approval_id: &str,
         request_id: &str,
@@ -335,76 +424,4 @@ impl BrowserFillState {
             })
             .unwrap_or(false)
     }
-}
-
-pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
-    app.state::<BrowserFillState>().cancel_pending();
-}
-
-#[allow(clippy::too_many_arguments)]
-fn wait_for_decision(
-    app: &AppHandle,
-    fill_state: &BrowserFillState,
-    vault: &VaultState,
-    approval_id: &str,
-    request_id: &str,
-    origin: &NormalizedOrigin,
-    epoch: u64,
-    deadline: Instant,
-    receiver: Receiver<ApprovalDecision>,
-    peer: &PipePeer,
-    kind: ApprovalKind,
-) -> Result<ApprovalDecision, &'static str> {
-    loop {
-        match receiver.try_recv() {
-            Ok(decision) => return Ok(decision),
-            Err(TryRecvError::Disconnected) => return Err("approvalUnavailable"),
-            Err(TryRecvError::Empty) => {}
-        }
-        if !peer.is_connected() {
-            fill_state.revoke(approval_id);
-            emit_approval_cancelled(app, kind, approval_id, "connectionClosed");
-            diagnostics::record_browser_host_registration(app, kind.connection_closed_code());
-            return Err("staleRequest");
-        }
-        if Instant::now() >= deadline {
-            fill_state.revoke(approval_id);
-            emit_approval_cancelled(app, kind, approval_id, "expired");
-            diagnostics::record_browser_host_registration(app, kind.timeout_code());
-            return Err("approvalTimeout");
-        }
-        if !fill_state.is_bound(approval_id, request_id, origin, epoch) {
-            if let Ok(decision) = receiver.try_recv() {
-                return Ok(decision);
-            }
-            fill_state.revoke(approval_id);
-            emit_approval_cancelled(app, kind, approval_id, "expired");
-            return Err("approvalUnavailable");
-        }
-        if vault.session_epoch() != epoch {
-            fill_state.revoke(approval_id);
-            emit_approval_cancelled(app, kind, approval_id, "vaultChanged");
-            diagnostics::record_browser_host_registration(app, kind.vault_changed_code());
-            return Err("staleRequest");
-        }
-        thread::sleep(APPROVAL_POLL.min(deadline.saturating_duration_since(Instant::now())));
-    }
-}
-
-include!("browser_fill_matching.rs");
-include!("browser_fill_lookalike.rs");
-
-pub(crate) fn emit_approval_cancelled(
-    app: &AppHandle,
-    kind: ApprovalKind,
-    approval_id: &str,
-    reason: &'static str,
-) {
-    let _ = app.emit(
-        kind.cancelled_event(),
-        BrowserApprovalCancelledEvent {
-            approval_id: approval_id.to_string(),
-            reason,
-        },
-    );
 }

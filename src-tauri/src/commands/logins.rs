@@ -285,7 +285,7 @@ pub fn reveal_login_secret(
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    reveal_login_secret_in_state(&state, &presence, &id)
+    reveal_login_secret_in_state(&state, &presence, &id).map(|secret| secret.to_string())
 }
 
 #[cfg(test)]

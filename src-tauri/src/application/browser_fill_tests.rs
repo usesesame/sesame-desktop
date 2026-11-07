@@ -4,16 +4,16 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
-use crate::browser_fill::{ApprovalRequest, BrowserFillState, Clock};
 use crate::commands::test_support::TestVault;
 use crate::vault::storage::payload_with_saved_login;
 use crate::vault::{Card, VaultEntry, VaultPayload};
 
 use super::browser_fill::{
     card_candidate, card_supports_fields, resolve_browser_fill_in_state,
-    resolve_browser_save_in_state, selected_card_fields, verify_update_target, ApprovalKind,
-    NormalizedOrigin, SaveKind,
+    resolve_browser_save_in_state, selected_card_fields, verify_update_target, ApprovalDecision,
+    ApprovalKind, BrowserFillCandidate, NormalizedOrigin, SaveKind,
 };
+use super::browser_fill_broker::{ApprovalRequest, BrowserFillState, Clock};
 use super::tests::{Effect, FakeEffects};
 
 const APPROVAL_EXPIRED: &str = "That browser approval expired or is no longer available.";
@@ -61,10 +61,7 @@ fn candidate_ids(values: &[&str]) -> HashSet<String> {
 fn begin_fill(
     state: &BrowserFillState,
     request_id: &str,
-) -> (
-    String,
-    std::sync::mpsc::Receiver<crate::browser_fill::ApprovalDecision>,
-) {
+) -> (String, std::sync::mpsc::Receiver<ApprovalDecision>) {
     let (approval_id, _, receiver) = state
         .begin(
             request_id,
@@ -83,11 +80,8 @@ fn begin_save(
     request_id: &str,
     epoch: u64,
     kind: SaveKind,
-    candidates: Vec<crate::browser_fill::BrowserFillCandidate>,
-) -> (
-    String,
-    std::sync::mpsc::Receiver<crate::browser_fill::ApprovalDecision>,
-) {
+    candidates: Vec<BrowserFillCandidate>,
+) -> (String, std::sync::mpsc::Receiver<ApprovalDecision>) {
     let (approval_id, _, receiver) = state
         .begin(
             request_id,
@@ -204,10 +198,7 @@ fn a_rejected_approval_clears_the_pending_approval() {
     let_delay_pass(&state, &clock);
 
     assert!(resolve_browser_fill_in_state(&state, &effects, &approval_id, None).is_ok());
-    assert!(matches!(
-        receiver.try_recv(),
-        Ok(crate::browser_fill::ApprovalDecision::Denied)
-    ));
+    assert!(matches!(receiver.try_recv(), Ok(ApprovalDecision::Denied)));
     assert_eq!(
         effects.calls(),
         vec![
@@ -362,10 +353,7 @@ fn an_approved_update_commits_the_new_password() {
     .expect("save result");
 
     assert_eq!(result.id, "login-a");
-    assert!(matches!(
-        receiver.try_recv(),
-        Ok(crate::browser_fill::ApprovalDecision::Saved)
-    ));
+    assert!(matches!(receiver.try_recv(), Ok(ApprovalDecision::Saved)));
     let stored = vault.stored_login("login-a");
     assert_eq!(stored.password, "fictional-new-secret");
     assert_ne!(stored.password_updated_at, 42);

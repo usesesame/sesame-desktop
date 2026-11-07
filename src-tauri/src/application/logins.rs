@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use zeroize::Zeroizing;
+
 use crate::application::release::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::snapshot_vault_revision;
@@ -110,7 +112,7 @@ pub(crate) fn reveal_login_secret_in_state(
     state: &VaultState,
     presence: &ReleasePresence,
     id: &str,
-) -> VaultResult<String> {
+) -> VaultResult<Zeroizing<String>> {
     require_release_presence(state, presence)?;
     let session = state
         .session
@@ -121,7 +123,7 @@ pub(crate) fn reveal_login_secret_in_state(
     let TaggedItem::Login(entry) = &*item else {
         return Err("That saved login no longer exists.".into());
     };
-    Ok(entry.password.clone())
+    Ok(Zeroizing::new(entry.password.clone()))
 }
 
 /// Folder names resolve to a stable ID before the payload is committed.
