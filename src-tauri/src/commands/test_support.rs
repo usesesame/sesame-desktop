@@ -53,6 +53,10 @@ impl TestVault {
         commit_payload_change(session, payload).expect("seeded payload");
     }
 
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     pub(crate) fn stored_login(&self, id: &str) -> VaultEntry {
         let bytes = std::fs::read(&self.path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");

@@ -5,6 +5,7 @@ use zeroize::Zeroizing;
 
 use crate::commands::test_support::TestVault;
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
+use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::storage::write_vault_file;
 use crate::vault::{
     random_id, Card, TaggedItem, UnlockedVault, VaultResult, VaultSnapshot, VaultState, WifiNetwork,
@@ -26,7 +27,7 @@ const CANARY: &str = "fictional-secret-canary";
 const COPY_EPOCH: u64 = 41;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Effect {
+pub(super) enum Effect {
     ReportKeyPageFallback,
     ObserveUnlock,
     ObserveLock {
@@ -41,30 +42,55 @@ enum Effect {
     CancelBreachScan,
     EstablishPinThrottle,
     EmitVaultLocked,
+    RecordRecoveryExport {
+        vault_id: String,
+        revision: u64,
+    },
+    RecordRecoveryVerification {
+        vault_id: String,
+        revision: u64,
+    },
+    ReadRecoveryHealth {
+        current_vault_id: Option<String>,
+    },
+    ResetRollbackAfterRestore {
+        vault_id: Option<String>,
+        revision: u64,
+    },
+    DiscardPinThrottle,
 }
 
-struct FakeEffects<'a> {
+pub(super) struct FakeEffects<'a> {
     path: PathBuf,
     presence: Option<&'a ReleasePresence>,
     fail_emit: bool,
     copy_epoch: u64,
+    health: RecoveryHealth,
     calls: RefCell<Vec<Effect>>,
 }
 
 impl<'a> FakeEffects<'a> {
-    fn new(path: PathBuf) -> Self {
+    pub(super) fn new(path: PathBuf) -> Self {
         Self {
             path,
             presence: None,
             fail_emit: false,
             copy_epoch: COPY_EPOCH,
+            health: RecoveryHealth::default(),
             calls: RefCell::new(Vec::new()),
         }
     }
 
-    fn with_presence(path: PathBuf, presence: &'a ReleasePresence) -> Self {
+    pub(super) fn with_presence(path: PathBuf, presence: &'a ReleasePresence) -> Self {
         Self {
             presence: Some(presence),
+            ..Self::new(path)
+        }
+    }
+
+    pub(super) fn with_recovery_health(path: PathBuf, health: RecoveryHealth) -> Self {
+        Self {
+            health,
             ..Self::new(path)
         }
     }
@@ -76,7 +102,7 @@ impl<'a> FakeEffects<'a> {
         }
     }
 
-    fn calls(&self) -> Vec<Effect> {
+    pub(super) fn calls(&self) -> Vec<Effect> {
         self.calls.borrow().clone()
     }
 
@@ -143,6 +169,38 @@ impl DesktopEffects for FakeEffects<'_> {
     fn establish_pin_throttle_state(&self, _state: &VaultState) -> VaultResult<()> {
         self.record(Effect::EstablishPinThrottle);
         Ok(())
+    }
+
+    fn record_recovery_export(&self, vault_id: &str, revision: u64) {
+        self.record(Effect::RecordRecoveryExport {
+            vault_id: vault_id.to_string(),
+            revision,
+        });
+    }
+
+    fn record_recovery_verification(&self, vault_id: &str, revision: u64) {
+        self.record(Effect::RecordRecoveryVerification {
+            vault_id: vault_id.to_string(),
+            revision,
+        });
+    }
+
+    fn recovery_health(&self, current_vault_id: Option<&str>) -> VaultResult<RecoveryHealth> {
+        self.record(Effect::ReadRecoveryHealth {
+            current_vault_id: current_vault_id.map(str::to_string),
+        });
+        Ok(self.health.clone())
+    }
+
+    fn reset_rollback_after_restore(&self, vault_id: Option<&str>, revision: u64) {
+        self.record(Effect::ResetRollbackAfterRestore {
+            vault_id: vault_id.map(str::to_string),
+            revision,
+        });
+    }
+
+    fn discard_pin_throttle_state(&self, _state: &VaultState) {
+        self.record(Effect::DiscardPinThrottle);
     }
 }
 

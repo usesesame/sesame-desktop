@@ -9,15 +9,25 @@ const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 const GATED_RELEASES = ['export_backup', 'export_vault_csv', 'export_recovery_kit']
 
 test('every deliberate release command requires presence in Rust', () => {
-  const source = read('src-tauri', 'src', 'commands', 'backups.rs')
+  const commands = read('src-tauri', 'src', 'commands', 'backups.rs')
+  const application = read('src-tauri', 'src', 'application', 'backups.rs')
   for (const command of GATED_RELEASES) {
-    const start = source.indexOf(`pub fn ${command}(`)
-    assert.ok(start >= 0, `${command} does not exist`)
-    const next = source.indexOf('\n#[tauri::command]', start)
-    const body = source.slice(start, next === -1 ? source.length : next)
+    const commandStart = commands.indexOf(`pub fn ${command}(`)
+    assert.ok(commandStart >= 0, `${command} does not exist`)
+    const commandNext = commands.indexOf('\n#[tauri::command]', commandStart)
+    const commandBody = commands.slice(commandStart, commandNext === -1 ? commands.length : commandNext)
+    assert.match(
+      commandBody,
+      new RegExp(`\\b${command}_in_state\\(`),
+      `${command} does not call its application rule`,
+    )
+    const start = application.indexOf(`pub(crate) fn ${command}_in_state(`)
+    assert.ok(start >= 0, `${command}_in_state does not exist in the application module`)
+    const next = application.indexOf('\npub(crate) fn ', start)
+    const body = application.slice(start, next === -1 ? application.length : next)
     assert.match(
       body,
-      /require_release_presence\(&state, &presence\)/,
+      /require_release_presence\(state, presence\)/,
       `${command} releases vault contents without requiring presence`,
     )
   }
