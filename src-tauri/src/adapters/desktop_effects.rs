@@ -7,6 +7,7 @@ use crate::application::DesktopEffects;
 use crate::commands::BreachScanState;
 use crate::release::ReleasePresence;
 use crate::vault::recovery_health::RecoveryHealth;
+use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) struct DesktopHostEffects<'a> {
@@ -107,5 +108,29 @@ impl DesktopEffects for DesktopHostEffects<'_> {
 
     fn report_backup_io_error(&self) {
         crate::diagnostics::record_backup_io_error(self.app);
+    }
+
+    fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>> {
+        crate::vault::storage::read_pin_throttle_state(self.app)
+    }
+
+    fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()> {
+        crate::vault::storage::write_pin_throttle_state(self.app, guard)
+    }
+
+    fn recovery_replacement_path(&self) -> VaultResult<PathBuf> {
+        crate::application::recovery_replacement::request_path(&self.vault_path()?)
+    }
+
+    fn discard_recovery_replacement(&self) {
+        if let Ok(path) = self.recovery_replacement_path() {
+            let _ = crate::application::recovery_replacement::remove_request(&path);
+        }
+    }
+
+    fn reset_rollback_record(&self, vault_id: &str, revision: u64) -> VaultResult<()> {
+        let dir = crate::rollback_guard::data_dir(self.app)
+            .ok_or("Sesame could not find its data folder.")?;
+        crate::rollback_guard::reset(&dir, vault_id, revision)
     }
 }

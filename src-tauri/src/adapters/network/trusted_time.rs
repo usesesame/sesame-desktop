@@ -6,6 +6,7 @@ use super::account_service::{client_for_base, pin_key, service_target, ServiceTa
 use super::ensure_crypto_provider;
 use super::server_address::ServerAddress;
 use super::server_trust::pinned_server_time;
+pub(crate) use crate::application::recovery_replacement::TrustedTime;
 use crate::vault::types::{CustomServerPin, ServiceConnectionFile};
 use crate::vault::VaultResult;
 
@@ -15,12 +16,6 @@ const TIME_SOURCE_TIMEOUT_SECS: u64 = 10;
 const TIME_UNAVAILABLE: &str = "Sesame could not confirm the current time with usesesame.app and github.com. Connect to the internet and try again.";
 const TIME_DISAGREES: &str =
     "The time servers disagree, so Sesame cannot confirm the current time. Try again later.";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TrustedTime {
-    pub earliest: u64,
-    pub latest: u64,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Reading {
