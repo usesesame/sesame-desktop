@@ -244,14 +244,13 @@ fn fill_response(
                 Ok(decision) => decision,
                 Err(reason) => return BrowserResponse::unavailable(request, reason),
             };
-            let peer_connected = peer.is_connected();
             browser_replies::complete_fill_in_state(
                 vault,
                 effects,
                 request,
                 &offer.approval,
                 decision,
-                peer_connected,
+                &|| peer.is_connected(),
             )
         }
     }
@@ -324,14 +323,13 @@ fn card_response(
                     return BrowserResponse::card_unavailable(&request.request_id, reason)
                 }
             };
-            let peer_connected = peer.is_connected();
             browser_replies::complete_card_in_state(
                 vault,
                 effects,
                 request,
                 &offer.approval,
                 decision,
-                peer_connected,
+                &|| peer.is_connected(),
             )
         }
     }
@@ -368,14 +366,13 @@ fn identity_response(
                     return BrowserResponse::identity_unavailable(&request.request_id, reason)
                 }
             };
-            let peer_connected = peer.is_connected();
             browser_replies::complete_identity_in_state(
                 vault,
                 effects,
                 request,
                 &offer.approval,
                 decision,
-                peer_connected,
+                &|| peer.is_connected(),
             )
         }
     }
@@ -412,14 +409,13 @@ fn totp_response(
                     return BrowserResponse::totp_unavailable(&request.request_id, reason)
                 }
             };
-            let peer_connected = peer.is_connected();
             browser_replies::complete_totp_in_state(
                 vault,
                 effects,
                 request,
                 &offer.approval,
                 decision,
-                peer_connected,
+                &|| peer.is_connected(),
             )
         }
     }

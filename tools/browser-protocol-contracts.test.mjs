@@ -110,12 +110,16 @@ test('capabilities answer desktop availability only on a new tagged contract', (
   )
 
   const fill = readFileSync(join(root, 'src-tauri', 'src', 'browser_fill.rs'), 'utf8')
-  assert.doesNotMatch(fill, /capabilities\s*\([^)]*locked/)
-
   const replies = readFileSync(
     join(root, 'src-tauri', 'src', 'application', 'browser_replies.rs'),
     'utf8',
   )
+  const capabilitiesStart = replies.indexOf('fn capabilities_response(')
+  assert.ok(capabilitiesStart >= 0, 'capabilities_response is missing from the application module')
+  const capabilitiesBody = replies.slice(capabilitiesStart, replies.indexOf('\n}\n', capabilitiesStart))
+  assert.match(capabilitiesBody, /BrowserResponse::capabilities\(&request\.request_id, true\)/, 'capabilities must report only that the desktop app is available')
+  assert.doesNotMatch(capabilitiesBody, /locked|session/, 'capabilities must not reveal whether the vault is locked')
+  assert.match(fill, /"capabilities" => browser_replies::capabilities_response\(/, 'the pipe no longer answers capabilities through the application rule')
   const preApprovalSlices = [
     ['application/browser_replies.rs', replies, 'fn fill_response_in_state'],
     ['application/browser_replies.rs', replies, 'fn save_response_in_state'],

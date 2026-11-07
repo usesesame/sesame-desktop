@@ -203,7 +203,7 @@ fn a_fill_approval_that_outlives_the_vault_lock_releases_nothing() {
         &request,
         &offer.approval,
         decision,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "fill-unavailable");
@@ -242,7 +242,7 @@ fn a_denied_fill_approval_releases_no_secret() {
         &request,
         &offer.approval,
         decision,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "fill-unavailable");
@@ -280,7 +280,7 @@ fn a_timed_out_fill_approval_can_no_longer_be_decided_and_releases_nothing() {
         &request,
         &offer.approval,
         ApprovalDecision::Denied,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "fill-unavailable");
@@ -326,7 +326,7 @@ fn a_card_approval_releases_only_the_requested_fields() {
         &request,
         &offer.approval,
         decision,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "card");
@@ -384,7 +384,7 @@ fn an_identity_approval_releases_only_the_requested_fields() {
         &request,
         &offer.approval,
         decision,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "identity");
@@ -439,7 +439,7 @@ fn a_totp_approval_releases_a_code_only_for_the_approved_origin() {
         &request,
         &offer.approval,
         decision,
-        true,
+        &|| true,
     );
 
     assert_eq!(response.message_type, "totp");

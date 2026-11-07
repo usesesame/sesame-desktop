@@ -187,7 +187,7 @@ pub(crate) fn complete_fill_in_state(
     request: &BrowserRequest,
     approval: &BrowserApproval,
     decision: ApprovalDecision,
-    peer_connected: bool,
+    peer_connected: &dyn Fn() -> bool,
 ) -> BrowserResponse {
     let login_id = match decision {
         ApprovalDecision::Selected(login_id) => login_id,
@@ -198,7 +198,7 @@ pub(crate) fn complete_fill_in_state(
             return BrowserResponse::unavailable(request, "invalidSelection")
         }
     };
-    if !peer_connected {
+    if !peer_connected() {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -526,7 +526,7 @@ pub(crate) fn complete_card_in_state(
     request: &BrowserRequest,
     approval: &BrowserApproval,
     decision: ApprovalDecision,
-    peer_connected: bool,
+    peer_connected: &dyn Fn() -> bool,
 ) -> BrowserResponse {
     let requested_fields = &approval.requested_fields;
     let card_id = match decision {
@@ -538,7 +538,7 @@ pub(crate) fn complete_card_in_state(
             return BrowserResponse::card_unavailable(&request.request_id, "invalidSelection")
         }
     };
-    if !peer_connected {
+    if !peer_connected() {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -708,7 +708,7 @@ pub(crate) fn complete_identity_in_state(
     request: &BrowserRequest,
     approval: &BrowserApproval,
     decision: ApprovalDecision,
-    peer_connected: bool,
+    peer_connected: &dyn Fn() -> bool,
 ) -> BrowserResponse {
     let requested_fields = &approval.requested_fields;
     let identity_id = match decision {
@@ -720,7 +720,7 @@ pub(crate) fn complete_identity_in_state(
             return BrowserResponse::identity_unavailable(&request.request_id, "invalidSelection")
         }
     };
-    if !peer_connected {
+    if !peer_connected() {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -901,7 +901,7 @@ pub(crate) fn complete_totp_in_state(
     request: &BrowserRequest,
     approval: &BrowserApproval,
     decision: ApprovalDecision,
-    peer_connected: bool,
+    peer_connected: &dyn Fn() -> bool,
 ) -> BrowserResponse {
     let login_id = match decision {
         ApprovalDecision::Selected(login_id) => login_id,
@@ -912,7 +912,7 @@ pub(crate) fn complete_totp_in_state(
             return BrowserResponse::totp_unavailable(&request.request_id, "invalidSelection")
         }
     };
-    if !peer_connected {
+    if !peer_connected() {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
