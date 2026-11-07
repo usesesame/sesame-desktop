@@ -712,6 +712,7 @@ test('no release workflow enables the insecure loopback update path', () => {
 
 test('desktop updates use an account-independent signed static manifest', () => {
   const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
+  const applicationUpdater = read('src-tauri', 'src', 'application', 'updater.rs')
   const publicUpdates = read('src-tauri', 'src', 'adapters', 'network', 'public_updates.rs')
   const build = read('src-tauri', 'build.rs')
   const settings = read('src', 'lib', 'ui', 'SettingsView.svelte')
@@ -722,6 +723,17 @@ test('desktop updates use an account-independent signed static manifest', () => 
 
   assert.doesNotMatch(updater, /read_service_(?:connection|token)|Authorization|\/v1\/desktop\/updates/)
   assert.match(updater, /adapters::network::public_updates::check\(app\)/)
+  assert.match(updater, /updater_trust\(\)\?/)
+  assert.match(updater, /verify_update_manifest\(/)
+  assert.match(updater, /verify_artifact_digest\(/)
+  assert.doesNotMatch(updater, /fn verify_candidate_receipt/)
+  assert.doesNotMatch(updater, /fn verify_set_candidate_claims/)
+  assert.doesNotMatch(updater, /fn verify_v3_candidate_claims/)
+  assert.match(applicationUpdater, /pub\(crate\) fn updater_trust/)
+  assert.match(applicationUpdater, /pub\(crate\) fn verify_candidate_receipt/)
+  assert.match(applicationUpdater, /fn verify_set_candidate_claims/)
+  assert.match(applicationUpdater, /fn verify_v3_candidate_claims/)
+  assert.match(applicationUpdater, /pub\(crate\) fn verify_artifact_digest/)
   assert.match(publicUpdates, /option_env!\("SESAME_UPDATE_MANIFEST_URL"\)/)
   assert.match(publicUpdates, /parsed\.scheme\(\) == "https"/)
   assert.match(publicUpdates, /SESAME_ALLOW_INSECURE_UPDATE_LOOPBACK/)

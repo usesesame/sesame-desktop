@@ -63,13 +63,13 @@ mod tests {
         for os in OPERATING_SYSTEMS {
             assert_eq!(
                 desktop_updates_for(os),
-                crate::commands::updater::updater_platform_for(os).is_ok(),
+                crate::application::updater::updater_platform_for(os).is_ok(),
                 "{os:?}"
             );
         }
         assert_eq!(
             get_platform_capabilities().desktop_updates,
-            crate::commands::updater::updater_platform_for(std::env::consts::OS).is_ok()
+            crate::application::updater::updater_platform_for(std::env::consts::OS).is_ok()
         );
     }
 

@@ -28,6 +28,7 @@ pub(crate) mod sync;
 pub(crate) mod sync_pairing;
 pub(crate) mod sync_recovery;
 pub(crate) mod unlock;
+pub(crate) mod updater;
 
 #[cfg(test)]
 mod backups_tests;
@@ -58,6 +59,9 @@ mod tests;
 
 #[cfg(test)]
 mod unlock_lifecycle_tests;
+
+#[cfg(test)]
+mod updater_tests;
 
 pub(crate) trait DesktopEffects {
     fn vault_path(&self) -> VaultResult<PathBuf>;

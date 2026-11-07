@@ -1,7 +1,9 @@
+use crate::application::updater::{
+    download_failure_message as describe_download_failure, require_available_update, update_status,
+    updater_trust, verify_artifact_digest, verify_update_manifest, DownloadFailureKind,
+    ReceiptArtifact, SizeRefusal, UpdateRelease,
+};
 use crate::vault::VaultResult;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,19 +31,6 @@ struct DesktopUpdateProgress {
 struct VerifiedDesktopUpdate {
     update: tauri_plugin_updater::Update,
     artifact: ReceiptArtifact,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct ReceiptArtifact {
-    sha256: String,
-    bytes: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SizeRefusal {
-    AnnouncedLength,
-    ExceededSignedSize,
-    ReceivedLength,
 }
 
 #[derive(Debug)]
@@ -114,24 +103,16 @@ where
 }
 
 fn download_failure_message(failure: &DownloadFailure) -> String {
-    match failure {
-        DownloadFailure::Refused(SizeRefusal::AnnouncedLength) => {
-            "The update server announced a download size that differs from the signed size, so Sesame stopped it."
-        }
-        DownloadFailure::Refused(SizeRefusal::ExceededSignedSize) => {
-            "The update download was larger than its signed size, so Sesame stopped it."
-        }
-        DownloadFailure::Refused(SizeRefusal::ReceivedLength) => {
-            "The update download was shorter than its signed size, so Sesame stopped it."
-        }
+    let kind = match failure {
+        DownloadFailure::Refused(refusal) => DownloadFailureKind::Refused(*refusal),
         DownloadFailure::Failed(tauri_plugin_updater::Error::Reqwest(error))
             if error.is_timeout() =>
         {
-            "The update download took too long and was stopped."
+            DownloadFailureKind::TimedOut
         }
-        DownloadFailure::Failed(_) => "Sesame could not download or verify the update.",
-    }
-    .to_string()
+        DownloadFailure::Failed(_) => DownloadFailureKind::Failed,
+    };
+    describe_download_failure(kind)
 }
 
 async fn download_verified_artifact(
@@ -155,44 +136,20 @@ async fn download_verified_artifact(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if digest != verified.artifact.sha256 {
-        return Err(
-            "Sesame rejected an update that did not match its signed release receipt.".into(),
-        );
-    }
+    verify_artifact_digest(&digest, &verified.artifact)?;
     Ok(bytes)
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CandidateReceipt {
-    payload: String,
-    signing_key_id: String,
-    signature: String,
-}
-
 async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
-    let platform = updater_platform()?;
-    if option_env!("SESAME_UPDATER_PUBLIC_KEY").is_none_or(|key| key.trim().is_empty()) {
-        return Err("This Sesame build does not include an updater public key.".into());
-    }
-    let candidate_public_key = option_env!("SESAME_RELEASE_CANDIDATE_PUBLIC_KEY")
-        .filter(|key| !key.trim().is_empty())
-        .ok_or("This Sesame build does not include a release-candidate public key.")?;
-    let candidate_key_id = option_env!("SESAME_RELEASE_CANDIDATE_KEY_ID")
-        .filter(|key| !key.trim().is_empty())
-        .ok_or("This Sesame build does not include a release-candidate key ID.")?;
+    let trust = updater_trust()?;
     let update = crate::adapters::network::public_updates::check(app).await?;
     update
         .map(|update| {
-            let artifact = verify_candidate_receipt(
+            let artifact = verify_update_manifest(
+                &trust,
                 &update.raw_json,
                 &update.version,
                 &update.signature,
-                candidate_public_key,
-                candidate_key_id,
-                platform,
-                updater_architecture()?,
             )?;
             Ok(VerifiedDesktopUpdate { update, artifact })
         })
@@ -201,32 +158,23 @@ async fn check(app: &AppHandle) -> VaultResult<Option<VerifiedDesktopUpdate>> {
 
 #[tauri::command]
 pub async fn check_desktop_update(app: AppHandle) -> VaultResult<DesktopUpdateStatus> {
-    match check(&app).await? {
-        Some(update) => {
-            let freshness = crate::adapters::network::update_freshness::current(
-                &app,
-                Some(update.update.version.as_str()),
-            )
-            .await;
-            Ok(DesktopUpdateStatus {
-                available: true,
-                version: Some(update.update.version),
-                body: update.update.body,
-                freshness,
-            })
-        }
-        None => Ok(DesktopUpdateStatus {
-            available: false,
-            version: None,
-            body: None,
-            freshness: crate::adapters::network::update_freshness::current(&app, None).await,
-        }),
-    }
+    let status = update_status(check(&app).await?.map(|update| UpdateRelease {
+        version: update.update.version,
+        body: update.update.body,
+    }));
+    let freshness =
+        crate::adapters::network::update_freshness::current(&app, status.version.as_deref()).await;
+    Ok(DesktopUpdateStatus {
+        available: status.available,
+        version: status.version,
+        body: status.body,
+        freshness,
+    })
 }
 
 #[tauri::command]
 pub async fn download_and_install_desktop_update(app: AppHandle) -> VaultResult<()> {
-    let verified = check(&app).await?.ok_or("Sesame is already up to date.")?;
+    let verified = require_available_update(check(&app).await?)?;
     let progress_app = app.clone();
     let bytes = download_verified_artifact(&verified, move |downloaded_bytes, total_bytes| {
         let _ = progress_app.emit(
@@ -248,580 +196,14 @@ pub async fn download_and_install_desktop_update(app: AppHandle) -> VaultResult<
     restart(&app.env());
 }
 
-fn updater_architecture() -> VaultResult<&'static str> {
-    match std::env::consts::ARCH {
-        "x86_64" => Ok("x86_64"),
-        "aarch64" => Ok("aarch64"),
-        _ => Err("This architecture is not supported by the Sesame updater.".into()),
-    }
-}
-
-fn updater_platform() -> VaultResult<&'static str> {
-    updater_platform_for(std::env::consts::OS)
-}
-
-pub(crate) fn updater_platform_for(os: &str) -> VaultResult<&'static str> {
-    match os {
-        "windows" => Ok("windows"),
-        _ => Err("This operating system is not supported by the Sesame updater.".into()),
-    }
-}
-
-fn verify_candidate_receipt(
-    manifest: &serde_json::Value,
-    announced_version: &str,
-    updater_signature: &str,
-    encoded_public_key: &str,
-    expected_key_id: &str,
-    expected_platform: &str,
-    expected_architecture: &str,
-) -> VaultResult<ReceiptArtifact> {
-    let receipt: CandidateReceipt = serde_json::from_value(
-        manifest
-            .get("candidateReceipt")
-            .cloned()
-            .ok_or("The update manifest did not include its signed release receipt.")?,
-    )
-    .map_err(|_| "The update manifest contained an invalid release receipt.".to_string())?;
-    if receipt.signing_key_id != expected_key_id {
-        return Err("The update manifest used an unexpected release-candidate key.".into());
-    }
-
-    let public_key_bytes = URL_SAFE_NO_PAD
-        .decode(encoded_public_key)
-        .map_err(|_| "The embedded release-candidate public key is invalid.".to_string())?;
-    let public_key_array: [u8; 32] = public_key_bytes
-        .try_into()
-        .map_err(|_| "The embedded release-candidate public key is invalid.".to_string())?;
-    let public_key = VerifyingKey::from_bytes(&public_key_array)
-        .map_err(|_| "The embedded release-candidate public key is invalid.".to_string())?;
-    let signature_bytes = URL_SAFE_NO_PAD
-        .decode(&receipt.signature)
-        .map_err(|_| "The release-candidate signature is invalid.".to_string())?;
-    let signature = Signature::from_slice(&signature_bytes)
-        .map_err(|_| "The release-candidate signature is invalid.".to_string())?;
-    public_key
-        .verify_strict(receipt.payload.as_bytes(), &signature)
-        .map_err(|_| "Sesame rejected an update with an invalid release receipt.".to_string())?;
-
-    let manifest_url = manifest
-        .get("url")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let expected_format = match expected_platform {
-        "windows" => "nsis",
-        "linux" => "appimage",
-        _ => "",
-    };
-    let claims: Vec<&str> = receipt.payload.split('\n').collect();
-    match claims.first().copied() {
-        // Clients before 0.2.3 verify only the v3 receipt layout and 0.2.3
-        // verifies only the release-set layout, so both are accepted until the
-        // installed base is past the release that understands both.
-        Some("sesame-release-set-candidate-v1") => {
-            verify_set_candidate_claims(
-                &claims,
-                announced_version,
-                expected_platform,
-                expected_architecture,
-                expected_format,
-                manifest_url,
-                updater_signature,
-            )?;
-            receipt_artifact(claims[13], claims[14])
-        }
-        Some("sesame-release-candidate-v3") => {
-            verify_v3_candidate_claims(
-                &claims,
-                announced_version,
-                expected_platform,
-                expected_architecture,
-                manifest_url,
-                updater_signature,
-            )?;
-            receipt_artifact(claims[9], claims[10])
-        }
-        _ => Err(
-            "Sesame rejected an update whose manifest did not match its signed release receipt."
-                .into(),
-        ),
-    }
-}
-
-fn receipt_artifact(sha256: &str, bytes: &str) -> VaultResult<ReceiptArtifact> {
-    let bytes = bytes
-        .parse::<u64>()
-        .ok()
-        .filter(|bytes| *bytes > 0)
-        .ok_or("The update manifest contained an invalid release receipt.")?;
-    Ok(ReceiptArtifact {
-        sha256: sha256.to_owned(),
-        bytes,
-    })
-}
-
-fn verify_set_candidate_claims(
-    claims: &[&str],
-    announced_version: &str,
-    expected_platform: &str,
-    expected_architecture: &str,
-    expected_format: &str,
-    manifest_url: &str,
-    updater_signature: &str,
-) -> VaultResult<()> {
-    // Claim 11 is the download URL the publisher signed. Comparing it to the URL
-    // this manifest actually points at is what stops a tampered manifest from
-    // redirecting an otherwise genuine receipt at a different file.
-    if claims.len() != 17
-        || claims[1] != announced_version
-        || claims[3] != expected_platform
-        || claims[4] != expected_architecture
-        || !valid_sha256(claims[7])
-        || claims[8] != "updater"
-        || claims[9] != expected_format
-        || claims[10] != expected_architecture
-        || claims[11].is_empty()
-        || claims[11] != manifest_url
-        || claims[12].is_empty()
-        || !valid_sha256(claims[13])
-        || claims[14]
-            .parse::<u64>()
-            .ok()
-            .is_none_or(|bytes| bytes == 0)
-        || claims[15] != updater_signature
-        || claims[16].is_empty()
-    {
-        return Err(
-            "Sesame rejected an update whose manifest did not match its signed release receipt."
-                .into(),
-        );
-    }
-    Ok(())
-}
-
-fn verify_v3_candidate_claims(
-    claims: &[&str],
-    announced_version: &str,
-    expected_platform: &str,
-    expected_architecture: &str,
-    manifest_url: &str,
-    updater_signature: &str,
-) -> VaultResult<()> {
-    let expected_sigstore_identity = format!(
-        "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v{announced_version}"
-    );
-    // Claim 7 is the download URL the publisher signed. Comparing it to the URL
-    // this manifest actually points at is what stops a tampered manifest from
-    // redirecting an otherwise genuine receipt at a different file.
-    if claims.len() != 23
-        || claims[1] != announced_version
-        || claims[3] != expected_platform
-        || claims[4] != expected_architecture
-        || claims[7].is_empty()
-        || claims[7] != manifest_url
-        || claims[8].is_empty()
-        || !valid_sha256(claims[9])
-        || claims[10]
-            .parse::<u64>()
-            .ok()
-            .is_none_or(|bytes| bytes == 0)
-        || claims[11] != updater_signature
-        || claims[12].is_empty()
-        || (claims[13] != "early_access" && claims[13] != "production")
-        || claims[14] != "true"
-        || claims[15] != "https://token.actions.githubusercontent.com"
-        || claims[16] != expected_sigstore_identity
-        || !valid_sha256(claims[17])
-        || !valid_base64url_sha256(claims[18])
-        || (claims[19] != "true" && claims[19] != "false")
-        || (claims[13] == "early_access" && claims[19] != "false")
-        || (claims[13] == "production" && claims[19] != "true")
-        || (claims[19] == "true" && (claims[20].is_empty() || claims[21].is_empty()))
-        || (claims[19] == "true" && !valid_base64url_sha256(claims[22]))
-        || (claims[19] == "false" && !claims[22].is_empty())
-    {
-        return Err(
-            "Sesame rejected an update whose manifest did not match its signed release receipt."
-                .into(),
-        );
-    }
-    Ok(())
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn valid_base64url_sha256(value: &str) -> bool {
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .is_ok_and(|decoded| decoded.len() == 32)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{updater_platform_for, verify_candidate_receipt, ReceiptArtifact};
-    use crate::vault::VaultResult;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine;
-    use ed25519_dalek::{Signer, SigningKey};
-    use serde_json::json;
-
-    fn signed_manifest() -> (serde_json::Value, String, String) {
-        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
-        let artifact_sha256 = "a".repeat(64);
-        let updater_signature = "s".repeat(64);
-        let payload = [
-            "sesame-release-set-candidate-v1".to_owned(),
-            "1.2.3".to_owned(),
-            "beta".to_owned(),
-            "windows".to_owned(),
-            "x86_64".to_owned(),
-            "Windows 10,Windows 11".to_owned(),
-            "https://example.invalid/releases/1.2.3".to_owned(),
-            "b".repeat(64),
-            "updater".to_owned(),
-            "nsis".to_owned(),
-            "x86_64".to_owned(),
-            "https://downloads.example.invalid/Sesame.exe".to_owned(),
-            "windows/1.2.3/Sesame.exe".to_owned(),
-            artifact_sha256.clone(),
-            "42".to_owned(),
-            updater_signature.clone(),
-            "fictional-updater-key".to_owned(),
-        ]
-        .join("\n");
-        let signature = URL_SAFE_NO_PAD.encode(signing_key.sign(payload.as_bytes()).to_bytes());
-        let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
-        let manifest = json!({
-            "url": "https://downloads.example.invalid/Sesame.exe",
-            "candidateReceipt": {
-                "payload": payload,
-                "signingKeyId": "fictional-candidate-key",
-                "signature": signature,
-            }
-        });
-        (manifest, public_key, updater_signature)
-    }
-
-    #[test]
-    fn verifies_the_signed_updater_binding() {
-        let (manifest, public_key, updater_signature) = signed_manifest();
-        let artifact = verify_candidate_receipt(
-            &manifest,
-            "1.2.3",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .expect("verify receipt");
-        assert_eq!(artifact.sha256, "a".repeat(64));
-        assert_eq!(artifact.bytes, 42);
-    }
-
-    #[test]
-    fn rejects_a_redirected_or_relabelled_updater() {
-        let (mut manifest, public_key, updater_signature) = signed_manifest();
-        manifest["url"] = json!("https://downloads.example.invalid/other.exe");
-        assert!(verify_candidate_receipt(
-            &manifest,
-            "1.2.3",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .is_err());
-        let (manifest, _, _) = signed_manifest();
-        assert!(verify_candidate_receipt(
-            &manifest,
-            "9.9.9",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn updater_support_matches_the_release_pipeline() {
-        assert_eq!(updater_platform_for("windows").ok(), Some("windows"));
-        assert!(updater_platform_for("linux").is_err());
-    }
-
-    fn signed_v3_manifest() -> (serde_json::Value, String, String) {
-        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
-        let artifact_sha256 = "a".repeat(64);
-        let updater_signature = "s".repeat(64);
-        let sigstore_identity =
-            "https://github.com/usesesame/sesame-desktop/.github/workflows/release-early-access.yml@refs/tags/v1.2.3";
-        let payload = [
-            "sesame-release-candidate-v3".to_owned(),
-            "1.2.3".to_owned(),
-            "beta".to_owned(),
-            "windows".to_owned(),
-            "x86_64".to_owned(),
-            "Windows 10,Windows 11".to_owned(),
-            "https://example.invalid/releases/1.2.3".to_owned(),
-            "https://downloads.example.invalid/Sesame.exe".to_owned(),
-            "windows/1.2.3/Sesame.exe".to_owned(),
-            artifact_sha256.clone(),
-            "42".to_owned(),
-            updater_signature.clone(),
-            "fictional-updater-key".to_owned(),
-            "early_access".to_owned(),
-            "true".to_owned(),
-            "https://token.actions.githubusercontent.com".to_owned(),
-            sigstore_identity.to_owned(),
-            "c".repeat(64),
-            "A".repeat(43),
-            "false".to_owned(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]
-        .join("\n");
-        let signature = URL_SAFE_NO_PAD.encode(signing_key.sign(payload.as_bytes()).to_bytes());
-        let public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_bytes());
-        let manifest = json!({
-            "url": "https://downloads.example.invalid/Sesame.exe",
-            "candidateReceipt": {
-                "payload": payload,
-                "signingKeyId": "fictional-candidate-key",
-                "signature": signature,
-            }
-        });
-        (manifest, public_key, updater_signature)
-    }
-
-    #[test]
-    fn verifies_a_v3_receipt_from_clients_before_0_2_3() {
-        let (manifest, public_key, updater_signature) = signed_v3_manifest();
-        let artifact = verify_candidate_receipt(
-            &manifest,
-            "1.2.3",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .expect("verify v3 receipt");
-        assert_eq!(artifact.sha256, "a".repeat(64));
-        assert_eq!(artifact.bytes, 42);
-    }
-
-    #[test]
-    fn rejects_a_v3_receipt_bound_to_another_version_or_download() {
-        let (manifest, public_key, updater_signature) = signed_v3_manifest();
-        assert!(verify_candidate_receipt(
-            &manifest,
-            "9.9.9",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .is_err());
-        let (mut manifest, public_key, updater_signature) = signed_v3_manifest();
-        manifest["url"] = json!("https://downloads.example.invalid/other.exe");
-        assert!(verify_candidate_receipt(
-            &manifest,
-            "1.2.3",
-            &updater_signature,
-            &public_key,
-            "fictional-candidate-key",
-            "windows",
-            "x86_64",
-        )
-        .is_err());
-    }
-
-    const RELEASE_SET_FIXTURE: &str =
-        include_str!("../../tests/fixtures/update-manifests/release-set-early-access.latest.json");
-    const V3_EARLY_ACCESS_FIXTURE: &str =
-        include_str!("../../tests/fixtures/update-manifests/v3-early-access.latest.json");
-    const V3_PRODUCTION_FIXTURE: &str =
-        include_str!("../../tests/fixtures/update-manifests/v3-production.latest.json");
-    const RECEIPT_KEY_FIXTURE: &str =
-        include_str!("../../tests/fixtures/update-manifests/receipt-key.json");
-    const TOOL_FIXTURES: [&str; 3] = [
-        RELEASE_SET_FIXTURE,
-        V3_EARLY_ACCESS_FIXTURE,
-        V3_PRODUCTION_FIXTURE,
-    ];
-
-    struct ToolManifest {
-        manifest: serde_json::Value,
-        public_key: String,
-        key_id: String,
-    }
-
-    impl ToolManifest {
-        fn load(source: &str) -> Self {
-            let key: serde_json::Value =
-                serde_json::from_str(RECEIPT_KEY_FIXTURE).expect("receipt key fixture");
-            Self {
-                manifest: serde_json::from_str(source).expect("manifest fixture"),
-                public_key: key["publicKey"].as_str().expect("public key").to_owned(),
-                key_id: key["keyId"].as_str().expect("key id").to_owned(),
-            }
-        }
-
-        fn updater_signature(&self) -> String {
-            self.manifest["platforms"]["windows-x86_64-nsis"]["signature"]
-                .as_str()
-                .expect("updater signature")
-                .to_owned()
-        }
-
-        fn verify(
-            &self,
-            version: &str,
-            platform: &str,
-            architecture: &str,
-        ) -> VaultResult<ReceiptArtifact> {
-            verify_candidate_receipt(
-                &self.manifest,
-                version,
-                &self.updater_signature(),
-                &self.public_key,
-                &self.key_id,
-                platform,
-                architecture,
-            )
-        }
-    }
-
-    #[test]
-    fn accepts_every_receipt_layout_the_release_tool_writes() {
-        for source in TOOL_FIXTURES {
-            let fixture = ToolManifest::load(source);
-            let artifact = fixture
-                .verify("1.2.3", "windows", "x86_64")
-                .expect("verify tool manifest");
-            assert_eq!(artifact.sha256, "a".repeat(64));
-            assert_eq!(artifact.bytes, 42);
-        }
-    }
-
-    #[test]
-    fn rejects_a_tool_manifest_without_its_top_level_download_url() {
-        for source in TOOL_FIXTURES {
-            let mut fixture = ToolManifest::load(source);
-            fixture
-                .manifest
-                .as_object_mut()
-                .expect("object")
-                .remove("url");
-            assert!(fixture.verify("1.2.3", "windows", "x86_64").is_err());
-        }
-    }
-
-    #[test]
-    fn rejects_a_tool_manifest_for_another_version_platform_or_download() {
-        for source in TOOL_FIXTURES {
-            let fixture = ToolManifest::load(source);
-            assert!(fixture.verify("1.2.4", "windows", "x86_64").is_err());
-            assert!(fixture.verify("1.2.2", "windows", "x86_64").is_err());
-            assert!(fixture.verify("1.2.3", "linux", "x86_64").is_err());
-            assert!(fixture.verify("1.2.3", "windows", "aarch64").is_err());
-            let mut redirected = ToolManifest::load(source);
-            redirected.manifest["url"] = json!("https://downloads.example.test/v1.2.3/other.exe");
-            assert!(redirected.verify("1.2.3", "windows", "x86_64").is_err());
-            let mut relabelled = ToolManifest::load(source);
-            relabelled.manifest["platforms"]["windows-x86_64-nsis"]["signature"] =
-                json!("B".repeat(64));
-            assert!(relabelled.verify("1.2.3", "windows", "x86_64").is_err());
-        }
-    }
-
-    #[test]
-    fn rejects_a_stale_receipt_attached_to_a_newer_manifest() {
-        let stale = ToolManifest::load(V3_EARLY_ACCESS_FIXTURE);
-        let mut newer = ToolManifest::load(V3_EARLY_ACCESS_FIXTURE);
-        newer.manifest["version"] = json!("1.2.4");
-        newer.manifest["candidateReceipt"] = stale.manifest["candidateReceipt"].clone();
-        assert!(newer.verify("1.2.4", "windows", "x86_64").is_err());
-    }
-
-    #[test]
-    fn rejects_a_truncated_or_tampered_tool_receipt() {
-        for source in TOOL_FIXTURES {
-            let mut truncated = ToolManifest::load(source);
-            let payload = truncated.manifest["candidateReceipt"]["payload"]
-                .as_str()
-                .expect("payload")
-                .to_owned();
-            let cut = payload.rfind('\n').expect("claim separator");
-            truncated.manifest["candidateReceipt"]["payload"] = json!(&payload[..cut]);
-            assert!(truncated.verify("1.2.3", "windows", "x86_64").is_err());
-
-            let mut forged_signature = ToolManifest::load(source);
-            let signature = forged_signature.manifest["candidateReceipt"]["signature"]
-                .as_str()
-                .expect("signature")
-                .to_owned();
-            let flipped = if signature.starts_with('A') { 'B' } else { 'A' };
-            forged_signature.manifest["candidateReceipt"]["signature"] =
-                json!(format!("{flipped}{}", &signature[1..]));
-            assert!(forged_signature
-                .verify("1.2.3", "windows", "x86_64")
-                .is_err());
-
-            let mut other_key = ToolManifest::load(source);
-            other_key.key_id = "another-key".to_owned();
-            assert!(other_key.verify("1.2.3", "windows", "x86_64").is_err());
-
-            let mut other_public_key = ToolManifest::load(source);
-            other_public_key.public_key = URL_SAFE_NO_PAD.encode(
-                SigningKey::from_bytes(&[9_u8; 32])
-                    .verifying_key()
-                    .to_bytes(),
-            );
-            assert!(other_public_key
-                .verify("1.2.3", "windows", "x86_64")
-                .is_err());
-
-            let mut missing = ToolManifest::load(source);
-            missing
-                .manifest
-                .as_object_mut()
-                .expect("object")
-                .remove("candidateReceipt");
-            assert!(missing.verify("1.2.3", "windows", "x86_64").is_err());
-        }
-    }
-
-    #[test]
-    fn the_production_receipt_carries_the_publisher_signature_claims() {
-        let production = ToolManifest::load(V3_PRODUCTION_FIXTURE);
-        let payload = production.manifest["candidateReceipt"]["payload"]
-            .as_str()
-            .expect("payload");
-        let claims: Vec<&str> = payload.split('\n').collect();
-        assert_eq!(claims[13], "production");
-        assert_eq!(claims[19], "true");
-        assert!(!claims[20].is_empty() && !claims[21].is_empty());
-    }
-}
-
 #[cfg(test)]
 mod download_tests {
     use super::{
-        download_verified_artifact, download_within_signed_size, DownloadFailure, ReceiptArtifact,
-        SignedSizeGuard, SizeRefusal, VerifiedDesktopUpdate,
+        download_verified_artifact, download_within_signed_size, DownloadFailure, SignedSizeGuard,
+        VerifiedDesktopUpdate,
     };
     use crate::adapters::network::public_updates::{check_endpoint, TransferLimits};
+    use crate::application::updater::{ReceiptArtifact, SizeRefusal};
     use std::future::Future;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -1078,6 +460,19 @@ mod download_tests {
                     .expect_err("size mismatch");
             assert!(message.contains("signed size"), "{message}");
         }
+    }
+
+    #[test]
+    fn the_install_path_refuses_a_body_larger_than_the_signed_size_before_installing() {
+        let server = serve_release("1.2.3", |stream| {
+            let oversized = vec![0_u8; (signed_size() * 2) as usize];
+            respond_with_length(stream, oversized.len() as u64, &oversized);
+        });
+        let (_app, verified) = verified_update(&server, &fixture_sha256(), signed_size());
+        let message =
+            tauri::async_runtime::block_on(download_verified_artifact(&verified, |_, _| {}))
+                .expect_err("oversized body");
+        assert!(message.contains("signed size"), "{message}");
     }
 
     fn is_timeout(failure: &DownloadFailure) -> bool {
