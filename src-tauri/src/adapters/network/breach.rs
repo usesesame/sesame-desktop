@@ -9,16 +9,17 @@ use std::time::Duration;
 use super::ensure_crypto_provider;
 use reqwest::{redirect::Policy, Client};
 use serde::Serialize;
-use sha1::{Digest, Sha1};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
 
+use crate::application::breach_scan::{
+    password_range, BreachVerdict, LoginBreachCheck, LoginRange, ScanOutcome,
+};
 use crate::vault::VaultResult;
 
 const HIBP_RANGE_URL: &str = "https://api.pwnedpasswords.com/range/";
 const HIBP_TIMEOUT_SECS: u64 = 10;
 const HIBP_CONNECT_TIMEOUT_SECS: u64 = 4;
 const HIBP_MAX_BODY_BYTES: usize = 64 * 1024;
-pub const SHA1_PREFIX_CHARS: usize = 5;
 
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
@@ -26,67 +27,6 @@ pub const SHA1_PREFIX_CHARS: usize = 5;
 pub struct BreachCheckResult {
     pub breached: bool,
     pub count: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(export)]
-#[serde(rename_all = "camelCase")]
-pub enum BreachVerdict {
-    Breached,
-    Safe,
-    Unknown,
-}
-
-pub struct PasswordRange {
-    pub prefix: String,
-    pub suffix: Zeroizing<String>,
-}
-
-pub fn password_range(password: &str) -> PasswordRange {
-    let mut hasher = Sha1::new();
-    hasher.update(password.as_bytes());
-    let mut digest = hasher.finalize();
-    let mut hex: String = digest.iter().map(|byte| format!("{byte:02X}")).collect();
-    digest.zeroize();
-    let (prefix, suffix) = hex.split_at(SHA1_PREFIX_CHARS);
-    let range = PasswordRange {
-        prefix: prefix.to_string(),
-        suffix: Zeroizing::new(suffix.to_string()),
-    };
-    hex.zeroize();
-    range
-}
-
-pub struct LoginRange {
-    pub id: String,
-    pub prefix: String,
-    pub suffix: Zeroizing<String>,
-}
-
-impl std::fmt::Debug for LoginRange {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LoginRange")
-            .field("id", &self.id)
-            .field("prefix", &self.prefix)
-            .field("suffix", &"[redacted]")
-            .finish()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
-#[ts(export, optional_fields)]
-#[serde(rename_all = "camelCase")]
-pub struct LoginBreachCheck {
-    pub id: String,
-    pub verdict: BreachVerdict,
-    pub count: u32,
-}
-
-#[derive(Debug)]
-pub struct ScanOutcome {
-    pub cancelled: bool,
-    pub checks: Vec<LoginBreachCheck>,
 }
 
 pub trait RangeFetcher {
@@ -273,6 +213,8 @@ pub async fn check_password_breach(password: String) -> VaultResult<BreachCheckR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::breach_scan::SHA1_PREFIX_CHARS;
+    use sha1::{Digest, Sha1};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 

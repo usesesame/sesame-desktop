@@ -78,6 +78,11 @@ pub(super) enum Effect {
         approval_id: String,
         reason: &'static str,
     },
+    EmitBreachScanProgress {
+        checked: usize,
+        total: usize,
+    },
+    EmitBreachScanFinished,
 }
 
 pub(super) struct FakeEffects<'a> {
@@ -293,6 +298,14 @@ impl DesktopEffects for FakeEffects<'_> {
             approval_id: approval_id.to_string(),
             reason,
         });
+    }
+
+    fn emit_breach_scan_progress(&self, checked: usize, total: usize) {
+        self.record(Effect::EmitBreachScanProgress { checked, total });
+    }
+
+    fn emit_breach_scan_finished(&self) {
+        self.record(Effect::EmitBreachScanFinished);
     }
 }
 

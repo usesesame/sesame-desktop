@@ -9,9 +9,11 @@ use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
 pub(crate) mod backups;
+pub(crate) mod breach_scan;
 pub(crate) mod browser_fill;
 pub(crate) mod file_choices;
 pub(crate) mod history;
+pub(crate) mod imports;
 pub(crate) mod lifecycle;
 pub(crate) mod logins;
 pub(crate) mod quick_access;
@@ -31,6 +33,9 @@ mod backups_tests;
 
 #[cfg(test)]
 mod browser_fill_tests;
+
+#[cfg(test)]
+mod imports_tests;
 
 #[cfg(test)]
 mod logins_tests;
@@ -84,4 +89,6 @@ pub(crate) trait DesktopEffects {
         approval_id: &str,
         reason: &'static str,
     );
+    fn emit_breach_scan_progress(&self, checked: usize, total: usize);
+    fn emit_breach_scan_finished(&self);
 }
