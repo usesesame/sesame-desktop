@@ -401,6 +401,7 @@ pub(crate) fn ensure_main_window(app: &AppHandle) -> Option<WebviewWindow> {
         .visible(false)
         .additional_browser_args(WEBVIEW2_BROWSER_ARGUMENTS)
         .general_autofill_enabled(false)
+        .on_download(|_, _| false)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
@@ -424,6 +425,7 @@ pub(crate) fn ensure_quick_access_window(app: &AppHandle) -> Option<WebviewWindo
         .clone();
     let window = WebviewWindowBuilder::from_config(app, &config)
         .ok()?
+        .on_download(|_, _| false)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .ok()?;
@@ -488,7 +490,11 @@ fn set_display_affinity(_window: &WebviewWindow, _affinity: DisplayAffinity) -> 
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn harden_release_webview(window: &WebviewWindow) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2, ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Settings3,
+        ICoreWebView2Settings4, COREWEBVIEW2_PERMISSION_STATE_DENY,
+    };
+    use webview2_com::PermissionRequestedEventHandler;
     use windows_core::Interface;
 
     let _ = window.with_webview(|platform| {
@@ -505,6 +511,20 @@ fn harden_release_webview(window: &WebviewWindow) {
             if let Ok(settings) = settings.cast::<ICoreWebView2Settings3>() {
                 let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
             }
+            if let Ok(settings) = settings.cast::<ICoreWebView2Settings4>() {
+                let _ = settings.SetIsPasswordAutosaveEnabled(false);
+            }
+            let handler = PermissionRequestedEventHandler::create(Box::new(
+                |_: Option<ICoreWebView2>,
+                 args: Option<ICoreWebView2PermissionRequestedEventArgs>| {
+                    if let Some(args) = args {
+                        let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY);
+                    }
+                    Ok(())
+                },
+            ));
+            let mut token = 0_i64;
+            let _ = webview.add_PermissionRequested(&handler, &mut token);
         }
     });
 }

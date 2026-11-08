@@ -1,6 +1,6 @@
 import { keptSecretKeys } from '../kept-secrets'
 import type { Attachment, DocumentMetadata, DocumentMetadataInput, SecretView } from '../types'
-import { addDocumentAttachment, deleteDocument, getDocument, removeDocumentAttachment, saveDocument } from '../vault'
+import { addDocumentAttachment, deleteDocument, getDocument, removeDocumentAttachment, saveDocument, saveDocumentAttachment } from '../vault'
 import { controllerStore } from './controller-store'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
@@ -50,12 +50,13 @@ async function fileToBase64(file: File): Promise<string> {
 /// a fetch that runs as a side effect of the base controller's own get, so a
 /// single load populates both the draft and the attachment list.
 export function createDocumentController(options: RecordControllerOptions) {
-  const { stores, modal } = options
+  const { stores, feedback, modal } = options
   const attachmentState = controllerStore({
     documentAttachments: [] as Attachment[],
     uploadingAttachment: false,
     attachmentError: '',
     removingAttachmentId: null as string | null,
+    savingAttachmentId: null as string | null,
   })
 
   async function fetchDocument(id: string): Promise<SecretView<DocumentMetadata>> {
@@ -67,7 +68,7 @@ export function createDocumentController(options: RecordControllerOptions) {
   }
 
   function clearAttachmentState() {
-    attachmentState.patch({ documentAttachments: [], attachmentError: '', uploadingAttachment: false, removingAttachmentId: null })
+    attachmentState.patch({ documentAttachments: [], attachmentError: '', uploadingAttachment: false, removingAttachmentId: null, savingAttachmentId: null })
   }
 
   const base = createRecordController<DocumentMetadata, DocumentMetadataInput>(options, {
@@ -120,6 +121,21 @@ export function createDocumentController(options: RecordControllerOptions) {
         if (base.state.value().draft.id === documentId) attachmentState.patch({ uploadingAttachment: false })
       }
     },
+    async saveAttachment(attachmentId: string) {
+      const documentId = base.state.value().draft.id
+      if (!documentId || attachmentState.value().savingAttachmentId) return
+      attachmentState.patch({ savingAttachmentId: attachmentId, attachmentError: '' })
+      try {
+        const savedName = await saveDocumentAttachment(documentId, attachmentId)
+        if (savedName) feedback.showNotice('Attachment saved', `${savedName} was saved outside your vault.`)
+      } catch (error) {
+        if (base.state.value().draft.id === documentId) {
+          attachmentState.patch({ attachmentError: error instanceof Error ? error.message : 'That attachment could not be saved.' })
+        }
+      } finally {
+        if (base.state.value().draft.id === documentId) attachmentState.patch({ savingAttachmentId: null })
+      }
+    },
     async removeAttachment(attachmentId: string) {
       const documentId = base.state.value().draft.id
       if (!documentId) return
@@ -138,7 +154,7 @@ export function createDocumentController(options: RecordControllerOptions) {
     },
     clearSecrets() {
       base.clearSecrets()
-      attachmentState.set({ documentAttachments: [], uploadingAttachment: false, attachmentError: '', removingAttachmentId: null })
+      attachmentState.set({ documentAttachments: [], uploadingAttachment: false, attachmentError: '', removingAttachmentId: null, savingAttachmentId: null })
     },
   }
 }

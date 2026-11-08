@@ -88,6 +88,7 @@ commands.allow = [
   "save_document",
   "delete_document",
   "add_document_attachment",
+  "save_document_attachment",
   "remove_document_attachment",
   "save_custom_record",
   "delete_custom_record",

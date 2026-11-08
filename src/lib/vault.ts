@@ -1238,6 +1238,15 @@ export async function addDocumentAttachment(
   return invoke<SaveDocumentMetadataResult>('add_document_attachment', { documentId, filename, contentType, data })
 }
 
+export async function saveDocumentAttachment(documentId: string, attachmentId: string): Promise<string | null> {
+  if (previewMode) {
+    const attachment = previewDocuments[documentId]?.attachments.find((entry) => entry.id === attachmentId)
+    if (!attachment) throw new Error('That attachment no longer exists.')
+    return attachment.filename
+  }
+  return invoke<string | null>('save_document_attachment', { documentId, attachmentId })
+}
+
 export async function removeDocumentAttachment(documentId: string, attachmentId: string): Promise<SaveDocumentMetadataResult> {
   if (previewMode) {
     const document = previewDocuments[documentId]
