@@ -118,6 +118,113 @@ test('release Linux builds scrub WebKit inspection variables before the Tauri bu
   assert.ok(run >= 0 && preparation > run && builder > preparation)
 })
 
+const LINUX_WEBKIT_SETTINGS = [
+  'set_enable_webgl',
+  'set_enable_webaudio',
+  'set_enable_media',
+  'set_enable_mediasource',
+  'set_enable_encrypted_media',
+  'set_enable_media_stream',
+  'set_enable_webrtc',
+  'set_enable_page_cache',
+  'set_enable_dns_prefetching',
+  'set_enable_developer_extras',
+  'set_allow_file_access_from_file_urls',
+  'set_allow_universal_access_from_file_urls',
+  'set_javascript_can_open_windows_automatically',
+  'set_javascript_can_access_clipboard',
+]
+
+function linuxWebviewHardening() {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const attribute = '#[cfg(target_os = "linux")]\nfn harden_release_webview'
+  const start = shell.indexOf(attribute)
+  assert.ok(start >= 0, 'the Linux webview hardening function is missing')
+  assert.equal(
+    shell.slice(start, shell.indexOf('fn harden_release_webview', start)).trim(),
+    '#[cfg(target_os = "linux")]',
+    'the Linux webview hardening does not apply to debug builds',
+  )
+  return braceBody(shell, start)
+}
+
+test('the Linux webview turns off every WebKit engine feature the app never uses', () => {
+  const cargo = read('src-tauri', 'Cargo.toml')
+  const linuxDependencies = cargo.slice(
+    cargo.indexOf(`[target.'cfg(target_os = "linux")'.dependencies]`),
+    cargo.indexOf(`[target.'cfg(target_os = "linux")'.dev-dependencies]`),
+  )
+  assert.match(
+    linuxDependencies,
+    /^webkit2gtk = \{ version = "=2\.0\.2", features = \["v2_20"\] \}$/m,
+    'webkit2gtk is not pinned to the locked crate under the Linux target',
+  )
+
+  const hardening = linuxWebviewHardening()
+  assert.match(hardening, /window\.with_webview\(/, 'the Linux hardening does not run on the platform WebView')
+  assert.match(hardening, /platform\.inner\(\)/, 'the Linux hardening does not use the platform WebView')
+  for (const setting of LINUX_WEBKIT_SETTINGS) {
+    assert.match(hardening, new RegExp(`${setting}\\(false\\)`), `${setting} is not turned off`)
+  }
+  assert.match(
+    hardening,
+    /connect_permission_request\(\|_, request\| \{\s*request\.deny\(\);\s*true\s*\}\)/,
+    'the Linux webview no longer denies permission requests',
+  )
+})
+
+test('an unexpected web process exit locks the vault and reloads at most twice', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
+  const start = shell.indexOf('fn web_process_terminated(')
+  assert.ok(start >= 0, 'the web process termination handler is missing')
+  const handler = braceBody(shell, start)
+  assert.match(handler, /QUITTING\.load\(Ordering::Acquire\)/, 'a quit is treated as a renderer crash')
+  assert.match(handler, /lock_vault_if_unlocked\(app\)/, 'a terminated web process does not lock the vault')
+  assert.match(
+    handler,
+    /crate::diagnostics::record_web_process_terminated\(app\)/,
+    'a terminated web process is not recorded',
+  )
+  assert.match(
+    handler,
+    /let allowed = WEB_PROCESS_RELOAD_GUARD\s*\.lock\(\)\s*\.map\(\|mut guard\| guard\.allow\(\)\)\s*\.unwrap_or\(false\);\s*if allowed \{\s*reload\(\);\s*\}/,
+    'the reload is not guarded',
+  )
+  assert.match(shell, /const WEB_PROCESS_RELOAD_LIMIT: u8 = 2;/, 'the reload guard has no limit')
+  assert.match(
+    shell,
+    /fn secure_window\(window: &WebviewWindow\) -> Result<\(\), String> \{\s*harden_release_webview\(window\);\s*watch_web_process\(window\);/,
+    'no window registers the web process watcher',
+  )
+  const guardStart = shell.indexOf('impl WebProcessReloadGuard {')
+  assert.ok(guardStart >= 0, 'the reload guard implementation is missing')
+  const guard = braceBody(shell, guardStart)
+  assert.match(
+    guard,
+    /if self\.reloads >= WEB_PROCESS_RELOAD_LIMIT \{\s*return false;\s*\}\s*self\.reloads \+= 1;\s*true/,
+    'the reload guard does not stop after its limit',
+  )
+  assert.match(
+    shell,
+    /connect_web_process_terminated\(move \|webview, _reason\| \{\s*web_process_terminated\(&app, \|\| webview\.reload\(\)\);/,
+    'Linux does not lock and reload when the web process terminates',
+  )
+  assert.match(
+    shell,
+    /ProcessFailedEventHandler::create\(Box::new\(move \|_, _\| \{[\s\S]*?web_process_terminated\(&app,[\s\S]*?reload\.Reload\(\)/,
+    'Windows does not lock and reload when the web process fails',
+  )
+  assert.match(shell, /webview\.add_ProcessFailed\(&handler, &mut token\)/, 'Windows never registers the process failure handler')
+  assert.match(diagnostics, /pub fn record_web_process_terminated\(app: &AppHandle\)/, 'the renderer crash diagnostic is missing')
+  assert.match(
+    diagnostics,
+    /append_event\(&path, "renderer", "web_process_terminated"\)/,
+    'the renderer crash diagnostic does not use the renderer operation',
+  )
+  assert.match(diagnostics, /"web_process_terminated" => "error"/, 'the renderer crash diagnostic is not classified as an error')
+})
+
 test('each desktop webview gets only the Tauri permissions its imports need', () => {
   const main = JSON.parse(read('src-tauri', 'capabilities', 'default.json'))
   const quick = JSON.parse(read('src-tauri', 'capabilities', 'quick-access.json'))

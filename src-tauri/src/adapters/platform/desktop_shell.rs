@@ -29,6 +29,29 @@ const MAIN_MIN_HEIGHT: f64 = 600.0;
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
 
+#[cfg(any(target_os = "linux", windows))]
+const WEB_PROCESS_RELOAD_LIMIT: u8 = 2;
+
+#[cfg(any(target_os = "linux", windows))]
+struct WebProcessReloadGuard {
+    reloads: u8,
+}
+
+#[cfg(any(target_os = "linux", windows))]
+impl WebProcessReloadGuard {
+    fn allow(&mut self) -> bool {
+        if self.reloads >= WEB_PROCESS_RELOAD_LIMIT {
+            return false;
+        }
+        self.reloads += 1;
+        true
+    }
+}
+
+#[cfg(any(target_os = "linux", windows))]
+static WEB_PROCESS_RELOAD_GUARD: Mutex<WebProcessReloadGuard> =
+    Mutex::new(WebProcessReloadGuard { reloads: 0 });
+
 const BLUR_GRACE: Duration = Duration::from_millis(1200);
 const BLUR_POINTER_LINGER: Duration = Duration::from_secs(8);
 const BLUR_POLL: Duration = Duration::from_millis(100);
@@ -413,6 +436,7 @@ pub(crate) fn ensure_quick_access_window(app: &AppHandle) -> Option<WebviewWindo
 
 fn secure_window(window: &WebviewWindow) -> Result<(), String> {
     harden_release_webview(window);
+    watch_web_process(window);
     let capture_allowed = desktop_settings::settings_path(window.app_handle())
         .is_ok_and(|path| desktop_settings::screen_capture_allowed_at(&path));
     set_display_affinity(window, display_affinity(capture_allowed))
@@ -485,8 +509,97 @@ fn harden_release_webview(window: &WebviewWindow) {
     });
 }
 
-#[cfg(any(not(windows), debug_assertions))]
+#[cfg(target_os = "linux")]
+fn harden_release_webview(window: &WebviewWindow) {
+    use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+
+    let _ = window.with_webview(|platform| {
+        let webview = platform.inner();
+        if let Some(settings) = webview.settings() {
+            settings.set_enable_webgl(false);
+            settings.set_enable_webaudio(false);
+            settings.set_enable_media(false);
+            settings.set_enable_mediasource(false);
+            settings.set_enable_encrypted_media(false);
+            settings.set_enable_media_stream(false);
+            settings.set_enable_webrtc(false);
+            settings.set_enable_page_cache(false);
+            settings.set_enable_dns_prefetching(false);
+            settings.set_enable_developer_extras(false);
+            settings.set_allow_file_access_from_file_urls(false);
+            settings.set_allow_universal_access_from_file_urls(false);
+            settings.set_javascript_can_open_windows_automatically(false);
+            settings.set_javascript_can_access_clipboard(false);
+        }
+        webview.connect_permission_request(|_, request| {
+            request.deny();
+            true
+        });
+    });
+}
+
+#[cfg(any(
+    all(windows, debug_assertions),
+    all(not(windows), not(target_os = "linux"))
+))]
 fn harden_release_webview(_window: &WebviewWindow) {}
+
+#[cfg(any(target_os = "linux", windows))]
+fn web_process_terminated(app: &AppHandle, reload: impl FnOnce()) {
+    if QUITTING.load(Ordering::Acquire) {
+        return;
+    }
+    lock_vault_if_unlocked(app);
+    crate::diagnostics::record_web_process_terminated(app);
+    let allowed = WEB_PROCESS_RELOAD_GUARD
+        .lock()
+        .map(|mut guard| guard.allow())
+        .unwrap_or(false);
+    if allowed {
+        reload();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn watch_web_process(window: &WebviewWindow) {
+    use webkit2gtk::WebViewExt;
+
+    let app = window.app_handle().clone();
+    let _ = window.with_webview(move |platform| {
+        let webview = platform.inner();
+        let app = app.clone();
+        webview.connect_web_process_terminated(move |webview, _reason| {
+            web_process_terminated(&app, || webview.reload());
+        });
+    });
+}
+
+#[cfg(windows)]
+fn watch_web_process(window: &WebviewWindow) {
+    use webview2_com::ProcessFailedEventHandler;
+
+    let app = window.app_handle().clone();
+    let _ = window.with_webview(move |platform| {
+        // SAFETY: WebView2 owns these COM interfaces for the platform handle's lifetime.
+        unsafe {
+            let Ok(webview) = platform.controller().CoreWebView2() else {
+                return;
+            };
+            let reload = webview.clone();
+            let handler = ProcessFailedEventHandler::create(Box::new(move |_, _| {
+                web_process_terminated(&app, || {
+                    let _ = reload.Reload();
+                });
+                Ok(())
+            }));
+            let mut token = 0;
+            let _ = webview.add_ProcessFailed(&handler, &mut token);
+        }
+    });
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn watch_web_process(_window: &WebviewWindow) {}
 
 pub fn lock_vault(app: &AppHandle) {
     let state = app.state::<VaultState>();
@@ -585,6 +698,16 @@ mod tests {
             Some(OsStr::new("wayland-1")),
             Some(OsStr::new("wayland"))
         ));
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn a_renderer_that_keeps_crashing_cannot_reload_forever() {
+        let mut guard = WebProcessReloadGuard { reloads: 0 };
+        for _ in 0..WEB_PROCESS_RELOAD_LIMIT {
+            assert!(guard.allow());
+        }
+        assert!(!guard.allow());
     }
 
     #[test]

@@ -150,7 +150,8 @@ fn severity(code: &str) -> &'static str {
         | "quick_access_listener_failed"
         | "breach_scan_listener_failed"
         | "card_fill_listener_failed"
-        | "totp_fill_listener_failed" => "error",
+        | "totp_fill_listener_failed"
+        | "web_process_terminated" => "error",
         "key_page_fallback" => "warn",
         "fill_locked"
         | "fill_no_match"
@@ -250,6 +251,12 @@ pub fn record_vault_key_fallback(app: &AppHandle, code: &'static str) {
     }
     if let Ok(path) = diagnostic_path(app) {
         let _ = append_event(&path, "vault_open", code);
+    }
+}
+
+pub fn record_web_process_terminated(app: &AppHandle) {
+    if let Ok(path) = diagnostic_path(app) {
+        let _ = append_event(&path, "renderer", "web_process_terminated");
     }
 }
 
@@ -585,6 +592,7 @@ fn allowed_code(value: &str) -> bool {
             | "selection_verified"
             | "modal_refused"
             | "key_page_fallback"
+            | "web_process_terminated"
     )
 }
 

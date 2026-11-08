@@ -3998,6 +3998,7 @@ dependencies = [
  "ts-rs",
  "unicode-security",
  "url",
+ "webkit2gtk",
  "webview2-com",
  "windows-core",
  "windows-sys 0.61.2",
