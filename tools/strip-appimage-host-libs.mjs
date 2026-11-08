@@ -22,11 +22,82 @@ export function planRemovedGioModules(fileNames) {
   return fileNames.filter((name) => unusedGioModulePatterns.some((pattern) => pattern.test(name)))
 }
 
-export function removedPathsStillListed(listing, libraries, gioModules) {
+export const unusedGtkPrintBackendPatterns = [/^libprintbackend-(cups|file)\.so$/]
+
+export function planRemovedGtkPrintBackends(fileNames) {
+  return fileNames.filter((name) => unusedGtkPrintBackendPatterns.some((pattern) => pattern.test(name)))
+}
+
+export const unusedPixbufLoaderPatterns = [/^libpixbufloader-tiff\.so$/]
+
+export function planRemovedPixbufLoaders(fileNames) {
+  return fileNames.filter((name) => unusedPixbufLoaderPatterns.some((pattern) => pattern.test(name)))
+}
+
+export function withoutPixbufLoaders(cache, names) {
+  const removed = new Set(names)
+  return cache
+    .split(/\n\n/)
+    .filter((block) => {
+      const first = block.trimStart().split('\n')[0].trim()
+      const loader = first.startsWith('"') ? path.basename(first.slice(1, -1)) : ''
+      return !removed.has(loader)
+    })
+    .join('\n\n')
+}
+
+export const orphanedLibraryPatterns = [
+  /^libcups\.so\./,
+  /^libavahi-client\.so\./,
+  /^libavahi-common\.so\./,
+  /^libcolord\.so\./,
+  /^libgnutls\.so\./,
+  /^libp11-kit\.so\./,
+  /^libnettle\.so\./,
+  /^libhogweed\.so\./,
+  /^libproxy\.so\./,
+  /^libpxbackend-1\.0\.so$/,
+  /^libcurl-gnutls\.so\./,
+  /^librtmp\.so\./,
+  /^libssh\.so\./,
+  /^libldap\.so\./,
+  /^liblber\.so\./,
+  /^libsasl2\.so\./,
+  /^libcrypto\.so\./,
+  /^libduktape\.so\./,
+  /^libmount\.so\./,
+  /^libblkid\.so\./,
+  /^libselinux\.so\./,
+  /^libpcre2-8\.so\./,
+  /^libtiff\.so\./,
+  /^libLerc\.so\./,
+  /^libjbig\.so\./,
+  /^libdeflate\.so\./,
+]
+
+export function planRemovedOrphanedLibraries(fileNames) {
+  return fileNames.filter((name) => orphanedLibraryPatterns.some((pattern) => pattern.test(name)))
+}
+
+export function removedPathsStillListed(
+  listing,
+  libraries,
+  gioModules,
+  { gtkPrintBackends = [], pixbufLoaders = [], orphanedLibraries = [] } = {},
+) {
   const listed = new Set(listing.split('\n').map((line) => line.trim()))
   return [
     ...libraries.map((name) => `squashfs-root/usr/lib/${name}`),
+    ...orphanedLibraries.map((name) => `squashfs-root/usr/lib/${name}`),
     ...gioModules.map((name) => `squashfs-root/usr/lib/gio/modules/${name}`),
+    ...gtkPrintBackends.flatMap((name) => [
+      `squashfs-root/usr/lib/${name}`,
+      `squashfs-root/usr/lib/gtk-3.0/3.0.0/printbackends/${name}`,
+    ]),
+    ...pixbufLoaders.flatMap((name) => [
+      `squashfs-root/usr/lib/${name}`,
+      `squashfs-root/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/${name}`,
+    ]),
   ].filter((entry) => listed.has(entry))
 }
 
@@ -117,6 +188,11 @@ export async function stripAppImageHostLibraries(appImagePath) {
     const planned = planStrippedLibraries(libNames)
     const gioModuleDirectory = path.join(libDirectory, 'gio', 'modules')
     const removedModules = planRemovedGioModules(await readdirIfPresent(gioModuleDirectory))
+    const printBackendDirectory = path.join(libDirectory, 'gtk-3.0', '3.0.0', 'printbackends')
+    const removedPrintBackends = planRemovedGtkPrintBackends(await readdirIfPresent(printBackendDirectory))
+    const pixbufLoaderDirectory = path.join(libDirectory, 'gdk-pixbuf-2.0', '2.10.0', 'loaders')
+    const removedPixbufLoaders = planRemovedPixbufLoaders(await readdirIfPresent(pixbufLoaderDirectory))
+    const removedLibraries = planRemovedOrphanedLibraries(libNames)
     let patched = 0
     for (const entry of await readdir(libDirectory, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.startsWith('libwebkit2gtk-4.1.so.0')) continue
@@ -138,14 +214,48 @@ export async function stripAppImageHostLibraries(appImagePath) {
     } catch {
       hookPatched = false
     }
-    if (planned.length === 0 && removedModules.length === 0 && patched === 0 && !hookPatched) {
-      return { appImage, stripped: [], removedModules: [], patched: 0, hookPatched: false, unchanged: true }
+    if (
+      planned.length === 0 &&
+      removedModules.length === 0 &&
+      removedPrintBackends.length === 0 &&
+      removedPixbufLoaders.length === 0 &&
+      removedLibraries.length === 0 &&
+      patched === 0 &&
+      !hookPatched
+    ) {
+      return {
+        appImage,
+        stripped: [],
+        removedModules: [],
+        removedPrintBackends: [],
+        removedPixbufLoaders: [],
+        removedLibraries: [],
+        patched: 0,
+        hookPatched: false,
+        unchanged: true,
+      }
     }
     for (const name of planned) {
       await rm(path.join(libDirectory, name), { force: true })
     }
     for (const name of removedModules) {
       await rm(path.join(gioModuleDirectory, name), { force: true })
+    }
+    for (const name of removedPrintBackends) {
+      await rm(path.join(printBackendDirectory, name), { force: true })
+      await rm(path.join(libDirectory, name), { force: true })
+    }
+    for (const name of removedPixbufLoaders) {
+      await rm(path.join(pixbufLoaderDirectory, name), { force: true })
+      await rm(path.join(libDirectory, name), { force: true })
+    }
+    if (removedPixbufLoaders.length > 0) {
+      const cachePath = path.join(libDirectory, 'gdk-pixbuf-2.0', '2.10.0', 'loaders.cache')
+      const cache = await readFile(cachePath, 'utf8').catch(() => null)
+      if (cache !== null) await writeFile(cachePath, withoutPixbufLoaders(cache, removedPixbufLoaders))
+    }
+    for (const name of removedLibraries) {
+      await rm(path.join(libDirectory, name), { force: true })
     }
     const rebuiltSquashfs = path.join(workspace, 'rebuilt.squashfs')
     await run('mksquashfs', [
@@ -159,7 +269,11 @@ export async function stripAppImageHostLibraries(appImagePath) {
       '-quiet',
     ])
     const { stdout: listing } = await run('unsquashfs', ['-ls', rebuiltSquashfs])
-    const remaining = removedPathsStillListed(listing, planned, removedModules)
+    const remaining = removedPathsStillListed(listing, planned, removedModules, {
+      gtkPrintBackends: removedPrintBackends,
+      pixbufLoaders: removedPixbufLoaders,
+      orphanedLibraries: removedLibraries,
+    })
     if (remaining.length > 0) throw new Error(`The rebuilt AppImage still contains ${remaining.join(', ')}.`)
     const finalBytes = Buffer.concat([appImageBytes.subarray(0, offset), await readFile(rebuiltSquashfs)])
     const rebuilt = path.join(workspace, 'rebuilt.AppImage')
@@ -174,7 +288,18 @@ export async function stripAppImageHostLibraries(appImagePath) {
     await chmod(replacement, 0o755)
     await rename(replacement, appImage)
     const size = await stat(appImage)
-    return { appImage, stripped: planned, removedModules, patched, hookPatched, unchanged: false, bytes: size.size }
+    return {
+      appImage,
+      stripped: planned,
+      removedModules,
+      removedPrintBackends,
+      removedPixbufLoaders,
+      removedLibraries,
+      patched,
+      hookPatched,
+      unchanged: false,
+      bytes: size.size,
+    }
   } finally {
     await rm(workspace, { recursive: true, force: true })
   }
@@ -194,6 +319,9 @@ async function main() {
     const changes = []
     if (result.stripped.length > 0) changes.push(`removed bundled ${result.stripped.join(', ')}`)
     if (result.removedModules.length > 0) changes.push(`removed the unused GIO module ${result.removedModules.join(', ')}`)
+    if (result.removedPrintBackends.length > 0) changes.push(`removed the unused GTK print backend ${result.removedPrintBackends.join(', ')}`)
+    if (result.removedPixbufLoaders.length > 0) changes.push(`removed the unused GDK pixbuf loader ${result.removedPixbufLoaders.join(', ')}`)
+    if (result.removedLibraries.length > 0) changes.push(`removed the unused bundled libraries ${result.removedLibraries.join(', ')}`)
     if (result.patched > 0) changes.push(`patched ${result.patched} sandbox path${result.patched === 1 ? '' : 's'}`)
     if (result.hookPatched) changes.push('patched the AppRun library path')
     console.log(`${result.appImage}: ${changes.join(' and ')} (${result.bytes} bytes).`)
