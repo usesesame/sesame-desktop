@@ -211,76 +211,6 @@
       "expires": "2027-01-18"
     },
     {
-      "id": "UBUNTU-CVE-2026-102555",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-102556",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-102557",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-102558",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-102559",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-102560",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-103399",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-12478",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-12547",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-12548",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
       "id": "UBUNTU-CVE-2026-15709",
       "package": "libsoup3",
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
@@ -573,13 +503,6 @@
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
       "reviewed": "2026-10-20",
       "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-111497",
-      "package": "brotli",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-24",
-      "expires": "2027-01-22"
     },
     {
       "id": "UBUNTU-CVE-2026-113679",
