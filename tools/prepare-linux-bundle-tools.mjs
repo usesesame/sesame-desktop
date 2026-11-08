@@ -57,10 +57,28 @@ async function localToolsDirectory(repo) {
   return path.join(metadata.target_directory, '.tauri')
 }
 
-async function fetchTool(tool) {
-  const response = await fetch(tool.url, { redirect: 'follow' })
-  if (!response.ok) throw new Error(`Could not download ${tool.name}: HTTP ${response.status}.`)
-  return Buffer.from(await response.arrayBuffer())
+export const downloadRetryDelaysMs = [2000, 5000, 15000]
+
+function retryableStatus(status) {
+  return status === 408 || status === 429 || status >= 500
+}
+
+export async function fetchTool(tool, { fetchImpl = fetch, delaysMs = downloadRetryDelaysMs, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  let failure
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    if (attempt > 0) await wait(delaysMs[attempt - 1])
+    let response
+    try {
+      response = await fetchImpl(tool.url, { redirect: 'follow' })
+      if (response.ok) return Buffer.from(await response.arrayBuffer())
+    } catch (error) {
+      failure = new Error(`Could not download ${tool.name}: ${error.message ?? error}.`)
+      continue
+    }
+    failure = new Error(`Could not download ${tool.name}: HTTP ${response.status}.`)
+    if (!retryableStatus(response.status)) throw failure
+  }
+  throw failure
 }
 
 export async function installPinnedTool(tool, toolsDir) {
