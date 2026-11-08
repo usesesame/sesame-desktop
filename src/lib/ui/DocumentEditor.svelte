@@ -119,7 +119,7 @@
                   type="button"
                   class="document-attachment-download"
                   aria-busy={savingAttachmentId === attachment.id}
-                  disabled={savingAttachmentId === attachment.id}
+                  disabled={savingAttachmentId !== null}
                   on:click={() => onSaveAttachment(attachment.id)}
                   title={`Save ${attachment.filename}`}
                 >

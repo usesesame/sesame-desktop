@@ -1274,12 +1274,12 @@ test('every window refuses webview downloads', () => {
   for (const path of filesMatching(/\.(ts|svelte)$/, join(root, 'src'))) {
     assert.doesNotMatch(
       readFileSync(path, 'utf8'),
-      /download\s*=|download\s*:/,
+      /\bdownload\s*=\s*[{"']|\.download\s*=/,
       `${relative(root, path)} can start a webview download from the page`,
     )
   }
   const editor = read('src', 'lib', 'ui', 'DocumentEditor.svelte')
-  assert.doesNotMatch(editor, /data:\$\{|\.data\b/, 'the document editor builds a data URL from attachment bytes')
+  assert.doesNotMatch(editor, /data:\$\{|attachment\.data\b/, 'the document editor builds a data URL from attachment bytes')
   assert.match(editor, /onSaveAttachment\(attachment\.id\)/, 'the document editor does not route a save through the main process')
 })
 

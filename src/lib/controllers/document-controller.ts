@@ -123,7 +123,7 @@ export function createDocumentController(options: RecordControllerOptions) {
     },
     async saveAttachment(attachmentId: string) {
       const documentId = base.state.value().draft.id
-      if (!documentId) return
+      if (!documentId || attachmentState.value().savingAttachmentId) return
       attachmentState.patch({ savingAttachmentId: attachmentId, attachmentError: '' })
       try {
         const savedName = await saveDocumentAttachment(documentId, attachmentId)
