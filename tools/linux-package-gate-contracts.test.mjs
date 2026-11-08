@@ -7,7 +7,7 @@ import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
 import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
-import { installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
+import { fetchTool, installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
 const repository = process.cwd()
@@ -476,3 +476,40 @@ test('the bundling tools are verified before the bundler can download its own', 
     assert.match(body, /useLocalToolsDir":true/, `${workflow} does not keep bundling tools in the project target directory`)
   }
 })
+
+function scriptedFetch(outcomes) {
+  const calls = []
+  const fetchImpl = async (url) => {
+    calls.push(url)
+    const outcome = outcomes.shift()
+    if (outcome instanceof Error) throw outcome
+    return { ok: outcome === 200, status: outcome, arrayBuffer: async () => new TextEncoder().encode('fictional tool').buffer }
+  }
+  return { fetchImpl, calls }
+}
+
+const fictionalTool = { name: 'fictional-tool', url: 'https://downloads.example.test/fictional-tool' }
+
+test('bundle tool downloads retry gateway errors and dropped connections', async () => {
+  const waits = []
+  const { fetchImpl, calls } = scriptedFetch([504, new Error('socket hang up'), 503, 200])
+  const bytes = await fetchTool(fictionalTool, { fetchImpl, wait: async (ms) => waits.push(ms) })
+  assert.equal(bytes.toString(), 'fictional tool')
+  assert.equal(calls.length, 4)
+  assert.deepEqual(waits, [2000, 5000, 15000])
+})
+
+test('bundle tool downloads stop after the last retry and report the final status', async () => {
+  const { fetchImpl, calls } = scriptedFetch([504, 504, 504, 504, 200])
+  await assert.rejects(fetchTool(fictionalTool, { fetchImpl, wait: async () => {} }), /fictional-tool: HTTP 504/)
+  assert.equal(calls.length, 4)
+})
+
+test('bundle tool downloads do not retry a missing or forbidden file', async () => {
+  for (const status of [403, 404]) {
+    const { fetchImpl, calls } = scriptedFetch([status, 200])
+    await assert.rejects(fetchTool(fictionalTool, { fetchImpl, wait: async () => {} }), new RegExp(`HTTP ${status}`))
+    assert.equal(calls.length, 1)
+  }
+})
+
