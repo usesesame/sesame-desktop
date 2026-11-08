@@ -114,6 +114,7 @@ libc = "0.2"
 # Copies go through arboard directly so a secret can be marked as one. Image
 # support stays off because Sesame only ever puts text on the clipboard.
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+webkit2gtk = { version = "=2.0.2", features = ["v2_20"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 glib = "=0.18.5"

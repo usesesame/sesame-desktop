@@ -329,6 +329,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "webkit2gtk",
+      "version": "2.0",
+      "reason": "The Linux webview hardening needs the WebKitGTK settings and process signals that Tauri does not re-export. It is already locked through Tauri at 2.0.2, so naming it directly adds no crate or version."
+    },
+    {
       "name": "webview2-com",
       "version": "0.39",
       "reason": "The versioned WebView2 settings interface that turns off the browser accelerator keys is not re-exported by tauri, tauri-runtime-wry or wry. It is already locked through wry at 0.39.1, so naming it directly adds no crate or version."
