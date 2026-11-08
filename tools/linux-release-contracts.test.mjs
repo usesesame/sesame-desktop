@@ -9,7 +9,19 @@ import { RELEASE_REPOSITORY, fileSha256, releaseIdentity } from './release-evide
 import { assertCandidateArtifactsBindAssets, LINUX_RELEASE_KIND, LINUX_RELEASE_WORKFLOW, validateLinuxEvidenceDirectory, validateLinuxHandoffPackageBytes, validateLinuxReleaseManifest, validateLinuxSigstoreEvidence } from './linux-release-evidence.mjs'
 import { buildLinuxCandidate } from './create-linux-release-candidate.mjs'
 import { releaseSetSigningPayload, verifyReleaseSet } from './release-set.mjs'
-import { addHelperAlias, appRunHookWithLibraryPath, patchSandboxPaths, planRemovedGioModules, planStrippedLibraries, removedPathsStillListed, webkitHelperAlias } from './strip-appimage-host-libs.mjs'
+import {
+  addHelperAlias,
+  appRunHookWithLibraryPath,
+  patchSandboxPaths,
+  planRemovedGioModules,
+  planRemovedGtkPrintBackends,
+  planRemovedOrphanedLibraries,
+  planRemovedPixbufLoaders,
+  withoutPixbufLoaders,
+  planStrippedLibraries,
+  removedPathsStillListed,
+  webkitHelperAlias,
+} from './strip-appimage-host-libs.mjs'
 
 const version = '1.2.3'
 const architecture = 'x86_64'
@@ -216,6 +228,55 @@ test('the AppImage keeps host-provided Wayland libraries out of the bundle', asy
     planRemovedGioModules(['libgiognutls.so', 'libgiognutls.so.old', 'libgiognomeproxy.so', 'libgiolibproxy.so', 'libgioenvironmentproxy.so', 'libdconfsettings.so', 'libgvfsdbus.so']),
     ['libgiognutls.so', 'libgiognomeproxy.so', 'libgiolibproxy.so', 'libgioenvironmentproxy.so'],
   )
+  assert.deepEqual(
+    planRemovedGtkPrintBackends(['libprintbackend-cups.so', 'libprintbackend-file.so', 'libprintbackend-cups.so.old', 'libprintbackend-print.so']),
+    ['libprintbackend-cups.so', 'libprintbackend-file.so'],
+  )
+  assert.deepEqual(
+    planRemovedPixbufLoaders(['libpixbufloader-tiff.so', 'libpixbufloader-tiff.so.old', 'libpixbufloader-svg.so', 'libpixbufloader-png.so']),
+    ['libpixbufloader-tiff.so'],
+  )
+  const orphaned = [
+    'libcups.so.2',
+    'libavahi-client.so.3',
+    'libavahi-common.so.3',
+    'libcolord.so.2',
+    'libgnutls.so.30',
+    'libp11-kit.so.0',
+    'libnettle.so.8',
+    'libhogweed.so.6',
+    'libproxy.so.1',
+    'libpxbackend-1.0.so',
+    'libcurl-gnutls.so.4',
+    'librtmp.so.1',
+    'libssh.so.4',
+    'libldap.so.2',
+    'liblber.so.2',
+    'libsasl2.so.2',
+    'libcrypto.so.3',
+    'libduktape.so.207',
+    'libmount.so.1',
+    'libblkid.so.1',
+    'libselinux.so.1',
+    'libpcre2-8.so.0',
+    'libtiff.so.6',
+    'libLerc.so.4',
+    'libjbig.so.0',
+    'libdeflate.so.0',
+  ]
+  assert.deepEqual(
+    planRemovedOrphanedLibraries([
+      ...orphaned,
+      'libpsl.so.5',
+      'libidn2.so.0',
+      'libunistring.so.5',
+      'libtasn1.so.6',
+      'libsoup-3.0.so.0',
+      'libgtk-3.so.0',
+      'libpixbufloader-svg.so',
+    ]),
+    orphaned,
+  )
   const ci = await readFile(path.join(process.cwd(), '.github', 'workflows', 'ci.yml'), 'utf8')
   const stripStep = ci.indexOf('strip-appimage-host-libs.mjs')
   const auditStep = ci.indexOf('supply-chain:sbom:audit -- --sbom appimage-sbom/')
@@ -223,6 +284,20 @@ test('the AppImage keeps host-provided Wayland libraries out of the bundle', asy
   const listing = ['squashfs-root/usr/lib/gio/modules', 'squashfs-root/usr/lib/gio/modules/libgiognutls.so.old', 'squashfs-root/usr/lib/libglib-2.0.so.0.8000.0'].join('\n')
   assert.deepEqual(removedPathsStillListed(listing, ['libglib-2.0.so.0'], ['libgiognutls.so']), [])
   assert.deepEqual(removedPathsStillListed(`${listing}\nsquashfs-root/usr/lib/gio/modules/libgiognutls.so`, [], ['libgiognutls.so']), ['squashfs-root/usr/lib/gio/modules/libgiognutls.so'])
+  assert.deepEqual(
+    removedPathsStillListed(
+      `${listing}\nsquashfs-root/usr/lib/libprintbackend-cups.so\nsquashfs-root/usr/lib/gtk-3.0/3.0.0/printbackends/libprintbackend-cups.so\nsquashfs-root/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so\nsquashfs-root/usr/lib/libtiff.so.6`,
+      [],
+      [],
+      { gtkPrintBackends: ['libprintbackend-cups.so'], pixbufLoaders: ['libpixbufloader-tiff.so'], orphanedLibraries: ['libtiff.so.6'] },
+    ),
+    [
+      'squashfs-root/usr/lib/libtiff.so.6',
+      'squashfs-root/usr/lib/libprintbackend-cups.so',
+      'squashfs-root/usr/lib/gtk-3.0/3.0.0/printbackends/libprintbackend-cups.so',
+      'squashfs-root/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so',
+    ],
+  )
 })
 
 test('the Linux release lane strips the AppImage before the gates bind its bytes', async () => {
@@ -308,4 +383,19 @@ test('the Linux CI patches the AppImage before the AppImage gate binds it', asyn
   const patch = workflow.indexOf('strip-appimage-host-libs.mjs')
   assert.ok(patch >= 0, 'the desktop-linux job does not patch the AppImage sandbox paths')
   assert.ok(patch < workflow.indexOf('--format appimage'), 'the job must patch the AppImage before its gate runs')
+})
+
+test('removed pixbuf loaders also leave the loader cache', () => {
+  const cache = [
+    '# GdkPixbuf Image Loader Modules file',
+    '"libpixbufloader-png.so"\n"png" 5 "gdk-pixbuf" "PNG" "LGPL"\n"image/png" ""',
+    '"/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-tiff.so"\n"tiff" 5 "gdk-pixbuf" "TIFF" "LGPL"\n"image/tiff" ""',
+    '"libpixbufloader-tiff.so"\n"tiff" 5 "gdk-pixbuf" "TIFF" "LGPL"',
+    '',
+  ].join('\n\n')
+  const kept = withoutPixbufLoaders(cache, ['libpixbufloader-tiff.so'])
+  assert.doesNotMatch(kept, /tiff/)
+  assert.match(kept, /"libpixbufloader-png\.so"\n"png"/)
+  assert.match(kept, /^# GdkPixbuf Image Loader Modules file/)
+  assert.equal(withoutPixbufLoaders(cache, []), cache)
 })

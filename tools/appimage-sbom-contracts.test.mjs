@@ -105,6 +105,17 @@ test('the inventory collects ELF shared objects recursively and deduplicates sym
   }
 })
 
+test('a directory symlink inside the extracted tree does not recurse or duplicate libraries', async () => {
+  const tree = fixtureTree()
+  try {
+    symlinkSync('.', path.join(tree, 'usr', '_s'))
+    const libraries = await collectBundledLibraries(tree)
+    assert.deepEqual(libraries.map((library) => library.library), ['im-fictional.so', 'libfictional.so'])
+  } finally {
+    rmSync(tree, { recursive: true, force: true })
+  }
+})
+
 test('resolved libraries become pkg:deb/ubuntu components and deduplicate by package', async () => {
   const tree = fixtureTree()
   try {

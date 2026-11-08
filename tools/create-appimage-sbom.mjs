@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -130,9 +130,12 @@ export const collectBundledLibraries = async (tree) => {
   const walk = async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name)
-      const info = await stat(full).catch(() => null)
+      const info = await lstat(full).catch(() => null)
       if (!info) continue
-      if (info.isDirectory()) {
+      if (info.isSymbolicLink()) {
+        const target = await stat(full).catch(() => null)
+        if (!target || target.isDirectory()) continue
+      } else if (info.isDirectory()) {
         await walk(full)
         continue
       }
