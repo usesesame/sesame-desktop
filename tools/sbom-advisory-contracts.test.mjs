@@ -204,6 +204,17 @@ test('one unlisted advisory in a component still fails the audit', async () => {
   )
 })
 
+test('obsolete PCRE2 exceptions cannot hide the vulnerable bundled version', async () => {
+  const bom = { components: [component('pcre2', '10.42-4ubuntu2.1', 'pkg:deb/ubuntu/pcre2@10.42-4ubuntu2.1')] }
+  await assert.rejects(
+    auditSboms([{ bom }], {
+      query: async () => [{ id: 'UBUNTU-CVE-2026-103111' }],
+      today: '2026-11-06',
+    }),
+    /pcre2@10\.42-4ubuntu2\.1: UBUNTU-CVE-2026-103111/,
+  )
+})
+
 test('an unused allowlist entry is reported', async () => {
   const sources = [
     {

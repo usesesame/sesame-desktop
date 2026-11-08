@@ -140,7 +140,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: lint
@@ -169,7 +169,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: test
@@ -198,7 +198,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: sync
@@ -227,7 +227,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: installer
@@ -280,7 +280,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: linux-rust
@@ -404,7 +404,7 @@ jobs:
 
   linux-bundles:
     needs: [lint, typecheck]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -417,10 +417,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-          key: linux-bundles
+          key: linux-bundles-ubuntu-24.04
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview and tray libraries
@@ -445,7 +445,8 @@ jobs:
           sudo apt-get install --only-upgrade --no-install-recommends -y \
             curl \
             libcurl3t64-gnutls \
-            libcurl4t64
+            libcurl4t64 \
+            libpcre2-8-0
 
       - name: Allow unprivileged user namespaces for the web view sandbox
         run: |
@@ -481,10 +482,16 @@ jobs:
 
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
-          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
             --format rpm \
             --package "$(ls src-tauri/target/release/bundle/rpm/*.rpm)" \
-            --out linux-rpm-shipped-evidence
+            --out linux-rpm-shipped-evidence; then
+            echo "--- launch log ---"
+            cat linux-rpm-shipped-evidence/linux-rpm-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-rpm-shipped-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Prove the shipped AppImage launches and stages its browser helper
         run: |
@@ -509,7 +516,7 @@ jobs:
 
   linux-installed:
     needs: [lint, typecheck]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -522,10 +529,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
-          key: linux-installed
+          key: linux-installed-ubuntu-24.04
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the webview and tray libraries
@@ -617,7 +624,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
           key: audit-0.22.2

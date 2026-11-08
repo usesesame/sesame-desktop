@@ -89,7 +89,8 @@ jobs:
           sudo apt-get install --only-upgrade --no-install-recommends -y \
             curl \
             libcurl3t64-gnutls \
-            libcurl4t64
+            libcurl4t64 \
+            libpcre2-8-0
 
       - name: Allow unprivileged user namespaces for the web view sandbox
         run: |
