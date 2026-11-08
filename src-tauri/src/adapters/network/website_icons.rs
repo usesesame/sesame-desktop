@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::Cursor,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -17,6 +18,9 @@ use tauri::{AppHandle, Manager};
 const SUCCESS_TTL_SECS: u64 = 30 * 24 * 60 * 60;
 const FAILURE_RETRY_SECS: u64 = 6 * 60 * 60;
 const MAX_ICON_BYTES: usize = 128 * 1024;
+const MAX_CACHED_ICON_BYTES: usize = 512 * 1024;
+const MAX_ICON_DIMENSION: u32 = 256;
+const PNG_DECODE_MEMORY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PAGE_BYTES: usize = 256 * 1024;
 const MAX_ICON_CANDIDATES: usize = 3;
 const MAX_LINK_TAGS: usize = 64;
@@ -24,13 +28,14 @@ const MAX_CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 500;
 const CACHE_SALT_FILE: &str = "icon-cache-salt.bin";
 const CACHE_SALT_BYTES: usize = 32;
-const ALLOWED_ICON_MEDIA_TYPES: [&str; 5] = [
-    "image/x-icon",
-    "image/vnd.microsoft.icon",
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-];
+const PNG_MEDIA_TYPE: &str = "image/png";
+const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
+const ICO_SIGNATURE: [u8; 4] = [0x00, 0x00, 0x01, 0x00];
+const ICO_DIRECTORY_BYTES: usize = 6;
+const ICO_ENTRY_BYTES: usize = 16;
+const BMP_HEADER_BYTES: usize = 40;
+const ALLOWED_ICON_MEDIA_TYPES: [&str; 3] =
+    ["image/x-icon", "image/vnd.microsoft.icon", "image/png"];
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,7 +88,7 @@ pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Optio
             let paths = cache_paths(&cache_dir, &salt, &host);
             let metadata = read_metadata(&paths.metadata);
             let now = unix_time();
-            let cached = read_cached_icon(&paths.image, metadata.media_type.as_deref());
+            let cached = read_cached_icon(&paths.image);
             Ok((paths, metadata, now, cached))
         })
         .await?
@@ -104,15 +109,15 @@ pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Optio
         Err(error) => Err(error),
     };
     match fetched {
-        Ok((bytes, media_type)) => {
+        Ok(bytes) => {
             run_cache_work(move || {
                 write_atomic(&paths.image, &bytes)?;
                 metadata.fetched_at = Some(now);
                 metadata.failed_at = None;
-                metadata.media_type = Some(media_type.clone());
+                metadata.media_type = Some(PNG_MEDIA_TYPE.to_string());
                 write_metadata(&paths.metadata, &metadata)?;
                 prune_cache(&cache_dir, &paths.metadata, &paths.image);
-                Ok(Some(data_url(&media_type, &bytes)))
+                Ok(Some(png_data_url(&bytes)))
             })
             .await
         }
@@ -121,10 +126,7 @@ pub async fn get_website_icon(app: AppHandle, site: String) -> VaultResult<Optio
                 metadata.failed_at = Some(now);
                 write_metadata(&paths.metadata, &metadata)?;
                 prune_cache(&cache_dir, &paths.metadata, &paths.image);
-                Ok(read_cached_icon(
-                    &paths.image,
-                    metadata.media_type.as_deref(),
-                ))
+                Ok(read_cached_icon(&paths.image))
             })
             .await
         }
@@ -264,7 +266,7 @@ async fn resolve_public_host(host: String) -> VaultResult<ValidatedHost> {
 }
 
 /// One redirect only: HTTPS, same registrable domain, re-checked through the public-address pin.
-async fn fetch_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)> {
+async fn fetch_icon(validated: &ValidatedHost) -> VaultResult<Vec<u8>> {
     match fetch_site_path(validated, "/favicon.ico").await {
         Ok(response) => match read_icon(response).await {
             Ok(icon) => Ok(icon),
@@ -292,7 +294,7 @@ async fn fetch_site_path(validated: &ValidatedHost, path: &str) -> VaultResult<r
     Ok(response)
 }
 
-async fn fetch_declared_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>, String)> {
+async fn fetch_declared_icon(validated: &ValidatedHost) -> VaultResult<Vec<u8>> {
     let page = fetch_site_path(validated, "/").await?;
     let page_url = page.url().clone();
     let html = read_limited(page, MAX_PAGE_BYTES).await?;
@@ -318,7 +320,7 @@ async fn fetch_declared_icon(validated: &ValidatedHost) -> VaultResult<(Vec<u8>,
     Err("That website did not provide an icon.".to_string())
 }
 
-async fn read_icon(mut response: reqwest::Response) -> VaultResult<(Vec<u8>, String)> {
+async fn read_icon(mut response: reqwest::Response) -> VaultResult<Vec<u8>> {
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -342,8 +344,8 @@ async fn read_icon(mut response: reqwest::Response) -> VaultResult<(Vec<u8>, Str
         }
         bytes.extend_from_slice(&chunk);
     }
-    let media_type = accepted_icon_body(content_type.as_deref(), &bytes)?;
-    Ok((bytes, media_type.to_string()))
+    accepted_icon_body(content_type.as_deref(), &bytes)?;
+    reencode_icon(&bytes)
 }
 
 fn accepted_icon_media_type(content_type: Option<&str>) -> VaultResult<()> {
@@ -589,15 +591,276 @@ fn icon_client(host: &str, pinned: &[SocketAddr]) -> VaultResult<Client> {
 }
 
 fn detect_image_type(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x00\x00\x01\x00") {
+    if bytes.starts_with(&ICO_SIGNATURE) {
         Some("image/x-icon")
-    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+    } else if bytes.starts_with(&PNG_SIGNATURE) {
         Some("image/png")
-    } else if bytes.starts_with(b"\xff\xd8\xff") {
-        Some("image/jpeg")
     } else {
         None
     }
+}
+
+struct DecodedIcon {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+struct IcoCandidate {
+    width: u32,
+    height: u32,
+    offset: usize,
+    size: usize,
+}
+
+fn icon_format_error() -> String {
+    "That website returned an unsupported icon format.".to_string()
+}
+
+fn icon_size_error() -> String {
+    "That website icon is too large.".to_string()
+}
+
+fn read_be_u32(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .first_chunk::<4>()
+        .map(|value| u32::from_be_bytes(*value))
+}
+
+fn read_le_u16(bytes: &[u8]) -> Option<u16> {
+    bytes
+        .first_chunk::<2>()
+        .map(|value| u16::from_le_bytes(*value))
+}
+
+fn read_le_u32(bytes: &[u8]) -> Option<u32> {
+    bytes
+        .first_chunk::<4>()
+        .map(|value| u32::from_le_bytes(*value))
+}
+
+fn read_le_i32(bytes: &[u8]) -> Option<i32> {
+    bytes
+        .first_chunk::<4>()
+        .map(|value| i32::from_le_bytes(*value))
+}
+
+fn reencode_icon(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+    if bytes.len() > MAX_ICON_BYTES {
+        return Err(icon_size_error());
+    }
+    if bytes.starts_with(&PNG_SIGNATURE) {
+        encode_icon_png(decode_png(bytes)?)
+    } else if bytes.starts_with(&ICO_SIGNATURE) {
+        encode_icon_png(decode_ico(bytes)?)
+    } else {
+        Err(icon_format_error())
+    }
+}
+
+fn png_dimensions(bytes: &[u8]) -> VaultResult<(u32, u32)> {
+    if bytes.len() < 24 || !bytes.starts_with(&PNG_SIGNATURE) || &bytes[12..16] != b"IHDR" {
+        return Err(icon_format_error());
+    }
+    if read_be_u32(&bytes[8..]).ok_or_else(icon_format_error)? != 13 {
+        return Err(icon_format_error());
+    }
+    let width = read_be_u32(&bytes[16..]).ok_or_else(icon_format_error)?;
+    let height = read_be_u32(&bytes[20..]).ok_or_else(icon_format_error)?;
+    if width == 0 || height == 0 {
+        return Err(icon_format_error());
+    }
+    if width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+        return Err(icon_size_error());
+    }
+    Ok((width, height))
+}
+
+fn decode_png(bytes: &[u8]) -> VaultResult<DecodedIcon> {
+    let (width, height) = png_dimensions(bytes)?;
+    let mut decoder = png::Decoder::new_with_limits(
+        Cursor::new(bytes),
+        png::Limits {
+            bytes: PNG_DECODE_MEMORY_BYTES,
+        },
+    );
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|_| icon_format_error())?;
+    let mut buffer = vec![0; reader.output_buffer_size().ok_or_else(icon_size_error)?];
+    let frame = reader
+        .next_frame(&mut buffer)
+        .map_err(|_| icon_format_error())?;
+    if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
+        return Err(icon_format_error());
+    }
+    buffer.truncate(frame.buffer_size());
+    Ok(DecodedIcon {
+        width,
+        height,
+        rgba: rgba_pixels(&buffer, frame.color_type)?,
+    })
+}
+
+fn rgba_pixels(pixels: &[u8], color_type: png::ColorType) -> VaultResult<Vec<u8>> {
+    let mut rgba = Vec::new();
+    match color_type {
+        png::ColorType::Grayscale => {
+            for value in pixels {
+                rgba.extend_from_slice(&[*value, *value, *value, 0xff]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            if !pixels.len().is_multiple_of(2) {
+                return Err(icon_format_error());
+            }
+            for pixel in pixels.as_chunks::<2>().0 {
+                rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
+            }
+        }
+        png::ColorType::Rgb => {
+            if !pixels.len().is_multiple_of(3) {
+                return Err(icon_format_error());
+            }
+            for pixel in pixels.as_chunks::<3>().0 {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 0xff]);
+            }
+        }
+        png::ColorType::Rgba => rgba.extend_from_slice(pixels),
+        png::ColorType::Indexed => return Err(icon_format_error()),
+    }
+    Ok(rgba)
+}
+
+fn encode_icon_png(icon: DecodedIcon) -> VaultResult<Vec<u8>> {
+    if icon.width == 0
+        || icon.height == 0
+        || icon.width > MAX_ICON_DIMENSION
+        || icon.height > MAX_ICON_DIMENSION
+    {
+        return Err(icon_size_error());
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, icon.width, icon.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|_| icon_format_error())?;
+        writer
+            .write_image_data(&icon.rgba)
+            .map_err(|_| icon_format_error())?;
+        writer.finish().map_err(|_| icon_format_error())?;
+    }
+    Ok(bytes)
+}
+
+fn ico_image_size(data: &[u8]) -> Option<(u32, u32)> {
+    if data.starts_with(&PNG_SIGNATURE) {
+        return png_dimensions(data).ok();
+    }
+    if data.len() < 12 || read_le_u32(data)? != BMP_HEADER_BYTES as u32 {
+        return None;
+    }
+    let width = read_le_i32(&data[4..])?;
+    let height = read_le_i32(&data[8..])?;
+    if width <= 0 || height <= 0 || height % 2 != 0 {
+        return None;
+    }
+    Some((u32::try_from(width).ok()?, u32::try_from(height / 2).ok()?))
+}
+
+fn largest_ico_entry(bytes: &[u8]) -> VaultResult<IcoCandidate> {
+    if bytes.len() < ICO_DIRECTORY_BYTES || !bytes.starts_with(&ICO_SIGNATURE) {
+        return Err(icon_format_error());
+    }
+    let count = read_le_u16(&bytes[4..]).ok_or_else(icon_format_error)? as usize;
+    let directory_end = ICO_DIRECTORY_BYTES
+        + count
+            .checked_mul(ICO_ENTRY_BYTES)
+            .ok_or_else(icon_format_error)?;
+    if count == 0 || directory_end > bytes.len() {
+        return Err(icon_format_error());
+    }
+    let mut best: Option<IcoCandidate> = None;
+    for index in 0..count {
+        let start = ICO_DIRECTORY_BYTES + index * ICO_ENTRY_BYTES;
+        let entry = &bytes[start..start + ICO_ENTRY_BYTES];
+        if entry[3] != 0 {
+            continue;
+        }
+        let size = read_le_u32(&entry[8..]).ok_or_else(icon_format_error)? as usize;
+        let offset = read_le_u32(&entry[12..]).ok_or_else(icon_format_error)? as usize;
+        let Some(end) = offset.checked_add(size) else {
+            continue;
+        };
+        if size == 0 || end > bytes.len() {
+            continue;
+        }
+        let Some((width, height)) = ico_image_size(&bytes[offset..end]) else {
+            continue;
+        };
+        if width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+            continue;
+        }
+        let area = u64::from(width) * u64::from(height);
+        let replaces = best
+            .as_ref()
+            .is_none_or(|current| area > u64::from(current.width) * u64::from(current.height));
+        if replaces {
+            best = Some(IcoCandidate {
+                width,
+                height,
+                offset,
+                size,
+            });
+        }
+    }
+    best.ok_or_else(icon_format_error)
+}
+
+fn decode_ico(bytes: &[u8]) -> VaultResult<DecodedIcon> {
+    let entry = largest_ico_entry(bytes)?;
+    let data = bytes
+        .get(entry.offset..entry.offset + entry.size)
+        .ok_or_else(icon_format_error)?;
+    if data.starts_with(&PNG_SIGNATURE) {
+        decode_png(data)
+    } else {
+        decode_ico_bmp(entry.width, entry.height, data)
+    }
+}
+
+fn decode_ico_bmp(width: u32, height: u32, data: &[u8]) -> VaultResult<DecodedIcon> {
+    let mut bytes = Vec::with_capacity(ICO_DIRECTORY_BYTES + ICO_ENTRY_BYTES + data.len());
+    bytes.extend_from_slice(&ICO_SIGNATURE);
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.push(if width == MAX_ICON_DIMENSION {
+        0
+    } else {
+        width as u8
+    });
+    bytes.push(if height == MAX_ICON_DIMENSION {
+        0
+    } else {
+        height as u8
+    });
+    bytes.extend_from_slice(&[0, 0]);
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&32_u16.to_le_bytes());
+    bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&((ICO_DIRECTORY_BYTES + ICO_ENTRY_BYTES) as u32).to_le_bytes());
+    bytes.extend_from_slice(data);
+    let directory = ico::IconDir::read(Cursor::new(bytes)).map_err(|_| icon_format_error())?;
+    let image = directory
+        .entries()
+        .first()
+        .ok_or_else(icon_format_error)?
+        .decode()
+        .map_err(|_| icon_format_error())?;
+    Ok(DecodedIcon {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.rgba_data().to_vec(),
+    })
 }
 
 fn read_metadata(path: &Path) -> CacheMetadata {
@@ -625,20 +888,32 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> VaultResult<()> {
         .map_err(|_| "Sesame could not update the website icon cache.".to_string())
 }
 
-fn read_cached_icon(path: &Path, media_type: Option<&str>) -> Option<String> {
-    let media_type = media_type?;
-    if fs::metadata(path).ok()?.len() > MAX_ICON_BYTES as u64 {
+fn read_cached_icon(path: &Path) -> Option<String> {
+    if fs::metadata(path).ok()?.len() > MAX_CACHED_ICON_BYTES as u64 {
+        let _ = fs::remove_file(path);
         return None;
     }
     let bytes = fs::read(path).ok()?;
-    if bytes.len() > MAX_ICON_BYTES || detect_image_type(&bytes) != Some(media_type) {
+    if bytes.len() > MAX_CACHED_ICON_BYTES {
+        let _ = fs::remove_file(path);
         return None;
     }
-    Some(data_url(media_type, &bytes))
+    let Ok(icon) = decode_png(&bytes) else {
+        let _ = fs::remove_file(path);
+        return None;
+    };
+    let Ok(png) = encode_icon_png(icon) else {
+        let _ = fs::remove_file(path);
+        return None;
+    };
+    if png != bytes && write_atomic(path, &png).is_err() {
+        let _ = fs::remove_file(path);
+    }
+    Some(png_data_url(&png))
 }
 
-fn data_url(media_type: &str, bytes: &[u8]) -> String {
-    format!("data:{media_type};base64,{}", STANDARD.encode(bytes))
+fn png_data_url(bytes: &[u8]) -> String {
+    format!("data:{PNG_MEDIA_TYPE};base64,{}", STANDARD.encode(bytes))
 }
 
 fn cache_is_fresh(metadata: &CacheMetadata, now: u64) -> bool {
@@ -1056,6 +1331,132 @@ mod tests {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
+    fn png_fixture(width: u32, height: u32, srgb: bool) -> Vec<u8> {
+        let pixels = (0..(width as usize * height as usize))
+            .flat_map(|index| [index as u8, 0x40, 0x80, 0xff])
+            .collect::<Vec<_>>();
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        if srgb {
+            encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+        }
+        let mut writer = encoder.write_header().expect("png header");
+        writer.write_image_data(&pixels).expect("png data");
+        writer.finish().expect("png finish");
+        bytes
+    }
+
+    fn grayscale_png_fixture(width: u32, height: u32) -> Vec<u8> {
+        let pixels = (0..(width as usize * height as usize))
+            .map(|index| index as u8)
+            .collect::<Vec<_>>();
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("png header");
+        writer.write_image_data(&pixels).expect("png data");
+        writer.finish().expect("png finish");
+        bytes
+    }
+
+    fn bmp_fixture(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(BMP_HEADER_BYTES as u32).to_le_bytes());
+        bytes.extend_from_slice(&(width as i32).to_le_bytes());
+        bytes.extend_from_slice(&((height as i32) * 2).to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&32_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&(width * height * 4).to_le_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        for _ in 0..(width * height) {
+            bytes.extend_from_slice(&[0x20, 0x60, 0xa0, 0xff]);
+        }
+        bytes
+    }
+
+    fn ico_fixture(entries: &[(u32, u32, Vec<u8>)]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ICO_SIGNATURE);
+        bytes.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        let mut offset = (ICO_DIRECTORY_BYTES + ICO_ENTRY_BYTES * entries.len()) as u32;
+        for (width, height, data) in entries {
+            bytes.push(if *width == MAX_ICON_DIMENSION {
+                0
+            } else {
+                *width as u8
+            });
+            bytes.push(if *height == MAX_ICON_DIMENSION {
+                0
+            } else {
+                *height as u8
+            });
+            bytes.extend_from_slice(&[0, 0]);
+            bytes.extend_from_slice(&1_u16.to_le_bytes());
+            bytes.extend_from_slice(&32_u16.to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&offset.to_le_bytes());
+            offset += data.len() as u32;
+        }
+        for (_, _, data) in entries {
+            bytes.extend_from_slice(data);
+        }
+        bytes
+    }
+
+    fn png_header_fixture(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = PNG_SIGNATURE.to_vec();
+        bytes.extend_from_slice(&13_u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        bytes.extend_from_slice(&[0; 4]);
+        bytes
+    }
+
+    fn png_metadata(bytes: &[u8]) -> (u32, u32, png::ColorType, png::BitDepth) {
+        let mut decoder = png::Decoder::new(Cursor::new(bytes));
+        let info = decoder.read_header_info().expect("png header info");
+        (info.width, info.height, info.color_type, info.bit_depth)
+    }
+
+    fn png_chunk_types(bytes: &[u8]) -> Vec<[u8; 4]> {
+        let mut types = Vec::new();
+        let mut offset = 8;
+        while let Some(length) = bytes.get(offset..offset + 4) {
+            let length = u32::from_be_bytes(length.try_into().expect("chunk length")) as usize;
+            let kind: [u8; 4] = bytes
+                .get(offset + 4..offset + 8)
+                .expect("chunk kind")
+                .try_into()
+                .expect("chunk kind");
+            types.push(kind);
+            offset += 12 + length;
+            if &kind == b"IEND" {
+                break;
+            }
+        }
+        types
+    }
+
+    fn assert_reencoded_png(source: &[u8], width: u32, height: u32) {
+        let output = reencode_icon(source).expect("icon reencoded");
+        assert!(output.starts_with(&PNG_SIGNATURE));
+        let decoded = decode_png(&output).expect("output decodes");
+        assert_eq!((decoded.width, decoded.height), (width, height));
+        let (output_width, output_height, color_type, bit_depth) = png_metadata(&output);
+        assert_eq!((output_width, output_height), (width, height));
+        assert_eq!(color_type, png::ColorType::Rgba);
+        assert_eq!(bit_depth, png::BitDepth::Eight);
+        assert!(png_chunk_types(&output)
+            .iter()
+            .all(|kind| matches!(kind, b"IHDR" | b"IDAT" | b"IEND")));
+    }
+
     const _: () = assert!(MAX_ICON_BYTES <= 512 * 1024);
 
     #[test]
@@ -1145,7 +1546,7 @@ mod tests {
     }
 
     #[test]
-    fn icon_ico_png_and_jpeg_are_still_accepted() {
+    fn ico_and_png_media_types_are_accepted() {
         for (media_type, bytes, detected) in [
             ("image/x-icon", &b"\x00\x00\x01\x00"[..], "image/x-icon"),
             (
@@ -1154,14 +1555,139 @@ mod tests {
                 "image/x-icon",
             ),
             ("image/png", &b"\x89PNG\r\n\x1a\n"[..], "image/png"),
-            ("image/jpeg", &b"\xff\xd8\xff\xe0"[..], "image/jpeg"),
-            ("image/jpg", &b"\xff\xd8\xff\xe0"[..], "image/jpeg"),
         ] {
             assert_eq!(
                 accepted_icon_body(Some(media_type), bytes).expect(media_type),
                 detected
             );
         }
+    }
+
+    #[test]
+    fn jpeg_icons_are_refused_by_type_and_by_content() {
+        let jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00";
+        for media_type in ["image/jpeg", "image/jpg"] {
+            assert!(
+                accepted_icon_media_type(Some(media_type)).is_err(),
+                "{media_type}"
+            );
+            assert!(
+                accepted_icon_body(Some(media_type), jpeg).is_err(),
+                "{media_type}"
+            );
+        }
+        assert!(accepted_icon_body(None, jpeg).is_err());
+        assert_eq!(detect_image_type(jpeg), None);
+        assert!(reencode_icon(jpeg).is_err());
+    }
+
+    #[test]
+    fn a_png_icon_is_reencoded_as_rgba_png() {
+        assert_reencoded_png(&png_fixture(32, 24, false), 32, 24);
+    }
+
+    #[test]
+    fn a_grayscale_png_is_reencoded_as_rgba_png() {
+        assert_reencoded_png(&grayscale_png_fixture(20, 12), 20, 12);
+    }
+
+    #[test]
+    fn an_ico_holding_a_bmp_is_reencoded_from_the_largest_entry() {
+        let source = ico_fixture(&[
+            (16, 16, bmp_fixture(16, 16)),
+            (64, 64, bmp_fixture(64, 64)),
+            (32, 32, bmp_fixture(32, 32)),
+        ]);
+        assert_reencoded_png(&source, 64, 64);
+    }
+
+    #[test]
+    fn an_ico_holding_a_png_is_reencoded() {
+        let source = ico_fixture(&[(48, 40, png_fixture(48, 40, false))]);
+        assert_reencoded_png(&source, 48, 40);
+    }
+
+    #[test]
+    fn an_ico_entry_larger_than_the_limit_is_skipped() {
+        let source = ico_fixture(&[
+            (16, 16, bmp_fixture(16, 16)),
+            (256, 256, png_fixture(512, 512, false)),
+        ]);
+        assert_reencoded_png(&source, 16, 16);
+    }
+
+    #[test]
+    fn an_ico_entry_at_the_size_limit_is_accepted() {
+        let source = ico_fixture(&[(256, 256, png_fixture(256, 256, false))]);
+        assert_reencoded_png(&source, 256, 256);
+    }
+
+    #[test]
+    fn a_truncated_png_is_refused() {
+        let mut source = png_fixture(16, 16, false);
+        source.truncate(source.len() / 2);
+        assert!(reencode_icon(&source).is_err());
+    }
+
+    #[test]
+    fn a_png_header_that_declares_huge_dimensions_is_refused() {
+        assert!(reencode_icon(&png_header_fixture(4096, 4096)).is_err());
+        assert!(reencode_icon(&png_header_fixture(256, 257)).is_err());
+    }
+
+    #[test]
+    fn png_magic_without_png_content_is_refused() {
+        let mut source = PNG_SIGNATURE.to_vec();
+        source.extend_from_slice(b"fictional bytes that are not a png");
+        assert!(reencode_icon(&source).is_err());
+    }
+
+    #[test]
+    fn an_ico_without_a_usable_entry_is_refused() {
+        assert!(reencode_icon(&ico_fixture(&[])).is_err());
+        assert!(reencode_icon(&ico_fixture(&[(16, 16, b"fictional bytes".to_vec())])).is_err());
+        assert!(reencode_icon(&[
+            0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn an_old_raw_cache_entry_is_deleted_instead_of_served() {
+        let dir = test_dir("old-cache");
+        let ico_path = dir.join("ico.img");
+        let jpeg_path = dir.join("jpeg.img");
+        fs::write(&ico_path, ico_fixture(&[(32, 32, bmp_fixture(32, 32))])).expect("old ico");
+        fs::write(&jpeg_path, b"\xff\xd8\xff\xe0\x00\x10JFIF\x00").expect("old jpeg");
+        assert!(read_cached_icon(&ico_path).is_none());
+        assert!(read_cached_icon(&jpeg_path).is_none());
+        assert!(!ico_path.exists());
+        assert!(!jpeg_path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cached_png_is_reencoded_before_it_is_served() {
+        let dir = test_dir("cached-png");
+        let path = dir.join("entry.img");
+        fs::write(&path, png_fixture(16, 16, true)).expect("cached png");
+        let url = read_cached_icon(&path).expect("cached png served");
+        assert!(url.starts_with("data:image/png;base64,"));
+        let stored = fs::read(&path).expect("stored png");
+        let (stored_width, stored_height, _, _) = png_metadata(&stored);
+        assert_eq!((stored_width, stored_height), (16, 16));
+        assert!(!png_chunk_types(&stored).contains(b"sRGB"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cached_png_with_huge_dimensions_is_deleted() {
+        let dir = test_dir("cached-huge");
+        let path = dir.join("entry.img");
+        fs::write(&path, png_header_fixture(1024, 1024)).expect("huge cache entry");
+        assert!(read_cached_icon(&path).is_none());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

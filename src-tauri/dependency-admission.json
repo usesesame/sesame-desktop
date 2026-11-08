@@ -131,6 +131,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "ico",
+      "version": "0.5",
+      "reason": "Decodes the BMP image inside a website ICO before Sesame writes a fresh PNG. It is already locked through tauri-codegen at 0.5.0, so naming it directly adds no crate or version."
+    },
+    {
       "name": "idna",
       "version": "1",
       "reason": "Decodes punycode host labels for the lookalike host comparison; psl reads only ASCII and does not decode. Already in the lock through url."
@@ -155,6 +160,11 @@
       "name": "ml-kem",
       "version": "0.3",
       "reason": "ML-KEM-768, the post-quantum half of the hybrid X-Wing key exchange that wraps the vault key in Sync key packages. It is pure Rust and is used at the exact version 0.3.2."
+    },
+    {
+      "name": "png",
+      "version": "0.18",
+      "reason": "Decodes website icons with explicit memory limits and writes the re-encoded PNG that Sesame caches and shows. It is already locked through tauri-codegen at 0.18.1, so naming it directly adds no crate or version."
     },
     {
       "name": "poly1305",
