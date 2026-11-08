@@ -70,11 +70,11 @@ export async function fetchTool(tool, { fetchImpl = fetch, delaysMs = downloadRe
     let response
     try {
       response = await fetchImpl(tool.url, { redirect: 'follow' })
+      if (response.ok) return Buffer.from(await response.arrayBuffer())
     } catch (error) {
       failure = new Error(`Could not download ${tool.name}: ${error.message ?? error}.`)
       continue
     }
-    if (response.ok) return Buffer.from(await response.arrayBuffer())
     failure = new Error(`Could not download ${tool.name}: HTTP ${response.status}.`)
     if (!retryableStatus(response.status)) throw failure
   }

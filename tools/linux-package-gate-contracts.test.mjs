@@ -483,6 +483,7 @@ function scriptedFetch(outcomes) {
     calls.push(url)
     const outcome = outcomes.shift()
     if (outcome instanceof Error) throw outcome
+    if (outcome === 'broken body') return { ok: true, status: 200, arrayBuffer: async () => { throw new Error('connection reset') } }
     return { ok: outcome === 200, status: outcome, arrayBuffer: async () => new TextEncoder().encode('fictional tool').buffer }
   }
   return { fetchImpl, calls }
@@ -511,5 +512,12 @@ test('bundle tool downloads do not retry a missing or forbidden file', async () 
     await assert.rejects(fetchTool(fictionalTool, { fetchImpl, wait: async () => {} }), new RegExp(`HTTP ${status}`))
     assert.equal(calls.length, 1)
   }
+})
+
+test('bundle tool downloads retry a body that breaks while it is read', async () => {
+  const { fetchImpl, calls } = scriptedFetch(['broken body', 200])
+  const bytes = await fetchTool(fictionalTool, { fetchImpl, wait: async () => {} })
+  assert.equal(bytes.toString(), 'fictional tool')
+  assert.equal(calls.length, 2)
 })
 
