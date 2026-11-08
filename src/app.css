@@ -1195,8 +1195,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .document-attachments-label { font-weight: var(--weight-medium); }
 .document-attachments-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .document-attachments-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-inset); }
-.document-attachment-download { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; }
-.document-attachment-download:hover { text-decoration: underline; }
+.document-attachment-download { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-2); border: 0; padding: 0; color: var(--text); background: none; font: inherit; text-align: left; }
+.document-attachment-download:hover:not(:disabled) { text-decoration: underline; }
 .document-attachment-name { overflow: hidden; flex: 1; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
 .document-attachment-size { flex: none; color: var(--text-muted); font-size: var(--type-2); }
 .editor-fields > label, .editor-two-column > label, .editor-section > label { display: grid; gap: 7px; color: var(--text-2); font-size: var(--type-2); font-weight: var(--weight-bold); }

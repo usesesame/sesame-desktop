@@ -1,6 +1,9 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use tauri::State;
+use tauri::{AppHandle, State, WebviewWindow};
+use tauri_plugin_dialog::DialogExt;
 
+use crate::application::document_attachments::attachment_for_save;
+use crate::commands::file_selection::path_from_file;
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
     Attachment, DeleteDocumentMetadataResult, DocumentMetadata, DocumentMetadataInput,
@@ -173,6 +176,47 @@ pub fn add_document_attachment(
         id: document_id,
         snapshot: session.snapshot(),
     })
+}
+
+#[tauri::command]
+pub async fn save_document_attachment(
+    app: AppHandle,
+    window: WebviewWindow,
+    document_id: String,
+    attachment_id: String,
+    state: State<'_, VaultState>,
+) -> VaultResult<Option<String>> {
+    if window.label() != "main" {
+        return Err("This window cannot save attachments.".into());
+    }
+    let saved = {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+        let payload = session
+            .as_ref()
+            .map(|session| session.open_payload())
+            .transpose()?;
+        attachment_for_save(payload.as_deref(), &document_id, &attachment_id)?
+    };
+    let Some(destination) = app
+        .dialog()
+        .file()
+        .set_title("Save the attachment")
+        .set_file_name(&saved.filename)
+        .blocking_save_file()
+        .and_then(path_from_file)
+    else {
+        return Ok(None);
+    };
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .ok_or("Sesame could not name the saved attachment.")?;
+    crate::vault::storage::write_export_file(&destination, &saved.bytes)?;
+    Ok(Some(file_name))
 }
 
 #[tauri::command]

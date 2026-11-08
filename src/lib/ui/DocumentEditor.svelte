@@ -12,10 +12,12 @@
   export let attachments: Attachment[] = []
   export let uploadingAttachment = false
   export let removingAttachmentId: string | null = null
+  export let savingAttachmentId: string | null = null
   export let attachmentError = ''
   export let onSubmit: () => void
   export let onClose: () => void
   export let onAddAttachment: (file: File) => void
+  export let onSaveAttachment: (attachmentId: string) => void
   export let onRemoveAttachment: (attachmentId: string) => void
 
   let titleInput: HTMLInputElement
@@ -113,11 +115,18 @@
           <ul class="document-attachments-list">
             {#each attachments as attachment (attachment.id)}
               <li>
-                <a class="document-attachment-download" href={`data:${attachment.contentType || 'application/octet-stream'};base64,${attachment.data}`} download={attachment.filename}>
+                <button
+                  type="button"
+                  class="document-attachment-download"
+                  aria-busy={savingAttachmentId === attachment.id}
+                  disabled={savingAttachmentId === attachment.id}
+                  on:click={() => onSaveAttachment(attachment.id)}
+                  title={`Save ${attachment.filename}`}
+                >
                   <Icon name="file-key" size={15} />
                   <span class="document-attachment-name">{attachment.filename}</span>
-                  <span class="document-attachment-size">{formatBytes(attachment.size)}</span>
-                </a>
+                  <span class="document-attachment-size">{savingAttachmentId === attachment.id ? 'Saving…' : formatBytes(attachment.size)}</span>
+                </button>
                 <button
                   type="button"
                   class="icon-button"

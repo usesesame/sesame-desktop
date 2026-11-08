@@ -187,7 +187,7 @@ pub(crate) fn resolve_path(
     Err(STALE_CHOICE.into())
 }
 
-fn path_from_file(file: tauri_plugin_dialog::FilePath) -> Option<PathBuf> {
+pub(crate) fn path_from_file(file: tauri_plugin_dialog::FilePath) -> Option<PathBuf> {
     file.into_path().ok()
 }
 

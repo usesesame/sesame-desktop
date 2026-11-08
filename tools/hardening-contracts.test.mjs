@@ -1246,11 +1246,108 @@ test('the content security policy closes every embedding and worker route', () =
   }
   assert.deepEqual(production.get('script-src'), ["'self'"])
   assert.deepEqual(production.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost'])
-  assert.deepEqual(production.get('img-src'), ["'self'", 'data:', 'asset:', 'http://asset.localhost'])
+  assert.deepEqual(production.get('img-src'), ["'self'", 'data:'])
+  assert.deepEqual(development.get('img-src'), ["'self'", 'data:'])
+  assert.deepEqual(wdio.get('img-src'), ["'self'", 'data:'])
   assert.deepEqual(wdio.get('script-src'), ["'self'"])
   assert.deepEqual(wdio.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost', 'http://127.0.0.1:*'])
   assert.deepEqual(development.get('script-src'), ["'self'", "'unsafe-inline'", "'unsafe-eval'"])
   assert.deepEqual(development.get('connect-src'), ["'self'", 'ipc:', 'http://ipc.localhost', 'http://localhost:5173', 'ws://localhost:5173'])
+})
+
+test('the prototype stays frozen in every webview configuration', () => {
+  for (const name of ['tauri.conf.json', 'tauri.wdio.conf.json']) {
+    const config = JSON.parse(read('src-tauri', name))
+    assert.equal(config.app.security.freezePrototype, true, `${name} leaves the prototype writable`)
+  }
+})
+
+test('every window refuses webview downloads', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const handlers = [...shell.matchAll(/\.on_download\(([\s\S]*?)\)\s*(?:\.|;)/g)]
+  assert.equal(handlers.length, 2, 'both window builders must set a download handler')
+  for (const handler of handlers) assert.match(handler[1], /^\|_, _\| false$/, 'a window lets a webview download a file')
+  assert.match(shell, /\.on_download\(\|_, _\| false\)\s*\.on_new_window/, 'the rebuilt main window does not refuse downloads')
+  const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
+  assert.match(quick, /\.on_download\(\|_, _\| false\)/, 'the quick access window does not refuse downloads')
+
+  for (const path of filesMatching(/\.(ts|svelte)$/, join(root, 'src'))) {
+    assert.doesNotMatch(
+      readFileSync(path, 'utf8'),
+      /download\s*=|download\s*:/,
+      `${relative(root, path)} can start a webview download from the page`,
+    )
+  }
+  const editor = read('src', 'lib', 'ui', 'DocumentEditor.svelte')
+  assert.doesNotMatch(editor, /data:\$\{|\.data\b/, 'the document editor builds a data URL from attachment bytes')
+  assert.match(editor, /onSaveAttachment\(attachment\.id\)/, 'the document editor does not route a save through the main process')
+})
+
+test('a document attachment is saved from the vault through a native dialog', () => {
+  const documents = read('src-tauri', 'src', 'commands', 'documents.rs')
+  const start = documents.indexOf('pub async fn save_document_attachment(')
+  assert.ok(start >= 0, 'save_document_attachment is missing')
+  const open = documents.indexOf('(', start)
+  const parameters = callArgumentSlice(documents, open, false)
+  assert.ok(parameters, 'save_document_attachment has no argument list')
+  const names = topLevelArguments(parameters).map((parameter) => parameter.match(/([a-z_][a-z0-9_]*)\s*:/)?.[1])
+  assert.deepEqual(names, ['app', 'window', 'document_id', 'attachment_id', 'state'])
+  assert.match(parameters, /window:\s*WebviewWindow/, 'the command cannot see which window called it')
+  assert.doesNotMatch(parameters, /data|destination|path/i, 'the page can choose attachment bytes or a target path')
+  const body = braceBody(documents, start, false)
+  assert.match(body, /window\.label\(\) != "main"/, 'the command does not refuse a non-main window')
+  assert.match(body, /attachment_for_save\(/, 'the command does not read the attachment through the application decision')
+  assert.match(body, /\.blocking_save_file\(\)/, 'the command does not show a native save dialog')
+  assert.match(body, /write_export_file\(/, 'the command does not write through the private export helper')
+  assert.doesNotMatch(body, /save_dialog|destination:\s*String|path:\s*String/, 'the page can name the saved file')
+
+  const applicationRoot = join(root, 'src-tauri', 'src', 'application')
+  for (const name of readdirSync(applicationRoot)) {
+    assert.doesNotMatch(readFileSync(join(applicationRoot, name), 'utf8'), /\btauri\b/, `application/${name} reaches into Tauri`)
+  }
+  const decision = read('src-tauri', 'src', 'application', 'document_attachments.rs')
+  assert.match(decision, /Unlock your vault before saving an attachment\./)
+  assert.match(decision, /That saved document no longer exists\./)
+  assert.match(decision, /That attachment no longer exists\./)
+
+  const permissions = applicationPermissions()
+  assert.ok(permissions.get('vault-edit').includes('save_document_attachment'), 'the main window cannot reach the save command')
+  assert.ok(!permissions.get('quick-access').includes('save_document_attachment'), 'the quick access window can reach the save command')
+  assert.match(read('src-tauri', 'src', 'lib.rs'), /commands::save_document_attachment,/, 'save_document_attachment is not registered')
+})
+
+test('the Windows release webview refuses permissions and password autosave', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const start = shell.indexOf('fn harden_release_webview(')
+  assert.ok(start >= 0, 'harden_release_webview is missing')
+  const body = braceBody(shell, start, false)
+  assert.match(body, /ICoreWebView2Settings4/, 'password autosave is not turned off through the settings interface')
+  assert.match(body, /SetIsPasswordAutosaveEnabled\(false\)/, 'password autosave is not turned off')
+  assert.match(body, /add_PermissionRequested\(/, 'the webview does not observe permission requests')
+  assert.match(body, /COREWEBVIEW2_PERMISSION_STATE_DENY/, 'a permission request is not refused')
+  assert.match(body, /PermissionRequestedEventHandler::create\(/, 'the permission handler is not built through the WebView2 callback')
+})
+
+test('release Windows builds remove the WebView2 overrides before the webview starts', () => {
+  const rust = read('src-tauri', 'src', 'lib.rs')
+  const block = rust.match(/#\[cfg\(all\(windows, not\(debug_assertions\)\)\)\]\s*const WEBVIEW2_ENVIRONMENT_OVERRIDES: \[&str; 7\] = \[([\s\S]*?)\];/)
+  assert.ok(block, 'the WebView2 override list changed shape')
+  for (const variable of [
+    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
+    'WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER',
+    'WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER',
+    'WEBVIEW2_USER_DATA_FOLDER',
+    'WEBVIEW2_BROWSER_EXECUTABLE_FOLDER',
+    'WEBVIEW2_RELEASE_CHANNELS',
+    'WEBVIEW2_CHANNEL_SEARCH_KIND',
+  ]) {
+    assert.match(block[1], new RegExp(`"${variable}"`), `${variable} is not removed before WebView2 starts`)
+  }
+  assert.match(
+    rust,
+    /#\[cfg\(all\(windows, not\(debug_assertions\)\)\)\]\s*fn prepare_release_webview_environment\(\) \{\s*for variable in WEBVIEW2_ENVIRONMENT_OVERRIDES \{\s*std::env::remove_var\(variable\);/,
+    'the Windows release preparation does not remove the overrides',
+  )
 })
 
 test('the shipping style policy has no inline allowance', () => {

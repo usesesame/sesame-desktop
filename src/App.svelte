@@ -1121,10 +1121,12 @@
         attachments={$documentAttachmentState.documentAttachments}
         uploadingAttachment={$documentAttachmentState.uploadingAttachment}
         removingAttachmentId={$documentAttachmentState.removingAttachmentId}
+        savingAttachmentId={$documentAttachmentState.savingAttachmentId}
         attachmentError={$documentAttachmentState.attachmentError}
         onSubmit={documentController.save}
         onClose={documentController.closeEditor}
         onAddAttachment={(file) => void documentController.addAttachment(file)}
+        onSaveAttachment={(attachmentId) => void documentController.saveAttachment(attachmentId)}
         onRemoveAttachment={(attachmentId) => void documentController.removeAttachment(attachmentId)}
       />
     {:else if active?.kind === 'delete-document'}

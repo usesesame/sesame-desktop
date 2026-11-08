@@ -2,6 +2,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod adapters;
+mod application;
 mod browser_fill;
 mod browser_protocol;
 mod commands;
@@ -106,6 +107,7 @@ macro_rules! sesame_invoke_handler {
             commands::save_document,
             commands::delete_document,
             commands::add_document_attachment,
+            commands::save_document_attachment,
             commands::remove_document_attachment,
             commands::get_custom_record,
             commands::save_custom_record,
@@ -227,15 +229,19 @@ macro_rules! sesame_wdio_handler {
 }
 
 #[cfg(all(windows, not(debug_assertions)))]
-const WEBVIEW2_DEBUG_ENVIRONMENT_VARIABLES: [&str; 3] = [
+const WEBVIEW2_ENVIRONMENT_OVERRIDES: [&str; 7] = [
     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
     "WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER",
     "WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER",
+    "WEBVIEW2_USER_DATA_FOLDER",
+    "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
+    "WEBVIEW2_RELEASE_CHANNELS",
+    "WEBVIEW2_CHANNEL_SEARCH_KIND",
 ];
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn prepare_release_webview_environment() {
-    for variable in WEBVIEW2_DEBUG_ENVIRONMENT_VARIABLES {
+    for variable in WEBVIEW2_ENVIRONMENT_OVERRIDES {
         std::env::remove_var(variable);
     }
 }
