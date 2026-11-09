@@ -109,7 +109,7 @@ tauri = { version = "2", features = ["test"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already in the dependency graph through tauri-plugin-opener; naming it here
 # pins the same locked version rather than adding a second D-Bus stack.
-zbus = "5"
+zbus = "6"
 libc = "0.2"
 # Copies go through arboard directly so a secret can be marked as one. Image
 # support stays off because Sesame only ever puts text on the clipboard.
