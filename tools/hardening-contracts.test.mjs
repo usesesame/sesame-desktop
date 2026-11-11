@@ -1042,7 +1042,8 @@ const FEATURE_GATED_PERMISSIONS = ['desktop-e2e']
 function applicationPermissions() {
   const permissions = new Map()
   const source = read('src-tauri', 'permissions', 'desktop.toml')
-  for (const block of source.split('[[permission]]').slice(1)) {
+  const uncommented = source.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  for (const block of uncommented.split('[[permission]]').slice(1)) {
     const identifier = block.match(/identifier = "([a-z0-9-]+)"/)?.[1]
     const list = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
     assert.ok(identifier, 'an application permission has no identifier')
