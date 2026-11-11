@@ -8,6 +8,9 @@ updates:
     cooldown:
       default-days: 7
       semver-major-days: 14
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
     ignore:
       # TypeScript 7 ships no compiler API, so typescript-eslint and
       # svelte-check run on the TypeScript 6 API behind the typescript alias.
@@ -23,6 +26,16 @@ updates:
     cooldown:
       default-days: 7
       semver-major-days: 14
+    groups:
+      cargo-patch:
+        update-types: [patch]
+      cargo-minor:
+        update-types: [minor]
+    ignore:
+      - dependency-name: windows-core
+        versions: [">=0.63.0"]
+      - dependency-name: zbus
+        versions: [">=6.0.0"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -31,3 +44,6 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
