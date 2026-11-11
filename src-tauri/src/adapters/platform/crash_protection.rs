@@ -72,6 +72,13 @@ fn harden_linux_process() -> std::io::Result<()> {
     if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
+    let core_limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &core_limit) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     if unsafe { libc::prctl(libc::PR_TASK_PERF_EVENTS_DISABLE) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -107,10 +114,18 @@ mod tests {
 
         harden_linux_process().unwrap();
         let hardened = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
+        let mut core_limit = libc::rlimit {
+            rlim_cur: 1,
+            rlim_max: 1,
+        };
+        let read_limit = unsafe { libc::getrlimit(libc::RLIMIT_CORE, &mut core_limit) };
         let restored = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, previous) };
         let perf_restored = unsafe { libc::prctl(libc::PR_TASK_PERF_EVENTS_ENABLE) };
 
         assert_eq!(hardened, 0);
+        assert_eq!(read_limit, 0);
+        assert_eq!(core_limit.rlim_cur, 0);
+        assert_eq!(core_limit.rlim_max, 0);
         assert_eq!(restored, 0);
         assert_eq!(perf_restored, 0);
     }
