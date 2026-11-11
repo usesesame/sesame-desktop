@@ -21,6 +21,7 @@ export const requiredPackageSteps = [
   'package.install',
   'app.launch',
   'browser.registration',
+  'webview.features',
   'vault.create',
   'vault.backup.verified',
   'vault.lock',
@@ -70,6 +71,16 @@ function browserRegistration(binary, environment) {
   }
 }
 
+export const disabledWebviewFeatures = ['webgl', 'webgl2', 'audioContext', 'mediaDevices', 'mediaElements']
+
+export function judgeWebviewFeatures(result) {
+  if (!result?.ok) return { ok: false, error: result?.error ?? 'no result' }
+  const offered = disabledWebviewFeatures.filter((feature) => result.value?.[feature] !== false)
+  return offered.length === 0
+    ? { ok: true, value: result.value }
+    : { ok: false, error: `The running webview still offers ${offered.join(', ')}.` }
+}
+
 async function runAppLifecycle({ binary, vaultRoot, logPath, environment }) {
   const steps = []
   const log = []
@@ -80,6 +91,7 @@ async function runAppLifecycle({ binary, vaultRoot, logPath, environment }) {
     recordStep(steps, 'app.launch', { ok: connected, error: connected ? undefined : 'The installed app never connected to the test bridge.' })
     if (!connected) return steps
     recordStep(steps, 'browser.registration', browserRegistration(binary, environment))
+    recordStep(steps, 'webview.features', judgeWebviewFeatures(await bridge.call('desktop_e2e_webview_features', {})))
     recordStep(steps, 'vault.status.before', await bridge.call('get_vault_status', {}))
     recordStep(steps, 'vault.create', await bridge.call('create_vault', { request: { masterPassword: 'fictional package validation' } }))
     const created = await bridge.call('get_vault_status', {})

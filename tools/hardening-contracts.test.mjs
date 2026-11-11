@@ -1104,6 +1104,15 @@ test('every command a shipping capability permits is registered in the shipping 
   }
 })
 
+test('each custom command belongs to exactly one application permission', () => {
+  const owners = new Map()
+  for (const [identifier, commands] of applicationPermissions()) {
+    for (const command of commands) owners.set(command, [...(owners.get(command) ?? []), identifier])
+  }
+  const shared = [...owners].filter(([, identifiers]) => identifiers.length > 1).map(([command, identifiers]) => `${command} in ${identifiers.join(' and ')}`)
+  assert.deepEqual(shared, [], 'a command granted by two permissions can be reached by a window that holds either one')
+})
+
 test('a permission whose commands are not all shipping commands is feature gated', () => {
   const permissions = applicationPermissions()
   const registered = shippingRegisteredCommands()
