@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url'
 import {
   countAnonymousExecutableMappings,
   judge,
+  judgeCoreLimit,
   judgeWebProcess,
+  parseCoreLimit,
   parseEnvironment,
   parseStatus,
 } from './linux-webview-sandbox-check.mjs'
@@ -16,17 +18,20 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (...parts) => readFileSync(join(root, ...parts), 'utf8')
 
 const host = { mnt: 'mnt:[1]', pid: 'pid:[2]', user: 'user:[3]', net: 'net:[4]' }
+const zeroCoreLimit = { soft: 0, hard: 0 }
+const app = (pid = 1) => ({ pid, coreLimit: zeroCoreLimit })
 const sandboxed = (pid = 100) => ({
   pid,
   status: { Seccomp: '2', NoNewPrivs: '1' },
   namespaces: { mnt: 'mnt:[11]', pid: 'pid:[12]', user: 'user:[13]', net: 'net:[14]' },
   environment: { JSC_useJIT: '0' },
   anonymousExecutableMappings: 0,
+  coreLimit: zeroCoreLimit,
 })
 
 test('a sandboxed web process with the JIT off passes', () => {
   assert.deepEqual(judgeWebProcess(sandboxed(), host), [])
-  assert.deepEqual(judge({ webProcesses: [sandboxed(1), sandboxed(2)], host, logText: '' }), { state: 'sandboxed', failures: [] })
+  assert.deepEqual(judge({ appProcess: app(), networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [sandboxed(100), sandboxed(101)], host, logText: '' }), { state: 'sandboxed', failures: [] })
 })
 
 test('a web process without seccomp, no_new_privs or its own namespaces fails', () => {
@@ -39,14 +44,14 @@ test('a web process without seccomp, no_new_privs or its own namespaces fails', 
 })
 
 test('unreadable state fails closed', () => {
-  const unreadable = { pid: 7, status: null, namespaces: {}, environment: null, anonymousExecutableMappings: null }
+  const unreadable = { pid: 7, status: null, namespaces: {}, environment: null, anonymousExecutableMappings: null, coreLimit: null }
   assert.equal(judgeWebProcess(unreadable, host).length, 8)
-  assert.equal(judge({ webProcesses: [unreadable], host, logText: '' }).state, 'unsandboxed')
+  assert.equal(judge({ appProcess: app(), webProcesses: [unreadable], host, logText: '' }).state, 'unsandboxed')
 })
 
 test('one unsandboxed renderer among sandboxed ones fails the run', () => {
   const loose = { ...sandboxed(2), status: { Seccomp: '0', NoNewPrivs: '0' } }
-  const result = judge({ webProcesses: [sandboxed(1), loose], host, logText: '' })
+  const result = judge({ appProcess: app(), networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [sandboxed(1), loose], host, logText: '' })
   assert.equal(result.state, 'unsandboxed')
   assert.equal(result.failures.length, 2)
 })
@@ -72,6 +77,39 @@ test('proc files are parsed without trusting their shape', () => {
     '7f60-7f70 rw-p 00000000 00:00 0',
   ].join('\n')
   assert.equal(countAnonymousExecutableMappings(maps), 2)
+})
+
+test('core limits are parsed from proc and must be zero', () => {
+  const limits = [
+    'Limit                     Soft Limit           Hard Limit           Units     ',
+    'Max cpu time              unlimited            unlimited            seconds   ',
+    'Max core file size        0                    0                    bytes     ',
+    'Max open files            1024                 1024                 files     ',
+  ].join('\n')
+  assert.deepEqual(parseCoreLimit(limits), { soft: 0, hard: 0 })
+  assert.deepEqual(parseCoreLimit('Max core file size        unlimited            unlimited            bytes     '), { soft: Infinity, hard: Infinity })
+  assert.equal(parseCoreLimit('Max cpu time              unlimited            unlimited            seconds'), null)
+  assert.equal(parseCoreLimit('Max core file size        0                    0'), null)
+  assert.equal(parseCoreLimit('Max core file size        0                    unknown              bytes'), null)
+  assert.equal(parseCoreLimit('Max core file size        0                    0                    blocks'), null)
+  assert.deepEqual(judgeCoreLimit({ pid: 7, coreLimit: { soft: 0, hard: 0 } }), [])
+  assert.match(judgeCoreLimit({ pid: 7, coreLimit: { soft: Infinity, hard: Infinity } }).join('\n'), /process 7 core limits are unlimited and unlimited/)
+  assert.match(judgeCoreLimit({ pid: 7, coreLimit: null }).join('\n'), /process 7 core limits are unreadable/)
+})
+
+test('an unlimited or unreadable core limit on any process fails the run', () => {
+  const unlimited = { soft: Infinity, hard: Infinity }
+  assert.equal(judge({ appProcess: app(), networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [sandboxed(100)], host, logText: '' }).state, 'sandboxed')
+  assert.match(judge({ appProcess: { pid: 1, coreLimit: unlimited }, networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [sandboxed(100)], host, logText: '' }).failures.join('\n'), /process 1 core limits are unlimited/)
+  assert.match(judge({ appProcess: app(), networkProcesses: [{ ...sandboxed(200), coreLimit: unlimited }, sandboxed(201)], webProcesses: [sandboxed(100)], host, logText: '' }).failures.join('\n'), /process 200 core limits are unlimited/)
+  assert.match(judge({ appProcess: app(), networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [{ ...sandboxed(100), coreLimit: null }], host, logText: '' }).failures.join('\n'), /process 100 core limits are unreadable/)
+  assert.match(judge({ networkProcesses: [sandboxed(200), sandboxed(201)], webProcesses: [sandboxed(100)], host, logText: '' }).failures.join('\n'), /the app process was not found/)
+})
+
+test('the check requires a network process for each webview context', () => {
+  const result = judge({ appProcess: app(), networkProcesses: [sandboxed(200)], webProcesses: [sandboxed(100)], host, logText: '' })
+  assert.equal(result.state, 'unsandboxed')
+  assert.match(result.failures.join('\n'), /network process count is 1, expected at least 2/)
 })
 
 test('the sandbox and the JIT switch are set after the launch scrub and before the builder', () => {
