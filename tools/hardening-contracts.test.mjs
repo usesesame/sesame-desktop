@@ -1046,7 +1046,11 @@ function applicationPermissions() {
     const identifier = block.match(/identifier = "([a-z0-9-]+)"/)?.[1]
     const list = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
     assert.ok(identifier, 'an application permission has no identifier')
-    permissions.set(identifier, [...list.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]))
+    const entries = list.split(',').map((entry) => entry.trim()).filter(Boolean)
+    for (const entry of entries) {
+      assert.match(entry, /^"[a-z0-9_]+"$/, `${identifier} lists a command this test cannot read: ${entry}`)
+    }
+    permissions.set(identifier, entries.map((entry) => entry.slice(1, -1)))
   }
   return permissions
 }

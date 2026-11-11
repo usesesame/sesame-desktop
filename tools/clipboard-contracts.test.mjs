@@ -26,6 +26,10 @@ test('copy_secret is only reached through the wrapper in vault.ts', () => {
     .filter((path) => /copy_secret/.test(readFileSync(path, 'utf8')))
     .map((path) => relative(root, path).replaceAll('\\', '/'))
   assert.deepEqual(callers, ['src/lib/vault.ts'])
+  const vault = source('lib', 'vault.ts')
+  assert.equal([...vault.matchAll(/copy_secret/g)].length, 1)
+  const wrapper = vault.match(/export async function copyToClipboard\([\s\S]*?\n\}\n/)?.[0] ?? ''
+  assert.match(wrapper, /invoke<number>\('copy_secret'/)
 })
 
 test('saved secrets copy by reference through the native command', () => {
