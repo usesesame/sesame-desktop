@@ -1432,6 +1432,17 @@ test('every window is built in code so each one gets the new window handler', ()
   assert.match(quick, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/, 'the quick access window denies new windows')
 })
 
+test('the quick access window gets its own webview data directory and the main window keeps the default', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
+  const main = shell.split('fn ensure_main_window')[1]?.split('fn ensure_quick_access_window')[0] ?? ''
+  assert.match(quick, /app\s*\.path\(\)\s*\.app_local_data_dir\(\)/, 'the quick access data directory is not under the app local data directory')
+  assert.match(quick, /\.join\("quick-access-webview"\)/, 'the quick access data directory is not named quick-access-webview')
+  assert.match(quick, /\.data_directory\(/, 'the quick access builder does not set a data directory')
+  assert.doesNotMatch(main, /\.data_directory\(/, 'the main builder overrides the default data directory')
+  assert.doesNotMatch(read('src-tauri', 'tauri.conf.json'), /"dataDirectory"/, 'a configured window sets dataDirectory against the generic local data directory')
+})
+
 test('vault key material is drawn from the system random source', () => {
   const util = read('src-tauri', 'sesame-core', 'src', 'util.rs')
   assert.match(

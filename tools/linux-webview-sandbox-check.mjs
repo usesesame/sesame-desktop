@@ -27,6 +27,29 @@ export function parseEnvironment(bytes) {
   return variables
 }
 
+export function parseCoreLimit(text) {
+  const line = String(text)
+    .split('\n')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith('Max core file size '))
+  if (!line) return null
+  const columns = line.split(/\s+/)
+  if (columns.length !== 7 || columns[6] !== 'bytes') return null
+  const value = (column) => (column === 'unlimited' ? Infinity : /^\d+$/.test(column) ? Number(column) : null)
+  const soft = value(columns[4])
+  const hard = value(columns[5])
+  return soft === null || hard === null ? null : { soft, hard }
+}
+
+export function judgeCoreLimit(observation) {
+  const prefix = `process ${observation.pid}`
+  if (!observation.coreLimit) return [`${prefix} core limits are unreadable, expected 0 and 0`]
+  const { soft, hard } = observation.coreLimit
+  if (soft === 0 && hard === 0) return []
+  const show = (value) => (value === Infinity ? 'unlimited' : String(value))
+  return [`${prefix} core limits are ${show(soft)} and ${show(hard)}, expected 0 and 0`]
+}
+
 export function countAnonymousExecutableMappings(maps) {
   let count = 0
   for (const line of String(maps).split('\n')) {
@@ -55,13 +78,17 @@ export function judgeWebProcess(observation, host) {
   return failures
 }
 
-export function judge({ webProcesses, host, logText }) {
+export function judge({ webProcesses, networkProcesses = [], appProcess, host, logText }) {
   if (webProcesses.length === 0) {
     return logText.includes(REFUSAL_TEXT)
       ? { state: 'refused', failures: [] }
       : { state: 'no_renderer', failures: ['no web process was found and the app did not report a refusal'] }
   }
   const failures = webProcesses.flatMap((observation) => judgeWebProcess(observation, host))
+  if (networkProcesses.length < 2) failures.push(`network process count is ${networkProcesses.length}, expected at least 2 so each window has its own webview context`)
+  if (!appProcess) failures.push('the app process was not found')
+  else failures.push(...judgeCoreLimit(appProcess))
+  for (const observation of [...webProcesses, ...networkProcesses]) failures.push(...judgeCoreLimit(observation))
   return { state: failures.length === 0 ? 'sandboxed' : 'unsandboxed', failures }
 }
 
@@ -107,16 +134,25 @@ export function descendantsNamed(rootPid, name) {
   return found
 }
 
+function processesNamed(rootPid, name) {
+  const found = descendantsNamed(rootPid, name)
+  const argv = (read(`/proc/${rootPid}/cmdline`) ?? '').split('\0')
+  if (path.basename(argv[0] ?? '') === name) found.unshift(rootPid)
+  return found
+}
+
 function observe(pid) {
   const status = read(`/proc/${pid}/status`)
   const environment = read(`/proc/${pid}/environ`)
   const maps = read(`/proc/${pid}/maps`)
+  const limits = read(`/proc/${pid}/limits`)
   return {
     pid,
     status: status === null ? null : parseStatus(status),
     namespaces: Object.fromEntries(NAMESPACES.map((name) => [name, link(`/proc/${pid}/ns/${name}`)])),
     environment: environment === null ? null : parseEnvironment(environment),
     anonymousExecutableMappings: maps === null ? null : countAnonymousExecutableMappings(maps),
+    coreLimit: limits === null ? null : parseCoreLimit(limits),
   }
 }
 
@@ -157,13 +193,20 @@ async function check(options) {
   child.stdout.on('data', (chunk) => log.push(chunk.toString('utf8')))
   child.stderr.on('data', (chunk) => log.push(chunk.toString('utf8')))
   const deadline = Date.now() + options.seconds * 1000
-  let pids = []
+  let appPids = []
+  let webPids = []
+  let networkPids = []
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 500))
-    pids = descendantsNamed(child.pid, 'WebKitWebProcess')
-    if (pids.length >= 2 || !appProcessAlive(child)) break
+    appPids = processesNamed(child.pid, path.basename(options.binary))
+    webPids = descendantsNamed(child.pid, 'WebKitWebProcess')
+    networkPids = descendantsNamed(child.pid, 'WebKitNetworkProcess')
+    if (!appProcessAlive(child)) break
   }
-  const result = judge({ webProcesses: pids.map(observe), host: hostNamespaces(), logText: log.join('') })
+  const appProcess = appPids.length > 0 ? observe(appPids[0]) : null
+  const webProcesses = webPids.map(observe)
+  const networkProcesses = networkPids.map(observe)
+  const result = judge({ webProcesses, networkProcesses, appProcess, host: hostNamespaces(), logText: log.join('') })
   const alive = appProcessAlive(child)
   try {
     process.kill(-child.pid, 'SIGTERM')
@@ -177,7 +220,24 @@ async function check(options) {
     child.kill('SIGKILL')
   }
   rmSync(root, { recursive: true, force: true })
-  return { ...result, appAliveAtCheck: alive, webProcesses: pids.length }
+  const limitOf = (processKind, observation) => ({
+    process: processKind,
+    pid: observation.pid,
+    soft: observation.coreLimit ? (observation.coreLimit.soft === Infinity ? 'unlimited' : observation.coreLimit.soft) : null,
+    hard: observation.coreLimit ? (observation.coreLimit.hard === Infinity ? 'unlimited' : observation.coreLimit.hard) : null,
+  })
+  return {
+    ...result,
+    appAliveAtCheck: alive,
+    appProcesses: appPids.length,
+    webProcesses: webProcesses.length,
+    networkProcesses: networkProcesses.length,
+    coreLimits: [
+      ...(appProcess ? [limitOf('app', appProcess)] : []),
+      ...webProcesses.map((observation) => limitOf('web', observation)),
+      ...networkProcesses.map((observation) => limitOf('network', observation)),
+    ],
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
