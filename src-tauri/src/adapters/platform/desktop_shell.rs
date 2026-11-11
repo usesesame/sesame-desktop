@@ -416,6 +416,11 @@ pub(crate) fn ensure_quick_access_window(app: &AppHandle) -> Option<WebviewWindo
     if let Some(window) = app.get_webview_window("quick-access") {
         return Some(window);
     }
+    let data_directory = app
+        .path()
+        .app_local_data_dir()
+        .ok()?
+        .join("quick-access-webview");
     let config = app
         .config()
         .app
@@ -425,6 +430,7 @@ pub(crate) fn ensure_quick_access_window(app: &AppHandle) -> Option<WebviewWindo
         .clone();
     let window = WebviewWindowBuilder::from_config(app, &config)
         .ok()?
+        .data_directory(data_directory)
         .on_download(|_, _| false)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
