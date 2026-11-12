@@ -99,7 +99,7 @@ hkdf = "0.13"
 ico = "0.5"
 png = "0.18"
 ts-rs = "12.0.1"
-ml-kem = { version = "=0.3.3", features = ["zeroize"] }
+ml-kem = { version = "=0.3.4", features = ["zeroize"] }
 sha3 = "=0.12.0"
 shake = "0.1"
 
