@@ -103,7 +103,7 @@
     },
     {
       "name": "eslint",
-      "version": "10.13",
+      "version": "10.14",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -121,7 +121,7 @@
     },
     {
       "name": "globals",
-      "version": "17.13",
+      "version": "17.14",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
