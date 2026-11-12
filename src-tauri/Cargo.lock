@@ -1988,6 +1988,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ico"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d75e94d66081e4d8dcd098bd8dc5254800fea14a26389b298410158d834de167"
+dependencies = [
+ "byteorder",
+ "png 0.18.1",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3971,7 +3981,7 @@ dependencies = [
  "ed25519-dalek",
  "glib",
  "hkdf",
- "ico",
+ "ico 0.6.0",
  "idna",
  "libc",
  "minisign-verify",
@@ -4527,7 +4537,7 @@ checksum = "e50213e463086ecc283d7e9f51c30cc0fd304ad457425158018be26dbf0d0a80"
 dependencies = [
  "base64 0.22.1",
  "brotli",
- "ico",
+ "ico 0.5.0",
  "json-patch",
  "plist",
  "png 0.18.1",
