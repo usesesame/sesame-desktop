@@ -14,7 +14,7 @@ pub(crate) fn install_unlocked_session(
     mut key_array: [u8; 32],
     file: VaultFile,
     effects: &dyn DesktopEffects,
-) -> VaultResult<VaultSnapshot> {
+) -> VaultResult<(VaultSnapshot, u64)> {
     let opened = sesame_core::api::open_vault_with_key(&file, key_array);
     key_array.zeroize();
     let opened = opened?;
@@ -34,10 +34,10 @@ pub(crate) fn install_unlocked_session(
     effects.observe_unlock(&snapshot);
     *session = Some(unlocked);
     // Fresh session epoch invalidates approvals bound to the previous one.
-    state.advance_session_epoch();
+    let epoch = state.advance_session_epoch();
     state.cache_pin_unlock(pin_unlock_available);
     state.cache_hello_unlock(hello_unlock_available);
-    Ok(snapshot)
+    Ok((snapshot, epoch))
 }
 
 pub(crate) fn unlock_vault_in_state(
@@ -56,11 +56,11 @@ pub(crate) fn unlock_vault_in_state(
     let key_array = sesame_core::api::unwrap_key_with_password(&file, &master_password)?;
     let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
     drop(session);
-    if result.is_ok() {
+    if let Ok((_, epoch)) = &result {
         let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
-        presence.grant_after_unlock(state.session_epoch());
+        presence.grant_after_unlock(*epoch);
     }
-    result
+    result.map(|(snapshot, _)| snapshot)
 }
 
 /// The event half of locking; every lock entry point calls this so behavior cannot drift.

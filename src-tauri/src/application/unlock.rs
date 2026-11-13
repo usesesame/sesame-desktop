@@ -204,7 +204,9 @@ pub(crate) fn unlock_recovery_vault_in_state(
     let path = effects.vault_path()?;
     let file = sesame_core::loader::VaultLoader::read(&path)?;
     let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &recovery_kit)?;
-    install_unlocked_session(state, &mut session, path, key_array, file, effects)
+    let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
+    drop(session);
+    result.map(|(snapshot, _)| snapshot)
 }
 
 pub(crate) fn set_unlock_pin_in_state(
@@ -313,7 +315,7 @@ pub(crate) fn unlock_with_windows_hello_in_state(
     if result.is_ok() {
         let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
     }
-    result
+    result.map(|(snapshot, _)| snapshot)
 }
 
 pub(crate) fn unlock_pin_vault_in_state(
@@ -378,7 +380,7 @@ fn unlock_pin_vault_inner(
             let _ = effects.write_pin_throttle_state(&guard);
         }
     }
-    result
+    result.map(|(snapshot, _)| snapshot)
 }
 
 fn ensure_pin_throttle_loaded(state: &VaultState, effects: &dyn DesktopEffects) -> VaultResult<()> {

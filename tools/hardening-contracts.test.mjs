@@ -632,7 +632,7 @@ test('only a master password unlock counts as the presence check', () => {
   const lifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
   const body = braceBody(lifecycle, lifecycle.indexOf('pub(crate) fn unlock_vault_in_state('))
-  assert.match(body, /if result\.is_ok\(\) \{[\s\S]*presence\.grant_after_unlock\(state\.session_epoch\(\)\);/, 'a master password unlock no longer grants the presence check after it succeeds')
+  assert.match(body, /if let Ok\(\(_, epoch\)\) = &result \{[\s\S]*presence\.grant_after_unlock\(\*epoch\);/, 'a master password unlock no longer grants the presence check for the epoch it installed')
   const command = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.match(braceBody(command, command.indexOf('pub fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
 })
