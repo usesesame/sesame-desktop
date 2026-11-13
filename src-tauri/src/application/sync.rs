@@ -73,6 +73,18 @@ impl SyncStore {
         crate::sync::state::write_protected(&self.state_path(), state)
     }
 
+    pub(crate) fn save_checkpoint_state(&self, state: &SyncState) -> VaultResult<()> {
+        if !self.identity_present() {
+            return Err("Sesame Sync is off on this device.".to_string());
+        }
+        crate::sync::state::write_protected(&self.state_path(), state)?;
+        if !self.identity_present() {
+            let _ = crate::sync::state::forget_protected(&self.state_path());
+            return Err("Sesame Sync is off on this device.".to_string());
+        }
+        Ok(())
+    }
+
     pub(crate) fn forget_state(&self) -> VaultResult<()> {
         crate::sync::state::forget_protected(&self.state_path())
     }

@@ -1307,6 +1307,100 @@ mod applied_digest_tests {
 }
 
 #[cfg(test)]
+mod save_after_disable_tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use super::*;
+    use crate::application::sync::Refreshed;
+    use crate::application::sync_transfer::record_checkpoint_if_due_in_state;
+    use crate::sync::client::StateView;
+    use crate::sync::engine::VerifiedUpdate;
+
+    #[test]
+    fn a_checkpoint_that_finishes_after_sync_was_turned_off_does_not_recreate_the_state() {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let identity = DeviceIdentity::generate().expect("identity");
+        identity
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&identity]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let mut local = SyncState::new(&vault_id, &identity.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        let (plaintext, _) = {
+            let session = vault.state.session.lock().expect("session lock");
+            local_payload_bytes(session.as_ref().expect("unlocked")).expect("payload")
+        };
+        local.payload_digest = payload_digest(&plaintext);
+        store.save_state(&local).expect("saved state");
+        let refreshed = Refreshed {
+            server: StateView {
+                vault_id: vault_id.clone(),
+                vault_epoch: 1,
+                current_revision: 0,
+                device_state: "approved".into(),
+                activated_epoch: 1,
+            },
+            update: VerifiedUpdate {
+                entries,
+                list,
+                head: None,
+                receipt: None,
+            },
+            confirmed_at: None,
+            peer_checks_skipped: false,
+        };
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let server = TestServer::start({
+            let started = started.clone();
+            let release = release.clone();
+            move |request: &Recorded| match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/v1/sync/checkpoints") => {
+                    started.wait();
+                    release.wait();
+                    Reply::json(200, &json!({}))
+                }
+                other => panic!("unexpected route {other:?}"),
+            }
+        });
+        let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+        let checkpoint_store = SyncStore::new(scratch.path.clone());
+        let checkpoint_vault_id = vault_id.clone();
+        let checkpoint_device = identity.device_id.clone();
+        let run = thread::spawn(move || {
+            let local = SyncState {
+                vault_id: checkpoint_vault_id,
+                device_id: checkpoint_device,
+                ..local
+            };
+            block_on(record_checkpoint_if_due_in_state(
+                &checkpoint_store,
+                &client,
+                &local,
+                &refreshed,
+            ));
+        });
+
+        started.wait();
+        store.forget_everything().expect("sync turned off");
+        release.wait();
+        run.join().expect("checkpoint thread");
+
+        assert!(
+            store.load_state().expect("state").is_none(),
+            "a checkpoint that finishes after Sync is off must not bring the state file back"
+        );
+        assert!(!store.identity_present());
+    }
+}
+
+#[cfg(test)]
 mod adoption_and_publish_tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};

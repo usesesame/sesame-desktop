@@ -1013,7 +1013,7 @@ pub(crate) async fn record_checkpoint_if_due_in_state(
         header_revision: checkpoint.header_revision,
         at: now,
     });
-    let _ = store.save_state(&next);
+    let _ = store.save_checkpoint_state(&next);
 }
 
 pub(crate) async fn run_one_transfer_in_state<Reconnect, Connecting>(
