@@ -9,7 +9,7 @@ use crate::commands::test_support::TestVault;
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
 use crate::vault::crypto::{default_kdf_params, derive_key, encrypt_bytes};
-use crate::vault::storage::{persist_session, RECOVERY_REPLACEMENT_DELAY_SECS};
+use crate::vault::storage::{persist_session, write_vault_file, RECOVERY_REPLACEMENT_DELAY_SECS};
 use crate::vault::throttle::PersistedPinThrottle;
 use crate::vault::types::VaultFile;
 use crate::vault::{
@@ -28,7 +28,7 @@ use super::unlock::{
     accept_rollback_in_state, change_master_password_in_state, complete_recovery_setup_in_state,
     create_vault_in_state, get_vault_status_in_state, remove_unlock_pin_in_state,
     resume_recovery_setup_in_state, set_auto_lock_minutes_in_state, set_unlock_pin_in_state,
-    unlock_pin_vault_in_state,
+    unlock_pin_vault_in_state, unlock_recovery_vault_in_state,
 };
 use super::DesktopEffects;
 
@@ -42,6 +42,24 @@ const READY_AT: u64 = REQUESTED_AT + RECOVERY_REPLACEMENT_DELAY_SECS;
 
 fn lock_vault(vault: &TestVault) {
     *vault.state.session.lock().expect("session lock") = None;
+}
+
+struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!("sesame-recovery-unlock-{}", random_id()));
+        std::fs::create_dir_all(&path).expect("test directory");
+        Self { path }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 fn vault_bytes(vault: &TestVault) -> Vec<u8> {
@@ -80,6 +98,44 @@ fn password_request(current: Option<&str>, kit: Option<&str>) -> ChangeMasterPas
         recovery_kit: kit.map(str::to_string),
         new_password: REPLACEMENT_PASSWORD.to_string(),
     }
+}
+
+#[test]
+fn unlocking_with_a_recovery_kit_reenables_the_pin_throttle_state() {
+    let scratch = Scratch::new();
+    let path = scratch.path.join("vault.sesame");
+    let (opened, kit) = create_vault(MASTER_PASSWORD, "Fictional vault").expect("created vault");
+    write_vault_file(&path, &opened.file).expect("written vault");
+    let setup_state = VaultState::default();
+    let effects = FakeEffects::new(path.clone());
+
+    unlock_recovery_vault_in_state(&setup_state, &effects, Zeroizing::new(kit.clone()))
+        .expect("unlocked with the recovery kit");
+    complete_recovery_setup_in_state(&setup_state, Zeroizing::new(kit.clone()))
+        .expect("completed recovery setup");
+    set_unlock_pin_in_state(&setup_state, &effects, PIN.to_string()).expect("set pin");
+
+    let state = VaultState::default();
+    let missing = FakeEffects::new(path);
+    let error = match unlock_pin_vault_in_state(&state, &missing, PIN.to_string()) {
+        Ok(_) => panic!("the missing throttle file unlocked the vault"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error,
+        "Sesame cannot verify how many PIN attempts have been made. Unlock with your master password or recovery kit to re-enable the PIN."
+    );
+
+    unlock_recovery_vault_in_state(&state, &missing, Zeroizing::new(kit))
+        .expect("unlocked with the recovery kit again");
+
+    assert!(missing.calls().contains(&Effect::WritePinThrottle {
+        failures: 0,
+        locked_until_unix_ms: None,
+    }));
+    *state.session.lock().expect("session lock") = None;
+    unlock_pin_vault_in_state(&state, &missing, PIN.to_string())
+        .expect("the PIN works after the recovery kit restored the throttle state");
 }
 
 #[test]

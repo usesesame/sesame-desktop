@@ -206,6 +206,9 @@ pub(crate) fn unlock_recovery_vault_in_state(
     let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &recovery_kit)?;
     let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
     drop(session);
+    if result.is_ok() {
+        let _ = establish_pin_throttle_state(state, effects);
+    }
     result.map(|(snapshot, _)| snapshot)
 }
 
