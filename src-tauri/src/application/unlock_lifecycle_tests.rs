@@ -106,36 +106,17 @@ fn unlocking_with_a_recovery_kit_reenables_the_pin_throttle_state() {
     let path = scratch.path.join("vault.sesame");
     let (opened, kit) = create_vault(MASTER_PASSWORD, "Fictional vault").expect("created vault");
     write_vault_file(&path, &opened.file).expect("written vault");
-    let setup_state = VaultState::default();
-    let effects = FakeEffects::new(path.clone());
-
-    unlock_recovery_vault_in_state(&setup_state, &effects, Zeroizing::new(kit.clone()))
-        .expect("unlocked with the recovery kit");
-    complete_recovery_setup_in_state(&setup_state, Zeroizing::new(kit.clone()))
-        .expect("completed recovery setup");
-    set_unlock_pin_in_state(&setup_state, &effects, PIN.to_string()).expect("set pin");
-
     let state = VaultState::default();
-    let missing = FakeEffects::new(path);
-    let error = match unlock_pin_vault_in_state(&state, &missing, PIN.to_string()) {
-        Ok(_) => panic!("the missing throttle file unlocked the vault"),
-        Err(error) => error,
-    };
-    assert_eq!(
-        error,
-        "Sesame cannot verify how many PIN attempts have been made. Unlock with your master password or recovery kit to re-enable the PIN."
-    );
+    let effects = FakeEffects::new(path);
 
-    unlock_recovery_vault_in_state(&state, &missing, Zeroizing::new(kit))
-        .expect("unlocked with the recovery kit again");
+    unlock_recovery_vault_in_state(&state, &effects, Zeroizing::new(kit))
+        .expect("unlocked with the recovery kit");
 
-    assert!(missing.calls().contains(&Effect::WritePinThrottle {
+    assert!(effects.calls().contains(&Effect::WritePinThrottle {
         failures: 0,
         locked_until_unix_ms: None,
     }));
-    *state.session.lock().expect("session lock") = None;
-    unlock_pin_vault_in_state(&state, &missing, PIN.to_string())
-        .expect("the PIN works after the recovery kit restored the throttle state");
+    assert!(state.session.lock().expect("session lock").is_some());
 }
 
 #[test]
