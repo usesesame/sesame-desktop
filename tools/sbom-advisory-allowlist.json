@@ -783,6 +783,20 @@
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
       "reviewed": "2026-11-11",
       "expires": "2027-02-09"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-125712",
+      "package": "gst-plugins-base1.0",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in the RTCP packet parser and needs a live RTP media session. Sesame plays no media, its webview has media and WebRTC turned off and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-11-13",
+      "expires": "2027-02-11"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-125704",
+      "package": "gstreamer1.0",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in GStreamer core when it deserializes untrusted caps or structure text, such as from a GStreamer Data Protocol receiver. Sesame plays no media, its webview has media and WebRTC turned off and its content security policy sets media-src 'none', so no caps from outside reach GStreamer. The AppImage bundles this library from its build image.",
+      "reviewed": "2026-11-13",
+      "expires": "2027-02-11"
     }
   ]
 }
