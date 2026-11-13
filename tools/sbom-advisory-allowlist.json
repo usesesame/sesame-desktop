@@ -797,6 +797,20 @@
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in GStreamer core when it deserializes untrusted caps or structure text, such as from a GStreamer Data Protocol receiver. Sesame plays no media, its webview has media and WebRTC turned off and its content security policy sets media-src 'none', so no caps from outside reach GStreamer. The AppImage bundles this library from its build image.",
       "reviewed": "2026-11-13",
       "expires": "2027-02-11"
+    },
+    {
+      "id": "GHSA-gcqx-w48m-w2h4",
+      "package": "deepmerge",
+      "reason": "No fixed version exists. deepmerge is a development dependency of @sveltejs/vite-plugin-svelte and merges Sesame's own build settings while the frontend is built. It is not part of the shipped app, and no outside input reaches it.",
+      "reviewed": "2026-11-13",
+      "expires": "2027-02-11"
+    },
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "reason": "The fix is in minimatch 11, and eslint, @eslint/config-array and typescript-estree still require 10. minimatch is a development dependency that matches the file patterns in Sesame's own lint configuration. It is not part of the shipped app, and no outside input reaches it.",
+      "reviewed": "2026-11-13",
+      "expires": "2027-02-11"
     }
   ]
 }
