@@ -4,6 +4,37 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.5.2
+
+### Security
+
+- Website icons are decoded by Sesame itself, which checks their size and
+  dimensions and writes a fresh PNG, so the web engine only ever reads an
+  image Sesame made. Icons are accepted as PNG or ICO. JPEG icons are no
+  longer shown, and icons cached by an older version are kept only if they
+  pass the same checks.
+- If the process that draws a Sesame window stops unexpectedly, Sesame locks
+  the vault and shows the lock screen again.
+- On Linux the web engine no longer offers WebGL, Web Audio, media playback,
+  WebRTC or windows opened by a script, and it refuses every permission
+  request. Sesame's own pages use none of them.
+- Both windows refuse downloads. A document attachment is saved through the
+  system save dialog, and the file comes from the vault instead of the page.
+- The quick access window keeps its web data apart from the main window. On
+  Linux it gets its own network process, and on Windows its own WebView2
+  profile.
+- Linux release builds no longer write core dumps, including from the web
+  engine's own processes, so a crash cannot leave page memory on disk.
+- On Windows the webview refuses permission requests, keeps password saving
+  off and ignores four more `WEBVIEW2_*` environment variables that could
+  point it at another runtime or profile.
+
+### Linux packaging
+
+- The AppImage no longer carries 21 packages that Sesame never used, among
+  them the print stack, the TIFF image loader and network and proxy
+  libraries.
+
 ## 0.5.1
 
 This version also carries everything listed under 0.5.0, which was never published.

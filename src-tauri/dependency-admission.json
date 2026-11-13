@@ -57,7 +57,7 @@
     },
     {
       "name": "@vitest/coverage-v8",
-      "version": "5.0",
+      "version": "5.1",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -103,13 +103,13 @@
     },
     {
       "name": "eslint",
-      "version": "10.13",
+      "version": "10.14",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
     {
       "name": "eslint-plugin-svelte",
-      "version": "3.23",
+      "version": "3.24",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -121,7 +121,7 @@
     },
     {
       "name": "globals",
-      "version": "17.13",
+      "version": "17.14",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },
@@ -132,8 +132,8 @@
     },
     {
       "name": "ico",
-      "version": "0.5",
-      "reason": "Decodes the BMP image inside a website ICO before Sesame writes a fresh PNG. It is already locked through tauri-codegen at 0.5.0, so naming it directly adds no crate or version."
+      "version": "0.6",
+      "reason": "Decodes the BMP image inside a website ICO before Sesame writes a fresh PNG. Version 0.6.0 keeps the decoding API and honors a non-zero colors_used field in BMP entries. tauri-codegen still locks 0.5.0, so the direct edge adds one version of a crate already in the build."
     },
     {
       "name": "idna",
@@ -159,7 +159,7 @@
     {
       "name": "ml-kem",
       "version": "0.3",
-      "reason": "ML-KEM-768, the post-quantum half of the hybrid X-Wing key exchange that wraps the vault key in Sync key packages. It is pure Rust and is used at the exact version 0.3.2."
+      "reason": "ML-KEM-768, the post-quantum half of the hybrid X-Wing key exchange that wraps the vault key in Sync key packages. It is pure Rust and is pinned to the exact version 0.3.4."
     },
     {
       "name": "png",
@@ -324,7 +324,7 @@
     },
     {
       "name": "vitest",
-      "version": "5.0",
+      "version": "5.1",
       "source": "npm",
       "reason": "In use before this gate was adopted."
     },

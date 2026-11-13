@@ -1160,11 +1160,16 @@ const FEATURE_GATED_PERMISSIONS = ['desktop-e2e']
 function applicationPermissions() {
   const permissions = new Map()
   const source = read('src-tauri', 'permissions', 'desktop.toml')
-  for (const block of source.split('[[permission]]').slice(1)) {
+  const uncommented = source.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  for (const block of uncommented.split('[[permission]]').slice(1)) {
     const identifier = block.match(/identifier = "([a-z0-9-]+)"/)?.[1]
     const list = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
     assert.ok(identifier, 'an application permission has no identifier')
-    permissions.set(identifier, [...list.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]))
+    const entries = list.split(',').map((entry) => entry.trim()).filter(Boolean)
+    for (const entry of entries) {
+      assert.match(entry, /^"[a-z0-9_]+"$/, `${identifier} lists a command this test cannot read: ${entry}`)
+    }
+    permissions.set(identifier, entries.map((entry) => entry.slice(1, -1)))
   }
   return permissions
 }
@@ -1220,6 +1225,15 @@ test('every command a shipping capability permits is registered in the shipping 
       }
     }
   }
+})
+
+test('each custom command belongs to exactly one application permission', () => {
+  const owners = new Map()
+  for (const [identifier, commands] of applicationPermissions()) {
+    for (const command of commands) owners.set(command, [...(owners.get(command) ?? []), identifier])
+  }
+  const shared = [...owners].filter(([, identifiers]) => identifiers.length > 1).map(([command, identifiers]) => `${command} in ${identifiers.join(' and ')}`)
+  assert.deepEqual(shared, [], 'a command granted by two permissions can be reached by a window that holds either one')
 })
 
 test('a permission whose commands are not all shipping commands is feature gated', () => {
@@ -1534,6 +1548,17 @@ test('every window is built in code so each one gets the new window handler', ()
   const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
   assert.match(quick, /WebviewWindowBuilder::from_config\(/, 'the quick access window is built from its configuration')
   assert.match(quick, /\.on_new_window\(\|_, _\| NewWindowResponse::Deny\)\s*\.build\(\)/, 'the quick access window denies new windows')
+})
+
+test('the quick access window gets its own webview data directory and the main window keeps the default', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const quick = shell.split('fn ensure_quick_access_window')[1]?.split('\nfn ')[0] ?? ''
+  const main = shell.split('fn ensure_main_window')[1]?.split('fn ensure_quick_access_window')[0] ?? ''
+  assert.match(quick, /app\s*\.path\(\)\s*\.app_local_data_dir\(\)/, 'the quick access data directory is not under the app local data directory')
+  assert.match(quick, /\.join\("quick-access-webview"\)/, 'the quick access data directory is not named quick-access-webview')
+  assert.match(quick, /\.data_directory\(/, 'the quick access builder does not set a data directory')
+  assert.doesNotMatch(main, /\.data_directory\(/, 'the main builder overrides the default data directory')
+  assert.doesNotMatch(read('src-tauri', 'tauri.conf.json'), /"dataDirectory"/, 'a configured window sets dataDirectory against the generic local data directory')
 })
 
 test('vault key material is drawn from the system random source', () => {
