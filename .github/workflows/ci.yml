@@ -639,6 +639,11 @@ jobs:
       - name: Generate locked SBOM and provenance
         run: npm run supply-chain:sbom
 
+      - name: Audit the locked SBOM against OSV advisories
+        run: |
+          version=$(node -p "require('./package.json').version")
+          npm run supply-chain:sbom:audit -- --sbom "release-evidence/sesame-$version.cdx.json"
+
       - name: Verify the vendored glib tree
         run: node tools/verify-glib-vendor.mjs
 
