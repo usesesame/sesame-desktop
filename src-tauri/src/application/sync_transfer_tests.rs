@@ -1425,6 +1425,7 @@ mod adoption_and_publish_tests {
         tokens: HashMap<String, String>,
         activated: HashMap<String, u64>,
         drop_activation_answer: bool,
+        fail_next_upload: bool,
         instance: SigningKey,
     }
 
@@ -1442,6 +1443,7 @@ mod adoption_and_publish_tests {
                 tokens: HashMap::new(),
                 activated: HashMap::new(),
                 drop_activation_answer: false,
+                fail_next_upload: false,
                 instance: SigningKey::from_bytes(&[7u8; 32]),
             }
         }
@@ -1491,6 +1493,7 @@ mod adoption_and_publish_tests {
             let activated = world.activated.get(&device).copied().unwrap_or(0);
             match (request.method.as_str(), request.path.as_str()) {
                 ("GET", "/v1/sync/checkpoints") => checkpoint_not_found(),
+                ("POST", "/v1/sync/checkpoints") => Reply::json(200, &json!({})),
                 ("GET", "/v1/sync/state") => Reply::json(
                     200,
                     &json!({
@@ -1558,6 +1561,10 @@ mod adoption_and_publish_tests {
                     Reply::json(200, &json!({}))
                 }
                 ("POST", "/v1/sync/snapshots") => {
+                    if world.fail_next_upload {
+                        world.fail_next_upload = false;
+                        return Reply::json(500, &json!({"error":{"code":"sync_failed"}}));
+                    }
                     let body: Value = serde_json::from_slice(&request.body).expect("upload body");
                     let header: Header =
                         serde_json::from_value(body["header"].clone()).expect("header");
@@ -1957,6 +1964,169 @@ mod adoption_and_publish_tests {
         )
         .expect("the published snapshot opens with the new key");
         assert_eq!(opened.payload().entries.len(), 1);
+
+        let recipient_scratch = Scratch::new();
+        let recipient_store = recipient_scratch.store();
+        recipient
+            .save(&recipient_store.identity_path())
+            .expect("saved identity");
+        let mut recipient_state = SyncState::new(&vault_id, &recipient.device_id);
+        recipient_state.entries = entries;
+        recipient_state.activated_epoch = 1;
+        state_digest(&recipient_vault, &mut recipient_state);
+        recipient_store
+            .save_state(&recipient_state)
+            .expect("saved recipient state");
+        world
+            .lock()
+            .expect("world")
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world
+            .lock()
+            .expect("world")
+            .activated
+            .insert(recipient.device_id.clone(), 1);
+        let recipient_client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        let taken = block_on(take_new_key_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &effects,
+            &recipient_client,
+            PASSWORD.into(),
+        ))
+        .expect("the second device takes the new key");
+        assert!(!taken.recovery_kit.is_empty());
+        assert_eq!(vault_key(&recipient_vault), new_key);
+
+        block_on(download_vault_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &recipient_client,
+            &effects,
+        ))
+        .expect("the second device reads the snapshot under the new key");
+        let name = {
+            let session = recipient_vault.state.session.lock().expect("session lock");
+            session
+                .as_ref()
+                .expect("unlocked")
+                .open_payload()
+                .expect("payload")
+                .vault_name
+                .clone()
+        };
+        assert_eq!(name, "Fictional vault from the acting device");
+    }
+
+    #[test]
+    fn a_clean_rekey_retries_a_failed_first_snapshot_on_the_next_run() {
+        let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        acting_vault.seed(|payload| {
+            payload.vault_name = "Fictional vault from the acting device".into();
+        });
+        let vault_id = vault_id_of_test_vault(&acting_vault);
+        let recipient_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        recipient_vault.seed(|payload| payload.vault_id = Some(vault_id.clone()));
+        let scratch = Scratch::new();
+        let acting_store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        acting
+            .save(&acting_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let mut acting_state = SyncState::new(&vault_id, &acting.device_id);
+        acting_state.entries = entries.clone();
+        acting_state.activated_epoch = 1;
+        state_digest(&acting_vault, &mut acting_state);
+        acting_store
+            .save_state(&acting_state)
+            .expect("saved acting state");
+        let mut world = FakeSyncWorld::new(&vault_id, entries.clone(), 1);
+        world
+            .tokens
+            .insert(ACTING_TOKEN.into(), acting.device_id.clone());
+        world.activated.insert(acting.device_id.clone(), 1);
+        world.fail_next_upload = true;
+        let world = Arc::new(Mutex::new(world));
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let acting_client = SyncClient::for_tests(&server.base(), ACTING_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let new_key = [6u8; 32];
+        let prepared = crate::sync::key_change::PreparedKeyChange::default();
+        let (kit, recovery) = prepare_recovery(&new_key).expect("prepared");
+        prepared.stage(&new_key, recovery, std::time::Instant::now());
+        assert!(!kit.is_empty());
+
+        block_on(crate::application::sync_transfer::rekey_without_in_state(
+            &acting_vault.state,
+            &acting_store,
+            &effects,
+            &acting_client,
+            crate::application::sync_transfer::RekeyRequest {
+                prepared: &prepared,
+                subject: None,
+                master_password: PASSWORD,
+                adopt_locally: true,
+            },
+        ))
+        .expect("the clean vault is rekeyed");
+
+        assert_eq!(vault_key(&acting_vault), new_key);
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/snapshots")
+                .count(),
+            1,
+            "the rekey attempts its first upload"
+        );
+        assert!(
+            world.lock().expect("world").snapshot.is_none(),
+            "the first upload did not reach the service"
+        );
+
+        let local = acting_store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        let reconnect_base = server.base();
+        let reconnect_instance = instance.clone();
+        let outcome = block_on(
+            crate::application::sync_transfer::run_one_transfer_in_state(
+                &acting_vault.state,
+                &acting_store,
+                &acting_client,
+                &effects,
+                local,
+                move || {
+                    let base = reconnect_base.clone();
+                    let instance = reconnect_instance.clone();
+                    async move { Ok(SyncClient::for_tests(&base, ACTING_TOKEN, &instance)) }
+                },
+            ),
+        )
+        .expect("the ordinary run publishes the snapshot");
+        assert!(
+            matches!(
+                outcome,
+                crate::sync::coordinator::Outcome::Uploaded { revision: 1 }
+            ),
+            "the ordinary run retries the upload instead of reporting that everything is current"
+        );
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/snapshots")
+                .count(),
+            2,
+            "the second upload succeeded"
+        );
 
         let recipient_scratch = Scratch::new();
         let recipient_store = recipient_scratch.store();

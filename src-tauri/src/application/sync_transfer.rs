@@ -724,11 +724,13 @@ pub(crate) fn must_publish_after_key_change(
     local: &SyncState,
     server: &crate::sync::client::StateView,
 ) -> bool {
-    local
-        .head
-        .as_ref()
-        .is_some_and(|head| head.vault_epoch < server.vault_epoch)
-        && server.current_revision == local.head_revision()
+    if server.current_revision != local.head_revision() {
+        return false;
+    }
+    match local.head.as_ref() {
+        None => server.current_revision == 0,
+        Some(head) => head.vault_epoch < server.vault_epoch,
+    }
 }
 
 pub(crate) async fn leave_vault_in_state(
