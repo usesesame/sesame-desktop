@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 
 use sesame_core::api::{create_vault, open_vault_with_password};
 
@@ -8,6 +9,14 @@ use crate::vault::{
 };
 
 const TEST_PASSWORD: &str = "fictional master password";
+
+static PAIRING_STATE_GUARD: Mutex<()> = Mutex::new(());
+
+pub(crate) fn pairing_state_guard() -> MutexGuard<'static, ()> {
+    PAIRING_STATE_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub(crate) struct TestVault {
     pub state: VaultState,
