@@ -43,7 +43,6 @@ pub(super) enum Effect {
     },
     RevokePresence,
     CancelBreachScan,
-    EstablishPinThrottle,
     EmitVaultLocked,
     RecordRecoveryExport {
         vault_id: String,
@@ -60,7 +59,7 @@ pub(super) enum Effect {
         vault_id: Option<String>,
         revision: u64,
     },
-    DiscardPinThrottle,
+    ClearPinThrottle,
     CancelPendingApprovals,
     ReportBackupIoError,
     WritePinThrottle {
@@ -204,11 +203,6 @@ impl DesktopEffects for FakeEffects<'_> {
         }
     }
 
-    fn establish_pin_throttle_state(&self, _state: &VaultState) -> VaultResult<()> {
-        self.record(Effect::EstablishPinThrottle);
-        Ok(())
-    }
-
     fn record_recovery_export(&self, vault_id: &str, revision: u64) {
         self.record(Effect::RecordRecoveryExport {
             vault_id: vault_id.to_string(),
@@ -237,16 +231,18 @@ impl DesktopEffects for FakeEffects<'_> {
         });
     }
 
-    fn discard_pin_throttle_state(&self, _state: &VaultState) {
-        self.record(Effect::DiscardPinThrottle);
-    }
-
     fn cancel_pending_approvals(&self) {
         self.record(Effect::CancelPendingApprovals);
     }
 
     fn report_backup_io_error(&self) {
         self.record(Effect::ReportBackupIoError);
+    }
+
+    fn clear_pin_throttle_state(&self) -> VaultResult<()> {
+        self.record(Effect::ClearPinThrottle);
+        *self.throttle.lock().expect("throttle lock") = None;
+        Ok(())
     }
 
     fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>> {
@@ -370,7 +366,10 @@ fn unlocking_installs_the_session_and_records_the_effects_in_order() {
         vec![
             Effect::ReportKeyPageFallback,
             Effect::ObserveUnlock,
-            Effect::EstablishPinThrottle,
+            Effect::WritePinThrottle {
+                failures: 0,
+                locked_until_unix_ms: None,
+            },
         ]
     );
 }

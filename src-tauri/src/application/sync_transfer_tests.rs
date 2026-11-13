@@ -437,7 +437,7 @@ fn a_take_new_key_resumes_from_an_interrupted_journal() {
     assert_eq!(saved.activated_epoch, rotation.epoch_after);
     assert_eq!(
         effects.calls(),
-        vec![Effect::DiscardPinThrottle, Effect::CancelPendingApprovals]
+        vec![Effect::ClearPinThrottle, Effect::CancelPendingApprovals]
     );
 }
 
@@ -669,7 +669,7 @@ fn joining_a_synced_vault_keeps_a_copy_and_reports_every_effect_in_order() {
         effects.calls(),
         vec![
             Effect::ReportKeyPageFallback,
-            Effect::DiscardPinThrottle,
+            Effect::ClearPinThrottle,
             Effect::CancelPendingApprovals,
         ]
     );

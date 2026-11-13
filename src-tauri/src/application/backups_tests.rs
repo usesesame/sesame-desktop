@@ -727,7 +727,7 @@ fn restoring_an_older_backup_needs_confirmation_then_replaces_the_file_once() {
                 revision: 2,
             },
             Effect::ClearArmedClipboard,
-            Effect::DiscardPinThrottle,
+            Effect::ClearPinThrottle,
         ]
     );
     assert_eq!(
@@ -899,7 +899,7 @@ fn deleting_the_vault_stages_every_managed_file_and_clears_the_caches() {
     assert_eq!(vault.state.cached_hello_unlock(), Some(false));
     assert_eq!(
         effects.calls(),
-        vec![Effect::ClearArmedClipboard, Effect::DiscardPinThrottle]
+        vec![Effect::ClearArmedClipboard, Effect::ClearPinThrottle]
     );
 }
 

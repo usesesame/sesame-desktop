@@ -279,7 +279,7 @@ pub(crate) fn delete_local_vault_in_state(
     drop(session);
     let _ = effects.clear_armed_clipboard();
     // Never recreate a PIN throttle file after the vault and its PIN wrapper are gone.
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     let staged = staged?;
     if securely_delete(&staged.staging_dir).is_err() {
         return Err("Sesame removed the local vault from its normal location, but could not finish deleting its staged data. Restart Sesame and try deleting the vault again.".into());
@@ -426,9 +426,9 @@ pub(crate) fn restore_backup_in_state(
         state.cache_pin_unlock(installed.pin_unlock_available);
         state.cache_hello_unlock(installed.hello_unlock_available);
         if installed.pin_unlock_available {
-            let _ = effects.establish_pin_throttle_state(state);
+            let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
         } else {
-            effects.discard_pin_throttle_state(state);
+            crate::application::unlock::discard_pin_throttle_state(state, effects);
         }
         Ok(RestoreBackupResult {
             safety_backup_name: installed.safety_backup_name,

@@ -90,16 +90,15 @@ pub(crate) trait DesktopEffects: Sync {
     fn revoke_presence(&self);
     fn cancel_breach_scan(&self);
     fn emit_vault_locked(&self) -> Result<(), ()>;
-    fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()>;
     fn record_recovery_export(&self, vault_id: &str, revision: u64);
     fn record_recovery_verification(&self, vault_id: &str, revision: u64);
     fn recovery_health(&self, current_vault_id: Option<&str>) -> VaultResult<RecoveryHealth>;
     fn reset_rollback_after_restore(&self, vault_id: Option<&str>, revision: u64);
-    fn discard_pin_throttle_state(&self, state: &VaultState);
     fn cancel_pending_approvals(&self);
     fn report_backup_io_error(&self);
     fn read_pin_throttle_state(&self) -> VaultResult<Option<PersistedPinThrottle>>;
     fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()>;
+    fn clear_pin_throttle_state(&self) -> VaultResult<()>;
     fn recovery_replacement_path(&self) -> VaultResult<PathBuf>;
     fn discard_recovery_replacement(&self);
     fn reset_rollback_record(&self, vault_id: &str, revision: u64) -> VaultResult<()>;

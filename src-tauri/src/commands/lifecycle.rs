@@ -10,7 +10,6 @@ use crate::application::unlock::{
     unlock_with_windows_hello_in_state,
 };
 use crate::release::ReleasePresence;
-use crate::vault::storage::{clear_pin_throttle_state, write_pin_throttle_state};
 use crate::vault::{
     ChangeMasterPasswordRequest, ChangeMasterPasswordResult, MasterPasswordRequest,
     RecoveryKitRequest, UnlockPinRequest, VaultResult, VaultSetup, VaultSnapshot, VaultState,
@@ -100,25 +99,6 @@ pub fn unlock_pin_vault(
     request: UnlockPinRequest,
 ) -> VaultResult<VaultSnapshot> {
     unlock_pin_vault_in_state(&state, &DesktopHostEffects::new(&app), request.pin)
-}
-
-pub(crate) fn establish_pin_throttle_state(app: &AppHandle, state: &VaultState) -> VaultResult<()> {
-    let mut guard = state
-        .pin_guard
-        .lock()
-        .map_err(|_| "Sesame could not read the PIN protection state.".to_string())?;
-    guard.record_success();
-    write_pin_throttle_state(app, &guard)?;
-    state.mark_pin_throttle_loaded();
-    Ok(())
-}
-
-pub(crate) fn discard_pin_throttle_state(app: &AppHandle, state: &VaultState) {
-    if let Ok(mut guard) = state.pin_guard.lock() {
-        guard.record_success();
-        state.mark_pin_throttle_loaded();
-    }
-    let _ = clear_pin_throttle_state(app);
 }
 
 #[tauri::command]

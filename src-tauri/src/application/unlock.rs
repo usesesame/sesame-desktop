@@ -19,6 +19,28 @@ use crate::vault::{
     MAX_VAULT_FILE_BYTES, PIN_WRAP_AAD,
 };
 
+pub(crate) fn establish_pin_throttle_state(
+    state: &VaultState,
+    effects: &dyn DesktopEffects,
+) -> VaultResult<()> {
+    let mut guard = state
+        .pin_guard
+        .lock()
+        .map_err(|_| "Sesame could not read the PIN protection state.".to_string())?;
+    guard.record_success();
+    effects.write_pin_throttle_state(&guard)?;
+    state.mark_pin_throttle_loaded();
+    Ok(())
+}
+
+pub(crate) fn discard_pin_throttle_state(state: &VaultState, effects: &dyn DesktopEffects) {
+    if let Ok(mut guard) = state.pin_guard.lock() {
+        guard.record_success();
+        state.mark_pin_throttle_loaded();
+    }
+    let _ = effects.clear_pin_throttle_state();
+}
+
 pub(crate) fn get_vault_status_in_state(
     state: &VaultState,
     effects: &dyn DesktopEffects,
@@ -128,7 +150,7 @@ pub(crate) fn create_vault_in_state(
     write_vault_file(&path, &opened.file)?;
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    let _ = effects.establish_pin_throttle_state(state);
+    let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
 
     // `OpenedVault` zeroizes on drop, so clone and let it drop rather than moving fields out.
     let unlocked = UnlockedVault::from_opened(path, &opened)?;
@@ -204,7 +226,7 @@ pub(crate) fn set_unlock_pin_in_state(
     })();
     pin.zeroize();
     if result.is_ok() {
-        let _ = effects.establish_pin_throttle_state(state);
+        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
         state.cache_pin_unlock(true);
     }
     result
@@ -225,7 +247,7 @@ pub(crate) fn remove_unlock_pin_in_state(
         remove_pin_for_session(session)?;
     }
     state.cache_pin_unlock(false);
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     Ok(())
 }
 
@@ -289,7 +311,7 @@ pub(crate) fn unlock_with_windows_hello_in_state(
     key_array.zeroize();
     drop(session);
     if result.is_ok() {
-        let _ = effects.establish_pin_throttle_state(state);
+        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
     }
     result
 }
@@ -382,7 +404,7 @@ pub(crate) fn retire_unlock_methods_after_key_rotation(
 ) {
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     effects.discard_recovery_replacement();
     state.advance_session_epoch();
 }

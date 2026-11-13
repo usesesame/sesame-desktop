@@ -373,7 +373,7 @@ pub(crate) async fn take_new_key_in_state(
     };
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     effects.cancel_pending_approvals();
     client
         .activate(&identity, &package.digest())
@@ -453,7 +453,7 @@ pub(crate) async fn adopt_journal_key_in_state(
     let recovery_kit = kit.unwrap_or_default();
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     effects.cancel_pending_approvals();
     let mut next = local;
     next.entries = refreshed.update.entries;
@@ -630,7 +630,7 @@ pub(crate) async fn rekey_without_in_state(
         }
         state.cache_pin_unlock(false);
         state.cache_hello_unlock(false);
-        effects.discard_pin_throttle_state(state);
+        crate::application::unlock::discard_pin_throttle_state(state, effects);
         effects.cancel_pending_approvals();
         next.activated_epoch = entry.epoch_after;
     }

@@ -76,10 +76,6 @@ impl DesktopEffects for DesktopHostEffects<'_> {
         self.app.emit("vault-locked", ()).map_err(|_| ())
     }
 
-    fn establish_pin_throttle_state(&self, state: &VaultState) -> VaultResult<()> {
-        crate::commands::establish_pin_throttle_state(self.app, state)
-    }
-
     fn record_recovery_export(&self, vault_id: &str, revision: u64) {
         let _ = crate::vault::recovery_health::update_after_export_with_payload(
             self.app, vault_id, revision,
@@ -100,10 +96,6 @@ impl DesktopEffects for DesktopHostEffects<'_> {
         crate::rollback_guard::reset_after_restore(self.app, vault_id, revision);
     }
 
-    fn discard_pin_throttle_state(&self, state: &VaultState) {
-        crate::commands::discard_pin_throttle_state(self.app, state);
-    }
-
     fn cancel_pending_approvals(&self) {
         crate::browser_fill::cancel_pending_approvals(self.app);
     }
@@ -118,6 +110,10 @@ impl DesktopEffects for DesktopHostEffects<'_> {
 
     fn write_pin_throttle_state(&self, guard: &PinAttemptGuard) -> VaultResult<()> {
         crate::vault::storage::write_pin_throttle_state(self.app, guard)
+    }
+
+    fn clear_pin_throttle_state(&self) -> VaultResult<()> {
+        crate::vault::storage::clear_pin_throttle_state(self.app)
     }
 
     fn recovery_replacement_path(&self) -> VaultResult<PathBuf> {

@@ -174,6 +174,15 @@ test('the application policy module does not depend on the desktop host', () => 
   )
 })
 
+test('the desktop effects adapter only performs effects and never calls back into the command layer', () => {
+  const adapter = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs').split('#[cfg(test)]')[0]
+  assert.doesNotMatch(adapter, /crate::commands\b/, 'the effects adapter calls into the command layer')
+  assert.doesNotMatch(adapter, /record_success|mark_pin_throttle_loaded|pin_guard/, 'the effects adapter changes the PIN attempt budget')
+  const unlock = read('src-tauri', 'src', 'application', 'unlock.rs')
+  assert.match(unlock, /pub\(crate\) fn establish_pin_throttle_state\(/)
+  assert.match(unlock, /pub\(crate\) fn discard_pin_throttle_state\(/)
+})
+
 test('desktop Sync fixtures are digest-bound local snapshots', () => {
   const contractRoot = join(root, 'src-tauri', 'contracts', 'sync', 'v3')
   const source = JSON.parse(readFileSync(join(contractRoot, 'source.json'), 'utf8'))

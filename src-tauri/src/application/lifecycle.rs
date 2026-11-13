@@ -57,7 +57,7 @@ pub(crate) fn unlock_vault_in_state(
     let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
     drop(session);
     if result.is_ok() {
-        let _ = effects.establish_pin_throttle_state(state);
+        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
         presence.grant_after_unlock(state.session_epoch());
     }
     result

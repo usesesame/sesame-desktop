@@ -180,7 +180,7 @@ fn a_master_password_change_retires_the_other_unlock_methods() {
     assert_eq!(
         effects.calls(),
         vec![
-            Effect::DiscardPinThrottle,
+            Effect::ClearPinThrottle,
             Effect::DiscardRecoveryReplacement,
             Effect::ReportKeyPageFallback,
         ]

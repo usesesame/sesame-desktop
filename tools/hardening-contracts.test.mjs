@@ -1688,7 +1688,7 @@ test('the sync commands hand their policy to the application module', () => {
     'leave_vault_in_state',
     'run_one_transfer_in_state',
   ]) {
-    assert.match(applicationTransfer, new RegExp(`fn ${name}\\(`), `${name} is missing from the application module`)
+    assert.match(applicationTransfer, new RegExp(`fn ${name}[(<]`), `${name} is missing from the application module`)
   }
 })
 

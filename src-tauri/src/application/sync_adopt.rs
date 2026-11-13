@@ -46,7 +46,7 @@ pub(crate) fn finish_adoption_in_state(
     };
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
-    effects.discard_pin_throttle_state(state);
+    crate::application::unlock::discard_pin_throttle_state(state, effects);
     effects.cancel_pending_approvals();
     Ok(recovery_kit)
 }
