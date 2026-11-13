@@ -96,10 +96,10 @@ zeroize = { version = "1.8", features = ["derive"] }
 curve25519-dalek = "5"
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hkdf = "0.13"
-ico = "0.5"
+ico = "0.6"
 png = "0.18"
 ts-rs = "12.0.1"
-ml-kem = { version = "=0.3.3", features = ["zeroize"] }
+ml-kem = { version = "=0.3.4", features = ["zeroize"] }
 sha3 = "=0.12.0"
 shake = "0.1"
 
