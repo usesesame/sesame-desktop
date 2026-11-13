@@ -318,7 +318,7 @@ pub(crate) async fn take_new_key_in_state(
         list,
         refreshed.server.activated_epoch,
     )? {
-        KeyChange::Adopt(journal) => {
+        KeyChange::Adopt(mut journal) => {
             if journal.purpose == Purpose::Adoption
                 && refreshed.server.activated_epoch < journal.epoch_after
             {
@@ -333,7 +333,7 @@ pub(crate) async fn take_new_key_in_state(
                 effects,
                 local,
                 refreshed,
-                &journal,
+                &mut journal,
                 &master_password,
             )
             .await;
@@ -377,7 +377,7 @@ pub(crate) async fn take_new_key_in_state(
             .as_mut()
             .ok_or("Unlock Sesame before taking the new key.")?;
         verify_master_password(unlocked, &master_password)?;
-        let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
+        let kept = KeptThroughAdoption::capture(&local, list, unlocked, None)?;
         let payload = unlocked.open_payload()?.clone();
         let (recovery_kit, recovery) = prepare_recovery(&key)?;
         Journal::for_adoption(
@@ -386,6 +386,7 @@ pub(crate) async fn take_new_key_in_state(
             &key,
             recovery.clone(),
             recovery_kit.clone(),
+            kept.adopted_payload_digest(),
             unix_now(),
         )?
         .save(&store.journal_path())?;
@@ -448,7 +449,7 @@ pub(crate) async fn adopt_journal_key_in_state(
     effects: &dyn DesktopEffects,
     local: SyncState,
     refreshed: Refreshed,
-    journal: &Journal,
+    journal: &mut Journal,
     master_password: &str,
 ) -> Result<SyncTakeKeyResult, String> {
     let mut key = journal.key();
@@ -461,8 +462,17 @@ pub(crate) async fn adopt_journal_key_in_state(
             .as_mut()
             .ok_or("Unlock Sesame before finishing the vault key change.")?;
         verify_master_password(unlocked, master_password).and_then(|()| {
-            let kept = KeptThroughAdoption::capture(&local, &refreshed.update.list, unlocked)?;
+            let kept = KeptThroughAdoption::capture(
+                &local,
+                &refreshed.update.list,
+                unlocked,
+                journal.adopted_payload_digest.as_deref(),
+            )?;
             let payload = unlocked.open_payload()?.clone();
+            if kept.cleaned() {
+                journal.adopted_payload_digest = kept.adopted_payload_digest().map(str::to_string);
+                journal.save(&store.journal_path())?;
+            }
             let kit = adopt_with(
                 unlocked,
                 key,
@@ -612,17 +622,23 @@ pub(crate) async fn rekey_without_in_state(
         &entry.digest(),
     )?;
     let journal_path = store.journal_path();
+    let mut journal = None;
     if adopt_locally {
         let saved = recovery
             .clone()
             .ok_or_else(|| "Sesame could not prepare the new recovery kit.".to_string())
             .and_then(|recovery| {
-                Journal::new(&entry, list.head_digest(), &new_key, recovery, unix_now())
-                    .save(&journal_path)
+                let journal =
+                    Journal::new(&entry, list.head_digest(), &new_key, recovery, unix_now());
+                journal.save(&journal_path)?;
+                Ok(journal)
             });
-        if let Err(error) = saved {
-            new_key.zeroize();
-            return Err(error);
+        match saved {
+            Ok(created) => journal = Some(created),
+            Err(error) => {
+                new_key.zeroize();
+                return Err(error);
+            }
         }
     }
     let posted = match subject {
@@ -651,9 +667,19 @@ pub(crate) async fn rekey_without_in_state(
             let unlocked = session
                 .as_mut()
                 .ok_or("Unlock Sesame before removing a device.")?;
-            let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
+            let kept = KeptThroughAdoption::capture(&local, list, unlocked, None)?;
             clean = kept.cleaned();
             let payload = unlocked.open_payload()?.clone();
+            if clean {
+                if let Some(journal) = journal.as_mut() {
+                    journal.adopted_payload_digest =
+                        kept.adopted_payload_digest().map(str::to_string);
+                    if let Err(error) = journal.save(&journal_path) {
+                        new_key.zeroize();
+                        return Err(error);
+                    }
+                }
+            }
             adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             state.advance_session_epoch();
             kept.apply(&mut next);

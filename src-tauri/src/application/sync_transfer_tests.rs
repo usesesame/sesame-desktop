@@ -372,7 +372,7 @@ fn a_take_new_key_resumes_from_an_interrupted_journal() {
     )
     .save(&journal_path)
     .expect("saved journal");
-    let journal = Journal::load(&journal_path).expect("journal");
+    let mut journal = Journal::load(&journal_path).expect("journal");
     let mut local = SyncState::new(&vault_id, &acting.device_id);
     local.entries = entries;
     local.activated_epoch = 1;
@@ -415,7 +415,7 @@ fn a_take_new_key_resumes_from_an_interrupted_journal() {
             &effects,
             local.clone(),
             refreshed,
-            &journal,
+            &mut journal,
             PASSWORD,
         ),
     )
@@ -1220,8 +1220,9 @@ mod applied_digest_tests {
     fn taking_a_new_key_does_not_make_a_synced_vault_look_edited() {
         let mut vault = session();
         let mut state = state_matching(&vault);
-        let kept = crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault)
-            .expect("digest");
+        let kept =
+            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault, None)
+                .expect("digest");
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         state.payload_digest = kept.expect("a clean vault keeps its digest");
@@ -1238,7 +1239,7 @@ mod applied_digest_tests {
         assert!(state.has_local_changes(&bytes_of(&vault)));
 
         assert_eq!(
-            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault)
+            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault, None)
                 .expect("digest"),
             None
         );
@@ -1274,9 +1275,10 @@ mod applied_digest_tests {
         let list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
         let mut state = state_matching(&vault);
 
-        let kept =
-            crate::application::sync_adopt::KeptThroughAdoption::capture(&state, &list, &vault)
-                .expect("kept");
+        let kept = crate::application::sync_adopt::KeptThroughAdoption::capture(
+            &state, &list, &vault, None,
+        )
+        .expect("kept");
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         kept.apply(&mut state);
@@ -1738,6 +1740,134 @@ mod adoption_and_publish_tests {
                 .count(),
             1,
             "the retry reads the service state instead of activating again"
+        );
+    }
+
+    struct LostActivation {
+        vault: TestVault,
+        _scratch: Scratch,
+        store: SyncStore,
+        world: Arc<Mutex<FakeSyncWorld>>,
+        new_key: [u8; 32],
+    }
+
+    fn lost_activation() -> LostActivation {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        recipient
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let rotation = rotate_entry(&acting, &list).expect("rotation");
+        let new_key = [5u8; 32];
+        let packages = survivor_packages(
+            &acting,
+            &list,
+            &vault_id,
+            &new_key,
+            &[acting.device_id.as_str()],
+            rotation.epoch_after,
+            &rotation.digest(),
+        )
+        .expect("packages");
+        let package = packages
+            .iter()
+            .find(|package| package.recipient_device_id == recipient.device_id)
+            .expect("recipient package")
+            .clone();
+        let mut local = SyncState::new(&vault_id, &recipient.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        state_digest(&vault, &mut local);
+        store.save_state(&local).expect("saved state");
+        let mut committed = entries;
+        committed.push(rotation);
+        let mut world = FakeSyncWorld::new(&vault_id, committed, 2);
+        world
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world.activated.insert(recipient.device_id.clone(), 1);
+        world.packages.insert(recipient.device_id.clone(), package);
+        world.drop_activation_answer = true;
+        LostActivation {
+            vault,
+            _scratch: scratch,
+            store,
+            world: Arc::new(Mutex::new(world)),
+            new_key,
+        }
+    }
+
+    fn take_key(fixture: &LostActivation, client: &SyncClient) -> Result<(), String> {
+        block_on(take_new_key_in_state(
+            &fixture.vault.state,
+            &fixture.store,
+            &FakeEffects::new(PathBuf::new()),
+            client,
+            PASSWORD.into(),
+        ))
+        .map(|_| ())
+    }
+
+    fn stored_plaintext(vault: &TestVault) -> Vec<u8> {
+        let session = vault.state.session.lock().expect("session lock");
+        local_payload_bytes(session.as_ref().expect("unlocked"))
+            .expect("payload")
+            .0
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_leaves_the_vault_without_local_changes() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        assert_eq!(vault_key(&fixture.vault), fixture.new_key);
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "an adoption-only revision bump is not a local edit"
+        );
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_still_reports_an_edit_made_in_between() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture
+            .vault
+            .seed(|payload| payload.vault_name = "Fictional vault edited between attempts".into());
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the edit made between attempts is still local"
         );
     }
 

@@ -65,13 +65,15 @@ pub(crate) fn digest_after_commit(payload: &VaultPayload) -> Result<String, Stri
 pub(crate) fn digest_kept_through_adoption(
     state: &crate::sync::state::SyncState,
     vault: &UnlockedVault,
+    adopted_digest: Option<&str>,
 ) -> Result<Option<String>, String> {
     let payload = vault.open_payload()?;
     let mut bytes = serde_json::to_vec(&*payload)
         .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-    let unsynced = state.has_local_changes(&bytes);
+    let digest = crate::sync::state::payload_digest(&bytes);
+    let unchanged = state.payload_digest == digest || adopted_digest == Some(digest.as_str());
     bytes.zeroize();
-    if unsynced {
+    if !unchanged {
         return Ok(None);
     }
     digest_after_commit(&payload).map(Some)
@@ -87,6 +89,7 @@ impl KeptThroughAdoption {
         state: &crate::sync::state::SyncState,
         list: &crate::sync::devicelist::DeviceList,
         vault: &UnlockedVault,
+        adopted_digest: Option<&str>,
     ) -> Result<Self, String> {
         let names = vault.expose_vault_key(|key| {
             Ok(crate::application::sync::names_for(
@@ -97,13 +100,17 @@ impl KeptThroughAdoption {
             ))
         })?;
         Ok(Self {
-            digest: digest_kept_through_adoption(state, vault)?,
+            digest: digest_kept_through_adoption(state, vault, adopted_digest)?,
             names,
         })
     }
 
     pub(crate) fn cleaned(&self) -> bool {
         self.digest.is_some()
+    }
+
+    pub(crate) fn adopted_payload_digest(&self) -> Option<&str> {
+        self.digest.as_deref()
     }
 
     pub(crate) fn apply(self, next: &mut crate::sync::state::SyncState) {
