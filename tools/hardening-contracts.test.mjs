@@ -1729,3 +1729,14 @@ test('the browser approval commands hand their decisions to the application modu
   assert.match(card, /for key in requested/, 'a card fill no longer releases only the requested fields')
   assert.match(application, /state\.decide\(approval_id, decision\)/, 'the approval decision is no longer consumed through the broker')
 })
+
+test('a browser approval can only be built where the broker registers it', () => {
+  const replies = read('src-tauri', 'src', 'application', 'browser_replies.rs')
+  const struct = replies.match(/pub\(crate\) struct BrowserApproval \{([\s\S]*?)\n\}/)
+  assert.ok(struct, 'BrowserApproval is missing')
+  assert.doesNotMatch(struct[1], /\bpub\b/, 'a BrowserApproval field is visible outside its module')
+  const builds = [...replies.matchAll(/approval: BrowserApproval \{/g)].length
+  const begins = [...replies.matchAll(/fill_state\.begin\(/g)].length
+  assert.ok(builds > 0)
+  assert.equal(builds, begins, 'an approval is built without being registered with the broker')
+})

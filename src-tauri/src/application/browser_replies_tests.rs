@@ -190,7 +190,7 @@ fn a_fill_approval_that_outlives_the_vault_lock_releases_nothing() {
     let_delay_pass(&state, &clock);
     state
         .decide(
-            &offer.approval.approval_id,
+            offer.approval.approval_id(),
             ApprovalDecision::Selected("login-a".to_string()),
         )
         .expect("approved");
@@ -214,7 +214,7 @@ fn a_fill_approval_that_outlives_the_vault_lock_releases_nothing() {
         effects.calls().last(),
         Some(&Effect::EmitBrowserApprovalCancelled {
             kind: ApprovalKind::Fill,
-            approval_id: offer.approval.approval_id.clone(),
+            approval_id: offer.approval.approval_id().to_string(),
             reason: "vaultChanged",
         })
     );
@@ -232,7 +232,7 @@ fn a_denied_fill_approval_releases_no_secret() {
     };
     let_delay_pass(&state, &clock);
     state
-        .decide(&offer.approval.approval_id, ApprovalDecision::Denied)
+        .decide(offer.approval.approval_id(), ApprovalDecision::Denied)
         .expect("denied");
     let decision = offer.receiver.recv().expect("decision");
 
@@ -266,7 +266,7 @@ fn a_timed_out_fill_approval_can_no_longer_be_decided_and_releases_nothing() {
 
     assert_eq!(
         state.decide(
-            &offer.approval.approval_id,
+            offer.approval.approval_id(),
             ApprovalDecision::Selected("login-a".to_string()),
         ),
         Err("approvalExpired")
@@ -314,7 +314,7 @@ fn a_card_approval_releases_only_the_requested_fields() {
     let_delay_pass(&state, &clock);
     state
         .decide(
-            &offer.approval.approval_id,
+            offer.approval.approval_id(),
             ApprovalDecision::Selected("card-a".to_string()),
         )
         .expect("approved");
@@ -372,7 +372,7 @@ fn an_identity_approval_releases_only_the_requested_fields() {
     let_delay_pass(&state, &clock);
     state
         .decide(
-            &offer.approval.approval_id,
+            offer.approval.approval_id(),
             ApprovalDecision::Selected("identity-a".to_string()),
         )
         .expect("approved");
@@ -427,7 +427,7 @@ fn a_totp_approval_releases_a_code_only_for_the_approved_origin() {
     let_delay_pass(&state, &clock);
     state
         .decide(
-            &offer.approval.approval_id,
+            offer.approval.approval_id(),
             ApprovalDecision::Selected("login-a".to_string()),
         )
         .expect("approved");
@@ -474,7 +474,7 @@ fn a_save_for_an_exact_origin_offers_only_that_login_as_an_update_target() {
         BrowserReply::Response(_) => panic!("no save approval was offered"),
     };
 
-    let ApprovalEvent::Save(event) = &offer.approval.event else {
+    let ApprovalEvent::Save(event) = offer.approval.event() else {
         panic!("the broker did not hold a save approval");
     };
     assert_eq!(event.kind, "update");

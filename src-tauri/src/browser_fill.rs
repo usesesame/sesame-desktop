@@ -232,14 +232,14 @@ fn fill_response(
                 app,
                 fill_state,
                 vault,
-                &offer.approval.approval_id,
+                offer.approval.approval_id(),
                 &request.request_id,
-                &offer.approval.origin,
-                offer.approval.epoch,
+                offer.approval.origin(),
+                offer.approval.epoch(),
                 offer.deadline,
                 offer.receiver,
                 peer,
-                offer.approval.kind,
+                offer.approval.kind(),
             ) {
                 Ok(decision) => decision,
                 Err(reason) => return BrowserResponse::unavailable(request, reason),
@@ -273,14 +273,14 @@ fn save_response(
                 app,
                 fill_state,
                 vault,
-                &offer.approval.approval_id,
+                offer.approval.approval_id(),
                 &request.request_id,
-                &offer.approval.origin,
-                offer.approval.epoch,
+                offer.approval.origin(),
+                offer.approval.epoch(),
                 offer.deadline,
                 offer.receiver,
                 peer,
-                offer.approval.kind,
+                offer.approval.kind(),
             ) {
                 Ok(decision) => decision,
                 Err(reason) => {
@@ -309,14 +309,14 @@ fn card_response(
                 app,
                 fill_state,
                 vault,
-                &offer.approval.approval_id,
+                offer.approval.approval_id(),
                 &request.request_id,
-                &offer.approval.origin,
-                offer.approval.epoch,
+                offer.approval.origin(),
+                offer.approval.epoch(),
                 offer.deadline,
                 offer.receiver,
                 peer,
-                offer.approval.kind,
+                offer.approval.kind(),
             ) {
                 Ok(decision) => decision,
                 Err(reason) => {
@@ -352,14 +352,14 @@ fn identity_response(
                 app,
                 fill_state,
                 vault,
-                &offer.approval.approval_id,
+                offer.approval.approval_id(),
                 &request.request_id,
-                &offer.approval.origin,
-                offer.approval.epoch,
+                offer.approval.origin(),
+                offer.approval.epoch(),
                 offer.deadline,
                 offer.receiver,
                 peer,
-                offer.approval.kind,
+                offer.approval.kind(),
             ) {
                 Ok(decision) => decision,
                 Err(reason) => {
@@ -395,14 +395,14 @@ fn totp_response(
                 app,
                 fill_state,
                 vault,
-                &offer.approval.approval_id,
+                offer.approval.approval_id(),
                 &request.request_id,
-                &offer.approval.origin,
-                offer.approval.epoch,
+                offer.approval.origin(),
+                offer.approval.epoch(),
                 offer.deadline,
                 offer.receiver,
                 peer,
-                offer.approval.kind,
+                offer.approval.kind(),
             ) {
                 Ok(decision) => decision,
                 Err(reason) => {
@@ -422,7 +422,7 @@ fn totp_response(
 }
 
 fn emit_browser_approval_request(app: &AppHandle, approval: &BrowserApproval) {
-    match &approval.event {
+    match approval.event() {
         ApprovalEvent::Fill(event) => {
             let _ = app.emit("browser-fill-request", event.clone());
         }

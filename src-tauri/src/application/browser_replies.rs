@@ -30,12 +30,34 @@ use super::browser_fill_broker::{
 pub(super) const MAX_MATCHING_CANDIDATES: usize = 32;
 
 pub(crate) struct BrowserApproval {
-    pub(crate) approval_id: String,
-    pub(crate) origin: NormalizedOrigin,
-    pub(crate) epoch: u64,
-    pub(crate) kind: ApprovalKind,
-    pub(crate) event: ApprovalEvent,
-    pub(crate) requested_fields: Vec<String>,
+    approval_id: String,
+    origin: NormalizedOrigin,
+    epoch: u64,
+    kind: ApprovalKind,
+    event: ApprovalEvent,
+    requested_fields: Vec<String>,
+}
+
+impl BrowserApproval {
+    pub(crate) fn approval_id(&self) -> &str {
+        &self.approval_id
+    }
+
+    pub(crate) fn origin(&self) -> &NormalizedOrigin {
+        &self.origin
+    }
+
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub(crate) fn kind(&self) -> ApprovalKind {
+        self.kind
+    }
+
+    pub(crate) fn event(&self) -> &ApprovalEvent {
+        &self.event
+    }
 }
 
 pub(crate) struct BrowserApprovalOffer {
