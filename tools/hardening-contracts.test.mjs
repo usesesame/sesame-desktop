@@ -1042,11 +1042,16 @@ const FEATURE_GATED_PERMISSIONS = ['desktop-e2e']
 function applicationPermissions() {
   const permissions = new Map()
   const source = read('src-tauri', 'permissions', 'desktop.toml')
-  for (const block of source.split('[[permission]]').slice(1)) {
+  const uncommented = source.split('\n').filter((line) => !line.trim().startsWith('#')).join('\n')
+  for (const block of uncommented.split('[[permission]]').slice(1)) {
     const identifier = block.match(/identifier = "([a-z0-9-]+)"/)?.[1]
     const list = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
     assert.ok(identifier, 'an application permission has no identifier')
-    permissions.set(identifier, [...list.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]))
+    const entries = list.split(',').map((entry) => entry.trim()).filter(Boolean)
+    for (const entry of entries) {
+      assert.match(entry, /^"[a-z0-9_]+"$/, `${identifier} lists a command this test cannot read: ${entry}`)
+    }
+    permissions.set(identifier, entries.map((entry) => entry.slice(1, -1)))
   }
   return permissions
 }
@@ -1102,6 +1107,15 @@ test('every command a shipping capability permits is registered in the shipping 
       }
     }
   }
+})
+
+test('each custom command belongs to exactly one application permission', () => {
+  const owners = new Map()
+  for (const [identifier, commands] of applicationPermissions()) {
+    for (const command of commands) owners.set(command, [...(owners.get(command) ?? []), identifier])
+  }
+  const shared = [...owners].filter(([, identifiers]) => identifiers.length > 1).map(([command, identifiers]) => `${command} in ${identifiers.join(' and ')}`)
+  assert.deepEqual(shared, [], 'a command granted by two permissions can be reached by a window that holds either one')
 })
 
 test('a permission whose commands are not all shipping commands is feature gated', () => {

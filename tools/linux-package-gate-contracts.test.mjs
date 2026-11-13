@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { PACKAGE_RUN_SCHEMA, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
+import { PACKAGE_RUN_SCHEMA, disabledWebviewFeatures, judgeWebviewFeatures, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
 import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { fetchTool, installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
@@ -125,6 +125,18 @@ function packageRecord(overrides = {}) {
 test('a real install with the full restore corpus satisfies the release lane', () => {
   const evidence = packageRecord()
   assert.equal(validateLinuxPackageEvidence(evidence), evidence)
+})
+
+test('the installed app must show every disabled webview feature as absent', () => {
+  const absent = Object.fromEntries(disabledWebviewFeatures.map((feature) => [feature, false]))
+  assert.deepEqual(judgeWebviewFeatures({ ok: true, value: absent }), { ok: true, value: absent })
+  assert.match(judgeWebviewFeatures({ ok: true, value: { ...absent, webgl: true, audioContext: true } }).error, /still offers webgl, audioContext\./)
+  const incomplete = { ...absent }
+  delete incomplete.mediaElements
+  assert.match(judgeWebviewFeatures({ ok: true, value: incomplete }).error, /mediaElements/)
+  assert.equal(judgeWebviewFeatures({ ok: false, error: 'desktop_e2e_webview_features timed out' }).error, 'desktop_e2e_webview_features timed out')
+  assert.equal(judgeWebviewFeatures(undefined).ok, false)
+  assert.ok(requiredPackageSteps.includes('webview.features'))
 })
 
 test('an extracted tree cannot stand in for an installed package', () => {

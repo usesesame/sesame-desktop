@@ -40,6 +40,7 @@
     ".github/workflows/release-linux-early-access.yml",
     ".github/workflows/boundary.yml",
     ".github/workflows/update-freshness.yml",
+    "tools/clipboard-contracts.test.mjs",
     "tools/desktop-boundary-contracts.test.mjs",
     "tools/sync-boundary-contracts.test.mjs",
     "tools/installer-contracts.test.mjs",
