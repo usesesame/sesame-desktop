@@ -989,13 +989,18 @@ pub(crate) async fn record_checkpoint_if_due_in_state(
     let _ = store.save_state(&next);
 }
 
-pub(crate) async fn run_one_transfer_in_state(
+pub(crate) async fn run_one_transfer_in_state<Reconnect, Connecting>(
     state: &VaultState,
     store: &SyncStore,
     client: &SyncClient,
     effects: &dyn DesktopEffects,
     local: SyncState,
-) -> Result<crate::sync::coordinator::Outcome, String> {
+    reconnect: Reconnect,
+) -> Result<crate::sync::coordinator::Outcome, String>
+where
+    Reconnect: Fn() -> Connecting,
+    Connecting: std::future::Future<Output = Result<SyncClient, String>>,
+{
     use crate::sync::coordinator::Outcome;
 
     let local = reconcile_pending_upload_in_state(store, client, local).await?;
@@ -1010,13 +1015,15 @@ pub(crate) async fn run_one_transfer_in_state(
         local.has_local_changes(&plaintext)
     };
     if has_local_changes {
-        let result = upload_vault_in_state(state, store, client).await?;
+        let transfer = reconnect().await?;
+        let result = upload_vault_in_state(state, store, &transfer).await?;
         return Ok(Outcome::Uploaded {
             revision: result.revision,
         });
     }
     if server.current_revision > local.head_revision() {
-        let result = download_vault_in_state(state, store, client, effects).await?;
+        let transfer = reconnect().await?;
+        let result = download_vault_in_state(state, store, &transfer, effects).await?;
         return Ok(Outcome::Downloaded {
             revision: result.revision,
         });

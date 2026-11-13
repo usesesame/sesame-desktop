@@ -268,6 +268,7 @@ async fn run_one_transfer(
         &client,
         &DesktopHostEffects::new(app),
         local,
+        || SyncClient::connect(app),
     )
     .await
 }

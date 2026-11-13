@@ -487,3 +487,18 @@ test('Sync does not post a checkpoint while a vault key change is unfinished', (
   assert.match(checkpoint[0], /require_no_pending_key_change\(\)/)
   assert.match(transfer, /record_checkpoint_if_due_in_state\(store, client, &local, &refreshed\)/, 'the transfer rule no longer records a due checkpoint')
 })
+
+test('an upload or download connects again so the version floor and server pin are checked right before it', () => {
+  const source = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const start = source.indexOf('pub(crate) async fn run_one_transfer_in_state')
+  assert.ok(start >= 0, 'run_one_transfer_in_state is missing')
+  const body = source.slice(start, source.indexOf('\n}\n', start))
+  const transfers = [...body.matchAll(/(upload|download)_vault_in_state\(state, store, (&?\w+)/g)]
+  assert.equal(transfers.length, 2)
+  for (const [, kind, client] of transfers) {
+    assert.equal(client, '&transfer', `the ${kind} reuses an earlier connection`)
+    const call = body.indexOf(`${kind}_vault_in_state(`)
+    assert.ok(body.lastIndexOf('let transfer = reconnect().await?;', call) >= 0, `the ${kind} does not reconnect first`)
+  }
+  assert.match(read('src-tauri', 'src', 'commands', 'sync_transfer.rs'), /\|\| SyncClient::connect\(app\),/)
+})
