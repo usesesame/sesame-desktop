@@ -1408,6 +1408,7 @@ mod adoption_and_publish_tests {
     use super::*;
     use crate::sync::request::Receipt;
 
+    const ACTING_TOKEN: &str = "fictional-acting-token";
     const RECIPIENT_TOKEN: &str = "fictional-recipient-token";
 
     struct FakeSyncWorld {
@@ -1738,6 +1739,148 @@ mod adoption_and_publish_tests {
             1,
             "the retry reads the service state instead of activating again"
         );
+    }
+
+    #[test]
+    fn a_clean_rekey_publishes_a_snapshot_a_second_device_can_read() {
+        let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        acting_vault.seed(|payload| {
+            payload.vault_name = "Fictional vault from the acting device".into();
+        });
+        let vault_id = vault_id_of_test_vault(&acting_vault);
+        let recipient_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        recipient_vault.seed(|payload| payload.vault_id = Some(vault_id.clone()));
+        let scratch = Scratch::new();
+        let acting_store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        acting
+            .save(&acting_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let mut acting_state = SyncState::new(&vault_id, &acting.device_id);
+        acting_state.entries = entries.clone();
+        acting_state.activated_epoch = 1;
+        state_digest(&acting_vault, &mut acting_state);
+        acting_store
+            .save_state(&acting_state)
+            .expect("saved acting state");
+        let world = Arc::new(Mutex::new(FakeSyncWorld::new(
+            &vault_id,
+            entries.clone(),
+            1,
+        )));
+        {
+            let mut world = world.lock().expect("world");
+            world
+                .tokens
+                .insert(ACTING_TOKEN.into(), acting.device_id.clone());
+            world.activated.insert(acting.device_id.clone(), 1);
+        }
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let acting_client = SyncClient::for_tests(&server.base(), ACTING_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let new_key = [6u8; 32];
+        let prepared = crate::sync::key_change::PreparedKeyChange::default();
+        let (kit, recovery) = prepare_recovery(&new_key).expect("prepared");
+        prepared.stage(&new_key, recovery, std::time::Instant::now());
+        assert!(!kit.is_empty());
+
+        block_on(crate::application::sync_transfer::rekey_without_in_state(
+            &acting_vault.state,
+            &acting_store,
+            &effects,
+            &acting_client,
+            crate::application::sync_transfer::RekeyRequest {
+                prepared: &prepared,
+                subject: None,
+                master_password: PASSWORD,
+                adopt_locally: true,
+            },
+        ))
+        .expect("the clean vault is rekeyed");
+
+        assert_eq!(vault_key(&acting_vault), new_key);
+        assert!(
+            server
+                .paths()
+                .iter()
+                .any(|path| path == "/v1/sync/snapshots"),
+            "a clean rekey must publish under the new key"
+        );
+        let (published, ciphertext) = world
+            .lock()
+            .expect("world")
+            .snapshot
+            .clone()
+            .expect("published snapshot");
+        let published_header: Header =
+            serde_json::from_value(published.clone()).expect("published header");
+        let ciphertext = URL_SAFE_NO_PAD
+            .decode(&ciphertext)
+            .expect("ciphertext bytes");
+        let opened = crate::application::sync_transfer::decrypt_remote(
+            &new_key,
+            &published_header,
+            &URL_SAFE_NO_PAD.encode(&ciphertext),
+        )
+        .expect("the published snapshot opens with the new key");
+        assert_eq!(opened.payload().entries.len(), 1);
+
+        let recipient_scratch = Scratch::new();
+        let recipient_store = recipient_scratch.store();
+        recipient
+            .save(&recipient_store.identity_path())
+            .expect("saved identity");
+        let mut recipient_state = SyncState::new(&vault_id, &recipient.device_id);
+        recipient_state.entries = entries;
+        recipient_state.activated_epoch = 1;
+        state_digest(&recipient_vault, &mut recipient_state);
+        recipient_store
+            .save_state(&recipient_state)
+            .expect("saved recipient state");
+        world
+            .lock()
+            .expect("world")
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world
+            .lock()
+            .expect("world")
+            .activated
+            .insert(recipient.device_id.clone(), 1);
+        let recipient_client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        let taken = block_on(take_new_key_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &effects,
+            &recipient_client,
+            PASSWORD.into(),
+        ))
+        .expect("the second device takes the new key");
+        assert!(!taken.recovery_kit.is_empty());
+        assert_eq!(vault_key(&recipient_vault), new_key);
+
+        block_on(download_vault_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &recipient_client,
+            &effects,
+        ))
+        .expect("the second device reads the snapshot under the new key");
+        let name = {
+            let session = recipient_vault.state.session.lock().expect("session lock");
+            session
+                .as_ref()
+                .expect("unlocked")
+                .open_payload()
+                .expect("payload")
+                .vault_name
+                .clone()
+        };
+        assert_eq!(name, "Fictional vault from the acting device");
     }
 }
 

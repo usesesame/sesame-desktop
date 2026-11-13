@@ -641,6 +641,7 @@ pub(crate) async fn rekey_without_in_state(
     entries.push(entry.clone());
     let mut next = local.clone();
     next.entries = entries;
+    let mut clean = false;
     if adopt_locally {
         {
             let mut session = state
@@ -651,6 +652,7 @@ pub(crate) async fn rekey_without_in_state(
                 .as_mut()
                 .ok_or("Unlock Sesame before removing a device.")?;
             let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
+            clean = kept.cleaned();
             let payload = unlocked.open_payload()?.clone();
             adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             state.advance_session_epoch();
@@ -666,9 +668,43 @@ pub(crate) async fn rekey_without_in_state(
     if adopt_locally {
         store.save_state(&next)?;
         let _ = rekey_journal::forget(&journal_path);
+        if clean {
+            let mut after_entries = refreshed.update.entries.clone();
+            after_entries.push(entry.clone());
+            let mut after_list = refreshed.update.list.clone();
+            after_list.extend(&entry).map_err(present_proof)?;
+            let after = Refreshed {
+                server: crate::sync::client::StateView {
+                    vault_epoch: entry.epoch_after,
+                    activated_epoch: entry.epoch_after,
+                    ..refreshed.server.clone()
+                },
+                update: crate::sync::engine::VerifiedUpdate {
+                    entries: after_entries,
+                    list: after_list,
+                    head: refreshed.update.head.clone(),
+                    receipt: refreshed.update.receipt.clone(),
+                },
+                confirmed_at: refreshed.confirmed_at,
+                peer_checks_skipped: refreshed.peer_checks_skipped,
+            };
+            let _ = upload_on_in_state(state, store, next.head.clone(), &next, client, after).await;
+        }
     }
     Ok(())
 }
+
+pub(crate) fn must_publish_after_key_change(
+    local: &SyncState,
+    server: &crate::sync::client::StateView,
+) -> bool {
+    local
+        .head
+        .as_ref()
+        .is_some_and(|head| head.vault_epoch < server.vault_epoch)
+        && server.current_revision == local.head_revision()
+}
+
 pub(crate) async fn leave_vault_in_state(
     state: &VaultState,
     store: &SyncStore,
@@ -1041,7 +1077,7 @@ where
         let (plaintext, _) = local_payload_bytes(unlocked)?;
         local.has_local_changes(&plaintext)
     };
-    if has_local_changes {
+    if has_local_changes || must_publish_after_key_change(&local, &server) {
         let transfer = reconnect().await?;
         let result = upload_vault_in_state(state, store, &transfer).await?;
         return Ok(Outcome::Uploaded {

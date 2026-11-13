@@ -102,6 +102,10 @@ impl KeptThroughAdoption {
         })
     }
 
+    pub(crate) fn cleaned(&self) -> bool {
+        self.digest.is_some()
+    }
+
     pub(crate) fn apply(self, next: &mut crate::sync::state::SyncState) {
         if let Some(digest) = self.digest {
             next.payload_digest = digest;
