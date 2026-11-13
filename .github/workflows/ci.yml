@@ -660,6 +660,7 @@ jobs:
         run: node tools/audit-dependencies.mjs
 
       - name: Scan for secrets
+        if: ${{ !cancelled() }}
         # The hosted action requires a commercial licence for organization
         # repositories. Run the pinned open-source CLI directly instead.
         run: >-
