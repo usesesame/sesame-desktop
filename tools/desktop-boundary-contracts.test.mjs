@@ -325,6 +325,15 @@ test('the required desktop checks pass only when every job behind them passed', 
   }
 })
 
+test('the supply chain job generates and audits the locked SBOM on every run', () => {
+  const workflow = read('.github', 'workflows', 'ci.yml')
+  const job = workflowJob(workflow, 'supply-chain')
+  const generate = job.indexOf('run: npm run supply-chain:sbom\n')
+  const audit = job.indexOf('npm run supply-chain:sbom:audit -- --sbom "release-evidence/sesame-$version.cdx.json"')
+  assert.ok(generate >= 0, 'the supply chain job does not generate the locked SBOM')
+  assert.ok(audit > generate, 'the supply chain job does not audit the generated locked SBOM')
+})
+
 test('the standalone boundary runs every part of the owned command in its own job', () => {
   const workflow = read('.github', 'workflows', 'boundary.yml')
   const owned = ['desktop:ci:web', 'desktop:lint:rust', 'desktop:test:rust', 'desktop:test:glib']
