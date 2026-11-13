@@ -8,10 +8,12 @@ use zeroize::{Zeroize, Zeroizing};
 use super::devicelist::{DeviceList, DeviceListEntry};
 use super::identity::{ensure_device_protection, protect_for_device, unprotect_for_device};
 use super::key_change::PreparedRecovery;
+use super::request::KeyPackageV3;
 use crate::vault::VaultResult;
 
 pub const JOURNAL_FILE_NAME: &str = "sync-rekey-journal.sesame";
 const JOURNAL_VERSION: u8 = 1;
+const PURPOSE_ADOPTION: &str = "adoption";
 const UNREADABLE: &str = "Sesame could not read the saved vault key change.";
 
 #[derive(Serialize, Deserialize)]
@@ -27,12 +29,24 @@ struct StoredJournal {
     protected_key: String,
     #[serde(default)]
     recovery: Option<PreparedRecovery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    package_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protected_recovery_kit: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Adopt,
     Discard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    Rekey,
+    Adoption,
 }
 
 pub struct Journal {
@@ -43,6 +57,9 @@ pub struct Journal {
     pub epoch_after: u64,
     pub created_at: u64,
     pub recovery: Option<PreparedRecovery>,
+    pub purpose: Purpose,
+    pub package_digest: Option<String>,
+    recovery_kit: Option<Zeroizing<String>>,
     key: Zeroizing<[u8; 32]>,
 }
 
@@ -78,17 +95,59 @@ impl Journal {
             epoch_after: entry.epoch_after,
             created_at,
             recovery: Some(recovery),
+            purpose: Purpose::Rekey,
+            package_digest: None,
+            recovery_kit: None,
             key: Zeroizing::new(*key),
         }
+    }
+
+    pub fn for_adoption(
+        package: &KeyPackageV3,
+        list: &DeviceList,
+        key: &[u8; 32],
+        recovery: PreparedRecovery,
+        recovery_kit: String,
+        created_at: u64,
+    ) -> VaultResult<Self> {
+        let entry_index = list
+            .index_of_digest(&package.entry_digest)
+            .ok_or_else(|| "Sesame could not save the vault key change.".to_string())?;
+        Ok(Self {
+            vault_id: package.vault_id.clone(),
+            entry_index,
+            entry_digest: package.entry_digest.clone(),
+            base_head_digest: list.head_digest().to_string(),
+            epoch_after: package.vault_epoch,
+            created_at,
+            recovery: Some(recovery),
+            purpose: Purpose::Adoption,
+            package_digest: Some(package.digest()),
+            recovery_kit: Some(Zeroizing::new(recovery_kit)),
+            key: Zeroizing::new(*key),
+        })
     }
 
     pub fn key(&self) -> [u8; 32] {
         *self.key
     }
 
+    pub fn recovery_kit(&self) -> Option<String> {
+        self.recovery_kit.as_ref().map(|kit| kit.to_string())
+    }
+
     pub fn save(&self, path: &Path) -> VaultResult<()> {
         ensure_device_protection()?;
         let mut protected = protect_for_device(self.key.as_slice())?;
+        let protected_recovery_kit = match &self.recovery_kit {
+            Some(kit) => {
+                let mut bytes = kit.as_bytes().to_vec();
+                let protected = protect_for_device(&bytes);
+                bytes.zeroize();
+                Some(URL_SAFE_NO_PAD.encode(protected?))
+            }
+            None => None,
+        };
         let stored = StoredJournal {
             version: JOURNAL_VERSION,
             vault_id: self.vault_id.clone(),
@@ -99,6 +158,12 @@ impl Journal {
             created_at: self.created_at,
             protected_key: URL_SAFE_NO_PAD.encode(&protected),
             recovery: self.recovery.clone(),
+            purpose: match self.purpose {
+                Purpose::Rekey => None,
+                Purpose::Adoption => Some(PURPOSE_ADOPTION.to_string()),
+            },
+            package_digest: self.package_digest.clone(),
+            protected_recovery_kit,
         };
         protected.zeroize();
         let body = serde_json::to_vec(&stored)
@@ -123,6 +188,18 @@ impl Journal {
         {
             return Err(UNREADABLE.to_string());
         }
+        let purpose = match stored.purpose.as_deref() {
+            None => Purpose::Rekey,
+            Some(PURPOSE_ADOPTION) => Purpose::Adoption,
+            Some(_) => return Err(UNREADABLE.to_string()),
+        };
+        if purpose == Purpose::Adoption
+            && (stored.recovery.is_none()
+                || stored.package_digest.is_none()
+                || stored.protected_recovery_kit.is_none())
+        {
+            return Err(UNREADABLE.to_string());
+        }
         let mut protected = URL_SAFE_NO_PAD
             .decode(&stored.protected_key)
             .map_err(|_| UNREADABLE.to_string())?;
@@ -132,6 +209,27 @@ impl Journal {
         let key: Result<[u8; 32], _> = bytes.as_slice().try_into();
         bytes.zeroize();
         let key = key.map_err(|_| UNREADABLE.to_string())?;
+        let recovery_kit = match stored.protected_recovery_kit {
+            Some(encoded) => {
+                let mut protected = URL_SAFE_NO_PAD
+                    .decode(&encoded)
+                    .map_err(|_| UNREADABLE.to_string())?;
+                let opened = unprotect_for_device(&protected);
+                protected.zeroize();
+                let mut bytes = opened.map_err(|_| UNREADABLE.to_string())?;
+                let text = match String::from_utf8(std::mem::take(&mut bytes)) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        let mut rejected = error.into_bytes();
+                        rejected.zeroize();
+                        return Err(UNREADABLE.to_string());
+                    }
+                };
+                bytes.zeroize();
+                Some(Zeroizing::new(text))
+            }
+            None => None,
+        };
         Ok(Self {
             vault_id: stored.vault_id,
             entry_index: stored.entry_index,
@@ -140,6 +238,9 @@ impl Journal {
             epoch_after: stored.epoch_after,
             created_at: stored.created_at,
             recovery: stored.recovery,
+            purpose,
+            package_digest: stored.package_digest,
+            recovery_kit,
             key: Zeroizing::new(key),
         })
     }

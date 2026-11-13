@@ -4,11 +4,11 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 use crate::application::sync::{
-    local_payload_bytes, present, present_proof, refresh, require_activated, signed_revision,
-    transfer_result, unix_now, vault_id_of, verify_master_password, Refreshed, SyncStore,
-    SyncTransferResult, NOT_ACTIVATED,
+    local_payload_bytes, prepare_recovery, present, present_proof, refresh, require_activated,
+    signed_revision, transfer_result, unix_now, vault_id_of, verify_master_password, Refreshed,
+    SyncStore, SyncTransferResult, NOT_ACTIVATED,
 };
-use crate::application::sync_adopt::{adopt, adopt_with, digest_after_commit, KeptThroughAdoption};
+use crate::application::sync_adopt::{adopt_with, digest_after_commit, KeptThroughAdoption};
 use crate::application::sync_recovery::backup_stamp;
 use crate::application::DesktopEffects;
 use crate::sync::client::{SyncClient, SyncError};
@@ -18,7 +18,7 @@ use crate::sync::engine::{
 };
 use crate::sync::header::Header;
 use crate::sync::key_change::PreparedKeyChange;
-use crate::sync::rekey_journal::{self, Journal, Outcome};
+use crate::sync::rekey_journal::{self, Journal, Outcome, Purpose};
 use crate::sync::request::KeyPackageV3;
 use crate::sync::state::{payload_digest, SyncState};
 use crate::vault::{VaultPayload, VaultResult, VaultState};
@@ -319,6 +319,14 @@ pub(crate) async fn take_new_key_in_state(
         refreshed.server.activated_epoch,
     )? {
         KeyChange::Adopt(journal) => {
+            if journal.purpose == Purpose::Adoption
+                && refreshed.server.activated_epoch < journal.epoch_after
+            {
+                let digest = journal.package_digest.as_deref().ok_or_else(|| {
+                    "Sesame could not read the saved vault key change.".to_string()
+                })?;
+                client.activate(&identity, digest).await.map_err(present)?;
+            }
             return adopt_journal_key_in_state(
                 state,
                 store,
@@ -351,11 +359,15 @@ pub(crate) async fn take_new_key_in_state(
         .map_err(present_proof)?;
     let sealed = decode_bytes(&package.ciphertext)?;
     let mut opened = identity.open_key_package(&sealed, &local.vault_id, epoch)?;
-    let key: [u8; 32] = opened
-        .as_slice()
-        .try_into()
-        .map_err(|_| "The synced vault key is invalid.".to_string())?;
+    let mut key = [0u8; 32];
+    let opened_len = opened.len();
+    if opened_len != key.len() {
+        opened.zeroize();
+        return Err("The synced vault key is invalid.".to_string());
+    }
+    key.copy_from_slice(&opened);
     opened.zeroize();
+    let key = zeroize::Zeroizing::new(key);
     let (recovery_kit, kept) = {
         let mut session = state
             .session
@@ -367,9 +379,19 @@ pub(crate) async fn take_new_key_in_state(
         verify_master_password(unlocked, &master_password)?;
         let kept = KeptThroughAdoption::capture(&local, list, unlocked)?;
         let payload = unlocked.open_payload()?.clone();
-        let kit = adopt(unlocked, key, payload, &master_password)?;
+        let (recovery_kit, recovery) = prepare_recovery(&key)?;
+        Journal::for_adoption(
+            &package,
+            list,
+            &key,
+            recovery.clone(),
+            recovery_kit.clone(),
+            unix_now(),
+        )?
+        .save(&store.journal_path())?;
+        adopt_with(unlocked, *key, payload, &master_password, Some(recovery))?;
         state.advance_session_epoch();
-        (kit, kept)
+        (recovery_kit, kept)
     };
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
@@ -384,13 +406,14 @@ pub(crate) async fn take_new_key_in_state(
     next.activated_epoch = epoch;
     kept.apply(&mut next);
     store.save_state(&next)?;
+    rekey_journal::forget(&store.journal_path())?;
     Ok(SyncTakeKeyResult { recovery_kit })
 }
 
 pub(crate) const KEY_CHANGE_NOT_DONE: &str = "The vault key change did not go through, so nothing changed. Remove the device again if you still want to.";
 
 pub(crate) enum KeyChange {
-    Adopt(Journal),
+    Adopt(Box<Journal>),
     NotDone,
     Proceed,
 }
@@ -407,9 +430,12 @@ pub(crate) fn reconcile_key_change(
         format!("{error} Turn Sesame Sync off on this device and pair it again.")
     })?;
     if journal.outcome(list) == Outcome::Adopt {
-        return Ok(KeyChange::Adopt(journal));
+        return Ok(KeyChange::Adopt(Box::new(journal)));
     }
     rekey_journal::forget(path)?;
+    if journal.purpose == Purpose::Adoption {
+        return Ok(KeyChange::Proceed);
+    }
     if activated_epoch >= list.epoch() {
         return Ok(KeyChange::NotDone);
     }
@@ -450,7 +476,9 @@ pub(crate) async fn adopt_journal_key_in_state(
     };
     key.zeroize();
     let (kit, kept) = adopted?;
-    let recovery_kit = kit.unwrap_or_default();
+    let recovery_kit = journal
+        .recovery_kit()
+        .unwrap_or_else(|| kit.unwrap_or_default());
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
     crate::application::unlock::discard_pin_throttle_state(state, effects);
@@ -641,7 +669,6 @@ pub(crate) async fn rekey_without_in_state(
     }
     Ok(())
 }
-
 pub(crate) async fn leave_vault_in_state(
     state: &VaultState,
     store: &SyncStore,

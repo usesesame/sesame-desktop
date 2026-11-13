@@ -1307,6 +1307,347 @@ mod applied_digest_tests {
 }
 
 #[cfg(test)]
+mod adoption_and_publish_tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::sync::request::Receipt;
+
+    const RECIPIENT_TOKEN: &str = "fictional-recipient-token";
+
+    struct FakeSyncWorld {
+        vault_id: String,
+        epoch: u64,
+        revision: u64,
+        device_state: String,
+        entries: Vec<DeviceListEntry>,
+        headers: Vec<Value>,
+        snapshot: Option<(Value, String)>,
+        packages: HashMap<String, KeyPackageV3>,
+        tokens: HashMap<String, String>,
+        activated: HashMap<String, u64>,
+        drop_activation_answer: bool,
+        instance: SigningKey,
+    }
+
+    impl FakeSyncWorld {
+        fn new(vault_id: &str, entries: Vec<DeviceListEntry>, epoch: u64) -> Self {
+            Self {
+                vault_id: vault_id.to_string(),
+                epoch,
+                revision: 0,
+                device_state: "approved".to_string(),
+                entries,
+                headers: Vec::new(),
+                snapshot: None,
+                packages: HashMap::new(),
+                tokens: HashMap::new(),
+                activated: HashMap::new(),
+                drop_activation_answer: false,
+                instance: SigningKey::from_bytes(&[7u8; 32]),
+            }
+        }
+
+        fn instance_key(&self) -> String {
+            URL_SAFE_NO_PAD.encode(self.instance.verifying_key().as_bytes())
+        }
+    }
+
+    fn after_of(path: &str) -> u64 {
+        path.split("after=")
+            .nth(1)
+            .and_then(|value| value.split('&').next())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn served_header(header: &Header, instance: &SigningKey) -> (Value, String) {
+        let receipt = Receipt {
+            vault_id: &header.vault_id,
+            revision: header.revision,
+            header_digest: &header.digest(),
+            vault_epoch: header.vault_epoch,
+            accepted_at: ACCEPTED_UNIX,
+        };
+        let signature = instance.sign(&receipt.signing_payload());
+        let receipt = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+        let mut document = serde_json::to_value(header).expect("header json");
+        document["digest"] = json!(header.digest());
+        document["receipt"] = json!(receipt);
+        document["acceptedAt"] = json!(ACCEPTED_AT);
+        (document, receipt)
+    }
+
+    fn handler(
+        world: Arc<Mutex<FakeSyncWorld>>,
+    ) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
+        move |request: &Recorded| {
+            let token = request
+                .headers
+                .get("authorization")
+                .and_then(|value| value.strip_prefix("Sesame "))
+                .unwrap_or_default()
+                .to_string();
+            let mut world = world.lock().expect("world");
+            let device = world.tokens.get(&token).cloned().unwrap_or_default();
+            let activated = world.activated.get(&device).copied().unwrap_or(0);
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/v1/sync/checkpoints") => checkpoint_not_found(),
+                ("GET", "/v1/sync/state") => Reply::json(
+                    200,
+                    &json!({
+                        "vaultId": world.vault_id,
+                        "vaultEpoch": world.epoch,
+                        "currentRevision": world.revision,
+                        "deviceState": world.device_state,
+                        "activatedEpoch": activated,
+                    }),
+                ),
+                ("GET", path) if path.starts_with("/v1/sync/device-list") => {
+                    let after = after_of(path);
+                    let entries: Vec<DeviceListEntry> = world
+                        .entries
+                        .iter()
+                        .filter(|entry| entry.index > after)
+                        .cloned()
+                        .collect();
+                    Reply::json(200, &json!({ "entries": entries }))
+                }
+                ("GET", path) if path.starts_with("/v1/sync/headers") => {
+                    let after = after_of(path);
+                    let headers: Vec<Value> = world
+                        .headers
+                        .iter()
+                        .filter(|header| header["revision"].as_u64().unwrap_or(0) > after)
+                        .cloned()
+                        .collect();
+                    Reply::json(200, &json!({ "headers": headers }))
+                }
+                ("GET", "/v1/sync/key-package") => {
+                    let package = world
+                        .packages
+                        .get(&device)
+                        .cloned()
+                        .expect("key package for this device");
+                    Reply::json(200, &json!({ "package": package }))
+                }
+                ("POST", "/v1/sync/activate") => {
+                    let epoch = world.epoch;
+                    world.activated.insert(device, epoch);
+                    if world.drop_activation_answer {
+                        Reply::disconnect()
+                    } else {
+                        Reply::json(200, &json!({}))
+                    }
+                }
+                ("POST", "/v1/sync/devices/rotate") => {
+                    let body: Value = serde_json::from_slice(&request.body).expect("rotate body");
+                    let entry: DeviceListEntry =
+                        serde_json::from_value(body["entry"].clone()).expect("rotation");
+                    let packages: Vec<KeyPackageV3> =
+                        serde_json::from_value(body["packages"].clone()).expect("packages");
+                    world.entries.push(entry.clone());
+                    world.epoch = entry.epoch_after;
+                    if let Some(sender) = world.tokens.get(&token).cloned() {
+                        let epoch = world.epoch;
+                        world.activated.insert(sender, epoch);
+                    }
+                    for package in packages {
+                        world
+                            .packages
+                            .insert(package.recipient_device_id.clone(), package);
+                    }
+                    Reply::json(200, &json!({}))
+                }
+                ("POST", "/v1/sync/snapshots") => {
+                    let body: Value = serde_json::from_slice(&request.body).expect("upload body");
+                    let header: Header =
+                        serde_json::from_value(body["header"].clone()).expect("header");
+                    let ciphertext = body["ciphertext"].as_str().expect("ciphertext").to_string();
+                    let (document, receipt) = served_header(&header, &world.instance);
+                    let accepted = json!({
+                        "revision": header.revision,
+                        "digest": header.digest(),
+                        "receipt": receipt,
+                        "acceptedAt": ACCEPTED_AT,
+                    });
+                    world.revision = header.revision;
+                    world.headers.push(document.clone());
+                    world.snapshot = Some((document, ciphertext));
+                    Reply::json(200, &accepted)
+                }
+                ("GET", "/v1/sync/snapshot") => {
+                    let (header, ciphertext) = world.snapshot.clone().expect("stored snapshot");
+                    Reply::json(
+                        200,
+                        &json!({
+                            "header": header,
+                            "acceptedAt": ACCEPTED_AT,
+                            "ciphertext": ciphertext,
+                        }),
+                    )
+                }
+                other => panic!("unexpected route {other:?}"),
+            }
+        }
+    }
+
+    fn recovery_opens(vault: &UnlockedVault, kit: &str, key: &[u8; 32]) -> bool {
+        let (Some(kdf), Some(wrap)) = (&vault.recovery_kdf, &vault.recovery_wrap) else {
+            return false;
+        };
+        let wrapping = crate::vault::crypto::derive_key(kit, kdf).expect("derived");
+        decrypt_bytes(&wrapping, wrap, RECOVERY_WRAP_AAD)
+            .is_ok_and(|opened| opened.as_slice() == key.as_slice())
+    }
+
+    fn vault_key(vault: &TestVault) -> [u8; 32] {
+        let session = vault.state.session.lock().expect("session lock");
+        session
+            .as_ref()
+            .expect("unlocked")
+            .expose_vault_key(|key| Ok(*key))
+            .expect("key")
+    }
+
+    fn state_digest(vault: &TestVault, state: &mut SyncState) {
+        let (plaintext, _) = {
+            let session = vault.state.session.lock().expect("session lock");
+            local_payload_bytes(session.as_ref().expect("unlocked")).expect("payload")
+        };
+        state.payload_digest = payload_digest(&plaintext);
+    }
+
+    #[test]
+    fn a_lost_activation_answer_can_be_finished_after_a_restart_and_still_shows_the_kit() {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        recipient
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let rotation = rotate_entry(&acting, &list).expect("rotation");
+        let new_key = [5u8; 32];
+        let packages = survivor_packages(
+            &acting,
+            &list,
+            &vault_id,
+            &new_key,
+            &[acting.device_id.as_str()],
+            rotation.epoch_after,
+            &rotation.digest(),
+        )
+        .expect("packages");
+        let package = packages
+            .iter()
+            .find(|package| package.recipient_device_id == recipient.device_id)
+            .expect("recipient package")
+            .clone();
+        let mut local = SyncState::new(&vault_id, &recipient.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        state_digest(&vault, &mut local);
+        store.save_state(&local).expect("saved state");
+        let mut committed = entries.clone();
+        committed.push(rotation.clone());
+        let world = Arc::new(Mutex::new(FakeSyncWorld::new(&vault_id, committed, 2)));
+        {
+            let mut world = world.lock().expect("world");
+            world
+                .tokens
+                .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+            world.activated.insert(recipient.device_id.clone(), 1);
+            world.packages.insert(recipient.device_id.clone(), package);
+            world.drop_activation_answer = true;
+        }
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let old_key = vault_key(&vault);
+
+        let first = block_on(take_new_key_in_state(
+            &vault.state,
+            &store,
+            &effects,
+            &client,
+            PASSWORD.into(),
+        ));
+        assert!(first.is_err(), "the lost answer is reported as a failure");
+        assert!(
+            rekey_journal::is_pending(&store.journal_path()),
+            "the new key and its kit are saved before the vault changes"
+        );
+        assert_eq!(
+            vault_key(&vault),
+            new_key,
+            "the vault already holds the new key"
+        );
+        assert_ne!(vault_key(&vault), old_key);
+        assert_eq!(
+            store
+                .load_state()
+                .expect("state")
+                .expect("state")
+                .activated_epoch,
+            1,
+            "activation was not recorded locally"
+        );
+
+        world.lock().expect("world").drop_activation_answer = false;
+        let restarted = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        let result = block_on(take_new_key_in_state(
+            &vault.state,
+            &store,
+            &effects,
+            &restarted,
+            PASSWORD.into(),
+        ))
+        .expect("the retry finishes the saved adoption");
+
+        assert!(
+            !result.recovery_kit.is_empty(),
+            "the saved kit is shown again"
+        );
+        assert!(recovery_opens(
+            vault
+                .state
+                .session
+                .lock()
+                .expect("session lock")
+                .as_ref()
+                .expect("unlocked"),
+            &result.recovery_kit,
+            &new_key
+        ));
+        assert!(!rekey_journal::is_pending(&store.journal_path()));
+        assert_eq!(
+            store
+                .load_state()
+                .expect("state")
+                .expect("state")
+                .activated_epoch,
+            rotation.epoch_after
+        );
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/activate")
+                .count(),
+            1,
+            "the retry reads the service state instead of activating again"
+        );
+    }
+}
+
+#[cfg(test)]
 mod coordinator_classification_tests {
     use super::*;
     use crate::sync::coordinator::{Halt, Outcome};
