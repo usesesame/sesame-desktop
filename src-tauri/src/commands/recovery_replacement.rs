@@ -51,13 +51,13 @@ pub async fn request_recovery_replacement(
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<RecoveryReplacementStatus> {
     let effects = DesktopHostEffects::new(&app);
-    if let Some(requested_at) =
-        begin_recovery_replacement_request_in_state(&state, &presence, &effects)?
-    {
+    let (pending, epoch) =
+        begin_recovery_replacement_request_in_state(&state, &presence, &effects)?;
+    if let Some(requested_at) = pending {
         return Ok(status_for(&app, Some(requested_at)).await);
     }
     let requested_at = trusted_time(linked_source(&app)).await?.latest;
-    write_recovery_replacement_request_in_state(&state, &effects, requested_at)?;
+    write_recovery_replacement_request_in_state(&state, &effects, requested_at, epoch)?;
     Ok(status_for(&app, Some(requested_at)).await)
 }
 

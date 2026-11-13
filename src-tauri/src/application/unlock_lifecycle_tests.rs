@@ -20,7 +20,8 @@ use super::recovery_replacement::{
     begin_recovery_replacement_completion_in_state, begin_recovery_replacement_request_in_state,
     complete_recovery_replacement_in_state, complete_request,
     pending_recovery_replacement_in_state, pending_request, recovery_replacement_status,
-    write_request, RecoveryReplacementStatus, TrustedTime,
+    write_recovery_replacement_request_in_state, write_request, RecoveryReplacementStatus,
+    TrustedTime,
 };
 use super::tests::{grant, Effect, FakeEffects};
 use super::unlock::{
@@ -278,6 +279,27 @@ fn recovery_replacement_needs_presence_before_reading_or_writing_requests() {
     assert_eq!(
         begin_recovery_replacement_completion_in_state(&vault.state, &presence, &effects),
         Err(PRESENCE_REQUIRED.to_string())
+    );
+    assert!(!effects
+        .recovery_replacement_path()
+        .expect("recovery replacement path")
+        .exists());
+}
+
+#[test]
+fn a_request_written_after_the_session_epoch_changed_is_refused() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    let captured = vault.state.session_epoch();
+    vault.state.advance_session_epoch();
+
+    let error =
+        write_recovery_replacement_request_in_state(&vault.state, &effects, REQUESTED_AT, captured)
+            .expect_err("a request from an earlier session must not be written");
+
+    assert_eq!(
+        error,
+        "Sesame changed while preparing the recovery kit request. Request it again."
     );
     assert!(!effects
         .recovery_replacement_path()
