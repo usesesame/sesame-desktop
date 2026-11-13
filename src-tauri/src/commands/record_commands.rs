@@ -43,19 +43,16 @@ macro_rules! impl_record_commands {
         pub fn $get_fn(
             id: String,
             state: tauri::State<'_, crate::vault::VaultState>,
-        ) -> crate::vault::VaultResult<crate::commands::secret_release::RecordView<$Item>> {
-            let session = state
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-            let session = session.as_ref().ok_or("Unlock your vault first.")?;
-            let item = session.open_item(&id)?;
-            match &*item {
-                crate::vault::types::TaggedItem::$Variant(item) => {
-                    Ok(crate::commands::secret_release::redacted_view(item.clone()))
-                }
-                _ => Err(format!("That saved {} no longer exists.", $missing_noun)),
-            }
+        ) -> crate::vault::VaultResult<crate::application::records::RecordView<$Item>> {
+            crate::application::records::record_view_in_state(
+                &state,
+                &id,
+                $missing_noun,
+                |item| match item {
+                    crate::vault::types::TaggedItem::$Variant(record) => Some(record),
+                    _ => None,
+                },
+            )
         }
 
         #[tauri::command]
@@ -70,42 +67,17 @@ macro_rules! impl_record_commands {
             input: $Input,
             state: &crate::vault::VaultState,
         ) -> crate::vault::VaultResult<$SaveResult> {
-            let kept = sesame_core::secret_fields::KeptSecrets::kept_secrets(&input);
-            let mut item = $from_input(input)?;
-            let item_id = item.id.clone();
-            let mut session = state
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-            let session = session.as_mut().ok_or($save_unlock_msg)?;
-            let payload = session.open_payload()?;
-            let mut next_payload = payload.clone();
-            if let Some(mut previous) = next_payload.take_active_item(&item_id) {
-                let crate::vault::types::TaggedItem::$Variant(existing) = &mut previous else {
-                    return Err("That item id belongs to a different kind of saved item.".into());
-                };
-                item.created_at = existing.created_at;
-                item.revision = existing.revision.saturating_add(1);
-                item.folder_id = existing.folder_id.clone();
-                item.favourite = existing.favourite;
-                item.last_used_at = existing.last_used_at;
-                $(
-                    let extra_carry: fn(&mut $Item, &$Item) = $extra_carry;
-                    extra_carry(&mut item, existing);
-                )?
-                sesame_core::secret_fields::SecretSlots::keep_secrets(&mut item, &*existing, &kept);
-                crate::vault::history::capture_history(
-                    &mut next_payload,
-                    crate::vault::types::TaggedItem::$Variant(std::mem::take(existing)),
-                );
-            }
-            next_payload
-                .insert_active_item(&mut crate::vault::types::TaggedItem::$Variant(item))?;
-            crate::vault::storage::commit_payload_change(session, next_payload)?;
-            state.advance_session_epoch();
+            let extra_carry: Option<fn(&mut $Item, &$Item)> = None $(.or(Some($extra_carry)))?;
+            let saved = crate::application::record_writes::save_record_in_state(
+                input,
+                state,
+                $save_unlock_msg,
+                $from_input,
+                extra_carry,
+            )?;
             Ok($SaveResult {
-                id: item_id,
-                snapshot: session.snapshot(),
+                id: saved.id,
+                snapshot: saved.snapshot,
             })
         }
 
@@ -114,29 +86,16 @@ macro_rules! impl_record_commands {
             id: String,
             state: tauri::State<'_, crate::vault::VaultState>,
         ) -> crate::vault::VaultResult<$DeleteResult> {
-            let id = id.trim();
-            if id.is_empty() {
-                return Err($delete_empty_msg.into());
-            }
-            let mut session = state
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-            let session = session.as_mut().ok_or($delete_unlock_msg)?;
-            let payload = session.open_payload()?;
-            let mut next_payload = payload.clone();
-            let tagged = next_payload
-                .take_active_item(id)
-                .ok_or_else(|| format!("That saved {} no longer exists.", $missing_noun))?;
-            if !matches!(&tagged, crate::vault::types::TaggedItem::$Variant(_)) {
-                return Err("That item id belongs to a different kind of saved item.".into());
-            }
-            crate::vault::trash::trash_item(&mut next_payload, tagged);
-            crate::vault::storage::commit_payload_change(session, next_payload)?;
-            state.advance_session_epoch();
+            let deleted = crate::application::record_writes::delete_record_in_state::<$Item>(
+                &state,
+                &id,
+                $missing_noun,
+                $delete_unlock_msg,
+                $delete_empty_msg,
+            )?;
             Ok($DeleteResult {
-                deleted_id: id.to_string(),
-                snapshot: session.snapshot(),
+                deleted_id: deleted.id,
+                snapshot: deleted.snapshot,
             })
         }
     };

@@ -1,21 +1,15 @@
-use std::path::PathBuf;
-
 use tauri::{AppHandle, State};
-use zeroize::{Zeroize, Zeroizing};
 
-use super::lifecycle::{discard_pin_throttle_state, establish_pin_throttle_state};
-use crate::commands::file_selection::{resolve_path, FilePurpose, FileSelectionState};
-use crate::commands::require_release_presence;
-use crate::release::ReleasePresence;
-use crate::vault::backup::{
-    apply_restored_vault_file, csv_export_bytes, identities_csv_bytes, inspect_backup_file,
-    json_export_bytes, managed_vault_paths, prepare_backup_for_restore, restore_revision_delta,
-    stage_managed_vault_files, verify_backup_file,
+use crate::adapters::desktop_effects::DesktopHostEffects;
+use crate::application::backups::{
+    create_backup_in_state, delete_local_vault_in_state, export_backup_in_state,
+    export_recovery_kit_in_state, export_vault_csv_in_state, export_vault_json_in_state,
+    inspect_backup_in_state, recovery_health_in_state, restore_backup_in_state,
+    verify_backup_in_state,
 };
-use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
+use crate::commands::file_selection::FileSelectionState;
+use crate::release::ReleasePresence;
 use crate::vault::recovery_health;
-use crate::vault::storage::{vault_path, write_export_file};
-use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
 use crate::vault::{
     BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultResult,
     VaultState,
@@ -23,23 +17,7 @@ use crate::vault::{
 
 #[tauri::command]
 pub fn create_backup(state: State<'_, VaultState>) -> VaultResult<String> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_ref()
-        .ok_or("Unlock your vault before creating a backup.")?;
-    let backup_dir = session
-        .path
-        .parent()
-        .ok_or("Sesame could not find the vault folder.")?
-        .join("backups");
-    create_private_dir(&backup_dir)?;
-    let backup_name = format!("sesame-backup-{}-{}.sesame", unix_timestamp(), random_id());
-    copy_private_file(&session.path, &backup_dir.join(&backup_name))
-        .map_err(|_| "Sesame could not create the encrypted backup.".to_string())?;
-    Ok(backup_name)
+    create_backup_in_state(&state)
 }
 
 #[tauri::command]
@@ -51,51 +29,16 @@ pub fn export_backup(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    require_release_presence(&state, &presence)?;
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_ref()
-        .ok_or("Unlock your vault before exporting a backup.")?;
-    let destination = resolve_path(
+    export_backup_in_state(
+        &state,
+        &presence,
+        &DesktopHostEffects::new(&app),
         &selection,
         token.as_deref(),
         destination.as_deref(),
-        FilePurpose::BackupExport,
-        true,
-    )?;
-    if destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        != Some("sesame")
-    {
-        return Err("Save the encrypted backup with a .sesame extension.".into());
-    }
-    if destination == session.path {
-        return Err("Choose a different location for the backup.".into());
-    }
-    let parent = destination
-        .parent()
-        .ok_or("Choose a valid location for the backup.")?;
-    if !parent.exists() {
-        return Err("The selected backup folder no longer exists.".into());
-    }
-    copy_private_file(&session.path, &destination)
-        .map_err(|_| "Sesame could not write the encrypted backup to that location.".to_string())?;
-    let snapshot = session.snapshot();
-    if let (Some(vault_id), revision) = (snapshot.vault_id.as_deref(), snapshot.revision) {
-        let _ = recovery_health::update_after_export_with_payload(&app, vault_id, revision);
-    }
-    destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string)
-        .ok_or("Sesame could not name the exported backup.".into())
+    )
 }
 
-/// Returns every file actually written, so the interface can say what it produced.
 #[tauri::command]
 pub fn export_vault_csv(
     token: Option<String>,
@@ -104,82 +47,15 @@ pub fn export_vault_csv(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<Vec<String>> {
-    require_release_presence(&state, &presence)?;
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_ref()
-        .ok_or("Unlock your vault before exporting it.")?;
-    let destination = resolve_path(
+    export_vault_csv_in_state(
+        &state,
+        &presence,
         &selection,
         token.as_deref(),
         destination.as_deref(),
-        FilePurpose::CsvExport,
-        true,
-    )?;
-    if destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        != Some("csv")
-    {
-        return Err("Save the readable export with a .csv extension.".into());
-    }
-    let parent = destination
-        .parent()
-        .ok_or("Choose a valid location for the export.")?;
-    if !parent.exists() {
-        return Err("The selected export folder no longer exists.".into());
-    }
-    let payload = session.open_payload()?;
-    let mut outputs = vec![(destination.clone(), csv_export_bytes(&payload)?)];
-    if !payload.identities.is_empty() {
-        let identities_destination = identities_export_path(&destination)
-            .ok_or("Sesame could not name the exported identities file.")?;
-        outputs.push((identities_destination, identities_csv_bytes(&payload)?));
-    }
-
-    let mut created: Vec<PathBuf> = Vec::new();
-    let mut replaced: Vec<String> = Vec::new();
-    let mut written = Vec::new();
-    for (path, bytes) in &outputs {
-        let existed = path.exists();
-        if let Err(error) = write_export_file(path, bytes) {
-            for path in &created {
-                let _ = std::fs::remove_file(path);
-            }
-            if replaced.is_empty() {
-                return Err(error);
-            }
-            return Err(format!(
-                "Sesame could not finish the readable export. It replaced {} before stopping, so review or remove that file.",
-                replaced.join(", ")
-            ));
-        }
-        if existed {
-            replaced.push(backup_file_name(path)?);
-        } else {
-            created.push(path.clone());
-        }
-        written.push(backup_file_name(path)?);
-    }
-
-    Ok(written)
+    )
 }
 
-fn require_json_extension(destination: &std::path::Path) -> VaultResult<()> {
-    if destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        != Some("json")
-    {
-        return Err("Save the complete export with a .json extension.".into());
-    }
-    Ok(())
-}
-
-/// One JSON file with every item kind, secrets included; the caller must show that it is not encrypted.
 #[tauri::command]
 pub fn export_vault_json(
     token: Option<String>,
@@ -188,41 +64,15 @@ pub fn export_vault_json(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    require_release_presence(&state, &presence)?;
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_ref()
-        .ok_or("Unlock your vault before exporting it.")?;
-    let destination = resolve_path(
+    export_vault_json_in_state(
+        &state,
+        &presence,
         &selection,
         token.as_deref(),
         destination.as_deref(),
-        FilePurpose::JsonExport,
-        true,
-    )?;
-    require_json_extension(&destination)?;
-    let parent = destination
-        .parent()
-        .ok_or("Choose a valid location for the export.")?;
-    if !parent.exists() {
-        return Err("The selected export folder no longer exists.".into());
-    }
-    let payload = session.open_payload()?;
-    let bytes = json_export_bytes(&payload)?;
-    write_export_file(&destination, &bytes)?;
-    backup_file_name(&destination)
+    )
 }
 
-/// `sesame-export.csv` becomes `sesame-export-identities.csv`, beside it.
-fn identities_export_path(logins_destination: &std::path::Path) -> Option<PathBuf> {
-    let stem = logins_destination.file_stem()?.to_str()?;
-    Some(logins_destination.with_file_name(format!("{stem}-identities.csv")))
-}
-
-/// `kit` is the plaintext already on screen; only an unlocked mid-onboarding session is required.
 #[tauri::command]
 pub fn export_recovery_kit(
     token: Option<String>,
@@ -232,44 +82,14 @@ pub fn export_recovery_kit(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    require_release_presence(&state, &presence)?;
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    if session.is_none() {
-        return Err("Unlock your vault before saving the recovery kit.".into());
-    }
-    if kit.trim().is_empty() {
-        return Err("There is no recovery kit to save.".into());
-    }
-    let destination = resolve_path(
+    export_recovery_kit_in_state(
+        &state,
+        &presence,
         &selection,
+        kit,
         token.as_deref(),
         destination.as_deref(),
-        FilePurpose::RecoveryKitExport,
-        true,
-    )?;
-    if destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        != Some("txt")
-    {
-        return Err("Save the recovery kit with a .txt extension.".into());
-    }
-    let parent = destination
-        .parent()
-        .ok_or("Choose a valid location for the recovery kit.")?;
-    if !parent.exists() {
-        return Err("The selected folder no longer exists.".into());
-    }
-    let body = format!(
-        "Sesame recovery kit\n\n{kit}\n\nKeep this file somewhere Sesame cannot reach: a password \
-         manager entry elsewhere, printed and stored safely, or an encrypted drive Sesame does not \
-         have access to. Anyone who has this kit and your device can open your vault.\n"
-    );
-    write_export_file(&destination, body.as_bytes())?;
-    backup_file_name(&destination)
+    )
 }
 
 #[tauri::command]
@@ -278,40 +98,7 @@ pub fn delete_local_vault(
     master_password: String,
     state: State<'_, VaultState>,
 ) -> VaultResult<()> {
-    let vault = vault_path(&app)?;
-    // Re-authenticate against the vault file rather than the open session, so an
-    // unattended unlocked window cannot destroy the vault and its backups, and so
-    // a locked window cannot either.
-    let master_password = Zeroizing::new(master_password);
-    let file = sesame_core::loader::VaultLoader::read(&vault)?;
-    let mut key =
-        sesame_core::api::unwrap_key_with_password(&file, &master_password).map_err(|_| {
-            "That master password is not correct. The vault was not removed.".to_string()
-        })?;
-    key.zeroize();
-    let parent = vault
-        .parent()
-        .ok_or("Sesame could not find the vault folder.")?;
-
-    // Guard held through staging so a racing save can never recreate the vault.
-    let session = state.begin_destructive_lifecycle_change()?;
-    state.cache_pin_unlock(false);
-    state.cache_hello_unlock(false);
-    let staged = stage_managed_vault_files(&vault, parent);
-    drop(session);
-    let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(&app);
-    // Never recreate a PIN throttle file after the vault and its PIN wrapper are gone.
-    discard_pin_throttle_state(&app, &state);
-    let staged = staged?;
-    if securely_delete(&staged.staging_dir).is_err() {
-        return Err("Sesame removed the local vault from its normal location, but could not finish deleting its staged data. Restart Sesame and try deleting the vault again.".into());
-    }
-    for path in managed_vault_paths(&vault) {
-        if path.exists() {
-            return Err("Sesame removed the local vault, but a file reappeared at its original location. Restart Sesame and try deleting the vault again.".into());
-        }
-    }
-    Ok(())
+    delete_local_vault_in_state(&state, &DesktopHostEffects::new(&app), master_password)
 }
 
 #[tauri::command]
@@ -322,23 +109,13 @@ pub fn inspect_backup(
     state: State<'_, VaultState>,
     selection: State<'_, FileSelectionState>,
 ) -> VaultResult<BackupInspection> {
-    // Session required: a locked renderer must not use this as a file-format oracle.
-    let unlocked = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?
-        .is_some();
-    if !unlocked && vault_path(&app)?.exists() {
-        return Err("Unlock your vault before inspecting a backup.".into());
-    }
-    let source = resolve_path(
+    inspect_backup_in_state(
+        &state,
+        &DesktopHostEffects::new(&app),
         &selection,
         token.as_deref(),
         source.as_deref(),
-        FilePurpose::BackupRead,
-        false,
-    )?;
-    inspect_backup_file(&source)
+    )
 }
 
 #[tauri::command]
@@ -348,46 +125,7 @@ pub fn verify_backup(
     state: State<'_, VaultState>,
     selection: State<'_, FileSelectionState>,
 ) -> VaultResult<BackupVerification> {
-    let unlocked = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?
-        .is_some();
-    if !unlocked {
-        return Err("Unlock your vault before verifying a backup.".into());
-    }
-    let source = resolve_path(
-        &selection,
-        request.token.as_deref(),
-        request.source.as_deref(),
-        FilePurpose::BackupRead,
-        false,
-    )?;
-    let mut secret = request.secret;
-    let result = verify_backup_file(&source, &secret);
-    secret.zeroize();
-    let verification = result?;
-    let current_vault_id = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?
-        .as_ref()
-        .map(|vault| vault.open_payload())
-        .transpose()?
-        .and_then(|payload| payload.vault_id.clone());
-    if let (Some(vault_id), Some(current_id)) = (
-        verification.vault_id.as_deref(),
-        current_vault_id.as_deref(),
-    ) {
-        if vault_id == current_id {
-            let _ = recovery_health::update_after_verification_with_payload(
-                &app,
-                vault_id,
-                verification.revision,
-            );
-        }
-    }
-    Ok(verification)
+    verify_backup_in_state(&state, &DesktopHostEffects::new(&app), &selection, request)
 }
 
 #[tauri::command]
@@ -398,100 +136,13 @@ pub fn restore_backup(
     presence: State<'_, ReleasePresence>,
     selection: State<'_, FileSelectionState>,
 ) -> VaultResult<RestoreBackupResult> {
-    let destination = vault_path(&app)?;
-    let claim = request
-        .token
-        .as_deref()
-        .filter(|token| !token.is_empty())
-        .map(|token| selection.claim(token, FilePurpose::BackupRead))
-        .transpose()?;
-    let source = match claim.as_ref() {
-        Some(claim) => claim.path().to_path_buf(),
-        None => resolve_path(
-            &selection,
-            None,
-            request.source.as_deref(),
-            FilePurpose::BackupRead,
-            false,
-        )?,
-    };
-    let confirm_older = request.confirm_older;
-    let secret = Zeroizing::new(request.secret);
-
-    let restored = (|secret: Zeroizing<String>| -> VaultResult<RestoreBackupResult> {
-        let active = destination.exists();
-        let current = {
-            let session = state
-                .session
-                .lock()
-                .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-            let session = session.as_ref();
-            if active && session.is_none() {
-                return Err("Unlock your vault before restoring a backup.".into());
-            }
-            session.map(|vault| {
-                let snapshot = vault.snapshot();
-                (snapshot.vault_id, snapshot.revision)
-            })
-        };
-        if current.is_some() {
-            require_release_presence(&state, &presence)?;
-        }
-
-        // Authenticate before invalidating anything: a failure must not lock the user out.
-        let prepared = prepare_backup_for_restore(&source, &destination, &secret);
-        drop(secret);
-        let prepared = prepared?;
-
-        let (restored_revision, replaced_revision) = match current {
-            Some((vault_id, revision)) => {
-                let (restored, replaced) =
-                    restore_revision_delta(&prepared, vault_id.as_deref(), revision)?;
-                (restored, Some(replaced))
-            }
-            None => (prepared.revision(), None),
-        };
-
-        crate::rollback_guard::require_older_confirmation(
-            restored_revision,
-            replaced_revision,
-            confirm_older,
-        )?;
-
-        let installed = state
-            .apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
-        crate::rollback_guard::reset_after_restore(&app, prepared.vault_id(), restored_revision);
-        let _ = crate::adapters::platform::clipboard::clear_armed_clipboard(&app);
-        state.cache_pin_unlock(installed.pin_unlock_available);
-        state.cache_hello_unlock(installed.hello_unlock_available);
-        if installed.pin_unlock_available {
-            let _ = establish_pin_throttle_state(&app, &state);
-        } else {
-            discard_pin_throttle_state(&app, &state);
-        }
-        Ok(RestoreBackupResult {
-            safety_backup_name: installed.safety_backup_name,
-            pin_unlock_available: installed.pin_unlock_available,
-            hello_unlock_available: installed.hello_unlock_available,
-            restored_revision,
-            replaced_revision,
-        })
-    })(secret);
-
-    match restored {
-        Ok(restored) => {
-            if let Some(claim) = claim {
-                selection.consume(claim);
-            }
-            Ok(restored)
-        }
-        Err(error) => {
-            if let Some(claim) = claim {
-                selection.release(claim);
-            }
-            Err(error)
-        }
-    }
+    restore_backup_in_state(
+        &state,
+        &presence,
+        &DesktopHostEffects::new(&app),
+        &selection,
+        request,
+    )
 }
 
 #[tauri::command]
@@ -504,35 +155,5 @@ pub fn get_recovery_health(
     app: AppHandle,
     state: State<'_, VaultState>,
 ) -> VaultResult<recovery_health::RecoveryHealth> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let current_id = session
-        .as_ref()
-        .map(|vault| vault.open_payload())
-        .transpose()?
-        .and_then(|payload| payload.vault_id.clone());
-    recovery_health::get_health(&app, current_id.as_deref())
-}
-
-#[cfg(test)]
-mod export_tests {
-    use super::require_json_extension;
-    use std::path::Path;
-
-    #[test]
-    fn the_complete_export_needs_a_json_name() {
-        assert!(require_json_extension(Path::new("/tmp/fictional-export.json")).is_ok());
-        for refused in [
-            "/tmp/fictional-export.csv",
-            "/tmp/fictional-export",
-            "/tmp/fictional-export.json.exe",
-        ] {
-            assert!(
-                require_json_extension(Path::new(refused)).is_err(),
-                "{refused}"
-            );
-        }
-    }
+    recovery_health_in_state(&state, &DesktopHostEffects::new(&app))
 }

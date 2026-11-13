@@ -55,21 +55,6 @@ pub fn judge(record: Option<&HighWater>, vault_id: &str, revision: u64) -> Verdi
     }
 }
 
-pub const OLDER_BACKUP_PREFIX: &str = "olderBackup:";
-
-pub fn require_older_confirmation(
-    restored_revision: u64,
-    replaced_revision: Option<u64>,
-    confirmed: bool,
-) -> VaultResult<()> {
-    match replaced_revision {
-        Some(replaced) if restored_revision < replaced && !confirmed => Err(format!(
-            "{OLDER_BACKUP_PREFIX}{restored_revision}:{replaced}"
-        )),
-        _ => Ok(()),
-    }
-}
-
 fn record_path(data_dir: &Path) -> PathBuf {
     data_dir.join(FILE_NAME)
 }
@@ -123,7 +108,7 @@ impl RollbackGuard {
     }
 }
 
-fn data_dir(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn data_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_local_data_dir().ok()
 }
 
@@ -174,18 +159,10 @@ pub fn accept_rollback(
     guard: State<'_, RollbackGuard>,
     state: State<'_, VaultState>,
 ) -> VaultResult<()> {
-    let snapshot = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?
-        .as_ref()
-        .map(|unlocked| unlocked.snapshot())
-        .ok_or("Unlock your vault first.")?;
-    let vault_id = snapshot
-        .vault_id
-        .ok_or("This vault has no revision record to reset.")?;
-    let dir = data_dir(&app).ok_or("Sesame could not find its data folder.")?;
-    reset(&dir, &vault_id, snapshot.revision)?;
+    crate::application::unlock::accept_rollback_in_state(
+        &state,
+        &crate::adapters::desktop_effects::DesktopHostEffects::new(&app),
+    )?;
     guard.set(None);
     Ok(())
 }
@@ -193,6 +170,7 @@ pub fn accept_rollback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::unlock::require_older_confirmation;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

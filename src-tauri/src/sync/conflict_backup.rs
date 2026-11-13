@@ -284,14 +284,6 @@ pub fn prune_counting(directory: &Path, keep: &[PathBuf]) -> Pruned {
     Pruned { removed, failed }
 }
 
-pub fn prune_and_report(app: &tauri::AppHandle, directory: &Path, keep: &[PathBuf]) -> usize {
-    let pruned = prune_counting(directory, keep);
-    if pruned.failed > 0 {
-        crate::diagnostics::record_backup_io_error(app);
-    }
-    pruned.removed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

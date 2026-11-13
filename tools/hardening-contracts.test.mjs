@@ -333,9 +333,21 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
   assert.doesNotMatch(quickView, /copyToClipboard|getQuickAccessField/, 'the quick-access window holds a copied value')
   assert.match(quickView, /openQuickAccessItem/)
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs')
-  assert.match(quickCommands, /window\.label\(\) == QUICK_ACCESS_WINDOW/)
-  assert.match(quickCommands, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
-  assert.doesNotMatch(quickCommands.split('#[cfg(test)]\nmod tests')[0], /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/)
+  const quickRules = read('src-tauri', 'src', 'application', 'quick_access.rs').split('#[cfg(test)]')[0]
+  assert.match(quickRules, /window_label == QUICK_ACCESS_WINDOW/)
+  assert.match(quickRules, /session\s*\.as_ref\(\)\s*\.ok_or\("Unlock your vault in Sesame first\."\)/)
+  for (const name of ['get_quick_access_status', 'search_quick_access_items', 'copy_quick_access_field', 'open_quick_access_item']) {
+    const start = quickCommands.indexOf(`fn ${name}(`)
+    assert.ok(start >= 0, `${name} is missing`)
+    assert.match(braceBody(quickCommands, start), /require_quick_access\(window\.label\(\)\)\?;/, `${name} no longer requires the quick-access window`)
+  }
+  assert.match(quickCommands, /quick_access_status_in_state\(/, 'get_quick_access_status no longer runs the application status rule')
+  assert.match(quickCommands, /search_quick_access_items_in_state\(/, 'search_quick_access_items no longer runs the application search rule')
+  assert.match(quickCommands, /copy_quick_access_field_in_state\(/, 'copy_quick_access_field no longer runs the application copy rule')
+  assert.match(quickCommands, /open_quick_access_item_in_state\(/, 'open_quick_access_item no longer runs the application open rule')
+  for (const [source, text] of [['command', quickCommands], ['application', quickRules]]) {
+    assert.doesNotMatch(text, /VaultSnapshot|LoginCard|backup_codes:\s*|notes:\s*|username:\s*/, `the quick-access ${source} gained a secret-bearing record shape`)
+  }
 })
 
 function assertNoUpdaterPermissions(projectRoot) {
@@ -563,20 +575,39 @@ test('the record read macro redacts and the gated commands require presence', ()
   assert.ok(getStart >= 0, 'the record read command is missing from the macro')
   const getBody = macro.slice(getStart, macro.indexOf('#[tauri::command]', getStart))
   assert.match(getBody, /RecordView<\$Item>/)
-  assert.match(getBody, /redacted_view\(item\.clone\(\)\)/)
+  assert.match(getBody, /record_view_in_state\(/)
   assert.doesNotMatch(getBody, /Ok\(item\.clone\(\)\)/)
 
+  const records = read('src-tauri', 'src', 'application', 'records.rs').split('#[cfg(test)]')[0]
+  assert.match(records, /pub struct RecordView<T>/)
+  assert.match(records, /redacted_view\(record\.clone\(\)\)/)
+
   const release = read('src-tauri', 'src', 'commands', 'secret_release.rs').split('#[cfg(test)]')[0]
-  const field = release.slice(release.indexOf('pub(crate) fn item_field_in_state('), release.indexOf('#[tauri::command]'))
+  const reveal = read('src-tauri', 'src', 'application', 'reveal.rs').split('#[cfg(test)]')[0]
+  const field = reveal.slice(reveal.indexOf('pub(crate) fn item_field_in_state('))
   assert.match(field, /require_release_presence\(state, presence\)\?/)
-  for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach']) {
+  for (const name of ['release_item_field', 'check_login_breach']) {
     const start = release.indexOf(`fn ${name}(`)
     assert.ok(start >= 0, `${name} is missing`)
     assert.match(braceBody(release, start), /item_field_in_state\(/, `${name} does not go through the presence-checked release`)
   }
-  assert.match(macro, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
+  const copy = braceBody(release, release.indexOf('fn copy_item_field('))
+  assert.match(copy, /copy_item_field_in_state\(/, 'copy_item_field does not go through the presence-checked release')
+  const copyInState = braceBody(reveal, reveal.indexOf('pub(crate) fn copy_item_field_in_state('))
+  assert.match(copyInState, /item_field_in_state\(state, presence, id, kind, field\)\?/)
+  assert.match(copyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
+  const recordWrites = read('src-tauri', 'src', 'application', 'record_writes.rs').split('#[cfg(test)]')[0]
+  assert.match(recordWrites, /SecretSlots::keep_secrets\(&mut item, &\*existing, &kept\)/, 'the record save no longer keeps unchanged secrets by key')
+  assert.match(braceBody(macro, macro.indexOf('pub(crate) fn $save_in_state_fn(')), /save_record_in_state\(/, 'the record save wrapper does not run the application rule')
+  assert.match(braceBody(macro, macro.indexOf('pub fn $delete_fn(')), /delete_record_in_state::<\$Item>\(/, 'the record delete command does not run the application rule')
   const quickCommands = read('src-tauri', 'src', 'commands', 'quick_access.rs').split('#[cfg(test)]')[0]
-  assert.match(braceBody(quickCommands, quickCommands.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
+  const quickRules = read('src-tauri', 'src', 'application', 'quick_access.rs').split('#[cfg(test)]')[0]
+  assert.match(braceBody(quickRules, quickRules.indexOf('fn quick_access_field_in_state(')), /if action\.guarded \{\s*require_release_presence\(state, presence\)\?;/)
+  const quickCopy = braceBody(quickCommands, quickCommands.indexOf('fn copy_quick_access_field('))
+  assert.match(quickCopy, /copy_quick_access_field_in_state\(/, 'copy_quick_access_field does not go through the application rule')
+  const quickCopyInState = braceBody(quickRules, quickRules.indexOf('fn copy_quick_access_field_in_state('))
+  assert.match(quickCopyInState, /quick_access_field_in_state\(state, presence, id, field\)\?/)
+  assert.match(quickCopyInState, /effects\.copy_secret\(value, clear_after_ms\)/)
   for (const name of ['release_item_field', 'copy_item_field', 'check_login_breach', 'copy_quick_access_field']) {
     assert.match(read('src-tauri', 'src', 'lib.rs'), new RegExp(`commands::${name},`), `${name} is not registered`)
   }
@@ -584,8 +615,10 @@ test('the record read macro redacts and the gated commands require presence', ()
 
 test('turning a note lock off needs the presence check and turning it on does not', () => {
   const notes = read('src-tauri', 'src', 'commands', 'secure_notes.rs').split('#[cfg(test)]')[0]
-  const body = braceBody(notes, notes.indexOf('pub(crate) fn set_secure_note_lock_in_state('))
+  const rules = read('src-tauri', 'src', 'application', 'record_writes.rs').split('#[cfg(test)]')[0]
+  const body = braceBody(rules, rules.indexOf('pub(crate) fn set_secure_note_lock_in_state('))
   assert.match(body, /if !locked \{\s*require_release_presence\(state, presence\)\?;\s*\}/, 'unlocking a note no longer needs the presence check')
+  assert.match(braceBody(notes, notes.indexOf('pub fn set_secure_note_lock(')), /set_secure_note_lock_in_state\(/, 'set_secure_note_lock does not run the application rule')
   assert.match(notes, /item\.locked \|= existing\.locked;/, 'a save can now turn a note lock off')
   assert.match(read('src-tauri', 'src', 'lib.rs'), /commands::set_secure_note_lock,/, 'set_secure_note_lock is not registered')
 })
@@ -595,11 +628,13 @@ test('only a master password unlock counts as the presence check', () => {
     .filter((path) => /grant_after_unlock\(/.test(read(relative(root, path)).split('#[cfg(test)]')[0]))
     .map((path) => relative(root, path).split('\\').join('/'))
     .sort()
-  assert.deepEqual(callers, ['src-tauri/src/commands/lifecycle.rs', 'src-tauri/src/release.rs'])
-  const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  assert.deepEqual(callers, ['src-tauri/src/application/lifecycle.rs', 'src-tauri/src/release.rs'])
+  const lifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
-  const body = braceBody(lifecycle, lifecycle.indexOf('pub fn unlock_vault('))
+  const body = braceBody(lifecycle, lifecycle.indexOf('pub(crate) fn unlock_vault_in_state('))
   assert.match(body, /if result\.is_ok\(\) \{[\s\S]*presence\.grant_after_unlock\(state\.session_epoch\(\)\);/, 'a master password unlock no longer grants the presence check after it succeeds')
+  const command = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  assert.match(braceBody(command, command.indexOf('pub fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
 })
 
 test('the window never keeps a secret value in a record view', () => {
@@ -677,6 +712,7 @@ test('no release workflow enables the insecure loopback update path', () => {
 
 test('desktop updates use an account-independent signed static manifest', () => {
   const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
+  const applicationUpdater = read('src-tauri', 'src', 'application', 'updater.rs')
   const publicUpdates = read('src-tauri', 'src', 'adapters', 'network', 'public_updates.rs')
   const build = read('src-tauri', 'build.rs')
   const settings = read('src', 'lib', 'ui', 'SettingsView.svelte')
@@ -687,6 +723,17 @@ test('desktop updates use an account-independent signed static manifest', () => 
 
   assert.doesNotMatch(updater, /read_service_(?:connection|token)|Authorization|\/v1\/desktop\/updates/)
   assert.match(updater, /adapters::network::public_updates::check\(app\)/)
+  assert.match(updater, /updater_trust\(\)\?/)
+  assert.match(updater, /verify_update_manifest\(/)
+  assert.match(updater, /verify_artifact_digest\(/)
+  assert.doesNotMatch(updater, /fn verify_candidate_receipt/)
+  assert.doesNotMatch(updater, /fn verify_set_candidate_claims/)
+  assert.doesNotMatch(updater, /fn verify_v3_candidate_claims/)
+  assert.match(applicationUpdater, /pub\(crate\) fn updater_trust/)
+  assert.match(applicationUpdater, /pub\(crate\) fn verify_candidate_receipt/)
+  assert.match(applicationUpdater, /fn verify_set_candidate_claims/)
+  assert.match(applicationUpdater, /fn verify_v3_candidate_claims/)
+  assert.match(applicationUpdater, /pub\(crate\) fn verify_artifact_digest/)
   assert.match(publicUpdates, /option_env!\("SESAME_UPDATE_MANIFEST_URL"\)/)
   assert.match(publicUpdates, /parsed\.scheme\(\) == "https"/)
   assert.match(publicUpdates, /SESAME_ALLOW_INSECURE_UPDATE_LOOPBACK/)
@@ -711,27 +758,48 @@ test('desktop updates use an account-independent signed static manifest', () => 
 
 test('every file command resolves its path through a Rust-issued choice', () => {
   const commands = [
-    ['backups.rs', 'export_backup'],
-    ['backups.rs', 'export_vault_csv'],
-    ['backups.rs', 'export_recovery_kit'],
-    ['backups.rs', 'inspect_backup'],
-    ['backups.rs', 'verify_backup'],
-    ['backups.rs', 'restore_backup'],
-    ['imports.rs', 'preview_import'],
-    ['support.rs', 'export_diagnostics'],
+    ['backups.rs', 'backups.rs', 'export_backup'],
+    ['backups.rs', 'backups.rs', 'export_vault_csv'],
+    ['backups.rs', 'backups.rs', 'export_recovery_kit'],
+    ['backups.rs', 'backups.rs', 'inspect_backup'],
+    ['backups.rs', 'backups.rs', 'verify_backup'],
+    ['backups.rs', 'backups.rs', 'restore_backup'],
+    ['imports.rs', 'imports.rs', 'preview_import'],
+    ['support.rs', null, 'export_diagnostics'],
   ]
-  for (const [file, command] of commands) {
+  for (const [file, applicationFile, command] of commands) {
     const source = read('src-tauri', 'src', 'commands', file)
     const start = source.indexOf(`pub fn ${command}(`)
     assert.ok(start >= 0, `${command} does not exist in ${file}`)
     const next = source.indexOf('\n#[tauri::command]', start)
     const body = source.slice(start, next === -1 ? source.length : next)
     const resolution = command === 'restore_backup' ? /claim\(/ : /resolve_path\(/
-    assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
+    if (applicationFile === null) {
+      assert.match(body, resolution, `${command} takes a file path without a Rust-issued choice`)
+      continue
+    }
+    assert.match(
+      body,
+      new RegExp(`\\b${command}_in_state\\(`),
+      `${command} does not call its application rule`,
+    )
+    const application = read('src-tauri', 'src', 'application', applicationFile)
+    const applicationStart = application.indexOf(`pub(crate) fn ${command}_in_state(`)
+    assert.ok(applicationStart >= 0, `${command}_in_state does not exist in the application module`)
+    const applicationNext = application.indexOf('\npub(crate) fn ', applicationStart)
+    const applicationBody = application.slice(applicationStart, applicationNext === -1 ? application.length : applicationNext)
+    assert.match(
+      applicationBody,
+      resolution,
+      `${command} takes a file path without a Rust-issued choice`,
+    )
   }
 
   const selection = read('src-tauri', 'src', 'commands', 'file_selection.rs')
-  const resolveBody = braceBody(selection, selection.indexOf('pub(crate) fn resolve_path('))
+  const choices = read('src-tauri', 'src', 'application', 'file_choices.rs')
+  const resolveStart = choices.indexOf('pub(crate) fn resolve_path(')
+  assert.ok(resolveStart >= 0, 'resolve_path is missing from the application module')
+  const resolveBody = braceBody(choices, resolveStart)
   assert.match(
     resolveBody,
     /#\[cfg\(feature = "wdio"\)\][\s\S]*PathBuf::from\(path\)[\s\S]*#\[cfg\(not\(feature = "wdio"\)\)\]/,
@@ -958,7 +1026,10 @@ test('every diagnostic code the app can emit stays on the diagnostics allowlist'
 test('the vault key page fallback is reported once per installed key', () => {
   const vault = read('src-tauri', 'src', 'vault', 'mod.rs')
   const lifecycle = read('src-tauri', 'src', 'commands', 'lifecycle.rs')
-  const syncAdopt = read('src-tauri', 'src', 'commands', 'sync_adopt.rs')
+  const applicationLifecycle = read('src-tauri', 'src', 'application', 'lifecycle.rs')
+  const applicationUnlock = read('src-tauri', 'src', 'application', 'unlock.rs')
+  const effects = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs')
+  const applicationSyncAdopt = read('src-tauri', 'src', 'application', 'sync_adopt.rs')
   const diagnostics = read('src-tauri', 'src', 'diagnostics.rs')
 
   assert.match(vault, /pub fn report_key_page_fallback\(app: &tauri::AppHandle, unlocked: &UnlockedVault\)/)
@@ -966,21 +1037,55 @@ test('the vault key page fallback is reported once per installed key', () => {
   assert.match(vault, /record_vault_key_fallback\(app, "key_page_fallback"\)/)
   assert.match(diagnostics, /"key_page_fallback" => "warn"/)
 
-  for (const name of ['create_vault', 'install_unlocked_session', 'change_master_password']) {
-    const start = lifecycle.indexOf(`fn ${name}(`)
-    assert.ok(start >= 0, `${name} is missing from lifecycle.rs`)
+  for (const [name, rule] of [
+    ['create_vault', 'create_vault_in_state'],
+    ['change_master_password', 'change_master_password_in_state'],
+  ]) {
+    const ruleStart = applicationUnlock.indexOf(`fn ${rule}(`)
+    assert.ok(ruleStart >= 0, `${rule} is missing from the application unlock rules`)
     assert.match(
-      braceBody(lifecycle, start),
+      braceBody(applicationUnlock, ruleStart),
       /report_key_page_fallback\(/,
-      `${name} does not report a key page fallback`,
+      `${rule} does not report a key page fallback`,
+    )
+    const commandStart = lifecycle.indexOf(`fn ${name}(`)
+    assert.ok(commandStart >= 0, `${name} is missing from lifecycle.rs`)
+    assert.match(
+      braceBody(lifecycle, commandStart),
+      new RegExp(`${rule}\\(`),
+      `${name} does not run the application rule`,
     )
   }
-  const adopt = syncAdopt.indexOf('fn finish_adoption(')
-  assert.ok(adopt >= 0, 'finish_adoption is missing from sync_adopt.rs')
+  const install = applicationLifecycle.indexOf('fn install_unlocked_session(')
+  assert.ok(install >= 0, 'install_unlocked_session is missing from the application lifecycle')
   assert.match(
-    braceBody(syncAdopt, adopt),
+    braceBody(applicationLifecycle, install),
     /report_key_page_fallback\(/,
-    'finish_adoption does not report a key page fallback',
+    'install_unlocked_session does not report a key page fallback',
+  )
+  assert.match(
+    braceBody(effects, effects.indexOf('fn report_key_page_fallback(')),
+    /crate::vault::report_key_page_fallback\(/,
+    'the desktop effect no longer reports the key page fallback',
+  )
+  const adopt = applicationSyncAdopt.indexOf('fn finish_adoption_in_state(')
+  assert.ok(adopt >= 0, 'finish_adoption_in_state is missing from the application sync_adopt')
+  assert.match(
+    braceBody(applicationSyncAdopt, adopt),
+    /report_key_page_fallback\(/,
+    'finish_adoption_in_state does not report a key page fallback',
+  )
+  const applicationJoin = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const syncPairingCommand = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
+  assert.match(
+    braceBody(applicationJoin, applicationJoin.indexOf('fn complete_join(')),
+    /finish_adoption_in_state\(/,
+    'the join rule does not adopt through the application rule that reports the key page fallback',
+  )
+  assert.match(
+    syncPairingCommand,
+    /join_with_code_in_state\(/,
+    'the join command does not run the application join rule',
   )
 
   const core = read('src-tauri', 'sesame-core', 'src', 'vault_key.rs')
@@ -1028,9 +1133,22 @@ test('the C ABI exports only the intended sesame_core symbols', () => {
 
 test('the recovery kit wait reads server time, never the local clock', () => {
   const source = readFileSync(join(root, 'src-tauri', 'src', 'commands', 'recovery_replacement.rs'), 'utf8')
+  const rules = readFileSync(join(root, 'src-tauri', 'src', 'application', 'recovery_replacement.rs'), 'utf8')
   assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.latest/, 'a recovery kit request must record the later server time')
   assert.match(source, /trusted_time\([^)]*\)[^;]*\.await\?\.earliest/, 'issuing a recovery kit must use the earlier server time')
-  assert.doesNotMatch(source, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+  for (const file of [source, rules]) {
+    assert.doesNotMatch(file, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the recovery kit wait read the local clock')
+  }
+  for (const rule of [
+    'pending_recovery_replacement_in_state',
+    'begin_recovery_replacement_request_in_state',
+    'begin_recovery_replacement_completion_in_state',
+    'cancel_recovery_replacement_in_state',
+    'complete_recovery_replacement_in_state',
+    'recovery_replacement_status',
+  ]) {
+    assert.match(source, new RegExp(`${rule}\\(`), `the recovery replacement commands do not run ${rule}`)
+  }
   const time = readFileSync(join(root, 'src-tauri', 'src', 'adapters', 'network', 'trusted_time.rs'), 'utf8').split('#[cfg(test)]\nmod tests')[0]
   assert.doesNotMatch(time, /SystemTime|Utc::now|Local::now|Instant::now|unix_timestamp/, 'the time sources read the local clock')
   assert.match(time, /COMPANY_SOURCES: \[&str; 2\]/, 'the wait no longer starts from the two company sources')
@@ -1464,9 +1582,9 @@ test('vault key material is drawn from the system random source', () => {
     ['src-tauri/sesame-core/src/platform/linux.rs', 'create_linux_device_key'],
     ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
     ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
-    ['src-tauri/src/commands/sync_transfer.rs', 'rekey_without'],
-    ['src-tauri/src/commands/sync_adopt.rs', 'prepare_recovery'],
-    ['src-tauri/src/commands/sync_transfer.rs', 'sync_prepare_key_change'],
+    ['src-tauri/src/application/sync_transfer.rs', 'rekey_without_in_state'],
+    ['src-tauri/src/application/sync.rs', 'prepare_recovery'],
+    ['src-tauri/src/application/sync.rs', 'prepare_key_change_in_state'],
   ]
   const offenders = []
   for (const [path, name] of secretSites) {
@@ -1482,4 +1600,143 @@ test('vault key material is drawn from the system random source', () => {
     }
   }
   assert.deepEqual(offenders, [], `secret material sources regressed:\n  ${offenders.join('\n  ')}`)
+})
+
+test('the sync commands hand their policy to the application module', () => {
+  const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
+  const transfer = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
+  const pairing = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
+  const account = read('src-tauri', 'src', 'adapters', 'network', 'account_api.rs')
+  const application = read('src-tauri', 'src', 'application', 'sync.rs')
+  const recovery = read('src-tauri', 'src', 'application', 'sync_recovery.rs')
+  const recoveryCommands = read('src-tauri', 'src', 'commands', 'sync_transfer_recovery.rs')
+  const applicationPairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
+  const applicationJoin = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const applicationTransfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+
+  const routes = [
+    [sync, 'sync_status', /sync_status_in_state\(/],
+    [sync, 'sync_local_status', /local_status_in_state\(/],
+    [sync, 'sync_create_vault', /create_vault_in_state\(/],
+    [sync, 'sync_reset_vault', /reset_vault_in_state\(/],
+    [sync, 'sync_disable', /leave_vault\(/],
+    [transfer, 'sync_upload_vault', /upload_vault\(/],
+    [transfer, 'sync_download_vault', /download_vault\(/],
+    [transfer, 'sync_take_new_key', /take_new_key_in_state\(/],
+    [transfer, 'sync_conflict_details', /sync_conflict_details_in_state\(/],
+    [transfer, 'sync_resolve_conflict', /resolve_conflict_in_state\(/],
+    [transfer, 'sync_prepare_key_change', /prepare_key_change_in_state\(/],
+    [transfer, 'sync_upgrade_device_key', /upgrade_device_key_in_state\(/],
+    [transfer, 'sync_remove_device', /refuse_self_removal\(/],
+    [transfer, 'sync_rotate_vault_key', /rekey_without_in_state\(/],
+    [transfer, 'sync_coordinator_status', /coordinator_view\(/],
+    [transfer, 'sync_now', /run_one_transfer\(/],
+    [pairing, 'sync_pairing_code', /pairing_code\(/],
+    [pairing, 'sync_cancel_pairing', /cancel_pairing\(/],
+    [pairing, 'sync_approve_with_code', /approve\(/],
+    [pairing, 'sync_join_with_code', /join_preflight_in_state\(/],
+    [account, 'link_custom_server', /require_no_service_connection\(/],
+  ]
+  for (const [source, name, call] of routes) {
+    assert.match(braceBody(source, source.indexOf(`fn ${name}(`)), call, `${name} does not call its application rule`)
+  }
+  assert.match(recoveryCommands, /list_conflict_backups_in_state\(/, 'listing recovery copies bypasses the application rule')
+  assert.match(recoveryCommands, /restore_conflict_backup_in_state\(/, 'restoring a recovery copy bypasses the application rule')
+  assert.match(recovery, /fn restore_conflict_backup_in_state\(/, 'the recovery copy rule is missing from the application module')
+  assert.match(recovery, /fn list_conflict_backups_in_state\(/, 'the recovery copy listing rule is missing from the application module')
+  assert.match(applicationPairing, /fn pairing_code\(/, 'the pairing code rule is missing from the application module')
+  assert.match(application, /fn prepare_key_change_in_state\(/, 'the key change rule is missing from the application module')
+  assert.match(application, /fn disable_needs_leave\(/, 'the disable decision is missing from the application module')
+  assert.match(application, /fn refuse_self_removal\(/, 'the self-removal rule is missing from the application module')
+  for (const [name, call] of [
+    ['upload_vault', /upload_vault_in_state\(/],
+    ['download_vault', /download_vault_in_state\(/],
+    ['run_one_transfer', /run_one_transfer_in_state\(/],
+    ['leave_vault', /leave_vault_in_state\(/],
+  ]) {
+    assert.match(
+      braceBody(transfer, transfer.indexOf(`fn ${name}(`)),
+      call,
+      `${name} does not hand its policy to the application module`,
+    )
+  }
+  for (const [name, call] of [['approve', /approve_in_state\(/]]) {
+    assert.match(
+      braceBody(pairing, pairing.indexOf(`fn ${name}(`)),
+      call,
+      `${name} does not hand its policy to the application module`,
+    )
+  }
+  const joinCommand = braceBody(pairing, pairing.indexOf('fn sync_join_with_code('))
+  assert.match(joinCommand, /join_with_code_in_state\(/, 'sync_join_with_code does not run the application join rule')
+  assert.ok(
+    joinCommand.indexOf('join_preflight_in_state(') < joinCommand.indexOf('SyncClient::connect('),
+    'the master password must be checked before the service is contacted',
+  )
+  assert.match(applicationJoin, /fn join_preflight_in_state\(/, 'the join preflight is missing from the application module')
+  assert.match(applicationJoin, /verify_master_password_now_in_state\(/, 'the join preflight no longer checks the master password')
+  assert.match(applicationJoin, /fn join_with_code_in_state/, 'the join rule is missing from the application module')
+  assert.match(applicationJoin, /fn finish_join_transaction/, 'the join transaction is missing from the application module')
+  assert.match(applicationPairing, /fn approve_in_state/, 'the approval rule is missing from the application module')
+  for (const name of [
+    'upload_vault_in_state',
+    'download_vault_in_state',
+    'take_new_key_in_state',
+    'sync_conflict_details_in_state',
+    'resolve_conflict_in_state',
+    'rekey_without_in_state',
+    'leave_vault_in_state',
+    'run_one_transfer_in_state',
+  ]) {
+    assert.match(applicationTransfer, new RegExp(`fn ${name}[(<]`), `${name} is missing from the application module`)
+  }
+})
+
+test('the browser approval commands hand their decisions to the application module', () => {
+  const commands = read('src-tauri', 'src', 'commands', 'support.rs')
+  const application = withoutComments(read('src-tauri', 'src', 'application', 'browser_fill.rs').split('#[cfg(test)]')[0])
+
+  const routes = [
+    ['resolve_browser_fill', /resolve_browser_fill_in_state\(/],
+    ['resolve_browser_save', /resolve_browser_save_in_state\(/],
+    ['resolve_browser_identity_fill', /resolve_browser_identity_fill_in_state\(/],
+    ['resolve_browser_card_fill', /resolve_browser_card_fill_in_state\(/],
+    ['resolve_browser_totp_fill', /resolve_browser_totp_fill_in_state\(/],
+  ]
+  for (const [name, call] of routes) {
+    assert.match(braceBody(commands, commands.indexOf(`fn ${name}(`)), call, `${name} does not call its application rule`)
+    assert.match(application, new RegExp(`fn ${name}_in_state\\(`), `${name}_in_state is missing from the application module`)
+  }
+  for (const name of ['resolve', 'resolve_save', 'resolve_identity', 'resolve_card', 'resolve_totp']) {
+    assert.doesNotMatch(commands, new RegExp(`browser_fill::${name}\\(`), `${name} still runs in the command layer`)
+  }
+
+  const save = braceBody(application, application.indexOf('fn resolve_browser_save_in_state('))
+  assert.match(save, /if !approved \{[\s\S]*resolve_save\(state, effects, approval_id, false\)\?;[\s\S]*return Ok\(None\);/, 'a denied save no longer resolves the broker before returning')
+  assert.match(save, /ensure_save_approval_ready\(state, approval_id\)\?;/, 'a save is committed before the approval is ready')
+  assert.match(save, /save_payload\(state, approval_id\)[\s\S]*ok_or\(APPROVAL_EXPIRED\)\?/, 'a save runs without the bound payload')
+  for (const name of ['save_new_login', 'save_login_update']) {
+    assert.match(application, new RegExp(`fn ${name}\\(`), `${name} is missing from the application module`)
+  }
+
+  const update = braceBody(application, application.indexOf('fn save_login_update('))
+  assert.match(update, /payload[\s\S]*\.candidates[\s\S]*\.any\(\|candidate\| candidate\.id == \*id\)/, 'an update can target a login outside the broker candidates')
+  assert.match(update, /if !verify_update_target\(&current\.entries, &payload\.origin, &target_id\)/, 'an update no longer re-verifies the saved origin under the lock')
+  assert.match(application, /fn verify_update_target\(/, 'the update origin check is missing from the application module')
+
+  assert.match(application, /fn card_supports_fields\(/, 'the card field rule is missing from the application module')
+  const card = braceBody(application, application.indexOf('fn selected_card_fields('))
+  assert.match(card, /for key in requested/, 'a card fill no longer releases only the requested fields')
+  assert.match(application, /state\.decide\(approval_id, decision\)/, 'the approval decision is no longer consumed through the broker')
+})
+
+test('a browser approval can only be built where the broker registers it', () => {
+  const replies = read('src-tauri', 'src', 'application', 'browser_replies.rs')
+  const struct = replies.match(/pub\(crate\) struct BrowserApproval \{([\s\S]*?)\n\}/)
+  assert.ok(struct, 'BrowserApproval is missing')
+  assert.doesNotMatch(struct[1], /\bpub\b/, 'a BrowserApproval field is visible outside its module')
+  const builds = [...replies.matchAll(/approval: BrowserApproval \{/g)].length
+  const begins = [...replies.matchAll(/fill_state\.begin\(/g)].length
+  assert.ok(builds > 0)
+  assert.equal(builds, begins, 'an approval is built without being registered with the broker')
 })
