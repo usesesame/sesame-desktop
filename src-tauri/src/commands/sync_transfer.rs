@@ -2,9 +2,9 @@ use tauri::AppHandle;
 
 use super::sync::local_data_dir;
 use crate::adapters::desktop_effects::DesktopHostEffects;
+use crate::adapters::network::sync::connect;
 use crate::application::sync::SyncStore;
 use crate::application::sync_transfer::classify_transfer_failure;
-use crate::sync::client::SyncClient;
 use crate::sync::key_change::PreparedKeyChange;
 use crate::vault::VaultState;
 
@@ -22,7 +22,7 @@ async fn upload_vault(
 ) -> Result<SyncTransferResult, String> {
     let store = SyncStore::new(local_data_dir(&app)?);
     store.require_no_pending_key_change()?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_transfer::upload_vault_in_state(&state, &store, &client).await
 }
 
@@ -44,7 +44,7 @@ async fn download_vault(
 ) -> Result<SyncTransferResult, String> {
     let store = SyncStore::new(local_data_dir(&app)?);
     store.require_no_pending_key_change()?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_transfer::download_vault_in_state(
         &state,
         &store,
@@ -74,7 +74,7 @@ pub async fn sync_take_new_key(
     master_password: String,
 ) -> Result<SyncTakeKeyResult, String> {
     let store = SyncStore::new(local_data_dir(&app)?);
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     let result = crate::application::sync_transfer::take_new_key_in_state(
         &state,
         &store,
@@ -119,7 +119,7 @@ pub async fn sync_remove_device(
     let store = SyncStore::new(local_data_dir(&app)?);
     let identity = store.this_identity()?;
     crate::application::sync::refuse_self_removal(&device_id, &identity.device_id)?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_transfer::rekey_without_in_state(
         &state,
         &store,
@@ -143,7 +143,7 @@ pub async fn sync_rotate_vault_key(
     master_password: String,
 ) -> Result<(), String> {
     let store = SyncStore::new(local_data_dir(&app)?);
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_transfer::rekey_without_in_state(
         &state,
         &store,
@@ -161,7 +161,7 @@ pub async fn sync_rotate_vault_key(
 
 #[tauri::command]
 pub async fn sync_upgrade_device_key(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     let store = SyncStore::new(local_data_dir(&app)?);
     crate::application::sync::upgrade_device_key_in_state(&store, &client).await
 }
@@ -173,7 +173,7 @@ pub(super) async fn leave_vault(
 ) -> Result<(), String> {
     let store = SyncStore::new(local_data_dir(app)?);
     let identity = store.this_identity()?;
-    let client = SyncClient::connect(app).await?;
+    let client = connect(app).await?;
     crate::application::sync_transfer::leave_vault_in_state(
         state,
         &store,
@@ -191,7 +191,7 @@ pub async fn sync_conflict_details(
     state: tauri::State<'_, VaultState>,
 ) -> Result<SyncConflictView, String> {
     let store = SyncStore::new(local_data_dir(&app)?);
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_transfer::sync_conflict_details_in_state(&state, &store, &client).await
 }
 
@@ -208,7 +208,7 @@ pub async fn sync_resolve_conflict(
     crate::application::sync_transfer::conflict_choice(&keep)?;
     let store = SyncStore::new(local_data_dir(&app)?);
     store.require_no_pending_key_change()?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     let resolved = crate::application::sync_transfer::resolve_conflict_in_state(
         &state,
         &store,
@@ -261,14 +261,14 @@ async fn run_one_transfer(
     let Some(local) = store.load_state()? else {
         return Ok(Outcome::AlreadyCurrent);
     };
-    let client = SyncClient::connect(app).await?;
+    let client = connect(app).await?;
     crate::application::sync_transfer::run_one_transfer_in_state(
         state,
         &store,
         &client,
         &DesktopHostEffects::new(app),
         local,
-        || SyncClient::connect(app),
+        || connect(app),
     )
     .await
 }

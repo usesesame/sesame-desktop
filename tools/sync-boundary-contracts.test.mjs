@@ -33,11 +33,11 @@ function sourceFiles(dir, pattern) {
 
 test('Sync is off by default: a device that never turned it on contacts nothing', () => {
   const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
-  const application = read('src-tauri', 'src', 'application', 'sync.rs')
+  const application = read('src-tauri', 'sesame-app', 'src', 'application', 'sync.rs')
   const status = commands.match(/pub async fn sync_status\([\s\S]*?\n\}\n/)
   assert.ok(status, 'sync_status is no longer a single function this test can read')
   const offline = status[0].indexOf('sync_status_needs_service(')
-  const connect = status[0].indexOf('SyncClient::connect(')
+  const connect = status[0].indexOf('connect(')
   assert.ok(offline !== -1 && connect !== -1 && offline < connect, 'sync_status must decide a never enrolled device is off before it connects')
   assert.match(application, /fn never_turned_on\(has_state: bool, has_identity: bool\) -> bool \{\s*!has_state && !has_identity\s*\}/)
 
@@ -88,7 +88,7 @@ test('the Sync client never hands key material to the webview', () => {
 })
 
 test('signing and key agreement use separate keys', () => {
-  const identity = read('src-tauri', 'src', 'sync', 'identity.rs')
+  const identity = read('src-tauri', 'sesame-app', 'src', 'sync', 'identity.rs')
   assert.match(identity, /signing:\s*SigningKey/)
   assert.match(identity, /encryption:\s*EncryptionKeypair/)
 })
@@ -135,8 +135,8 @@ test('the Sync client no longer hides behind a build feature, and nothing of the
   assert.equal(scripts['desktop:test:rust:sync'], 'npm run desktop:test:rust')
   const vite = read('vite.config.ts')
   assert.doesNotMatch(vite, /SYNC_PREVIEW/)
-  const module = read('src-tauri', 'src', 'sync', 'mod.rs')
-  assert.match(module, /pub\(crate\) use crate::adapters::network::sync as client;/)
+  const module = read('src-tauri', 'sesame-app', 'src', 'sync', 'mod.rs')
+  assert.match(module, /pub mod client;/)
 })
 
 test('the first run notice says Sync is off, asks for nothing, and is shown once', () => {
@@ -152,7 +152,7 @@ test('the first run notice says Sync is off, asks for nothing, and is shown once
 })
 
 test('both X25519 exchanges refuse a non-contributory result', () => {
-  const keys = read('src-tauri', 'src', 'sync', 'keys.rs')
+  const keys = read('src-tauri', 'sesame-app', 'src', 'sync', 'keys.rs')
   assert.match(
     keys,
     /fn contributory_shared_secret\(/,
@@ -194,7 +194,7 @@ test('the conflict screen shows both sides as they are', () => {
 })
 
 test('a coordinator drives Sync, and never resolves a conflict itself', () => {
-  const coordinator = read('src-tauri', 'src', 'sync', 'coordinator.rs')
+  const coordinator = read('src-tauri', 'sesame-app', 'src', 'sync', 'coordinator.rs')
   for (const [required, why] of [
     ['pub fn begin(', 'nothing claims the right to run a single transfer'],
     ['follow_up', 'concurrent requests are no longer coalesced into one follow-up'],
@@ -218,7 +218,7 @@ test('a coordinator drives Sync, and never resolves a conflict itself', () => {
 })
 
 test('the local Sync state is authenticated', () => {
-  const state = read('src-tauri', 'src', 'sync', 'state.rs')
+  const state = read('src-tauri', 'sesame-app', 'src', 'sync', 'state.rs')
   assert.match(state, /pub fn write_protected\(/, 'the state is written unauthenticated again')
   assert.match(state, /protect\(&state_tag\(&body\)\)/, 'the tag is no longer device-protected')
   assert.match(
@@ -228,14 +228,14 @@ test('the local Sync state is authenticated', () => {
   )
 
   for (const file of [
-    ['commands', 'sync_transfer.rs'],
-    ['commands', 'sync.rs'],
-    ['commands', 'sync_adopt.rs'],
-    ['application', 'sync_transfer.rs'],
-    ['application', 'sync_adopt.rs'],
-    ['application', 'sync.rs'],
+    ['src-tauri', 'src', 'commands', 'sync_transfer.rs'],
+    ['src-tauri', 'src', 'commands', 'sync.rs'],
+    ['src-tauri', 'src', 'commands', 'sync_adopt.rs'],
+    ['src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs'],
+    ['src-tauri', 'sesame-app', 'src', 'application', 'sync_adopt.rs'],
+    ['src-tauri', 'sesame-app', 'src', 'application', 'sync.rs'],
   ]) {
-    const source = read('src-tauri', 'src', ...file)
+    const source = read(...file)
     for (const forbidden of ['sync::state::write(', 'sync::state::read(', 'sync::state::forget(']) {
       assert.ok(
         !source.includes(forbidden),
@@ -285,16 +285,16 @@ test('the Go and Rust sides share one v3 fixture and the Rust tests read it', ()
   for (const part of ['chain', 'removalChain', 'headers', 'request', 'receipt', 'keyPackage', 'brokenChains', 'brokenHeaders']) {
     assert.ok(fixture[part], `the fixture lost its ${part} vectors`)
   }
-  const tests = read('src-tauri', 'src', 'sync', 'v3_contract_tests.rs')
+  const tests = read('src-tauri', 'sesame-app', 'src', 'sync', 'v3_contract_tests.rs')
   assert.match(tests, /contracts[\s\S]*v3[\s\S]*v3-fixture\.json/, 'the Rust tests no longer read the shared fixture')
   assert.ok(!existsSync(join(root, 'src-tauri', 'contracts', 'sync', 'v2')), 'the v2 fixtures are retired with the v2 wire format')
 })
 
 test('a device list and every header are verified from the stored chain, never from the service listing', () => {
-  const refresh = read('src-tauri', 'src', 'application', 'sync.rs')
+  const refresh = read('src-tauri', 'sesame-app', 'src', 'application', 'sync.rs')
   const commands = read('src-tauri', 'src', 'commands', 'sync.rs')
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
-  const pairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
+  const pairing = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_pairing.rs')
   assert.match(transfer, /refresh\(/, 'the transfer rules no longer reach the shared refresh')
   assert.match(pairing, /refresh\(/, 'the approval rule no longer reaches the shared refresh')
   assert.match(commands, /_in_state\(/, 'the commands no longer hand Sync policy to the application module')
@@ -306,14 +306,14 @@ test('a device list and every header are verified from the stored chain, never f
     const source = read('src-tauri', 'src', 'commands', file)
     assert.doesNotMatch(source, /\.devices\(\)[\s\S]{0,200}state\s*==\s*"approved"[\s\S]{0,80}signing/, `${file} trusts the service listing for an approval`)
   }
-  const engine = read('src-tauri', 'src', 'sync', 'engine.rs')
+  const engine = read('src-tauri', 'sesame-app', 'src', 'sync', 'engine.rs')
   for (const rule of ['verify_header_chain', 'verify_header(', 'check_receipt', 'floor_for']) {
     assert.ok(engine.includes(rule), `the engine no longer calls ${rule}`)
   }
 })
 
 test('an upload is numbered from the local head and its header is planned before it is encrypted', () => {
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
   const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   assert.match(transfer, /decide_upload\(\s*local\.head_revision\(\),\s*refreshed\.server\.current_revision/, 'the upload decision must compare the local head with the verified service revision')
   assert.match(transfer, /plan_header\([^)]*previous\.as_ref\(\)/, 'the header must name the previous header the device holds')
@@ -325,40 +325,40 @@ test('an upload is numbered from the local head and its header is planned before
 })
 
 test('one canonical AEAD context, shared by encryption and decryption', () => {
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
   const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   assert.match(transfer, /header\.aad\(\)/, 'decryption must use the header context')
   assert.match(transfer, /plan\.aad\(\)/, 'encryption must use the planned header context')
   assert.match(commands, /download_vault_in_state\(/, 'the download command does not run the application rule')
   const pairing = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
-  const join = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const join = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_join.rs')
   assert.match(join, /head\.aad\(\)/, 'a joining device must decrypt with the header context')
   assert.match(pairing, /join_with_code_in_state\(/, 'the join command does not run the application rule')
-  const header = read('src-tauri', 'src', 'sync', 'header.rs')
+  const header = read('src-tauri', 'sesame-app', 'src', 'sync', 'header.rs')
   assert.match(header, /pub fn aad\(&self\)/)
 })
 
 test('a new device is added only after a code the person typed, and the approver comes from the exchange', () => {
   const pairing = read('src-tauri', 'src', 'commands', 'sync_pairing.rs')
-  const applicationPairing = read('src-tauri', 'src', 'application', 'sync_pairing.rs')
-  const applicationJoin = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const applicationPairing = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_pairing.rs')
+  const applicationJoin = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_join.rs')
   assert.match(applicationPairing, /pake::answer\(/, 'the approving device must run the exchange')
   assert.match(applicationJoin, /Offer::begin\(/, 'the joining device must run the exchange')
   assert.match(applicationPairing, /verify_confirmation\(/, 'the approver must check the new device proved the code')
   assert.match(applicationJoin, /verify_join\(/, 'the joining device must check the device list and key package through the engine')
   assert.match(pairing, /approve_in_state\(/, 'the approval command does not run the application rule')
   assert.match(pairing, /join_with_code_in_state\(/, 'the join command does not run the application rule')
-  const engine = read('src-tauri', 'src', 'sync', 'engine.rs')
+  const engine = read('src-tauri', 'sesame-app', 'src', 'sync', 'engine.rs')
   assert.match(engine, /check\.approver\.signing_key/, 'the joining device must take the approver key from the exchange')
   assert.match(engine, /adding\.signer_device_id != approver\.device_id/, 'the entry that added this device must be signed by the device that gave the code')
   assert.doesNotMatch(pairing, /record_verified|fingerprint/, 'the first-sight trust and fingerprint comparison are gone')
-  const pake = read('src-tauri', 'src', 'sync', 'pake', 'mod.rs')
+  const pake = read('src-tauri', 'sesame-app', 'src', 'sync', 'pake', 'mod.rs')
   assert.match(pake, /CODE_ALPHABET/, 'codes come from a fixed alphabet')
   assert.match(pake, /is_identity\(\)/, 'an identity point must be refused')
 })
 
 test('every request that changes state carries a device signature', () => {
-  const client = read('src-tauri', 'src', 'adapters', 'network', 'sync.rs')
+  const client = read('src-tauri', 'sesame-app', 'src', 'sync', 'client.rs')
   const methods = [...client.matchAll(/pub async fn (\w+)\([\s\S]*?\n {4}}\n/g)].map((match) => [match[1], match[0]])
   const changing = ['create_vault', 'begin_pairing', 'answer_pairing', 'confirm_pairing', 'cancel_pairing', 'approve', 'remove', 'activate', 'upload', 'reset']
   for (const name of changing) {
@@ -379,9 +379,9 @@ test('every request that changes state carries a device signature', () => {
 })
 
 test('the company-signed Sync floor gates the one place every Sync command connects, and no server input can set it', () => {
-  const client = read('src-tauri', 'src', 'adapters', 'network', 'sync.rs')
-  const connect = client.match(/pub async fn connect\(app: &AppHandle\)[\s\S]*?\n {4}\}\n/)
-  assert.ok(connect, 'SyncClient::connect is no longer a single function this test can read')
+  const connection = read('src-tauri', 'src', 'adapters', 'network', 'sync.rs')
+  const connect = connection.match(/pub async fn connect\(app: &AppHandle\)[\s\S]*?\n}\n/)
+  assert.ok(connect, 'the Sync connect function is no longer something this test can read')
   assert.ok(
     connect[0].indexOf('require_sync_allowed(') !== -1 &&
       connect[0].indexOf('require_sync_allowed(') < connect[0].indexOf('read_service_connection('),
@@ -392,14 +392,17 @@ test('the company-signed Sync floor gates the one place every Sync command conne
     const body = source.slice(0, source.indexOf('#[cfg(test)]') === -1 ? undefined : source.indexOf('#[cfg(test)]'))
     assert.doesNotMatch(body, /for_target\(|reqwest::Client/, `${file} builds a Sync connection without going through connect`)
   }
-  const writers = sourceFiles(join('src-tauri', 'src'), /\.rs$/).filter((file) => {
+  const writers = [
+    ...sourceFiles(join('src-tauri', 'src'), /\.rs$/),
+    ...sourceFiles(join('src-tauri', 'sesame-app', 'src'), /\.rs$/),
+  ].filter((file) => {
     const source = read(file)
     const body = source.slice(0, source.indexOf('#[cfg(test)]') === -1 ? undefined : source.indexOf('#[cfg(test)]'))
     return /raise_floor\(|record_manifest_floor\(/.test(body)
   })
   assert.deepEqual(
     writers.map((file) => file.replaceAll('\\', '/')).sort(),
-    ['src-tauri/src/adapters/network/sync_floor.rs', 'src-tauri/src/sync/floor.rs'],
+    ['src-tauri/sesame-app/src/sync/floor.rs', 'src-tauri/src/adapters/network/sync_floor.rs'],
     'only the company manifest reader may write the Sync floor',
   )
   const floorReader = read('src-tauri', 'src', 'adapters', 'network', 'sync_floor.rs')
@@ -409,15 +412,15 @@ test('the company-signed Sync floor gates the one place every Sync command conne
 })
 
 test('the service must say it offers Sync in a signed document before this device talks to it', () => {
-  const client = read('src-tauri', 'src', 'adapters', 'network', 'sync.rs')
+  const client = read('src-tauri', 'sesame-app', 'src', 'sync', 'client.rs')
   assert.match(client, /fetch_signed_document\(/)
   assert.match(client, /require_sync_enabled\(/)
-  const capabilities = read('src-tauri', 'src', 'adapters', 'network', 'capabilities.rs')
+  const capabilities = read('src-tauri', 'sesame-app', 'src', 'network', 'capabilities.rs')
   assert.match(capabilities, /features\s*\.get\("sync"\)/)
 })
 
 test('removing a device rotates the vault key and leaving does the same', () => {
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
   const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
   const rekey = transfer.match(/async fn rekey_without_in_state\([\s\S]*?\n}\n/)
@@ -465,12 +468,12 @@ test('the lifecycle is reachable from the interface', () => {
 })
 
 test('a fork or a disagreement stops Sync and is shown, never applied', () => {
-  const application = read('src-tauri', 'src', 'application', 'sync.rs')
-  const join = read('src-tauri', 'src', 'application', 'sync_join.rs')
+  const application = read('src-tauri', 'sesame-app', 'src', 'application', 'sync.rs')
+  const join = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_join.rs')
   assert.match(application, /sync_fork:/)
   assert.match(application, /fn present_proof\(/)
   assert.match(join, /present_proof/)
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
   assert.match(transfer, /starts_with\("sync_fork:"\)[\s\S]*Halt::Fork/)
   const commands = read('src-tauri', 'src', 'commands', 'sync_transfer.rs')
   assert.match(commands, /classify_transfer_failure\(/, 'sync_now no longer classifies a failed transfer in the application module')
@@ -481,16 +484,16 @@ test('a fork or a disagreement stops Sync and is shown, never applied', () => {
 })
 
 test('Sync does not post a checkpoint while a vault key change is unfinished', () => {
-  const transfer = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
-  const checkpoint = transfer.match(/pub\(crate\) async fn record_checkpoint_if_due_in_state\([\s\S]*?\n}\n/)
+  const transfer = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
+  const checkpoint = transfer.match(/pub async fn record_checkpoint_if_due_in_state\([\s\S]*?\n}\n/)
   assert.ok(checkpoint, 'record_checkpoint_if_due_in_state is no longer one function this test can read')
   assert.match(checkpoint[0], /require_no_pending_key_change\(\)/)
   assert.match(transfer, /record_checkpoint_if_due_in_state\(store, client, &local, &refreshed\)/, 'the transfer rule no longer records a due checkpoint')
 })
 
 test('an upload or download connects again so the version floor and server pin are checked right before it', () => {
-  const source = read('src-tauri', 'src', 'application', 'sync_transfer.rs')
-  const start = source.indexOf('pub(crate) async fn run_one_transfer_in_state')
+  const source = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_transfer.rs')
+  const start = source.indexOf('pub async fn run_one_transfer_in_state')
   assert.ok(start >= 0, 'run_one_transfer_in_state is missing')
   const body = source.slice(start, source.indexOf('\n}\n', start))
   const transfers = [...body.matchAll(/(upload|download)_vault_in_state\(state, store, (&?\w+)/g)]
@@ -500,5 +503,5 @@ test('an upload or download connects again so the version floor and server pin a
     const call = body.indexOf(`${kind}_vault_in_state(`)
     assert.ok(body.lastIndexOf('let transfer = reconnect().await?;', call) >= 0, `the ${kind} does not reconnect first`)
   }
-  assert.match(read('src-tauri', 'src', 'commands', 'sync_transfer.rs'), /\|\| SyncClient::connect\(app\),/)
+  assert.match(read('src-tauri', 'src', 'commands', 'sync_transfer.rs'), /\|\| connect\(app\),/)
 })

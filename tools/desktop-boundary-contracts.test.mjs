@@ -132,6 +132,7 @@ test('desktop code and owned checks do not read a former product sibling', () =>
   const sourceFiles = [
     ...filesUnder(join(root, 'src')),
     ...filesUnder(join(root, 'src-tauri', 'src')),
+    ...filesUnder(join(root, 'src-tauri', 'sesame-app', 'src')),
     ...filesUnder(join(root, 'src-tauri', 'tests')),
     join(root, 'vite.config.ts'),
     join(root, 'vitest.config.ts'),
@@ -145,9 +146,14 @@ test('desktop code and owned checks do not read a former product sibling', () =>
 })
 
 test('the application policy module does not depend on the desktop host', () => {
-  const directory = join(root, 'src-tauri', 'src', 'application')
+  const directory = join(root, 'src-tauri', 'sesame-app', 'src', 'application')
   assert.ok(statSync(directory).isDirectory(), 'the application module is missing')
-  assert.match(read('src-tauri', 'src', 'lib.rs'), /^mod application;$/m)
+  assert.match(read('src-tauri', 'sesame-app', 'src', 'lib.rs'), /^pub mod application;$/m)
+  assert.match(
+    read('src-tauri', 'src', 'lib.rs'),
+    /pub\(crate\) use sesame_app::\{application,/,
+    'the desktop crate no longer re-exports the application module',
+  )
 
   const files = filesUnder(directory)
   assert.ok(files.length > 0, 'the application module contains no files')
@@ -178,9 +184,9 @@ test('the desktop effects adapter only performs effects and never calls back int
   const adapter = read('src-tauri', 'src', 'adapters', 'desktop_effects.rs').split('#[cfg(test)]')[0]
   assert.doesNotMatch(adapter, /crate::commands\b/, 'the effects adapter calls into the command layer')
   assert.doesNotMatch(adapter, /record_success|mark_pin_throttle_loaded|pin_guard/, 'the effects adapter changes the PIN attempt budget')
-  const unlock = read('src-tauri', 'src', 'application', 'unlock.rs')
-  assert.match(unlock, /pub\(crate\) fn establish_pin_throttle_state\(/)
-  assert.match(unlock, /pub\(crate\) fn discard_pin_throttle_state\(/)
+  const unlock = read('src-tauri', 'sesame-app', 'src', 'application', 'unlock.rs')
+  assert.match(unlock, /pub fn establish_pin_throttle_state\(/)
+  assert.match(unlock, /pub fn discard_pin_throttle_state\(/)
 })
 
 test('desktop Sync fixtures are digest-bound local snapshots', () => {
@@ -195,7 +201,7 @@ test('desktop Sync fixtures are digest-bound local snapshots', () => {
     assert.equal(actual, expected, `${name} no longer matches its recorded source digest`)
   }
 
-  const rust = read('src-tauri', 'src', 'sync', 'v3_contract_tests.rs')
+  const rust = read('src-tauri', 'sesame-app', 'src', 'sync', 'v3_contract_tests.rs')
   for (const name of Object.keys(source.files)) assert.match(rust, new RegExp(name.replaceAll('.', '\\.')))
   assert.doesNotMatch(rust, /\.\.\/backend\/internal\/syncproto\/testdata/)
 })

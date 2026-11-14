@@ -3993,6 +3993,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sesame-app",
  "sesame-core",
  "sha1",
  "sha2 0.11.1",
@@ -4016,6 +4017,37 @@ dependencies = [
  "windows-sys 0.61.2",
  "x25519-dalek",
  "zbus",
+ "zeroize",
+]
+
+[[package]]
+name = "sesame-app"
+version = "0.5.2"
+dependencies = [
+ "base64 0.23.1",
+ "chacha20poly1305",
+ "chrono",
+ "curve25519-dalek",
+ "ed25519-dalek",
+ "hkdf",
+ "idna",
+ "ml-kem",
+ "psl",
+ "rand",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sesame-core",
+ "sha1",
+ "sha2 0.11.1",
+ "sha3",
+ "shake",
+ "tokio",
+ "ts-rs",
+ "unicode-security",
+ "url",
+ "x25519-dalek",
  "zeroize",
 ]
 

@@ -2,19 +2,19 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod adapters;
-mod application;
 mod browser_fill;
-mod browser_protocol;
 mod commands;
 #[cfg(feature = "wdio")]
 mod desktop_e2e;
 mod diagnostics;
-mod release;
+#[cfg(test)]
+mod record_writes_tests;
 mod rollback_guard;
-mod sync;
+mod vault;
+
+pub(crate) use sesame_app::{application, browser_protocol, release, sync};
 #[cfg(fuzzing)]
 pub use sync::fuzz_entry as sync_fuzz;
-mod vault;
 
 pub(crate) use adapters::network::website_icons;
 pub(crate) use adapters::platform::{
@@ -257,6 +257,7 @@ fn prepare_release_webview_environment() {
 )))]
 fn prepare_release_webview_environment() {}
 
+#[allow(clippy::expect_used)]
 pub fn run() {
     // Before Tauri or WebView2 loads any optional DLL; a failure restores the unsafe search path.
     if dll_search::harden_process().is_err() {
