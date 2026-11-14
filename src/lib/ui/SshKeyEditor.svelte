@@ -92,7 +92,7 @@
     <label>Passphrase
       <span class="password-field single">
         <input name="ssh-passphrase" bind:value={keyDraft.passphrase} maxlength="256" autocomplete="off" spellcheck="false" type={passphraseVisible ? 'text' : 'password'} />
-        <button type="button" class="icon-button" aria-label={passphraseVisible ? 'Hide passphrase' : 'Show passphrase'} aria-pressed={passphraseVisible} on:click={() => (passphraseVisible = !passphraseVisible)}><Icon name={passphraseVisible ? 'eye-off' : 'eye'} size={15} /></button>
+        <button type="button" class="icon-button" aria-label={passphraseVisible ? 'Hide passphrase' : 'Show passphrase'} title={passphraseVisible ? 'Hide passphrase' : 'Show passphrase'} aria-pressed={passphraseVisible} on:click={() => (passphraseVisible = !passphraseVisible)}><Icon name={passphraseVisible ? 'eye-off' : 'eye'} size={15} /></button>
       </span>
     </label>
     <KeptSecret draft={keyDraft} key="passphrase" typed={keyDraft.passphrase} onChange={(next) => (keyDraft = { ...keyDraft, ...next })} />

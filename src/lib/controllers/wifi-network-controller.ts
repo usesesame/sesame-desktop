@@ -25,7 +25,7 @@ export function createWifiNetworkController(options: RecordControllerOptions) {
       addTitle: 'Add a network',
       editTitle: 'Edit network',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Network saved' : 'Network updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Network deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Network deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

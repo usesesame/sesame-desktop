@@ -1,11 +1,18 @@
 import { controllerStore } from './controller-store'
 
+export interface NoticeAction {
+  label: string
+  run: () => void
+}
+
 export interface AppNotice {
   title: string
   message: string
+  action?: NoticeAction
 }
 
 const NOTICE_MS = 4_800
+const NOTICE_WITH_ACTION_MS = 9_000
 const NOTICE_MIN_READ_MS = 1_000
 
 export function messageFor(error: unknown) {
@@ -45,14 +52,15 @@ export function createFeedbackController() {
     setErrorMessage(errorMessage: string) {
       state.patch({ errorMessage })
     },
-    showNotice(title: string, message: string) {
-      state.patch({ notice: { title, message } })
+    showNotice(title: string, message: string, action?: NoticeAction) {
+      const duration = action ? NOTICE_WITH_ACTION_MS : NOTICE_MS
+      state.patch({ notice: action ? { title, message, action } : { title, message } })
       if (noticeHeld) {
         clearNoticeTimer()
-        noticeRemainingMs = NOTICE_MS
+        noticeRemainingMs = duration
         return
       }
-      startNoticeTimer(NOTICE_MS)
+      startNoticeTimer(duration)
     },
     holdNotice() {
       noticeHeld = true

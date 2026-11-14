@@ -83,7 +83,7 @@ export function createDocumentController(options: RecordControllerOptions) {
       addTitle: 'Add a document',
       editTitle: 'Edit document',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Document saved' : 'Document updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Document deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Document deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 

@@ -20,6 +20,7 @@ import {
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
+import { undoDeleteAction } from './undo-delete'
 
 interface CleanupControllerOptions {
   stores: AppStores
@@ -134,6 +135,52 @@ export function createCleanupController(options: CleanupControllerOptions) {
     }
   }
 
+  async function deleteTargets(candidate: CleanupEntry, targets: CleanupEntry[]) {
+    state.patch({ cleanupWorking: true })
+    feedback.clearError()
+    let lastSnapshot: Awaited<ReturnType<typeof deleteLogin>>['snapshot'] | null = null
+    let deleted = 0
+    try {
+      for (const target of targets) {
+        lastSnapshot = (await deleteLogin(target.id)).snapshot
+        deleted += 1
+        if (!vault.value().status.unlocked) break
+      }
+      if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
+      modal.close('delete-login')
+      state.patch({ deleteCandidate: null, deleteBatch: [] })
+      if (deleted !== targets.length) {
+        if (vault.value().status.unlocked) {
+          feedback.setErrorMessage('Sesame removed some logins before the vault locked. The rest were left untouched.')
+        }
+        return
+      }
+      const openCardDeleted = targets.some((target) => vault.value().loginCard?.id === target.id)
+      if (openCardDeleted) {
+        options.clearLoginSelection()
+        if (lastSnapshot?.entries[0]) await options.selectEntry(lastSnapshot.entries[0].id)
+      }
+      if (state.value().duplicateReviewOpen) await loadDuplicateGroups()
+      feedback.showNotice(
+        targets.length === 1 ? 'Login deleted' : 'Logins deleted',
+        targets.length === 1
+          ? `${candidate.title} is in Trash for 30 days.`
+          : `${targets.length} logins are in Trash for 30 days.`,
+        undoDeleteAction(targets.map((target) => target.id), { stores, feedback }),
+      )
+    } catch (error) {
+      if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
+      if (deleted > 0 && deleted < targets.length) {
+        state.patch({ deleteCandidate: targets[deleted], deleteBatch: targets.slice(deleted) })
+      }
+      void recordDiagnostic('vault_save', 'failed')
+      void options.refreshDiagnostics()
+      feedback.setError(error)
+    } finally {
+      state.patch({ cleanupWorking: false })
+    }
+  }
+
   return {
     state,
     loadDuplicateGroups,
@@ -192,46 +239,12 @@ export function createCleanupController(options: CleanupControllerOptions) {
       const candidate = state.value().deleteCandidate
       if (!candidate || state.value().cleanupWorking) return
       const batch = state.value().deleteBatch
-      const targets = batch.length ? batch : [candidate]
-      state.patch({ cleanupWorking: true })
-      feedback.clearError()
-      let lastSnapshot: Awaited<ReturnType<typeof deleteLogin>>['snapshot'] | null = null
-      let deleted = 0
-      try {
-        for (const target of targets) {
-          lastSnapshot = (await deleteLogin(target.id)).snapshot
-          deleted += 1
-          if (!vault.value().status.unlocked) break
-        }
-        if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
-        modal.close('delete-login')
-        state.patch({ deleteCandidate: null, deleteBatch: [] })
-        if (deleted !== targets.length) {
-          if (vault.value().status.unlocked) {
-            feedback.setErrorMessage('Sesame removed some logins before the vault locked. The rest were left untouched.')
-          }
-          return
-        }
-        const openCardDeleted = targets.some((target) => vault.value().loginCard?.id === target.id)
-        if (openCardDeleted) {
-          options.clearLoginSelection()
-          if (lastSnapshot?.entries[0]) await options.selectEntry(lastSnapshot.entries[0].id)
-        }
-        if (state.value().duplicateReviewOpen) await loadDuplicateGroups()
-        feedback.showNotice(
-          targets.length === 1 ? 'Login deleted' : 'Logins deleted',
-          targets.length === 1
-            ? `${candidate.title} was removed from your vault.`
-            : `${targets.length} logins were removed from your vault.`,
-        )
-      } catch (error) {
-        if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
-        void recordDiagnostic('vault_save', 'failed')
-        void options.refreshDiagnostics()
-        feedback.setError(error)
-      } finally {
-        state.patch({ cleanupWorking: false })
-      }
+      await deleteTargets(candidate, batch.length ? batch : [candidate])
+    },
+    async deleteConfirmed(entry: CleanupEntry) {
+      if (state.value().cleanupWorking) return
+      state.patch({ deleteCandidate: entry, deleteBatch: [] })
+      await deleteTargets(entry, [entry])
     },
     async confirmMerge() {
       const current = state.value()

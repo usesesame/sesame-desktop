@@ -66,7 +66,7 @@
   </div>
   <div class="login-title-actions">
     <button type="button" class="card-favourite" class:active={detail.favourite} aria-label={detail.favourite ? 'Remove from favourites' : 'Add to favourites'} aria-pressed={detail.favourite} on:click={() => onToggleFavourite(!detail.favourite)}>{detail.favourite ? '★' : '☆'}</button>
-    <button type="button" class="more-button" aria-label={`Edit ${detail.title}`} on:click={onEdit}><Icon name="more" size={19} /></button>
+    <button type="button" class="more-button" aria-label={`Edit ${detail.title}`} title={`Edit ${detail.title}`} on:click={onEdit}><Icon name="more" size={19} /></button>
   </div>
 </div>
 
@@ -82,9 +82,9 @@
           <code>{shownValue(field)}</code>
         {/if}
         {#if field.secret}
-          <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
+          <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
         {/if}
-        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
+        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
       </div>
       {/if}
     {/each}
@@ -97,9 +97,9 @@
         <h3>{field.label}</h3>
         <div class="multiline-field-actions">
           {#if field.secret}
-            <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
+            <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
           {/if}
-          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
+          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
         </div>
       </div>
       {#if field.secret && !isShown(field)}

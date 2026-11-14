@@ -21,7 +21,7 @@
   {#if folders.length}
     <div class="folder-manager-list">
       {#each folders as folder (folder.id)}
-        <article><span class="folder-manager-icon"><Icon name="folder" size={16} /></span><div><strong>{folder.name}</strong><small>{count(folder)} {count(folder) === 1 ? 'login' : 'logins'}</small></div><button type="button" disabled={working} on:click={() => onRename(folder)} aria-label={`Rename ${folder.name}`}><Icon name="pencil" size={15} /></button><button type="button" disabled={working} on:click={() => onUnfile(folder)} aria-label={`Move ${folder.name} logins to Unfiled`}><Icon name="folder-minus" size={15} /></button></article>
+        <article><span class="folder-manager-icon"><Icon name="folder" size={16} /></span><div><strong>{folder.name}</strong><small>{count(folder)} {count(folder) === 1 ? 'login' : 'logins'}</small></div><button type="button" disabled={working} on:click={() => onRename(folder)} aria-label={`Rename ${folder.name}`} title={`Rename ${folder.name}`}><Icon name="pencil" size={15} /></button><button type="button" disabled={working} on:click={() => onUnfile(folder)} aria-label={`Move ${folder.name} logins to Unfiled`} title={`Move ${folder.name} logins to Unfiled`}><Icon name="folder-minus" size={15} /></button></article>
       {/each}
     </div>
   {:else}
