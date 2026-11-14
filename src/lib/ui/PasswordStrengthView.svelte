@@ -70,7 +70,7 @@
           on:input={scheduleCheck}
         />
         <button type="button" class="icon-button" aria-label={revealed ? 'Hide password' : 'Show password'} on:click={() => (revealed = !revealed)}><Icon name={revealed ? 'eye-off' : 'eye'} size={15} /></button>
-        <button type="button" class="icon-button" aria-label="Clear" disabled={!value} on:click={clear}><Icon name="trash" size={15} /></button>
+        <button type="button" class="icon-button" aria-label="Clear" title="Clear" disabled={!value} on:click={clear}><Icon name="trash" size={15} /></button>
       </div>
       <div class="strength-track" aria-hidden="true"><span class:weak={label === 'Weak'} style={`width: ${percent}%`}></span></div>
       <p class="strength-privacy-note">Checked on this device. Nothing typed here is saved or sent.</p>

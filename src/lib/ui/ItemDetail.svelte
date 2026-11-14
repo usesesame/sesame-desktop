@@ -66,7 +66,7 @@
   </div>
   <div class="login-title-actions">
     <button type="button" class="card-favourite" class:active={detail.favourite} aria-label={detail.favourite ? 'Remove from favourites' : 'Add to favourites'} aria-pressed={detail.favourite} on:click={() => onToggleFavourite(!detail.favourite)}>{detail.favourite ? '★' : '☆'}</button>
-    <button type="button" class="more-button" aria-label={`Edit ${detail.title}`} on:click={onEdit}><Icon name="more" size={19} /></button>
+    <button type="button" class="more-button" aria-label={`Edit ${detail.title}`} title={`Edit ${detail.title}`} on:click={onEdit}><Icon name="more" size={19} /></button>
   </div>
 </div>
 
