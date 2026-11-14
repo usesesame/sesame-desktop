@@ -1240,9 +1240,12 @@ mod applied_digest_tests {
     fn taking_a_new_key_does_not_make_a_synced_vault_look_edited() {
         let mut vault = session();
         let mut state = state_matching(&vault);
-        let kept =
-            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault, None)
-                .expect("digest");
+        let kept = crate::application::sync_adopt::digest_kept_through_adoption(
+            &state,
+            &vault,
+            [None, None],
+        )
+        .expect("digest");
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         state.payload_digest = kept.expect("a clean vault keeps its digest");
@@ -1259,8 +1262,12 @@ mod applied_digest_tests {
         assert!(state.has_local_changes(&bytes_of(&vault)));
 
         assert_eq!(
-            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault, None)
-                .expect("digest"),
+            crate::application::sync_adopt::digest_kept_through_adoption(
+                &state,
+                &vault,
+                [None, None],
+            )
+            .expect("digest"),
             None
         );
         let payload = vault.open_payload().expect("payload").clone();
@@ -1296,7 +1303,10 @@ mod applied_digest_tests {
         let mut state = state_matching(&vault);
 
         let kept = crate::application::sync_adopt::KeptThroughAdoption::capture(
-            &state, &list, &vault, None,
+            &state,
+            &list,
+            &vault,
+            [None, None],
         )
         .expect("kept");
         let payload = vault.open_payload().expect("payload").clone();
@@ -1772,11 +1782,26 @@ mod adoption_and_publish_tests {
 
     struct LostActivation {
         vault: TestVault,
-        _scratch: Scratch,
+        scratch: Scratch,
         store: SyncStore,
         world: Arc<Mutex<FakeSyncWorld>>,
         new_key: [u8; 32],
         acting_device_id: String,
+    }
+
+    impl LostActivation {
+        fn block_vault_writes(&self) -> PathBuf {
+            let blocked = self.scratch.path.join("blocked");
+            std::fs::write(&blocked, b"not a directory").expect("blocking file");
+            let mut session = self.vault.state.session.lock().expect("session lock");
+            let unlocked = session.as_mut().expect("unlocked");
+            std::mem::replace(&mut unlocked.path, blocked.join("vault.sesame"))
+        }
+
+        fn allow_vault_writes(&self, original: PathBuf) {
+            let mut session = self.vault.state.session.lock().expect("session lock");
+            session.as_mut().expect("unlocked").path = original;
+        }
     }
 
     fn lost_activation() -> LostActivation {
@@ -1824,7 +1849,7 @@ mod adoption_and_publish_tests {
         world.drop_activation_answer = true;
         LostActivation {
             vault,
-            _scratch: scratch,
+            scratch,
             store,
             world: Arc::new(Mutex::new(world)),
             new_key,
@@ -1928,6 +1953,65 @@ mod adoption_and_publish_tests {
             shown.get(&fixture.acting_device_id).map(String::as_str),
             Some("Fictional laptop"),
             "the name read under the old key survives the retry"
+        );
+    }
+
+    #[test]
+    fn a_replay_whose_vault_commit_fails_is_retried_without_a_local_change() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let original = fixture.block_vault_writes();
+        let replay = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &replay).expect_err("the replay cannot save the vault");
+        fixture.allow_vault_writes(original);
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the next retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the adoption's revision bump is not a local edit"
+        );
+    }
+
+    #[test]
+    fn an_edit_between_a_failed_replay_and_its_retry_is_still_local() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let original = fixture.block_vault_writes();
+        let replay = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &replay).expect_err("the replay cannot save the vault");
+        fixture.allow_vault_writes(original);
+        fixture.vault.seed(|payload| {
+            payload.vault_name = "Fictional vault edited after the failed replay".into()
+        });
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the next retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the edit made after the failed replay is still local"
         );
     }
 

@@ -36,6 +36,8 @@ struct StoredJournal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     adopted_payload_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    prospective_payload_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     protected_recovery_kit: Option<String>,
 }
 
@@ -62,6 +64,7 @@ pub struct Journal {
     pub purpose: Purpose,
     pub package_digest: Option<String>,
     pub adopted_payload_digest: Option<String>,
+    pub prospective_payload_digest: Option<String>,
     recovery_kit: Option<Zeroizing<String>>,
     key: Zeroizing<[u8; 32]>,
 }
@@ -101,6 +104,7 @@ impl Journal {
             purpose: Purpose::Rekey,
             package_digest: None,
             adopted_payload_digest: None,
+            prospective_payload_digest: None,
             recovery_kit: None,
             key: Zeroizing::new(*key),
         }
@@ -112,7 +116,7 @@ impl Journal {
         key: &[u8; 32],
         recovery: PreparedRecovery,
         recovery_kit: String,
-        adopted_payload_digest: Option<&str>,
+        prospective_payload_digest: Option<&str>,
         created_at: u64,
     ) -> VaultResult<Self> {
         let entry_index = list
@@ -128,7 +132,8 @@ impl Journal {
             recovery: Some(recovery),
             purpose: Purpose::Adoption,
             package_digest: Some(package.digest()),
-            adopted_payload_digest: adopted_payload_digest.map(str::to_string),
+            adopted_payload_digest: None,
+            prospective_payload_digest: prospective_payload_digest.map(str::to_string),
             recovery_kit: Some(Zeroizing::new(recovery_kit)),
             key: Zeroizing::new(*key),
         })
@@ -140,6 +145,13 @@ impl Journal {
 
     pub fn recovery_kit(&self) -> Option<String> {
         self.recovery_kit.as_ref().map(|kit| kit.to_string())
+    }
+
+    pub fn adoption_digests(&self) -> [Option<&str>; 2] {
+        [
+            self.adopted_payload_digest.as_deref(),
+            self.prospective_payload_digest.as_deref(),
+        ]
     }
 
     pub fn save(&self, path: &Path) -> VaultResult<()> {
@@ -170,6 +182,7 @@ impl Journal {
             },
             package_digest: self.package_digest.clone(),
             adopted_payload_digest: self.adopted_payload_digest.clone(),
+            prospective_payload_digest: self.prospective_payload_digest.clone(),
             protected_recovery_kit,
         };
         protected.zeroize();
@@ -248,6 +261,7 @@ impl Journal {
             purpose,
             package_digest: stored.package_digest,
             adopted_payload_digest: stored.adopted_payload_digest,
+            prospective_payload_digest: stored.prospective_payload_digest,
             recovery_kit,
             key: Zeroizing::new(key),
         })
@@ -381,6 +395,30 @@ mod tests {
         let loaded = Journal::load(&path).expect("loaded");
         assert!(loaded.recovery.is_none());
         assert_eq!(loaded.key(), [4u8; 32]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn adoption_digests_are_optional_and_round_trip_separately() {
+        let world = world();
+        let (path, _) = saved(&world, "digests");
+        rewritten(&path, |body| {
+            body["adoptedPayloadDigest"] = serde_json::json!("digest-committed");
+            body["prospectivePayloadDigest"] = serde_json::json!("digest-prospective");
+        });
+        let loaded = Journal::load(&path).expect("loaded");
+        assert_eq!(
+            loaded.adoption_digests(),
+            [Some("digest-committed"), Some("digest-prospective")]
+        );
+        rewritten(&path, |body| {
+            body.as_object_mut().unwrap().remove("adoptedPayloadDigest");
+            body.as_object_mut()
+                .unwrap()
+                .remove("prospectivePayloadDigest");
+        });
+        let loaded = Journal::load(&path).expect("loaded");
+        assert_eq!(loaded.adoption_digests(), [None, None]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
