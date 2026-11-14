@@ -20,7 +20,7 @@ function json(path) {
 test('the published contract matches the implementation that serves it', () => {
   const contract = json(join(canonical, 'contract.json'))
   const vectors = json(join(canonical, 'vectors.json'))
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
 
   assert.equal(contract.protocolVersion, 1)
   assert.equal(contract.compatibility.minimumHostProtocolVersion, 1)
@@ -32,7 +32,7 @@ test('the published contract matches the implementation that serves it', () => {
 })
 
 test('only the current contract version of each message type is accepted', () => {
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
   const v6 = json(join(capabilitiesCanonical, 'contract.json'))
   const matrix = {
     capabilities: 6,
@@ -102,7 +102,7 @@ test('capabilities answer desktop availability only on a new tagged contract', (
   assert.deepEqual(Object.keys(capabilities.properties), capabilities.required)
   assert.equal(capabilities.additionalProperties, false)
 
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
   assert.match(rust, /pub fn capabilities\(request_id: &str, desktop_available: bool\)/)
   assert.match(
     rust,
@@ -111,7 +111,7 @@ test('capabilities answer desktop availability only on a new tagged contract', (
 
   const fill = readFileSync(join(root, 'src-tauri', 'src', 'browser_fill.rs'), 'utf8')
   const replies = readFileSync(
-    join(root, 'src-tauri', 'src', 'application', 'browser_replies.rs'),
+    join(root, 'src-tauri', 'sesame-app', 'src', 'application', 'browser_replies.rs'),
     'utf8',
   )
   const capabilitiesStart = replies.indexOf('fn capabilities_response(')
@@ -158,7 +158,7 @@ test('capabilities answer desktop availability only on a new tagged contract', (
 })
 
 test('the host implementation names no consumer of its protocol', () => {
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
   assert.doesNotMatch(rust, /extensions[\\/]sesame|sesame-browser-extension/)
 })
 
@@ -185,7 +185,7 @@ test('card protocol v2 is HTTPS-only, card-only, and regression-vectored', () =>
   const requestSchema = json(join(cardCanonical, 'request.schema.json'))
   const responseSchema = json(join(cardCanonical, 'response.schema.json'))
   const vectors = json(join(cardCanonical, 'vectors.json'))
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
 
   assert.equal(contract.protocolVersion, 2)
   assert.deepEqual(contract.requestTypes, ['card'])
@@ -228,7 +228,7 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
   const responseSchema = json(join(fillMatchCanonical, 'response.schema.json'))
   const vectors = json(join(fillMatchCanonical, 'vectors.json'))
   const v1ResponseSchema = json(join(canonical, 'response.schema.json'))
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
 
   assert.equal(contract.protocolVersion, 3)
   assert.deepEqual(contract.requestTypes, ['fill'])
@@ -276,7 +276,7 @@ test('lookalike protocol v5 warns with a bounded stored host and is regression-v
   const vectors = json(join(lookalikeCanonical, 'vectors.json'))
   const v3RequestSchema = json(join(fillMatchCanonical, 'request.schema.json'))
   const v3ResponseSchema = json(join(fillMatchCanonical, 'response.schema.json'))
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
 
   assert.equal(contract.tag, 'browser-protocol-v5')
   assert.equal(contract.protocolVersion, 5)
@@ -375,7 +375,7 @@ test('totp protocol v4 derives a code only after an origin approval', () => {
   const responseSchema = json(join(totpCanonical, 'response.schema.json'))
   const vectors = json(join(totpCanonical, 'vectors.json'))
   const v3RequestSchema = json(join(fillMatchCanonical, 'request.schema.json'))
-  const rust = readFileSync(join(root, 'src-tauri', 'src', 'browser_protocol.rs'), 'utf8')
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
 
   assert.equal(contract.tag, 'browser-protocol-v4')
   assert.equal(contract.protocolVersion, 4)

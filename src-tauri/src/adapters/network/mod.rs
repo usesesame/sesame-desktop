@@ -15,6 +15,4 @@ pub(crate) mod trusted_time;
 pub(crate) mod update_freshness;
 pub(crate) mod website_icons;
 
-pub(crate) fn ensure_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-}
+pub(crate) use sesame_app::network::ensure_crypto_provider;

@@ -10,7 +10,7 @@ const GATED_RELEASES = ['export_backup', 'export_vault_csv', 'export_recovery_ki
 
 test('every deliberate release command requires presence in Rust', () => {
   const commands = read('src-tauri', 'src', 'commands', 'backups.rs')
-  const application = read('src-tauri', 'src', 'application', 'backups.rs')
+  const application = read('src-tauri', 'sesame-app', 'src', 'application', 'backups.rs')
   for (const command of GATED_RELEASES) {
     const commandStart = commands.indexOf(`pub fn ${command}(`)
     assert.ok(commandStart >= 0, `${command} does not exist`)
@@ -21,9 +21,9 @@ test('every deliberate release command requires presence in Rust', () => {
       new RegExp(`\\b${command}_in_state\\(`),
       `${command} does not call its application rule`,
     )
-    const start = application.indexOf(`pub(crate) fn ${command}_in_state(`)
+    const start = application.indexOf(`pub fn ${command}_in_state(`)
     assert.ok(start >= 0, `${command}_in_state does not exist in the application module`)
-    const next = application.indexOf('\npub(crate) fn ', start)
+    const next = application.indexOf('\npub fn ', start)
     const body = application.slice(start, next === -1 ? application.length : next)
     assert.match(
       body,
@@ -34,7 +34,7 @@ test('every deliberate release command requires presence in Rust', () => {
 })
 
 test('the release sentinel and the grant command agree across the seam', () => {
-  const presence = read('src-tauri', 'src', 'release.rs')
+  const presence = read('src-tauri', 'sesame-app', 'src', 'release.rs')
   assert.match(presence, /PRESENCE_REQUIRED: &str = "presenceRequired"/)
   assert.match(presence, /PRESENCE_TTL: Duration = Duration::from_secs\(\d+\)/)
 
@@ -51,7 +51,7 @@ test('the release sentinel and the grant command agree across the seam', () => {
 })
 
 test('release verification re-authenticates instead of trusting the session', () => {
-  const presence = read('src-tauri', 'src', 'release.rs')
+  const presence = read('src-tauri', 'sesame-app', 'src', 'release.rs')
   assert.match(presence, /unwrap_with_password\(/)
   assert.match(presence, /bytes_match\(/)
   const crypto = read('src-tauri', 'sesame-core', 'src', 'crypto.rs')
@@ -80,10 +80,10 @@ test('the saved password is revealed only through a presence gate', () => {
     /reveal_login_secret_in_state\(/,
     'reveal_login_secret does not call its application rule',
   )
-  const rules = read('src-tauri', 'src', 'application', 'logins.rs')
-  const ruleStart = rules.indexOf('pub(crate) fn reveal_login_secret_in_state(')
+  const rules = read('src-tauri', 'sesame-app', 'src', 'application', 'logins.rs')
+  const ruleStart = rules.indexOf('pub fn reveal_login_secret_in_state(')
   assert.ok(ruleStart >= 0, 'reveal_login_secret_in_state is missing from the application module')
-  const body = rules.slice(ruleStart, rules.indexOf('\npub(crate) fn ', ruleStart))
+  const body = rules.slice(ruleStart, rules.indexOf('\npub fn ', ruleStart))
   assert.match(body, /require_release_presence\(state, presence\)\?/)
   assert.ok(
     body.indexOf('require_release_presence(state, presence)?') < body.indexOf('session.open_item('),
@@ -136,10 +136,10 @@ test('a blank password on edit keeps the stored secret', () => {
     /save_login_in_state\(/,
     'save_login does not call its application rule',
   )
-  const rules = read('src-tauri', 'src', 'application', 'logins.rs')
-  const ruleStart = rules.indexOf('pub(crate) fn save_login_in_state(')
+  const rules = read('src-tauri', 'sesame-app', 'src', 'application', 'logins.rs')
+  const ruleStart = rules.indexOf('pub fn save_login_in_state(')
   assert.ok(ruleStart >= 0, 'save_login_in_state is missing from the application module')
-  const ruleBody = rules.slice(ruleStart, rules.indexOf('\npub(crate) fn ', ruleStart))
+  const ruleBody = rules.slice(ruleStart, rules.indexOf('\npub fn ', ruleStart))
   assert.match(
     ruleBody,
     /payload_with_saved_login\(/,

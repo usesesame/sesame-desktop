@@ -30,21 +30,6 @@ use crate::browser_host::HOST_FILE_NAME;
 
 const APPROVAL_POLL: Duration = Duration::from_millis(200);
 
-#[cfg(test)]
-pub(crate) fn test_update_candidate(
-    id: &str,
-    saved_origin: &str,
-) -> crate::application::browser_fill::BrowserFillCandidate {
-    crate::application::browser_fill::BrowserFillCandidate {
-        id: id.to_string(),
-        title: "Northwind".to_string(),
-        username: "fictional-user".to_string(),
-        email: String::new(),
-        saved_origin: saved_origin.to_string(),
-        match_kind: "exact",
-    }
-}
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserApprovalCancelledEvent {

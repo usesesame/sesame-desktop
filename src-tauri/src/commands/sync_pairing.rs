@@ -5,11 +5,11 @@ use tauri::AppHandle;
 use super::sync::local_data_dir;
 use super::sync_adopt::SyncAdoptResult;
 use crate::adapters::desktop_effects::DesktopHostEffects;
+use crate::adapters::network::sync::connect;
 use crate::application::sync::SyncStore;
 use crate::application::sync_pairing::{
     cancel_pairing, clear_shown_code, pairing_code, take_shown_code,
 };
-use crate::sync::client::SyncClient;
 use crate::vault::VaultState;
 
 pub use crate::application::sync_pairing::{ApprovedDeviceView, PairingCodeView};
@@ -48,7 +48,7 @@ async fn approve(
 ) -> Result<ApprovedDeviceView, String> {
     let code = take_shown_code()?;
     let started = Instant::now();
-    let client = SyncClient::connect(app).await?;
+    let client = connect(app).await?;
     let store = SyncStore::new(local_data_dir(app)?);
     let identity = store.this_identity()?;
     crate::application::sync_pairing::approve_in_state(
@@ -83,7 +83,7 @@ pub async fn sync_join_with_code(
         &label,
         &master_password,
     )?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync_join::join_with_code_in_state(
         &vault,
         &store,

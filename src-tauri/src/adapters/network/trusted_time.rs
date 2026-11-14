@@ -45,11 +45,7 @@ pub(crate) fn linked_time_source(connection: &ServiceConnectionFile) -> Option<L
     (!address.is_loopback()).then_some(LinkedTimeSource { address, pin })
 }
 
-pub(crate) fn parse_http_date(value: &str) -> Option<u64> {
-    chrono::DateTime::parse_from_rfc2822(value)
-        .ok()
-        .and_then(|moment| u64::try_from(moment.timestamp()).ok())
-}
+pub(crate) use sesame_app::network::time::parse_http_date;
 
 fn within_tolerance(first: u64, second: u64) -> VaultResult<TrustedTime> {
     let (earliest, latest) = (first.min(second), first.max(second));
