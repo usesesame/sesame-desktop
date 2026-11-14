@@ -19,7 +19,7 @@ use crate::application::sync_recovery::{
     list_conflict_backups_in_state, restore_conflict_backup_in_state,
 };
 use crate::application::tests::{Effect, FakeEffects};
-use crate::commands::test_support::{block_on, TestVault};
+use crate::commands::test_support::{block_on, pairing_state_guard, TestVault};
 use crate::sync::client::SyncClient;
 use crate::sync::conflict_backup::{self, Side};
 use crate::sync::identity::DeviceIdentity;
@@ -617,6 +617,7 @@ fn the_listing_skips_copies_this_key_cannot_open() {
 
 #[test]
 fn a_shown_pairing_code_is_kept_until_it_is_cancelled_or_replaced() {
+    let _pairing = pairing_state_guard();
     let first = pairing_code().expect("a code");
     assert_eq!(first.expires_in_seconds, 600);
     assert_eq!(take_shown_code().expect("shown"), first.code);

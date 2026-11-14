@@ -9,7 +9,7 @@ use crate::commands::test_support::TestVault;
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
 use crate::vault::crypto::{default_kdf_params, derive_key, encrypt_bytes};
-use crate::vault::storage::{persist_session, RECOVERY_REPLACEMENT_DELAY_SECS};
+use crate::vault::storage::{persist_session, write_vault_file, RECOVERY_REPLACEMENT_DELAY_SECS};
 use crate::vault::throttle::PersistedPinThrottle;
 use crate::vault::types::VaultFile;
 use crate::vault::{
@@ -20,14 +20,15 @@ use super::recovery_replacement::{
     begin_recovery_replacement_completion_in_state, begin_recovery_replacement_request_in_state,
     complete_recovery_replacement_in_state, complete_request,
     pending_recovery_replacement_in_state, pending_request, recovery_replacement_status,
-    write_request, RecoveryReplacementStatus, TrustedTime,
+    write_recovery_replacement_request_in_state, write_request, RecoveryReplacementStatus,
+    TrustedTime,
 };
 use super::tests::{grant, Effect, FakeEffects};
 use super::unlock::{
     accept_rollback_in_state, change_master_password_in_state, complete_recovery_setup_in_state,
     create_vault_in_state, get_vault_status_in_state, remove_unlock_pin_in_state,
     resume_recovery_setup_in_state, set_auto_lock_minutes_in_state, set_unlock_pin_in_state,
-    unlock_pin_vault_in_state,
+    unlock_pin_vault_in_state, unlock_recovery_vault_in_state,
 };
 use super::DesktopEffects;
 
@@ -41,6 +42,24 @@ const READY_AT: u64 = REQUESTED_AT + RECOVERY_REPLACEMENT_DELAY_SECS;
 
 fn lock_vault(vault: &TestVault) {
     *vault.state.session.lock().expect("session lock") = None;
+}
+
+struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!("sesame-recovery-unlock-{}", random_id()));
+        std::fs::create_dir_all(&path).expect("test directory");
+        Self { path }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 fn vault_bytes(vault: &TestVault) -> Vec<u8> {
@@ -79,6 +98,25 @@ fn password_request(current: Option<&str>, kit: Option<&str>) -> ChangeMasterPas
         recovery_kit: kit.map(str::to_string),
         new_password: REPLACEMENT_PASSWORD.to_string(),
     }
+}
+
+#[test]
+fn unlocking_with_a_recovery_kit_reenables_the_pin_throttle_state() {
+    let scratch = Scratch::new();
+    let path = scratch.path.join("vault.sesame");
+    let (opened, kit) = create_vault(MASTER_PASSWORD, "Fictional vault").expect("created vault");
+    write_vault_file(&path, &opened.file).expect("written vault");
+    let state = VaultState::default();
+    let effects = FakeEffects::new(path);
+
+    unlock_recovery_vault_in_state(&state, &effects, Zeroizing::new(kit))
+        .expect("unlocked with the recovery kit");
+
+    assert!(effects.calls().contains(&Effect::WritePinThrottle {
+        failures: 0,
+        locked_until_unix_ms: None,
+    }));
+    assert!(state.session.lock().expect("session lock").is_some());
 }
 
 #[test]
@@ -278,6 +316,27 @@ fn recovery_replacement_needs_presence_before_reading_or_writing_requests() {
     assert_eq!(
         begin_recovery_replacement_completion_in_state(&vault.state, &presence, &effects),
         Err(PRESENCE_REQUIRED.to_string())
+    );
+    assert!(!effects
+        .recovery_replacement_path()
+        .expect("recovery replacement path")
+        .exists());
+}
+
+#[test]
+fn a_request_written_after_the_session_epoch_changed_is_refused() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    let captured = vault.state.session_epoch();
+    vault.state.advance_session_epoch();
+
+    let error =
+        write_recovery_replacement_request_in_state(&vault.state, &effects, REQUESTED_AT, captured)
+            .expect_err("a request from an earlier session must not be written");
+
+    assert_eq!(
+        error,
+        "Sesame changed while preparing the recovery kit request. Request it again."
     );
     assert!(!effects
         .recovery_replacement_path()

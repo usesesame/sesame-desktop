@@ -811,6 +811,55 @@
       "reason": "The fix is in minimatch 11, and eslint, @eslint/config-array and typescript-estree still require 10. minimatch is a development dependency that matches the file patterns in Sesame's own lint configuration. It is not part of the shipped app, and no outside input reaches it.",
       "reviewed": "2026-11-13",
       "expires": "2027-02-11"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-111423",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in how Kerberos services and the KDC check PAC server checksums, and Sesame is not a Kerberos service. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-71199",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in how Kerberos services validate CAMMAC verifiers, and Sesame is not a Kerberos service. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-107884",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in kadmind, the Kerberos admin server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-118380",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in the RPCSEC_GSS server side of libgssrpc, and Sesame makes no GSS-RPC calls. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-107364",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. It is one of the denial of service bugs MIT lists for the KDC, kadmind, application servers and client programs. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-71200",
+      "package": "krb5",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. It is one of the denial of service bugs MIT lists for the KDC, kadmind, application servers and client programs. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
+    },
+    {
+      "id": "UBUNTU-CVE-2026-121876",
+      "package": "systemd",
+      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in systemd-gpt-auto-generator, which mounts GPT partitions at boot in confidential computing guest images. The AppImage bundles only the libsystemd client library, and Sesame never runs the generator or mounts anything.",
+      "reviewed": "2026-11-14",
+      "expires": "2027-02-12"
     }
   ]
 }

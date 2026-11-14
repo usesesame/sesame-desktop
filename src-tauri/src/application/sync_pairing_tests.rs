@@ -19,7 +19,7 @@ use crate::application::sync_pairing::{
     set_cancelled, ApproveRequest, CLASSICAL_KEY_REFUSAL,
 };
 use crate::application::tests::FakeEffects;
-use crate::commands::test_support::{block_on, TestVault};
+use crate::commands::test_support::{block_on, pairing_state_guard, TestVault};
 use crate::sync::client::{PairingRecord, SyncClient};
 use crate::sync::devicelist::DeviceList;
 use crate::sync::engine::{
@@ -476,6 +476,7 @@ fn lost_pairing_responses_keep_the_authenticated_context_and_resume_without_pair
 
 #[test]
 fn a_join_with_the_wrong_master_password_is_refused_before_any_service_request() {
+    let _pairing = pairing_state_guard();
     let vault = TestVault::with_login("fictional-login", "https://northwind.example");
     let scratch = Scratch::new();
     let store = scratch.store();
@@ -492,6 +493,7 @@ fn a_join_with_the_wrong_master_password_is_refused_before_any_service_request()
 
 #[test]
 fn a_locked_vault_is_refused_before_the_other_device_is_contacted() {
+    let _pairing = pairing_state_guard();
     let vault = TestVault::with_login("fictional-login", "https://northwind.example");
     *vault.state.session.lock().expect("session lock") = None;
     let scratch = Scratch::new();
@@ -507,6 +509,7 @@ fn a_locked_vault_is_refused_before_the_other_device_is_contacted() {
 
 #[test]
 fn a_cancelled_pairing_stops_the_approve_loop_before_it_asks_for_devices() {
+    let _pairing = pairing_state_guard();
     let approver = Approver::new();
     let store = approver.store();
     let server = approver.server(Vec::new());
@@ -551,6 +554,7 @@ fn a_cancelled_pairing_stops_the_approve_loop_before_it_asks_for_devices() {
 
 #[test]
 fn a_cancelled_pairing_stops_the_join_loop_before_it_asks_for_the_answer() {
+    let _pairing = pairing_state_guard();
     let vault = TestVault::with_login("fictional-login", "https://northwind.example");
     let scratch = Scratch::new();
     let store = scratch.store();
@@ -601,6 +605,7 @@ fn a_cancelled_pairing_stops_the_join_loop_before_it_asks_for_the_answer() {
 
 #[test]
 fn an_offer_whose_newcomer_does_not_match_is_refused_without_adding_a_device() {
+    let _pairing = pairing_state_guard();
     let approver = Approver::new();
     let store = approver.store();
     let newcomer = DeviceIdentity::generate()
@@ -652,6 +657,7 @@ fn an_offer_whose_newcomer_does_not_match_is_refused_without_adding_a_device() {
 
 #[test]
 fn a_classical_newcomer_is_refused_for_a_hybrid_vault_unless_the_person_allows_it() {
+    let _pairing = pairing_state_guard();
     let approver = Approver::new();
     let store = approver.store();
     let newcomer = DeviceIdentity::generate()

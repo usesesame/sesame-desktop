@@ -146,9 +146,13 @@ pub(crate) fn begin_recovery_replacement_request_in_state(
     state: &VaultState,
     presence: &ReleasePresence,
     effects: &dyn DesktopEffects,
-) -> VaultResult<Option<u64>> {
-    require_release_presence(state, presence)?;
-    pending_recovery_replacement_in_state(state, effects)
+) -> VaultResult<(Option<u64>, u64)> {
+    let epoch = state.session_epoch();
+    presence.require(epoch)?;
+    Ok((
+        pending_recovery_replacement_in_state(state, effects)?,
+        epoch,
+    ))
 }
 
 pub(crate) fn begin_recovery_replacement_completion_in_state(
@@ -166,12 +170,19 @@ pub(crate) fn write_recovery_replacement_request_in_state(
     state: &VaultState,
     effects: &dyn DesktopEffects,
     requested_at: u64,
+    expected_epoch: u64,
 ) -> VaultResult<()> {
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    if state.session_epoch() != expected_epoch {
+        return Err(
+            "Sesame changed while preparing the recovery kit request. Request it again."
+                .to_string(),
+        );
+    }
     write_request(&effects.recovery_replacement_path()?, session, requested_at)
 }
 

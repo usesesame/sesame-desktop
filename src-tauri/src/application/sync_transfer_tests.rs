@@ -74,9 +74,15 @@ fn vault_id_of_test_vault(vault: &TestVault) -> String {
         .expect("vault id")
 }
 
-fn state_json(epoch: u64, revision: u64, device_state: &str, activated: u64) -> Value {
+fn state_json(
+    vault_id: &str,
+    epoch: u64,
+    revision: u64,
+    device_state: &str,
+    activated: u64,
+) -> Value {
     json!({
-        "vaultId": VAULT,
+        "vaultId": vault_id,
         "vaultEpoch": epoch,
         "currentRevision": revision,
         "deviceState": device_state,
@@ -181,7 +187,7 @@ fn an_upload_on_a_locked_vault_sends_nothing_and_keeps_the_sync_state() {
     store.save_state(&state).expect("saved state");
     let server = TestServer::start(|request: &Recorded| match request.path.as_str() {
         "/v1/sync/checkpoints" => checkpoint_not_found(),
-        "/v1/sync/state" => Reply::json(200, &state_json(1, 0, "approved", 1)),
+        "/v1/sync/state" => Reply::json(200, &state_json(VAULT, 1, 0, "approved", 1)),
         path if path.starts_with("/v1/sync/device-list") => {
             Reply::json(200, &json!({"entries": []}))
         }
@@ -227,7 +233,7 @@ fn a_lost_upload_answer_is_settled_from_the_service_head_instead_of_a_conflict()
         let header_json = remote.header_json.clone();
         move |request: &Recorded| match request.path.as_str() {
             "/v1/sync/checkpoints" => checkpoint_not_found(),
-            "/v1/sync/state" => Reply::json(200, &state_json(1, 1, "approved", 1)),
+            "/v1/sync/state" => Reply::json(200, &state_json(VAULT, 1, 1, "approved", 1)),
             path if path.starts_with("/v1/sync/device-list") => {
                 Reply::json(200, &json!({"entries": []}))
             }
@@ -281,7 +287,7 @@ fn a_download_whose_payload_does_not_decrypt_leaves_the_vault_file_unchanged() {
         let ciphertext = remote.ciphertext.clone();
         move |request: &Recorded| match request.path.as_str() {
             "/v1/sync/checkpoints" => checkpoint_not_found(),
-            "/v1/sync/state" => Reply::json(200, &state_json(1, 1, "approved", 1)),
+            "/v1/sync/state" => Reply::json(200, &state_json(&vault_id, 1, 1, "approved", 1)),
             path if path.starts_with("/v1/sync/device-list") => {
                 Reply::json(200, &json!({"entries": []}))
             }
@@ -302,13 +308,16 @@ fn a_download_whose_payload_does_not_decrypt_leaves_the_vault_file_unchanged() {
     let client = SyncClient::for_tests(&server.base(), "fictional-token", &remote.instance_key);
     let effects = FakeEffects::new(PathBuf::new());
 
-    assert!(block_on(download_vault_in_state(
-        &vault.state,
-        &store,
-        &client,
-        &effects,
-    ))
-    .is_err());
+    assert_eq!(
+        block_on(download_vault_in_state(
+            &vault.state,
+            &store,
+            &client,
+            &effects,
+        ))
+        .expect_err("the payload must not decrypt"),
+        "The vault data could not be authenticated. Restore a known-good encrypted backup."
+    );
     assert_eq!(
         std::fs::read(vault.path()).expect("vault bytes"),
         before,
@@ -475,9 +484,9 @@ fn leaving_a_vault_that_the_service_refuses_keeps_the_local_sync_state() {
     state.activated_epoch = 1;
     store.save_state(&state).expect("saved state");
     let before = std::fs::read(vault.path()).expect("vault bytes");
-    let server = TestServer::start(|request: &Recorded| match request.path.as_str() {
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
         "/v1/sync/checkpoints" => checkpoint_not_found(),
-        "/v1/sync/state" => Reply::json(200, &state_json(1, 0, "approved", 1)),
+        "/v1/sync/state" => Reply::json(200, &state_json(&vault_id, 1, 0, "approved", 1)),
         path if path.starts_with("/v1/sync/device-list") => {
             Reply::json(200, &json!({"entries": []}))
         }
@@ -487,15 +496,18 @@ fn leaving_a_vault_that_the_service_refuses_keeps_the_local_sync_state() {
     let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
     let effects = FakeEffects::new(PathBuf::new());
 
-    assert!(block_on(leave_vault_in_state(
-        &vault.state,
-        &store,
-        &effects,
-        &client,
-        &acting.device_id,
-        PASSWORD,
-    ))
-    .is_err());
+    assert_eq!(
+        block_on(leave_vault_in_state(
+            &vault.state,
+            &store,
+            &effects,
+            &client,
+            &acting.device_id,
+            PASSWORD,
+        ))
+        .expect_err("the service refused the removal"),
+        "Sesame Sync could not complete that request."
+    );
     assert_eq!(store.load_state().expect("state"), Some(state));
     assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
     assert!(!rekey_journal::is_pending(&store.journal_path()));
@@ -547,9 +559,9 @@ fn a_locked_vault_cannot_take_a_key() {
     state.entries = entries;
     state.activated_epoch = 1;
     store.save_state(&state).expect("saved state");
-    let server = TestServer::start(|request: &Recorded| match request.path.as_str() {
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
         "/v1/sync/checkpoints" => checkpoint_not_found(),
-        "/v1/sync/state" => Reply::json(200, &state_json(2, 0, "approved", 1)),
+        "/v1/sync/state" => Reply::json(200, &state_json(&vault_id, 2, 0, "approved", 1)),
         path if path.starts_with("/v1/sync/device-list") => {
             Reply::json(200, &json!({"entries": []}))
         }
@@ -586,7 +598,7 @@ fn a_rekey_needs_a_correct_master_password_before_any_service_change() {
     let before = std::fs::read(vault.path()).expect("vault bytes");
     let server = TestServer::start(|request: &Recorded| match request.path.as_str() {
         "/v1/sync/checkpoints" => checkpoint_not_found(),
-        "/v1/sync/state" => Reply::json(200, &state_json(1, 0, "approved", 1)),
+        "/v1/sync/state" => Reply::json(200, &state_json(VAULT, 1, 0, "approved", 1)),
         path if path.starts_with("/v1/sync/device-list") => {
             Reply::json(200, &json!({"entries": []}))
         }

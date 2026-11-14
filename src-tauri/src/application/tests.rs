@@ -91,6 +91,7 @@ pub(super) struct FakeEffects<'a> {
     copy_epoch: u64,
     health: RecoveryHealth,
     throttle: Mutex<Option<PersistedPinThrottle>>,
+    epoch_advance_on_pin_write: Option<&'a VaultState>,
     calls: Mutex<Vec<Effect>>,
 }
 
@@ -103,7 +104,15 @@ impl<'a> FakeEffects<'a> {
             copy_epoch: COPY_EPOCH,
             health: RecoveryHealth::default(),
             throttle: Mutex::new(None),
+            epoch_advance_on_pin_write: None,
             calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(super) fn with_epoch_advance_on_pin_write(path: PathBuf, state: &'a VaultState) -> Self {
+        Self {
+            epoch_advance_on_pin_write: Some(state),
+            ..Self::new(path)
         }
     }
 
@@ -256,6 +265,9 @@ impl DesktopEffects for FakeEffects<'_> {
             locked_until_unix_ms: persisted.locked_until_unix_ms,
         });
         *self.throttle.lock().expect("throttle lock") = Some(persisted);
+        if let Some(state) = self.epoch_advance_on_pin_write {
+            state.advance_session_epoch();
+        }
         Ok(())
     }
 
@@ -371,6 +383,30 @@ fn unlocking_installs_the_session_and_records_the_effects_in_order() {
                 locked_until_unix_ms: None,
             },
         ]
+    );
+}
+
+#[test]
+fn unlocking_grants_presence_for_the_epoch_it_installed() {
+    let vault = TempVault::new();
+    let state = VaultState::default();
+    let presence = ReleasePresence::default();
+    let effects = FakeEffects::with_epoch_advance_on_pin_write(vault.path.clone(), &state);
+    let installed = state.session_epoch() + 1;
+
+    unlock_vault_in_state(
+        &state,
+        &presence,
+        &effects,
+        Zeroizing::new(MASTER_PASSWORD.to_string()),
+    )
+    .expect("unlocked");
+
+    assert_eq!(state.session_epoch(), installed + 1);
+    assert!(presence.require(installed).is_ok());
+    assert_eq!(
+        presence.require(installed + 1),
+        Err(PRESENCE_REQUIRED.to_string())
     );
 }
 
