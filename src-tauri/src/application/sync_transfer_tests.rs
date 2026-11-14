@@ -91,11 +91,19 @@ fn state_json(
 }
 
 fn labels(vault_id: &str, devices: &[&DeviceIdentity]) -> Vec<DeviceListEntry> {
+    labels_sealed_with(&[9u8; 32], vault_id, devices)
+}
+
+fn labels_sealed_with(
+    label_key: &[u8; 32],
+    vault_id: &str,
+    devices: &[&DeviceIdentity],
+) -> Vec<DeviceListEntry> {
     let mut entries = vec![create_entry(
         devices[0],
         vault_id,
         &seal_label(
-            &[9u8; 32],
+            label_key,
             vault_id,
             &devices[0].device_id,
             "Fictional laptop",
@@ -112,7 +120,7 @@ fn labels(vault_id: &str, devices: &[&DeviceIdentity]) -> Vec<DeviceListEntry> {
                 signing_key: &URL_SAFE_NO_PAD.encode(device.signing_public_key()),
                 package_key: &URL_SAFE_NO_PAD.encode(device.package_public_key()),
             },
-            &seal_label(&[9u8; 32], vault_id, &device.device_id, "Fictional desktop")
+            &seal_label(label_key, vault_id, &device.device_id, "Fictional desktop")
                 .expect("label"),
             0,
         )
@@ -1768,6 +1776,7 @@ mod adoption_and_publish_tests {
         store: SyncStore,
         world: Arc<Mutex<FakeSyncWorld>>,
         new_key: [u8; 32],
+        acting_device_id: String,
     }
 
     fn lost_activation() -> LostActivation {
@@ -1780,7 +1789,7 @@ mod adoption_and_publish_tests {
         recipient
             .save(&store.identity_path())
             .expect("saved identity");
-        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let entries = labels_sealed_with(&vault_key(&vault), &vault_id, &[&acting, &recipient]);
         let list = DeviceList::verify(&entries).expect("list");
         let rotation = rotate_entry(&acting, &list).expect("rotation");
         let new_key = [5u8; 32];
@@ -1819,6 +1828,7 @@ mod adoption_and_publish_tests {
             store,
             world: Arc::new(Mutex::new(world)),
             new_key,
+            acting_device_id: acting.device_id,
         }
     }
 
@@ -1887,6 +1897,37 @@ mod adoption_and_publish_tests {
         assert!(
             saved.has_local_changes(&stored_plaintext(&fixture.vault)),
             "the edit made between attempts is still local"
+        );
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_keeps_names_read_with_the_old_key() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        let list = saved.list().expect("list");
+        let shown = crate::application::sync::names_for(
+            &list,
+            &saved.remembered_names(),
+            &saved.vault_id,
+            Some(&vault_key(&fixture.vault)),
+        );
+        assert_eq!(
+            shown.get(&fixture.acting_device_id).map(String::as_str),
+            Some("Fictional laptop"),
+            "the name read under the old key survives the retry"
         );
     }
 

@@ -390,6 +390,9 @@ pub(crate) async fn take_new_key_in_state(
             unix_now(),
         )?
         .save(&store.journal_path())?;
+        let mut named = local.clone();
+        named.remember_names(kept.names())?;
+        store.save_state(&named)?;
         adopt_with(unlocked, *key, payload, &master_password, Some(recovery))?;
         state.advance_session_epoch();
         (recovery_kit, kept)

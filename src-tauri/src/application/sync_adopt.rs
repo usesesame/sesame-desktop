@@ -113,6 +113,10 @@ impl KeptThroughAdoption {
         self.digest.as_deref()
     }
 
+    pub(crate) fn names(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.names
+    }
+
     pub(crate) fn apply(self, next: &mut crate::sync::state::SyncState) {
         if let Some(digest) = self.digest {
             next.payload_digest = digest;
