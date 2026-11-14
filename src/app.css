@@ -212,7 +212,10 @@ button.no-totp, .credential-button, .more-button {
 .toast button:hover { color: var(--accent-link); background: var(--tint); }
 .toast-timer { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; transform-origin: left; background: var(--ring-fill); animation: toast-countdown 4.8s linear both; }
 .toast:hover .toast-timer, .toast:focus-within .toast-timer { animation-play-state: paused; }
-.alert { border-color: var(--danger-tint); color: var(--danger); background: var(--danger-bg); }
+.toast.has-action { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.toast.has-action .toast-timer { animation-duration: 9s; }
+.toast .toast-action { width: auto; padding: 0 var(--space-2); color: var(--accent-link); font-size: var(--type-2); font-weight: var(--weight-bold); }
+.alert { z-index: 130; border-color: var(--danger-tint); color: var(--danger); background: var(--danger-bg); }
 .alert .toast-icon { color: var(--danger); background: var(--danger-tint); }
 .alert p { margin: 0; color: var(--danger); }
 .alert button:hover { color: var(--danger); background: var(--danger-tint); }
@@ -1228,6 +1231,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .editor-footer.discard-confirm p { margin: 0; color: var(--text-muted); font-size: var(--type-2); }
 .editor-footer.discard-confirm strong { color: var(--text); }
 .editor-footer-actions { display: flex; gap: var(--space-2); margin-left: auto; }
+.editor-footer.discard-confirm .editor-footer-actions button { white-space: nowrap; }
 .editor-delete { border: 0; border-radius: var(--radius-sm); padding: 0 var(--space-3); color: var(--danger); background: transparent; font-size: var(--type-2); font-weight: var(--weight-bold); }
 .editor-delete:hover { background: var(--danger-tint); }
 

@@ -25,7 +25,7 @@ export function createSoftwareLicenseController(options: RecordControllerOptions
       addTitle: 'Add a licence',
       editTitle: 'Edit licence',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Licence saved' : 'Licence updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Licence deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Licence deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

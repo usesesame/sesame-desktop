@@ -61,7 +61,7 @@
     <label>Password
       <span class="password-field single">
         <input name="wifi-password" bind:value={networkDraft.password} maxlength="256" autocomplete="off" spellcheck="false" type={passwordVisible ? 'text' : 'password'} />
-        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
+        <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} on:click={() => (passwordVisible = !passwordVisible)}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
       </span>
     </label>
     <KeptSecret draft={networkDraft} key="password" typed={networkDraft.password} onChange={(next) => (networkDraft = { ...networkDraft, ...next })} />

@@ -29,7 +29,7 @@
   >
     <span class="confirm-icon danger"><Icon name="alert" size={20} /></span>
     <h2 id="delete-login-heading">{bulk ? `Delete ${count} logins?` : `Delete ${deleteCandidate.title}?`}</h2>
-    <p id="delete-login-description">This removes the {bulk ? 'logins' : 'login'}, {bulk ? 'their' : 'its'} password, 2FA secret, and recovery details from your vault.</p>
+    <p id="delete-login-description">This removes the {bulk ? 'logins' : 'login'}, {bulk ? 'their' : 'its'} password, 2FA secret, and recovery details from your vault. {bulk ? 'They stay' : 'It stays'} in Trash for 30 days.</p>
     {#if bulk}
       <ul class="confirm-list">
         {#each deleteBatch as target (target.id)}

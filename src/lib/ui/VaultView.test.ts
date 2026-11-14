@@ -159,6 +159,7 @@ function renderReveal() {
     refreshDiagnostics: async () => {},
     requestDelete: () => {},
     requestBulkDelete: () => {},
+    deleteConfirmed: vi.fn(),
   })
   const rendered = render(VaultView, {
     props: vaultProps({

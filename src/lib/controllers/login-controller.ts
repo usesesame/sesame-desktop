@@ -53,9 +53,10 @@ interface LoginControllerOptions {
   refreshDiagnostics: () => Promise<void>
   requestDelete: (entry: CleanupEntry) => void
   requestBulkDelete: (entries: CleanupEntry[]) => void
+  deleteConfirmed: (entry: CleanupEntry) => Promise<void>
 }
 
-export function createLoginController({ stores, feedback, modal, presence, refreshDiagnostics, requestDelete, requestBulkDelete }: LoginControllerOptions) {
+export function createLoginController({ stores, feedback, modal, presence, refreshDiagnostics, requestDelete, requestBulkDelete, deleteConfirmed }: LoginControllerOptions) {
   const { selection, settings, totp, vault } = stores
   const state = controllerStore({
     passwordVisible: false,
@@ -545,11 +546,11 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       stopAutoTypeCountdown()
       state.patch({ autoTypeEntryId: '', autoTypeCountdown: 0 })
     },
-    requestCurrentDelete() {
+    async deleteCurrent() {
       const card = vault.value().loginCard
       if (!card) return
       closeEditor()
-      requestDelete({ id: card.id, title: card.title, site: card.site, username: card.username, initials: card.initials, reason: '' })
+      await deleteConfirmed({ id: card.id, title: card.title, site: card.site, username: card.username, initials: card.initials, reason: '' })
     },
     async markRecoveryNotApplicable() {
       const card = vault.value().loginCard

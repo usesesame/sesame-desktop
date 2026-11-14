@@ -91,6 +91,7 @@ function harness(activeItemId = 'login-a') {
     refreshDiagnostics: async () => {},
     requestDelete: () => {},
     requestBulkDelete: (entries) => deleted.push(entries.map((entry) => entry.id)),
+    deleteConfirmed: vi.fn(),
   })
   return { stores, feedback, controller, deleted, presence }
 }

@@ -1,7 +1,9 @@
 <script lang="ts">
   import Icon from '../Icon.svelte'
 
-  export let notice: { title: string; message: string } | null = null
+  import type { AppNotice } from '../controllers/feedback-controller'
+
+  export let notice: AppNotice | null = null
   export let errorMessage = ''
   export let onDismissNotice: () => void
   export let onDismissError: () => void
@@ -26,6 +28,12 @@
     focused = value
   }
 
+  function runAction() {
+    const action = notice?.action
+    onDismissNotice()
+    action?.run()
+  }
+
   function setPresence(nextHovered: boolean, nextFocused: boolean) {
     const wasHeld = hovered || focused
     const isHeld = nextHovered || nextFocused
@@ -35,9 +43,10 @@
 </script>
 
 {#if notice}
-  <div class="toast" role="status" aria-live="polite" aria-atomic="true" on:mouseenter={() => setPointer(true)} on:mouseleave={() => setPointer(false)} on:focusin={() => setFocus(true)} on:focusout={() => setFocus(false)}>
+  <div class="toast" class:has-action={Boolean(notice.action)} role="status" aria-live="polite" aria-atomic="true" on:mouseenter={() => setPointer(true)} on:mouseleave={() => setPointer(false)} on:focusin={() => setFocus(true)} on:focusout={() => setFocus(false)}>
     <span class="toast-icon" aria-hidden="true"><Icon name="check" size={15} strokeWidth={2.2} /></span>
     <div><strong>{notice.title}</strong><p>{notice.message}</p></div>
+    {#if notice.action}<button type="button" class="toast-action" on:click={runAction}>{notice.action.label}</button>{/if}
     <button type="button" aria-label="Dismiss notification" on:click={onDismissNotice}>×</button>
     <span class="toast-timer" aria-hidden="true"></span>
   </div>

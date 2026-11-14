@@ -109,7 +109,7 @@ describe('createRecordController', () => {
     expect(get(controller.state).deleteCandidate).toEqual({ id: 'item-1', title: 'Mine' })
     await controller.confirmDelete()
     expect(deleted).toEqual(['item-1'])
-    expect(get(feedback.state).notice).toEqual({ title: 'Thing deleted', message: 'Mine removed' })
+    expect(get(feedback.state).notice).toMatchObject({ title: 'Thing deleted', message: 'Mine removed', action: { label: 'Undo' } })
     expect(get(controller.state).deleteCandidate).toBeNull()
   })
 

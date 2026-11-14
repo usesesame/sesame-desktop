@@ -96,6 +96,7 @@
   let refreshDiagnostics = async () => {}
   let requestDelete = (_entry: Parameters<ReturnType<typeof createCleanupController>['requestDelete']>[0]) => {}
   let requestBulkDelete = (_entries: Parameters<ReturnType<typeof createCleanupController>['requestBulkDelete']>[0]) => {}
+  let deleteConfirmed = async (_entry: Parameters<ReturnType<typeof createCleanupController>['deleteConfirmed']>[0]) => {}
   let onVaultDeleted = (_message: string) => {}
   let onRestored = (_message: string) => {}
   let onNativeVaultLocked = () => {}
@@ -118,6 +119,7 @@
     refreshDiagnostics: () => refreshDiagnostics(),
     requestDelete: (entry) => requestDelete(entry),
     requestBulkDelete: (entries) => requestBulkDelete(entries),
+    deleteConfirmed: (entry) => deleteConfirmed(entry),
   })
   const loginState = loginController.state
   const folderOptions = loginController.folderOptions
@@ -177,6 +179,7 @@
   const cleanupState = cleanupController.state
   requestDelete = cleanupController.requestDelete
   requestBulkDelete = cleanupController.requestBulkDelete
+  deleteConfirmed = cleanupController.deleteConfirmed
 
   const browserFillController = createBrowserFillController({
     stores: appStores,
@@ -992,7 +995,7 @@
         backupCodeCount={$loginState.editorBackupCodeCount}
         onSubmit={loginController.submit}
         onClose={loginController.closeEditor}
-        onDelete={loginController.requestCurrentDelete}
+        onDelete={loginController.deleteCurrent}
       />
     {:else if active?.kind === 'identity-editor'}
       <IdentityEditor

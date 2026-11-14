@@ -25,7 +25,7 @@ export function createCardController(options: RecordControllerOptions) {
       addTitle: 'Add a card',
       editTitle: 'Edit card',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Card saved' : 'Card updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Card deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Card deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

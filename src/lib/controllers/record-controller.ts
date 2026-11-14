@@ -4,6 +4,7 @@ import { recordDiagnostic } from '../vault'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ActiveModal, ModalController, ModalKind } from './modal-controller'
+import { undoDeleteAction } from './undo-delete'
 
 export interface RecordControllerOptions {
   stores: AppStores
@@ -127,7 +128,7 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
         modal.close(config.deleteModalKind)
         state.patch({ deleteCandidate: null })
         const notice = config.copy.deletedNotice(candidate.title)
-        feedback.showNotice(notice.title, notice.body)
+        feedback.showNotice(notice.title, notice.body, undoDeleteAction([candidate.id], { stores, feedback }))
       } catch (error) {
         void recordDiagnostic('vault_save', 'failed')
         feedback.setError(error)

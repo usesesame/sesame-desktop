@@ -27,7 +27,7 @@ export function createIdentityController(options: RecordControllerOptions) {
       addTitle: 'Add an identity',
       editTitle: 'Edit identity',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Identity saved' : 'Identity updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Identity deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Identity deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

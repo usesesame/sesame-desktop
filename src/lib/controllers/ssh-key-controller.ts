@@ -25,7 +25,7 @@ export function createSshKeyController(options: RecordControllerOptions) {
       addTitle: 'Add a key',
       editTitle: 'Edit key',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Key saved' : 'Key updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Key deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Key deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }
