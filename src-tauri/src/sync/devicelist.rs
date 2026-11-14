@@ -206,6 +206,14 @@ impl DeviceList {
         self.digests.get(position).map(String::as_str)
     }
 
+    pub fn index_of_digest(&self, digest: &str) -> Option<u64> {
+        self.digests
+            .iter()
+            .position(|candidate| candidate == digest)
+            .and_then(|position| u64::try_from(position).ok())
+            .map(|position| position + 1)
+    }
+
     pub fn epoch_at(&self, index: u64) -> Option<u64> {
         let position = usize::try_from(index.checked_sub(1)?).ok()?;
         self.epochs.get(position).copied()

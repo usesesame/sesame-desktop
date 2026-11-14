@@ -91,11 +91,19 @@ fn state_json(
 }
 
 fn labels(vault_id: &str, devices: &[&DeviceIdentity]) -> Vec<DeviceListEntry> {
+    labels_sealed_with(&[9u8; 32], vault_id, devices)
+}
+
+fn labels_sealed_with(
+    label_key: &[u8; 32],
+    vault_id: &str,
+    devices: &[&DeviceIdentity],
+) -> Vec<DeviceListEntry> {
     let mut entries = vec![create_entry(
         devices[0],
         vault_id,
         &seal_label(
-            &[9u8; 32],
+            label_key,
             vault_id,
             &devices[0].device_id,
             "Fictional laptop",
@@ -112,7 +120,7 @@ fn labels(vault_id: &str, devices: &[&DeviceIdentity]) -> Vec<DeviceListEntry> {
                 signing_key: &URL_SAFE_NO_PAD.encode(device.signing_public_key()),
                 package_key: &URL_SAFE_NO_PAD.encode(device.package_public_key()),
             },
-            &seal_label(&[9u8; 32], vault_id, &device.device_id, "Fictional desktop")
+            &seal_label(label_key, vault_id, &device.device_id, "Fictional desktop")
                 .expect("label"),
             0,
         )
@@ -381,7 +389,7 @@ fn a_take_new_key_resumes_from_an_interrupted_journal() {
     )
     .save(&journal_path)
     .expect("saved journal");
-    let journal = Journal::load(&journal_path).expect("journal");
+    let mut journal = Journal::load(&journal_path).expect("journal");
     let mut local = SyncState::new(&vault_id, &acting.device_id);
     local.entries = entries;
     local.activated_epoch = 1;
@@ -424,7 +432,7 @@ fn a_take_new_key_resumes_from_an_interrupted_journal() {
             &effects,
             local.clone(),
             refreshed,
-            &journal,
+            &mut journal,
             PASSWORD,
         ),
     )
@@ -1232,8 +1240,12 @@ mod applied_digest_tests {
     fn taking_a_new_key_does_not_make_a_synced_vault_look_edited() {
         let mut vault = session();
         let mut state = state_matching(&vault);
-        let kept = crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault)
-            .expect("digest");
+        let kept = crate::application::sync_adopt::digest_kept_through_adoption(
+            &state,
+            &vault,
+            [None, None],
+        )
+        .expect("digest");
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         state.payload_digest = kept.expect("a clean vault keeps its digest");
@@ -1250,8 +1262,12 @@ mod applied_digest_tests {
         assert!(state.has_local_changes(&bytes_of(&vault)));
 
         assert_eq!(
-            crate::application::sync_adopt::digest_kept_through_adoption(&state, &vault)
-                .expect("digest"),
+            crate::application::sync_adopt::digest_kept_through_adoption(
+                &state,
+                &vault,
+                [None, None],
+            )
+            .expect("digest"),
             None
         );
         let payload = vault.open_payload().expect("payload").clone();
@@ -1286,9 +1302,13 @@ mod applied_digest_tests {
         let list = DeviceList::verify(std::slice::from_ref(&create)).expect("list");
         let mut state = state_matching(&vault);
 
-        let kept =
-            crate::application::sync_adopt::KeptThroughAdoption::capture(&state, &list, &vault)
-                .expect("kept");
+        let kept = crate::application::sync_adopt::KeptThroughAdoption::capture(
+            &state,
+            &list,
+            &vault,
+            [None, None],
+        )
+        .expect("kept");
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         kept.apply(&mut state);
@@ -1315,6 +1335,1028 @@ mod applied_digest_tests {
         let opened = decrypt_bytes(&wrapping, &recovery.wrap, RECOVERY_WRAP_AAD).expect("opens");
         assert_eq!(opened.as_slice(), [1u8; 32].as_slice());
         assert!(decrypt_bytes(&wrapping, &recovery.wrap, crate::vault::WRAP_AAD).is_err());
+    }
+}
+
+#[cfg(test)]
+mod save_after_disable_tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use super::*;
+    use crate::application::sync::Refreshed;
+    use crate::application::sync_transfer::record_checkpoint_if_due_in_state;
+    use crate::sync::client::StateView;
+    use crate::sync::engine::VerifiedUpdate;
+
+    #[test]
+    fn a_checkpoint_that_finishes_after_sync_was_turned_off_does_not_recreate_the_state() {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let identity = DeviceIdentity::generate().expect("identity");
+        identity
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&identity]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let mut local = SyncState::new(&vault_id, &identity.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        let (plaintext, _) = {
+            let session = vault.state.session.lock().expect("session lock");
+            local_payload_bytes(session.as_ref().expect("unlocked")).expect("payload")
+        };
+        local.payload_digest = payload_digest(&plaintext);
+        store.save_state(&local).expect("saved state");
+        let refreshed = Refreshed {
+            server: StateView {
+                vault_id: vault_id.clone(),
+                vault_epoch: 1,
+                current_revision: 0,
+                device_state: "approved".into(),
+                activated_epoch: 1,
+            },
+            update: VerifiedUpdate {
+                entries,
+                list,
+                head: None,
+                receipt: None,
+            },
+            confirmed_at: None,
+            peer_checks_skipped: false,
+        };
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let server = TestServer::start({
+            let started = started.clone();
+            let release = release.clone();
+            move |request: &Recorded| match (request.method.as_str(), request.path.as_str()) {
+                ("POST", "/v1/sync/checkpoints") => {
+                    started.wait();
+                    release.wait();
+                    Reply::json(200, &json!({}))
+                }
+                other => panic!("unexpected route {other:?}"),
+            }
+        });
+        let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+        let checkpoint_store = SyncStore::new(scratch.path.clone());
+        let checkpoint_vault_id = vault_id.clone();
+        let checkpoint_device = identity.device_id.clone();
+        let run = thread::spawn(move || {
+            let local = SyncState {
+                vault_id: checkpoint_vault_id,
+                device_id: checkpoint_device,
+                ..local
+            };
+            block_on(record_checkpoint_if_due_in_state(
+                &checkpoint_store,
+                &client,
+                &local,
+                &refreshed,
+            ));
+        });
+
+        started.wait();
+        store.forget_everything().expect("sync turned off");
+        release.wait();
+        run.join().expect("checkpoint thread");
+
+        assert!(
+            store.load_state().expect("state").is_none(),
+            "a checkpoint that finishes after Sync is off must not bring the state file back"
+        );
+        assert!(!store.identity_present());
+    }
+}
+
+#[cfg(test)]
+mod adoption_and_publish_tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::sync::request::Receipt;
+
+    const ACTING_TOKEN: &str = "fictional-acting-token";
+    const RECIPIENT_TOKEN: &str = "fictional-recipient-token";
+
+    struct FakeSyncWorld {
+        vault_id: String,
+        epoch: u64,
+        revision: u64,
+        device_state: String,
+        entries: Vec<DeviceListEntry>,
+        headers: Vec<Value>,
+        snapshot: Option<(Value, String)>,
+        packages: HashMap<String, KeyPackageV3>,
+        tokens: HashMap<String, String>,
+        activated: HashMap<String, u64>,
+        drop_activation_answer: bool,
+        fail_next_upload: bool,
+        instance: SigningKey,
+    }
+
+    impl FakeSyncWorld {
+        fn new(vault_id: &str, entries: Vec<DeviceListEntry>, epoch: u64) -> Self {
+            Self {
+                vault_id: vault_id.to_string(),
+                epoch,
+                revision: 0,
+                device_state: "approved".to_string(),
+                entries,
+                headers: Vec::new(),
+                snapshot: None,
+                packages: HashMap::new(),
+                tokens: HashMap::new(),
+                activated: HashMap::new(),
+                drop_activation_answer: false,
+                fail_next_upload: false,
+                instance: SigningKey::from_bytes(&[7u8; 32]),
+            }
+        }
+
+        fn instance_key(&self) -> String {
+            URL_SAFE_NO_PAD.encode(self.instance.verifying_key().as_bytes())
+        }
+    }
+
+    fn after_of(path: &str) -> u64 {
+        path.split("after=")
+            .nth(1)
+            .and_then(|value| value.split('&').next())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn served_header(header: &Header, instance: &SigningKey) -> (Value, String) {
+        let receipt = Receipt {
+            vault_id: &header.vault_id,
+            revision: header.revision,
+            header_digest: &header.digest(),
+            vault_epoch: header.vault_epoch,
+            accepted_at: ACCEPTED_UNIX,
+        };
+        let signature = instance.sign(&receipt.signing_payload());
+        let receipt = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+        let mut document = serde_json::to_value(header).expect("header json");
+        document["digest"] = json!(header.digest());
+        document["receipt"] = json!(receipt);
+        document["acceptedAt"] = json!(ACCEPTED_AT);
+        (document, receipt)
+    }
+
+    fn handler(
+        world: Arc<Mutex<FakeSyncWorld>>,
+    ) -> impl Fn(&Recorded) -> Reply + Send + Sync + 'static {
+        move |request: &Recorded| {
+            let token = request
+                .headers
+                .get("authorization")
+                .and_then(|value| value.strip_prefix("Sesame "))
+                .unwrap_or_default()
+                .to_string();
+            let mut world = world.lock().expect("world");
+            let device = world.tokens.get(&token).cloned().unwrap_or_default();
+            let activated = world.activated.get(&device).copied().unwrap_or(0);
+            match (request.method.as_str(), request.path.as_str()) {
+                ("GET", "/v1/sync/checkpoints") => checkpoint_not_found(),
+                ("POST", "/v1/sync/checkpoints") => Reply::json(200, &json!({})),
+                ("GET", "/v1/sync/state") => Reply::json(
+                    200,
+                    &json!({
+                        "vaultId": world.vault_id,
+                        "vaultEpoch": world.epoch,
+                        "currentRevision": world.revision,
+                        "deviceState": world.device_state,
+                        "activatedEpoch": activated,
+                    }),
+                ),
+                ("GET", path) if path.starts_with("/v1/sync/device-list") => {
+                    let after = after_of(path);
+                    let entries: Vec<DeviceListEntry> = world
+                        .entries
+                        .iter()
+                        .filter(|entry| entry.index > after)
+                        .cloned()
+                        .collect();
+                    Reply::json(200, &json!({ "entries": entries }))
+                }
+                ("GET", path) if path.starts_with("/v1/sync/headers") => {
+                    let after = after_of(path);
+                    let headers: Vec<Value> = world
+                        .headers
+                        .iter()
+                        .filter(|header| header["revision"].as_u64().unwrap_or(0) > after)
+                        .cloned()
+                        .collect();
+                    Reply::json(200, &json!({ "headers": headers }))
+                }
+                ("GET", "/v1/sync/key-package") => {
+                    let package = world
+                        .packages
+                        .get(&device)
+                        .cloned()
+                        .expect("key package for this device");
+                    Reply::json(200, &json!({ "package": package }))
+                }
+                ("POST", "/v1/sync/activate") => {
+                    let epoch = world.epoch;
+                    world.activated.insert(device, epoch);
+                    if world.drop_activation_answer {
+                        Reply::disconnect()
+                    } else {
+                        Reply::json(200, &json!({}))
+                    }
+                }
+                ("POST", "/v1/sync/devices/rotate") => {
+                    let body: Value = serde_json::from_slice(&request.body).expect("rotate body");
+                    let entry: DeviceListEntry =
+                        serde_json::from_value(body["entry"].clone()).expect("rotation");
+                    let packages: Vec<KeyPackageV3> =
+                        serde_json::from_value(body["packages"].clone()).expect("packages");
+                    world.entries.push(entry.clone());
+                    world.epoch = entry.epoch_after;
+                    if let Some(sender) = world.tokens.get(&token).cloned() {
+                        let epoch = world.epoch;
+                        world.activated.insert(sender, epoch);
+                    }
+                    for package in packages {
+                        world
+                            .packages
+                            .insert(package.recipient_device_id.clone(), package);
+                    }
+                    Reply::json(200, &json!({}))
+                }
+                ("POST", "/v1/sync/snapshots") => {
+                    if world.fail_next_upload {
+                        world.fail_next_upload = false;
+                        return Reply::json(500, &json!({"error":{"code":"sync_failed"}}));
+                    }
+                    let body: Value = serde_json::from_slice(&request.body).expect("upload body");
+                    let header: Header =
+                        serde_json::from_value(body["header"].clone()).expect("header");
+                    let ciphertext = body["ciphertext"].as_str().expect("ciphertext").to_string();
+                    let (document, receipt) = served_header(&header, &world.instance);
+                    let accepted = json!({
+                        "revision": header.revision,
+                        "digest": header.digest(),
+                        "receipt": receipt,
+                        "acceptedAt": ACCEPTED_AT,
+                    });
+                    world.revision = header.revision;
+                    world.headers.push(document.clone());
+                    world.snapshot = Some((document, ciphertext));
+                    Reply::json(200, &accepted)
+                }
+                ("GET", "/v1/sync/snapshot") => {
+                    let (header, ciphertext) = world.snapshot.clone().expect("stored snapshot");
+                    Reply::json(
+                        200,
+                        &json!({
+                            "header": header,
+                            "acceptedAt": ACCEPTED_AT,
+                            "ciphertext": ciphertext,
+                        }),
+                    )
+                }
+                other => panic!("unexpected route {other:?}"),
+            }
+        }
+    }
+
+    fn recovery_opens(vault: &UnlockedVault, kit: &str, key: &[u8; 32]) -> bool {
+        let (Some(kdf), Some(wrap)) = (&vault.recovery_kdf, &vault.recovery_wrap) else {
+            return false;
+        };
+        let wrapping = crate::vault::crypto::derive_key(kit, kdf).expect("derived");
+        decrypt_bytes(&wrapping, wrap, RECOVERY_WRAP_AAD)
+            .is_ok_and(|opened| opened.as_slice() == key.as_slice())
+    }
+
+    fn vault_key(vault: &TestVault) -> [u8; 32] {
+        let session = vault.state.session.lock().expect("session lock");
+        session
+            .as_ref()
+            .expect("unlocked")
+            .expose_vault_key(|key| Ok(*key))
+            .expect("key")
+    }
+
+    fn state_digest(vault: &TestVault, state: &mut SyncState) {
+        let (plaintext, _) = {
+            let session = vault.state.session.lock().expect("session lock");
+            local_payload_bytes(session.as_ref().expect("unlocked")).expect("payload")
+        };
+        state.payload_digest = payload_digest(&plaintext);
+    }
+
+    #[test]
+    fn a_lost_activation_answer_can_be_finished_after_a_restart_and_still_shows_the_kit() {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        recipient
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let rotation = rotate_entry(&acting, &list).expect("rotation");
+        let new_key = [5u8; 32];
+        let packages = survivor_packages(
+            &acting,
+            &list,
+            &vault_id,
+            &new_key,
+            &[acting.device_id.as_str()],
+            rotation.epoch_after,
+            &rotation.digest(),
+        )
+        .expect("packages");
+        let package = packages
+            .iter()
+            .find(|package| package.recipient_device_id == recipient.device_id)
+            .expect("recipient package")
+            .clone();
+        let mut local = SyncState::new(&vault_id, &recipient.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        state_digest(&vault, &mut local);
+        store.save_state(&local).expect("saved state");
+        let mut committed = entries.clone();
+        committed.push(rotation.clone());
+        let world = Arc::new(Mutex::new(FakeSyncWorld::new(&vault_id, committed, 2)));
+        {
+            let mut world = world.lock().expect("world");
+            world
+                .tokens
+                .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+            world.activated.insert(recipient.device_id.clone(), 1);
+            world.packages.insert(recipient.device_id.clone(), package);
+            world.drop_activation_answer = true;
+        }
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let old_key = vault_key(&vault);
+
+        let first = block_on(take_new_key_in_state(
+            &vault.state,
+            &store,
+            &effects,
+            &client,
+            PASSWORD.into(),
+        ));
+        assert!(first.is_err(), "the lost answer is reported as a failure");
+        assert!(
+            rekey_journal::is_pending(&store.journal_path()),
+            "the new key and its kit are saved before the vault changes"
+        );
+        assert_eq!(
+            vault_key(&vault),
+            new_key,
+            "the vault already holds the new key"
+        );
+        assert_ne!(vault_key(&vault), old_key);
+        assert_eq!(
+            store
+                .load_state()
+                .expect("state")
+                .expect("state")
+                .activated_epoch,
+            1,
+            "activation was not recorded locally"
+        );
+
+        world.lock().expect("world").drop_activation_answer = false;
+        let restarted = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        let result = block_on(take_new_key_in_state(
+            &vault.state,
+            &store,
+            &effects,
+            &restarted,
+            PASSWORD.into(),
+        ))
+        .expect("the retry finishes the saved adoption");
+
+        assert!(
+            !result.recovery_kit.is_empty(),
+            "the saved kit is shown again"
+        );
+        assert!(recovery_opens(
+            vault
+                .state
+                .session
+                .lock()
+                .expect("session lock")
+                .as_ref()
+                .expect("unlocked"),
+            &result.recovery_kit,
+            &new_key
+        ));
+        assert!(!rekey_journal::is_pending(&store.journal_path()));
+        assert_eq!(
+            store
+                .load_state()
+                .expect("state")
+                .expect("state")
+                .activated_epoch,
+            rotation.epoch_after
+        );
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/activate")
+                .count(),
+            1,
+            "the retry reads the service state instead of activating again"
+        );
+    }
+
+    struct LostActivation {
+        vault: TestVault,
+        scratch: Scratch,
+        store: SyncStore,
+        world: Arc<Mutex<FakeSyncWorld>>,
+        new_key: [u8; 32],
+        acting_device_id: String,
+    }
+
+    impl LostActivation {
+        fn block_vault_writes(&self) -> PathBuf {
+            let blocked = self.scratch.path.join("blocked");
+            std::fs::write(&blocked, b"not a directory").expect("blocking file");
+            let mut session = self.vault.state.session.lock().expect("session lock");
+            let unlocked = session.as_mut().expect("unlocked");
+            std::mem::replace(&mut unlocked.path, blocked.join("vault.sesame"))
+        }
+
+        fn allow_vault_writes(&self, original: PathBuf) {
+            let mut session = self.vault.state.session.lock().expect("session lock");
+            session.as_mut().expect("unlocked").path = original;
+        }
+    }
+
+    fn lost_activation() -> LostActivation {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&vault);
+        let scratch = Scratch::new();
+        let store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        recipient
+            .save(&store.identity_path())
+            .expect("saved identity");
+        let entries = labels_sealed_with(&vault_key(&vault), &vault_id, &[&acting, &recipient]);
+        let list = DeviceList::verify(&entries).expect("list");
+        let rotation = rotate_entry(&acting, &list).expect("rotation");
+        let new_key = [5u8; 32];
+        let packages = survivor_packages(
+            &acting,
+            &list,
+            &vault_id,
+            &new_key,
+            &[acting.device_id.as_str()],
+            rotation.epoch_after,
+            &rotation.digest(),
+        )
+        .expect("packages");
+        let package = packages
+            .iter()
+            .find(|package| package.recipient_device_id == recipient.device_id)
+            .expect("recipient package")
+            .clone();
+        let mut local = SyncState::new(&vault_id, &recipient.device_id);
+        local.entries = entries.clone();
+        local.activated_epoch = 1;
+        state_digest(&vault, &mut local);
+        store.save_state(&local).expect("saved state");
+        let mut committed = entries;
+        committed.push(rotation);
+        let mut world = FakeSyncWorld::new(&vault_id, committed, 2);
+        world
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world.activated.insert(recipient.device_id.clone(), 1);
+        world.packages.insert(recipient.device_id.clone(), package);
+        world.drop_activation_answer = true;
+        LostActivation {
+            vault,
+            scratch,
+            store,
+            world: Arc::new(Mutex::new(world)),
+            new_key,
+            acting_device_id: acting.device_id,
+        }
+    }
+
+    fn take_key(fixture: &LostActivation, client: &SyncClient) -> Result<(), String> {
+        block_on(take_new_key_in_state(
+            &fixture.vault.state,
+            &fixture.store,
+            &FakeEffects::new(PathBuf::new()),
+            client,
+            PASSWORD.into(),
+        ))
+        .map(|_| ())
+    }
+
+    fn stored_plaintext(vault: &TestVault) -> Vec<u8> {
+        let session = vault.state.session.lock().expect("session lock");
+        local_payload_bytes(session.as_ref().expect("unlocked"))
+            .expect("payload")
+            .0
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_leaves_the_vault_without_local_changes() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        assert_eq!(vault_key(&fixture.vault), fixture.new_key);
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "an adoption-only revision bump is not a local edit"
+        );
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_still_reports_an_edit_made_in_between() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture
+            .vault
+            .seed(|payload| payload.vault_name = "Fictional vault edited between attempts".into());
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the edit made between attempts is still local"
+        );
+    }
+
+    #[test]
+    fn a_retry_after_a_lost_activation_keeps_names_read_with_the_old_key() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        let list = saved.list().expect("list");
+        let shown = crate::application::sync::names_for(
+            &list,
+            &saved.remembered_names(),
+            &saved.vault_id,
+            Some(&vault_key(&fixture.vault)),
+        );
+        assert_eq!(
+            shown.get(&fixture.acting_device_id).map(String::as_str),
+            Some("Fictional laptop"),
+            "the name read under the old key survives the retry"
+        );
+    }
+
+    #[test]
+    fn a_journal_retry_saves_names_read_with_the_old_key_before_changing_it() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+
+        let original = fixture.block_vault_writes();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &client).expect_err("the first attempt cannot save the vault");
+        let mut forgotten = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        forgotten
+            .remember_names(&std::collections::BTreeMap::new())
+            .expect("cleared names");
+        fixture.store.save_state(&forgotten).expect("saved state");
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect_err("the retry cannot save the vault either");
+        fixture.allow_vault_writes(original);
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert_eq!(
+            saved
+                .remembered_names()
+                .get(&fixture.acting_device_id)
+                .map(String::as_str),
+            Some("Fictional laptop"),
+            "the journal retry saved the name before it tried to change the key"
+        );
+    }
+
+    #[test]
+    fn a_replay_whose_vault_commit_fails_is_retried_without_a_local_change() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let original = fixture.block_vault_writes();
+        let replay = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &replay).expect_err("the replay cannot save the vault");
+        fixture.allow_vault_writes(original);
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the next retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the adoption's revision bump is not a local edit"
+        );
+    }
+
+    #[test]
+    fn an_edit_between_a_failed_replay_and_its_retry_is_still_local() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        take_key(&fixture, &client).expect_err("the lost answer is reported as a failure");
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+        let original = fixture.block_vault_writes();
+        let replay = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &replay).expect_err("the replay cannot save the vault");
+        fixture.allow_vault_writes(original);
+        fixture.vault.seed(|payload| {
+            payload.vault_name = "Fictional vault edited after the failed replay".into()
+        });
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect("the next retry finishes the saved adoption");
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert!(
+            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            "the edit made after the failed replay is still local"
+        );
+    }
+
+    #[test]
+    fn a_clean_rekey_publishes_a_snapshot_a_second_device_can_read() {
+        let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        acting_vault.seed(|payload| {
+            payload.vault_name = "Fictional vault from the acting device".into();
+        });
+        let vault_id = vault_id_of_test_vault(&acting_vault);
+        let recipient_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        recipient_vault.seed(|payload| payload.vault_id = Some(vault_id.clone()));
+        let scratch = Scratch::new();
+        let acting_store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        acting
+            .save(&acting_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let mut acting_state = SyncState::new(&vault_id, &acting.device_id);
+        acting_state.entries = entries.clone();
+        acting_state.activated_epoch = 1;
+        state_digest(&acting_vault, &mut acting_state);
+        acting_store
+            .save_state(&acting_state)
+            .expect("saved acting state");
+        let world = Arc::new(Mutex::new(FakeSyncWorld::new(
+            &vault_id,
+            entries.clone(),
+            1,
+        )));
+        {
+            let mut world = world.lock().expect("world");
+            world
+                .tokens
+                .insert(ACTING_TOKEN.into(), acting.device_id.clone());
+            world.activated.insert(acting.device_id.clone(), 1);
+        }
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let acting_client = SyncClient::for_tests(&server.base(), ACTING_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let new_key = [6u8; 32];
+        let prepared = crate::sync::key_change::PreparedKeyChange::default();
+        let (kit, recovery) = prepare_recovery(&new_key).expect("prepared");
+        prepared.stage(&new_key, recovery, std::time::Instant::now());
+        assert!(!kit.is_empty());
+
+        block_on(crate::application::sync_transfer::rekey_without_in_state(
+            &acting_vault.state,
+            &acting_store,
+            &effects,
+            &acting_client,
+            crate::application::sync_transfer::RekeyRequest {
+                prepared: &prepared,
+                subject: None,
+                master_password: PASSWORD,
+                adopt_locally: true,
+            },
+        ))
+        .expect("the clean vault is rekeyed");
+
+        assert_eq!(vault_key(&acting_vault), new_key);
+        assert!(
+            server
+                .paths()
+                .iter()
+                .any(|path| path == "/v1/sync/snapshots"),
+            "a clean rekey must publish under the new key"
+        );
+        let (published, ciphertext) = world
+            .lock()
+            .expect("world")
+            .snapshot
+            .clone()
+            .expect("published snapshot");
+        let published_header: Header =
+            serde_json::from_value(published.clone()).expect("published header");
+        let ciphertext = URL_SAFE_NO_PAD
+            .decode(&ciphertext)
+            .expect("ciphertext bytes");
+        let opened = crate::application::sync_transfer::decrypt_remote(
+            &new_key,
+            &published_header,
+            &URL_SAFE_NO_PAD.encode(&ciphertext),
+        )
+        .expect("the published snapshot opens with the new key");
+        assert_eq!(opened.payload().entries.len(), 1);
+
+        let recipient_scratch = Scratch::new();
+        let recipient_store = recipient_scratch.store();
+        recipient
+            .save(&recipient_store.identity_path())
+            .expect("saved identity");
+        let mut recipient_state = SyncState::new(&vault_id, &recipient.device_id);
+        recipient_state.entries = entries;
+        recipient_state.activated_epoch = 1;
+        state_digest(&recipient_vault, &mut recipient_state);
+        recipient_store
+            .save_state(&recipient_state)
+            .expect("saved recipient state");
+        world
+            .lock()
+            .expect("world")
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world
+            .lock()
+            .expect("world")
+            .activated
+            .insert(recipient.device_id.clone(), 1);
+        let recipient_client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        let taken = block_on(take_new_key_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &effects,
+            &recipient_client,
+            PASSWORD.into(),
+        ))
+        .expect("the second device takes the new key");
+        assert!(!taken.recovery_kit.is_empty());
+        assert_eq!(vault_key(&recipient_vault), new_key);
+
+        block_on(download_vault_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &recipient_client,
+            &effects,
+        ))
+        .expect("the second device reads the snapshot under the new key");
+        let name = {
+            let session = recipient_vault.state.session.lock().expect("session lock");
+            session
+                .as_ref()
+                .expect("unlocked")
+                .open_payload()
+                .expect("payload")
+                .vault_name
+                .clone()
+        };
+        assert_eq!(name, "Fictional vault from the acting device");
+    }
+
+    #[test]
+    fn a_clean_rekey_retries_a_failed_first_snapshot_on_the_next_run() {
+        let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        acting_vault.seed(|payload| {
+            payload.vault_name = "Fictional vault from the acting device".into();
+        });
+        let vault_id = vault_id_of_test_vault(&acting_vault);
+        let recipient_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        recipient_vault.seed(|payload| payload.vault_id = Some(vault_id.clone()));
+        let scratch = Scratch::new();
+        let acting_store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let recipient = DeviceIdentity::generate().expect("recipient identity");
+        acting
+            .save(&acting_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &recipient]);
+        let mut acting_state = SyncState::new(&vault_id, &acting.device_id);
+        acting_state.entries = entries.clone();
+        acting_state.activated_epoch = 1;
+        state_digest(&acting_vault, &mut acting_state);
+        acting_store
+            .save_state(&acting_state)
+            .expect("saved acting state");
+        let mut world = FakeSyncWorld::new(&vault_id, entries.clone(), 1);
+        world
+            .tokens
+            .insert(ACTING_TOKEN.into(), acting.device_id.clone());
+        world.activated.insert(acting.device_id.clone(), 1);
+        world.fail_next_upload = true;
+        let world = Arc::new(Mutex::new(world));
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let acting_client = SyncClient::for_tests(&server.base(), ACTING_TOKEN, &instance);
+        let effects = FakeEffects::new(PathBuf::new());
+        let new_key = [6u8; 32];
+        let prepared = crate::sync::key_change::PreparedKeyChange::default();
+        let (kit, recovery) = prepare_recovery(&new_key).expect("prepared");
+        prepared.stage(&new_key, recovery, std::time::Instant::now());
+        assert!(!kit.is_empty());
+
+        block_on(crate::application::sync_transfer::rekey_without_in_state(
+            &acting_vault.state,
+            &acting_store,
+            &effects,
+            &acting_client,
+            crate::application::sync_transfer::RekeyRequest {
+                prepared: &prepared,
+                subject: None,
+                master_password: PASSWORD,
+                adopt_locally: true,
+            },
+        ))
+        .expect("the clean vault is rekeyed");
+
+        assert_eq!(vault_key(&acting_vault), new_key);
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/snapshots")
+                .count(),
+            1,
+            "the rekey attempts its first upload"
+        );
+        assert!(
+            world.lock().expect("world").snapshot.is_none(),
+            "the first upload did not reach the service"
+        );
+
+        let local = acting_store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        let reconnect_base = server.base();
+        let reconnect_instance = instance.clone();
+        let outcome = block_on(
+            crate::application::sync_transfer::run_one_transfer_in_state(
+                &acting_vault.state,
+                &acting_store,
+                &acting_client,
+                &effects,
+                local,
+                move || {
+                    let base = reconnect_base.clone();
+                    let instance = reconnect_instance.clone();
+                    async move { Ok(SyncClient::for_tests(&base, ACTING_TOKEN, &instance)) }
+                },
+            ),
+        )
+        .expect("the ordinary run publishes the snapshot");
+        assert!(
+            matches!(
+                outcome,
+                crate::sync::coordinator::Outcome::Uploaded { revision: 1 }
+            ),
+            "the ordinary run retries the upload instead of reporting that everything is current"
+        );
+        assert_eq!(
+            server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/snapshots")
+                .count(),
+            2,
+            "the second upload succeeded"
+        );
+
+        let recipient_scratch = Scratch::new();
+        let recipient_store = recipient_scratch.store();
+        recipient
+            .save(&recipient_store.identity_path())
+            .expect("saved identity");
+        let mut recipient_state = SyncState::new(&vault_id, &recipient.device_id);
+        recipient_state.entries = entries;
+        recipient_state.activated_epoch = 1;
+        state_digest(&recipient_vault, &mut recipient_state);
+        recipient_store
+            .save_state(&recipient_state)
+            .expect("saved recipient state");
+        world
+            .lock()
+            .expect("world")
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), recipient.device_id.clone());
+        world
+            .lock()
+            .expect("world")
+            .activated
+            .insert(recipient.device_id.clone(), 1);
+        let recipient_client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+
+        let taken = block_on(take_new_key_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &effects,
+            &recipient_client,
+            PASSWORD.into(),
+        ))
+        .expect("the second device takes the new key");
+        assert!(!taken.recovery_kit.is_empty());
+        assert_eq!(vault_key(&recipient_vault), new_key);
+
+        block_on(download_vault_in_state(
+            &recipient_vault.state,
+            &recipient_store,
+            &recipient_client,
+            &effects,
+        ))
+        .expect("the second device reads the snapshot under the new key");
+        let name = {
+            let session = recipient_vault.state.session.lock().expect("session lock");
+            session
+                .as_ref()
+                .expect("unlocked")
+                .open_payload()
+                .expect("payload")
+                .vault_name
+                .clone()
+        };
+        assert_eq!(name, "Fictional vault from the acting device");
     }
 }
 
