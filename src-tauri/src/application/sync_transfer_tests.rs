@@ -1957,6 +1957,45 @@ mod adoption_and_publish_tests {
     }
 
     #[test]
+    fn a_journal_retry_saves_names_read_with_the_old_key_before_changing_it() {
+        let fixture = lost_activation();
+        let server = TestServer::start(handler(fixture.world.clone()));
+        let instance = fixture.world.lock().expect("world").instance_key();
+        fixture.world.lock().expect("world").drop_activation_answer = false;
+
+        let original = fixture.block_vault_writes();
+        let client = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &client).expect_err("the first attempt cannot save the vault");
+        let mut forgotten = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        forgotten
+            .remember_names(&std::collections::BTreeMap::new())
+            .expect("cleared names");
+        fixture.store.save_state(&forgotten).expect("saved state");
+
+        let retry = SyncClient::for_tests(&server.base(), RECIPIENT_TOKEN, &instance);
+        take_key(&fixture, &retry).expect_err("the retry cannot save the vault either");
+        fixture.allow_vault_writes(original);
+
+        let saved = fixture
+            .store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        assert_eq!(
+            saved
+                .remembered_names()
+                .get(&fixture.acting_device_id)
+                .map(String::as_str),
+            Some("Fictional laptop"),
+            "the journal retry saved the name before it tried to change the key"
+        );
+    }
+
+    #[test]
     fn a_replay_whose_vault_commit_fails_is_retried_without_a_local_change() {
         let fixture = lost_activation();
         let server = TestServer::start(handler(fixture.world.clone()));

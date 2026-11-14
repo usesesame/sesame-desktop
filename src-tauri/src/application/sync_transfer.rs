@@ -389,10 +389,10 @@ pub(crate) async fn take_new_key_in_state(
             kept.adopted_payload_digest(),
             unix_now(),
         )?;
-        journal.save(&store.journal_path())?;
         let mut named = local.clone();
         named.remember_names(kept.names())?;
         store.save_state(&named)?;
+        journal.save(&store.journal_path())?;
         adopt_with(unlocked, *key, payload, &master_password, Some(recovery))?;
         state.advance_session_epoch();
         if journal.prospective_payload_digest.is_some() {
@@ -475,6 +475,9 @@ pub(crate) async fn adopt_journal_key_in_state(
                 unlocked,
                 journal.adoption_digests(),
             )?;
+            let mut named = local.clone();
+            named.remember_names(kept.names())?;
+            store.save_state(&named)?;
             let payload = unlocked.open_payload()?.clone();
             if kept.cleaned() {
                 journal.prospective_payload_digest =
