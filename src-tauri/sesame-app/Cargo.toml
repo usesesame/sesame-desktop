@@ -1,8 +1,8 @@
 [package]
 name = "sesame-app"
-version = "0.5.2"
+version = "0.1.0"
 license = "AGPL-3.0-or-later"
-description = "Platform-independent Sesame application rules: vault lifecycle, item policies, Sync, the browser protocol, and the service adapters they need."
+description = "Sesame application rules for vault lifecycle, items, Sync and the browser protocol, with no dependency on Tauri."
 authors = ["Sesame"]
 edition = "2021"
 

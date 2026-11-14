@@ -4022,7 +4022,7 @@ dependencies = [
 
 [[package]]
 name = "sesame-app"
-version = "0.5.2"
+version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305",
