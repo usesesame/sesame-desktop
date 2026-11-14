@@ -14,6 +14,7 @@ function snapshot(marker: string) {
 
 function harness() {
   const stores = createAppStores()
+  stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
   const feedback = createFeedbackController()
   return { stores, feedback }
 }
@@ -47,5 +48,18 @@ describe('undoing a delete', () => {
     vaultApi.restoreTrashedItem.mockRejectedValueOnce(new Error('Unlock your vault before restoring an item.'))
     undoDeleteAction(['login-a'], { stores, feedback }).run()
     await vi.waitFor(() => expect(get(feedback.state).errorMessage).toBe('Unlock your vault before restoring an item.'))
+  })
+
+  it('leaves the vault view alone when the vault locked while the restore was running', async () => {
+    const { stores, feedback } = harness()
+    vaultApi.restoreTrashedItem.mockImplementationOnce(async () => {
+      stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: false }, snapshot: null })
+      return { restoredId: 'login-a', snapshot: snapshot('after lock') }
+    })
+    undoDeleteAction(['login-a'], { stores, feedback }).run()
+    await vi.waitFor(() => expect(vaultApi.restoreTrashedItem).toHaveBeenCalledOnce())
+    await Promise.resolve()
+    expect(stores.vault.value().snapshot).toBeNull()
+    expect(get(feedback.state).notice).toBeNull()
   })
 })

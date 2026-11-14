@@ -57,7 +57,7 @@
         {#each $recentGenerations.items as item, index (index)}
           <li>
             <code>{item.value}</code>
-            <button type="button" class="icon-button" aria-label={`Copy ${item.kind === 'password' ? 'password' : 'passphrase'}`} on:click={() => onCopy(item.value, item.kind === 'password' ? 'Password' : 'Passphrase')}><Icon name="copy" size={14} /></button>
+            <button type="button" class="icon-button" aria-label={`Copy ${item.kind === 'password' ? 'password' : 'passphrase'}`} title={`Copy ${item.kind === 'password' ? 'password' : 'passphrase'}`} on:click={() => onCopy(item.value, item.kind === 'password' ? 'Password' : 'Passphrase')}><Icon name="copy" size={14} /></button>
           </li>
         {/each}
       </ul>

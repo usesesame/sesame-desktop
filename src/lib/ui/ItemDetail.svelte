@@ -82,9 +82,9 @@
           <code>{shownValue(field)}</code>
         {/if}
         {#if field.secret}
-          <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
+          <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
         {/if}
-        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
+        <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
       </div>
       {/if}
     {/each}
@@ -97,9 +97,9 @@
         <h3>{field.label}</h3>
         <div class="multiline-field-actions">
           {#if field.secret}
-            <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
+            <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
           {/if}
-          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
+          <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} on:click={() => copyField(field)}><Icon name="copy" size={15} /></button>
         </div>
       </div>
       {#if field.secret && !isShown(field)}

@@ -149,7 +149,7 @@
   function hidePassword() {
     clearTimeout(hideTimer)
     hideTimer = undefined
-    passwordDisplay = ''
+    passwordDisplay = loginDraft.password
     passwordVisible = false
   }
 

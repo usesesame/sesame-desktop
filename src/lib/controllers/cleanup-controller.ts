@@ -170,6 +170,9 @@ export function createCleanupController(options: CleanupControllerOptions) {
       )
     } catch (error) {
       if (lastSnapshot) vault.patch({ snapshot: lastSnapshot })
+      if (deleted > 0 && deleted < targets.length) {
+        state.patch({ deleteCandidate: targets[deleted], deleteBatch: targets.slice(deleted) })
+      }
       void recordDiagnostic('vault_save', 'failed')
       void options.refreshDiagnostics()
       feedback.setError(error)

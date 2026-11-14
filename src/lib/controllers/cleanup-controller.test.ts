@@ -114,3 +114,18 @@ describe('deleting a login the person already confirmed in the editor', () => {
     expect(get(feedback.state).notice).toMatchObject({ title: 'Login deleted', message: 'Northwind is in Trash for 30 days.', action: { label: 'Undo' } })
   })
 })
+
+describe('a batch delete that fails partway', () => {
+  it('keeps only the logins that were not deleted, so a retry starts with them', async () => {
+    const { controller, stores } = harness()
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
+    const entry = (id: string) => ({ id, title: id, site: '', username: '', initials: 'F', reason: '' })
+    vaultApi.deleteLogin
+      .mockResolvedValueOnce({ deletedId: 'login-a', snapshot: { entries: [] } })
+      .mockRejectedValueOnce(new Error('Sesame could not save the vault.'))
+    controller.requestBulkDelete([entry('login-a'), entry('login-b'), entry('login-c')])
+    await controller.confirmDelete()
+    expect(get(controller.state).deleteCandidate?.id).toBe('login-b')
+    expect(get(controller.state).deleteBatch.map((target) => target.id)).toEqual(['login-b', 'login-c'])
+  })
+})

@@ -17,6 +17,7 @@ async function restore(ids: string[], stores: AppStores, feedback: FeedbackContr
   try {
     for (const id of ids) {
       const result = await restoreTrashedItem(id)
+      if (!stores.vault.value().status.unlocked) return
       stores.vault.patch({ snapshot: result.snapshot })
       restored += 1
     }
