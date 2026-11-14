@@ -37,7 +37,7 @@ export function createCustomRecordController(options: RecordControllerOptions) {
       addTitle: 'Add a record',
       editTitle: 'Edit record',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Record saved' : 'Record updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Record deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Record deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

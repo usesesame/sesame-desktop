@@ -60,3 +60,19 @@ describe('Toast', () => {
     expect(onResume).toHaveBeenCalledOnce()
   })
 })
+
+describe('Toast actions', () => {
+  it('dismisses the notice and runs its action once', async () => {
+    const run = vi.fn()
+    const onDismissNotice = vi.fn()
+    render(Toast, {
+      notice: { title: 'Login deleted', message: 'Fictional is in Trash for 30 days.', action: { label: 'Undo', run } },
+      errorMessage: '',
+      onDismissNotice,
+      onDismissError: vi.fn(),
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(onDismissNotice).toHaveBeenCalledOnce()
+    expect(run).toHaveBeenCalledOnce()
+  })
+})

@@ -30,7 +30,7 @@
   >
     <span class="confirm-icon danger"><Icon name="alert" size={20} /></span>
     <h2 id={headingId}>Delete {deleteCandidate.title}?</h2>
-    <p id={descriptionId}>{description}</p>
+    <p id={descriptionId}>{description} It stays in Trash for 30 days.</p>
     <div class="confirm-actions"><button type="button" class="secondary-button" disabled={deleteWorking} on:click={cancel}>Cancel</button><button type="button" class="danger-button" disabled={deleteWorking} on:click={onConfirm}>{deleteWorking ? 'Deleting…' : `Delete ${noun}`}</button></div>
   </ModalShell>
 {/if}

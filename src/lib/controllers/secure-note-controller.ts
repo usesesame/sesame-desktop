@@ -25,7 +25,7 @@ export function createSecureNoteController(options: RecordControllerOptions) {
       addTitle: 'Add a note',
       editTitle: 'Edit note',
       savedNotice: (isNew, title) => ({ title: isNew ? 'Note saved' : 'Note updated', body: `${title} is stored in your vault.` }),
-      deletedNotice: (title) => ({ title: 'Note deleted', body: `${title} was removed from your vault.` }),
+      deletedNotice: (title) => ({ title: 'Note deleted', body: `${title} is in Trash for 30 days.` }),
     },
   })
 }

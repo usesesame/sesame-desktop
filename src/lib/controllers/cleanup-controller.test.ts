@@ -1,3 +1,4 @@
+import { get } from 'svelte/store'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppStores } from '../stores/app-stores'
 import { createCleanupController } from './cleanup-controller'
@@ -6,6 +7,7 @@ import { createModalController } from './modal-controller'
 
 const vaultApi = vi.hoisted(() => ({
   cancelLoginBreachScan: vi.fn(),
+  deleteLogin: vi.fn(),
   exportVaultCsv: vi.fn(),
   exportVaultJson: vi.fn(),
   grantPresence: vi.fn(),
@@ -28,7 +30,7 @@ function harness() {
     refreshDiagnostics: vi.fn(),
     onVaultDeleted: vi.fn(),
   })
-  return { controller, feedback }
+  return { controller, feedback, stores }
 }
 
 beforeEach(() => {
@@ -98,5 +100,17 @@ describe('cancelling a breach check', () => {
     await controller.cancelBreachScan()
     expect(controller.state.value().breachScanError).toBe('Sesame could not cancel the breach check. It is still running.')
     expect(controller.state.value().breachScan?.phase).toBe('running')
+  })
+})
+
+describe('deleting a login the person already confirmed in the editor', () => {
+  it('deletes it without opening the delete dialog and offers to undo', async () => {
+    const { controller, feedback, stores } = harness()
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
+    vaultApi.deleteLogin.mockResolvedValue({ deletedId: 'login-a', snapshot: { entries: [] } })
+    await controller.deleteConfirmed({ id: 'login-a', title: 'Northwind', site: 'northwind.example.test', username: '', initials: 'N', reason: '' })
+    expect(vaultApi.deleteLogin).toHaveBeenCalledWith('login-a')
+    expect(get(controller.state).deleteCandidate).toBeNull()
+    expect(get(feedback.state).notice).toMatchObject({ title: 'Login deleted', message: 'Northwind is in Trash for 30 days.', action: { label: 'Undo' } })
   })
 })

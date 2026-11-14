@@ -124,3 +124,44 @@ test('showing a generated replacement preserves the generated draft', async () =
   expect(passwordInput().value).toBe(generated)
   expect(vaultApi.revealLoginSecret).not.toHaveBeenCalled()
 })
+
+test('a shown password hides itself after 30 seconds unless the field is in use', async () => {
+  vi.useFakeTimers()
+  try {
+    vaultApi.revealLoginSecret.mockResolvedValue('fictional-alpha-secret')
+    renderEditor()
+    const password = passwordInput()
+    await fireEvent.click(screen.getByRole('button', { name: 'Show password' }))
+    await vi.waitFor(() => expect(password.value).toBe('fictional-alpha-secret'))
+
+    password.focus()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(password.type).toBe('text')
+
+    password.blur()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(password.type).toBe('password')
+    expect(password.value).toBe('')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('deleting from the editor asks inside the editor and keeps the edits when cancelled', async () => {
+  const onDelete = vi.fn()
+  renderEditor({ onDelete })
+  const title = document.querySelector<HTMLInputElement>('input[name="login-title"]')!
+  await fireEvent.input(title, { target: { value: 'Northwind renamed' } })
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete login' }))
+  expect(onDelete).not.toHaveBeenCalled()
+  expect(screen.getByText(/stays in Trash for 30 days/)).toBeTruthy()
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(title.value).toBe('Northwind renamed')
+  expect(onDelete).not.toHaveBeenCalled()
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete login' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete login' }))
+  expect(onDelete).toHaveBeenCalledOnce()
+})

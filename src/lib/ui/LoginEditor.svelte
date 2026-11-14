@@ -10,6 +10,9 @@
   import { messageFor } from '../controllers/feedback-controller'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import type { Folder, LoginInput } from '../types'
+  import { onDestroy } from 'svelte'
+
+  const PASSWORD_HIDE_AFTER_MS = 30_000
 
   // Fetched on focus, and again when the website changes, because the vault ranks them for that site.
   // No store, so nothing survives a lock.
@@ -89,6 +92,7 @@
   // Tracked from input events, not a draft snapshot, which would hold a second copy of the password.
   let dirty = false
   let confirmingDiscard = false
+  let confirmingDelete = false
   let totpEntered = false
 
   function requestClose() {
@@ -139,23 +143,46 @@
   let presenceSecret = ''
   let presenceError = ''
 
+  let passwordInput: HTMLInputElement
+  let hideTimer: ReturnType<typeof setTimeout> | undefined
+
+  function hidePassword() {
+    clearTimeout(hideTimer)
+    hideTimer = undefined
+    passwordDisplay = ''
+    passwordVisible = false
+  }
+
+  function hideLater() {
+    clearTimeout(hideTimer)
+    hideTimer = setTimeout(() => {
+      if (document.activeElement === passwordInput) hideLater()
+      else hidePassword()
+    }, PASSWORD_HIDE_AFTER_MS)
+  }
+
+  function showPassword(value: string) {
+    passwordDisplay = value
+    passwordVisible = true
+    hideLater()
+  }
+
+  onDestroy(() => clearTimeout(hideTimer))
+
   async function togglePasswordVisibility() {
     if (passwordVisible) {
-      passwordDisplay = ''
-      passwordVisible = false
+      hidePassword()
       return
     }
     if (!loginDraft.id || loginDraft.password !== '') {
-      passwordDisplay = loginDraft.password
-      passwordVisible = true
+      showPassword(loginDraft.password)
       return
     }
     if (passwordRevealWorking) return
     passwordRevealWorking = true
     revealError = ''
     try {
-      passwordDisplay = await revealLoginSecret(loginDraft.id)
-      passwordVisible = true
+      showPassword(await revealLoginSecret(loginDraft.id))
     } catch (error) {
       if (error instanceof Error && error.message === PRESENCE_REQUIRED) presenceOpen = true
       else revealError = messageFor(error)
@@ -174,8 +201,7 @@
       return
     }
     try {
-      passwordDisplay = await revealLoginSecret(loginDraft.id)
-      passwordVisible = true
+      showPassword(await revealLoginSecret(loginDraft.id))
       presenceOpen = false
       presenceSecret = ''
       presenceError = ''
@@ -249,7 +275,7 @@
     </div>
     <label>Password
       <span class="password-field">
-        <input name="login-password" value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="off" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
+        <input name="login-password" bind:this={passwordInput} value={passwordDisplay} maxlength="8192" type={passwordVisible ? 'text' : 'password'} autocomplete="off" spellcheck="false" placeholder={loginDraft.id ? 'Leave blank to keep the saved password' : ''} on:input={(event) => { passwordDisplay = event.currentTarget.value; loginDraft = { ...loginDraft, password: passwordDisplay } }} />
         <button type="button" class="icon-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={(!passwordDisplay && !loginDraft.password && !loginDraft.id) || passwordRevealWorking} on:click={togglePasswordVisibility}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={15} /></button>
         <button type="button" class="icon-button" aria-label="Generate a password" title="Generate a password" on:click={generatePassword}><Icon name="refresh" size={15} /></button>
         <button type="button" class="icon-button" aria-label="Password options" title="Password options" aria-expanded={generatorOpen} on:click={() => (generatorOpen = !generatorOpen)}><Icon name="settings" size={15} /></button>
@@ -300,7 +326,15 @@
     <label>Notes<textarea name="login-notes" bind:value={loginDraft.notes} maxlength="20000" placeholder="Anything useful to remember about this account…" autocomplete="off"></textarea></label>
   </div>
 
-  {#if confirmingDiscard}
+  {#if confirmingDelete}
+    <footer class="editor-footer discard-confirm">
+      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.</p>
+      <div class="editor-footer-actions">
+        <button type="button" class="secondary-button" on:click={() => (confirmingDelete = false)}>Keep editing</button>
+        <button type="button" class="editor-delete" on:click={onDelete}>Delete login</button>
+      </div>
+    </footer>
+  {:else if confirmingDiscard}
     <footer class="editor-footer discard-confirm">
       <p><strong>Discard your changes?</strong> This login has edits that have not been saved.</p>
       <div class="editor-footer-actions">
@@ -309,7 +343,7 @@
       </div>
     </footer>
   {:else}
-    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={onDelete}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
+    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={() => (confirmingDelete = true)}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
   {/if}
   </form>
 
