@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use tauri::AppHandle;
 
+use crate::adapters::network::sync::connect;
 use crate::application::sync::{clean_label, SyncStore};
-use crate::sync::client::SyncClient;
 use crate::sync::state::SyncState;
 use crate::vault::{VaultResult, VaultState};
 
@@ -44,7 +44,7 @@ pub async fn sync_status(
     if !crate::application::sync::sync_status_needs_service(local.is_some(), identity_present) {
         return Ok(crate::application::sync::never_enrolled_status());
     }
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     crate::application::sync::sync_status_in_state(&vault, &store, local, identity_present, &client)
         .await
 }
@@ -56,7 +56,7 @@ pub async fn sync_create_vault(
     label: String,
 ) -> Result<SyncStatusView, String> {
     let label = clean_label(&label)?;
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     let store = SyncStore::new(local_data_dir(&app)?);
     crate::application::sync::create_vault_in_state(&vault, &store, &client, &label).await
 }
@@ -80,16 +80,16 @@ pub async fn sync_disable(
 
 #[tauri::command]
 pub async fn sync_reset_vault(app: AppHandle) -> Result<(), String> {
-    let client = SyncClient::connect(&app).await?;
+    let client = connect(&app).await?;
     let store = SyncStore::new(local_data_dir(&app)?);
     crate::application::sync::reset_vault_in_state(&store, &client).await
 }
 
 #[cfg(test)]
 mod status_tests {
-    use super::*;
     use crate::adapters::network::test_server::{Reply, TestServer};
     use crate::application::sync::initial_status;
+    use crate::sync::client::SyncClient;
 
     #[test]
     fn an_unpaired_device_shows_setup_without_claiming_membership_or_reading_history() {

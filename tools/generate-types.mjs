@@ -11,7 +11,7 @@ const workspace = dirname(dirname(fileURLToPath(import.meta.url)))
 // a type.
 const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[]}}' }
 
-const args = ['test', '--manifest-path', join(workspace, 'src-tauri', 'Cargo.toml'), '--lib', 'export_bindings']
+const args = ['test', '--manifest-path', join(workspace, 'src-tauri', 'Cargo.toml'), '-p', 'sesame', '-p', 'sesame-app', '--lib', 'export_bindings']
 const run = spawnSync('cargo', args, { stdio: 'inherit', env: environment, shell: false })
 if (run.status !== 0) {
   throw new Error('The TypeScript bindings could not be generated.')

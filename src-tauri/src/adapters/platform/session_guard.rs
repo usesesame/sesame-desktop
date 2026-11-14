@@ -1,35 +1,6 @@
 //! Clears the unlocked vault when the desktop session locks or the user is inactive.
 //! Runs on system input independent of the webview: throttling or a suspended renderer cannot keep a vault open.
 
-mod activity {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::OnceLock;
-    #[cfg(any(windows, target_os = "linux"))]
-    use std::time::Duration;
-    use std::time::Instant;
-
-    static START: OnceLock<Instant> = OnceLock::new();
-    static LAST_MILLIS: AtomicU64 = AtomicU64::new(0);
-
-    fn elapsed_millis() -> u64 {
-        u64::try_from(START.get_or_init(Instant::now).elapsed().as_millis()).unwrap_or(u64::MAX)
-    }
-
-    pub fn record() {
-        LAST_MILLIS.store(elapsed_millis(), Ordering::Release);
-    }
-
-    #[cfg(any(windows, target_os = "linux"))]
-    pub fn idle_for() -> Duration {
-        Duration::from_millis(elapsed_millis().saturating_sub(LAST_MILLIS.load(Ordering::Acquire)))
-    }
-}
-
-/// Input in the Sesame window, reported by the interface. It stands in for the desktop's idle time only where the desktop reports none.
-pub fn record_activity() {
-    activity::record();
-}
-
 #[cfg(any(windows, target_os = "linux"))]
 mod monitor {
     use std::time::{Duration, Instant, SystemTime};
@@ -106,10 +77,14 @@ mod monitor {
             let blind_for = blindness.observe(lock, reported_idle, Instant::now());
             let open = session_is_open(&app);
             if open && !was_open {
-                super::activity::record();
+                sesame_app::session_activity::record_activity();
             }
             was_open = open;
-            let idle = effective_idle(reported_idle, open, super::activity::idle_for());
+            let idle = effective_idle(
+                reported_idle,
+                open,
+                sesame_app::session_activity::idle_for(),
+            );
             let timeout = Duration::from_secs(
                 app.state::<crate::vault::VaultState>()
                     .auto_lock_minutes()
@@ -553,8 +528,8 @@ mod tests {
         let timeout = Duration::from_secs(60);
         let idle = effective_idle(None, true, Duration::from_secs(60)).unwrap();
         assert!(idle >= timeout);
-        super::record_activity();
-        let fresh = effective_idle(None, true, super::activity::idle_for()).unwrap();
+        sesame_app::session_activity::record_activity();
+        let fresh = effective_idle(None, true, sesame_app::session_activity::idle_for()).unwrap();
         assert!(fresh < Duration::from_secs(5));
         assert!(fresh < timeout);
     }

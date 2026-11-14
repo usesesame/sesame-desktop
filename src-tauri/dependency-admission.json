@@ -280,6 +280,11 @@
       "reason": "In use before this gate was adopted."
     },
     {
+      "name": "tokio",
+      "version": "1.53",
+      "reason": "Test-only async runtime for the application crate; the same version is already locked through Tauri and reqwest."
+    },
+    {
       "name": "totp-rs",
       "version": "6",
       "reason": "In use before this gate was adopted."

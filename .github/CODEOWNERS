@@ -26,6 +26,7 @@
 # ---------------------------------------------------------------------------
 /src-tauri/                     @d0mkaaa
 /src-tauri/src/vault/           @d0mkaaa
+/src-tauri/sesame-app/src/vault/ @d0mkaaa
 /src-tauri/Cargo.toml           @d0mkaaa
 
 # ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@
 # desktop process toward a page the user does not control.
 # ---------------------------------------------------------------------------
 /src-tauri/src/browser_fill.rs            @d0mkaaa
-/src-tauri/src/browser_protocol.rs        @d0mkaaa
+/src-tauri/sesame-app/src/browser_protocol.rs @d0mkaaa
 /src-tauri/src/adapters/platform/browser_host/  @d0mkaaa
 /src-tauri/src/adapters/platform/browser_pipe/  @d0mkaaa
 # The desktop owns the wire because it owns the host. Changing it needs a new

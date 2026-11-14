@@ -1,12 +1,13 @@
 [workspace]
-members = ["sesame-core"]
+resolver = "2"
+members = ["sesame-core", "sesame-app"]
 # Every existing `cargo test`/`clippy`/`check` invocation in this repo's npm
 # scripts and CI passes `--manifest-path src-tauri/Cargo.toml` without
 # `--workspace`, because that predates this workspace existing. Cargo's
 # default scope for that invocation is `default-members`, not `members`, so
 # without this, `sesame-core` would silently stop being tested/linted by
 # every one of those existing commands the moment it was extracted.
-default-members = [".", "sesame-core"]
+default-members = [".", "sesame-core", "sesame-app"]
 
 [patch.crates-io]
 glib = { path = "vendor/glib" }
@@ -33,7 +34,7 @@ edition = "2021"
 
 [features]
 browser-helper-dev = []
-wdio = []
+wdio = ["sesame-app/wdio"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
@@ -66,6 +67,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 sesame-core = { path = "sesame-core" }
+sesame-app = { path = "sesame-app" }
 argon2 = { version = "0.6", features = ["zeroize"] }
 base64 = "0.23"
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
@@ -105,6 +107,7 @@ shake = "0.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+sesame-app = { path = "sesame-app", features = ["test-support"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already in the dependency graph through tauri-plugin-opener; naming it here
