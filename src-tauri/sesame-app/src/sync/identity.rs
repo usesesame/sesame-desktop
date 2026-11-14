@@ -33,25 +33,25 @@ struct StoredIdentity {
     protected_hybrid_seed: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn protect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn unprotect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 pub use crate::vault::platform::{protect_for_device, unprotect_for_device};
 
 pub fn ensure_device_protection() -> VaultResult<()> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         Ok(())
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         crate::vault::platform::ensure_device_protection()
     }

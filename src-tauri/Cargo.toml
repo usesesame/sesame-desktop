@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = ["sesame-core", "sesame-app"]
 # Every existing `cargo test`/`clippy`/`check` invocation in this repo's npm
 # scripts and CI passes `--manifest-path src-tauri/Cargo.toml` without

@@ -505,3 +505,17 @@ test('an upload or download connects again so the version floor and server pin a
   }
   assert.match(read('src-tauri', 'src', 'commands', 'sync_transfer.rs'), /\|\| connect\(app\),/)
 })
+
+test('the fake device protection used by tests never reaches a normal build', () => {
+  const manifest = readFileSync(join(root, 'src-tauri', 'Cargo.toml'), 'utf8')
+  assert.match(manifest, /^\[workspace\]\nresolver = "2"\n/m)
+  const sections = manifest.split(/^(?=\[)/m)
+  const withFeature = sections.filter((section) => section.includes('test-support'))
+  assert.deepEqual(withFeature.map((section) => section.split('\n')[0]), ['[dev-dependencies]'])
+  assert.match(manifest, /^\[dependencies\][\s\S]*?^sesame-app = \{ path = "sesame-app" \}$/m)
+  for (const file of ['state.rs', 'identity.rs']) {
+    const source = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'sync', file), 'utf8')
+    assert.doesNotMatch(source, /#\[cfg\(not\(test\)\)\]/, file)
+    assert.match(source, /#\[cfg\(not\(any\(test, feature = "test-support"\)\)\)\]/, file)
+  }
+})

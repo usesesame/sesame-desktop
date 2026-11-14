@@ -226,23 +226,23 @@ fn state_tag(body: &[u8]) -> Vec<u8> {
     tag_for(STATE_TAG_LABEL, body)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     crate::vault::platform::protect_for_device(bytes)
         .map_err(|_| "Sesame could not record the Sync state.".to_string())
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "test-support")))]
 fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
     crate::vault::platform::unprotect_for_device(bytes)
 }
