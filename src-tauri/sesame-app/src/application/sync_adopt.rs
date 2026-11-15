@@ -3,6 +3,7 @@ use zeroize::Zeroize;
 use crate::application::sync::{prepare_recovery, verify_master_password, SyncStore};
 use crate::application::sync_recovery::backup_stamp;
 use crate::application::DesktopEffects;
+use crate::sync::state::StateNames;
 use crate::vault::crypto::{derive_key, encrypt_bytes, master_password_kdf_params};
 use crate::vault::{UnlockedVault, VaultPayload, VaultState, WRAP_AAD};
 

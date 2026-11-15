@@ -15,7 +15,7 @@ use crate::application::sync_pairing::{
 use crate::application::DesktopEffects;
 use crate::sync::client::{SyncClient, SyncError};
 use crate::sync::engine::{verify_join, verify_server_view, JoinCheck, ServerView};
-use crate::sync::identity::DeviceIdentity;
+use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::pairing::ApproverIdentity;
 use crate::sync::pake::Offer;
 use crate::sync::request::KeyPackageV3;

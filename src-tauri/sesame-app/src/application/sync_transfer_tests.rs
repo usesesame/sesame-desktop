@@ -23,11 +23,11 @@ use crate::sync::engine::{
     seal_label, NewDevice,
 };
 use crate::sync::header::Header;
-use crate::sync::identity::DeviceIdentity;
+use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::key_change::fictional_recovery;
-use crate::sync::rekey_journal::{self, Journal};
+use crate::sync::rekey_journal::{self, Journal, JournalFiles};
 use crate::sync::request::{KeyPackageV3, Receipt};
-use crate::sync::state::{payload_digest, PendingUpload, SyncState};
+use crate::sync::state::{payload_digest, PendingUpload, StateNames, SyncState};
 use crate::test_support::{block_on, TestVault};
 use crate::vault::crypto::decrypt_bytes;
 use crate::vault::{random_id, UnlockedVault, RECOVERY_WRAP_AAD};

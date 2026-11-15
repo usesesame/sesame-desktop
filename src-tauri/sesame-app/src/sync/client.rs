@@ -13,16 +13,32 @@ use crate::network::capabilities::{
 };
 use crate::network::ensure_crypto_provider;
 use crate::network::server_trust::verify_pinned_server;
-use crate::sync::canonical::REQUEST_NONCE_BYTES;
 use crate::sync::checkpoint::Checkpoint;
 use crate::sync::devicelist::DeviceListEntry;
 use crate::sync::engine::{ServedCheckpoint, ServedHeader};
 use crate::sync::header::Header;
 use crate::sync::identity::DeviceIdentity;
-use crate::sync::request::{KeyPackageV3, RequestSignature};
+use crate::sync::request::KeyPackageV3;
 use crate::vault::VaultResult;
+use sesame_sync::canonical::REQUEST_NONCE_BYTES;
+use sesame_sync::wire::{
+    classify, device_list_path, encode, headers_path, name_the_old_server,
+    name_the_server_without_the_route, pairing_answer_path, pairing_cancel_path, parse,
+    request_signature_header, PATH_ACTIVATE, PATH_CHECKPOINTS, PATH_DEVICES, PATH_DEVICES_KEY,
+    PATH_DEVICES_REMOVE, PATH_DEVICES_ROTATE, PATH_KEY_PACKAGE, PATH_PAIRINGS,
+    PATH_PAIRING_CONFIRM, PATH_PAIRING_MINE, PATH_RESET, PATH_SNAPSHOT, PATH_SNAPSHOTS, PATH_STATE,
+    PATH_VAULT,
+};
 
-const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+pub use sesame_sync::wire::{
+    Accepted, ActivateBody, ApproveBody, BeginPairingBody, CheckpointBody, Checkpoints,
+    CreateVaultBody, DevicesView, Entries, Headers, MessageBody, PackageBody, PairingRecord,
+    PairingStatus, RemoveBody, ResetBody, ServedSnapshot, StateView, SyncError, SyncResult,
+    UpgradeKeyBody, UploadBody, HEADER_PAGE_SIZE, MAX_HEADERS, MAX_RESPONSE_BYTES,
+};
+
+#[cfg(test)]
+pub(crate) use sesame_sync::wire::SERVER_NEEDS_UPDATE;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const TRANSFER_BASE_TIMEOUT: Duration = Duration::from_secs(60);
 const TRANSFER_SLOWEST_BYTES_PER_SECOND: usize = 32 * 1024;
@@ -33,145 +49,6 @@ fn transfer_timeout(bytes: usize) -> Duration {
         + Duration::from_secs((bytes / TRANSFER_SLOWEST_BYTES_PER_SECOND) as u64))
     .min(TRANSFER_MAX_TIMEOUT)
 }
-
-pub const SERVER_NEEDS_UPDATE: &str = "This Sync server does not accept the newer device keys yet. If you run the server yourself, update it and try again. Otherwise try again later.";
-
-fn is_hybrid_package_key(encoded: &str) -> bool {
-    URL_SAFE_NO_PAD
-        .decode(encoded)
-        .is_ok_and(|bytes| bytes.len() == crate::sync::xwing::PUBLIC_KEY_BYTES)
-}
-
-fn name_the_server_without_the_route(error: SyncError) -> SyncError {
-    match error {
-        SyncError::Rejected | SyncError::NotFound => SyncError::ServerNeedsUpdate,
-        other => other,
-    }
-}
-
-fn name_the_old_server(error: SyncError, package_key: &str) -> SyncError {
-    match error {
-        SyncError::Rejected if is_hybrid_package_key(package_key) => SyncError::ServerNeedsUpdate,
-        other => other,
-    }
-}
-
-#[derive(Debug)]
-pub enum SyncError {
-    Unavailable(String),
-    Conflict,
-    NotApproved,
-    NotActivated,
-    NotEntitled,
-    NotFound,
-    StorageFull,
-    Rejected,
-    ServerNeedsUpdate,
-    Failed(String),
-}
-
-impl std::fmt::Display for SyncError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unavailable(message) | Self::Failed(message) => write!(formatter, "{message}"),
-            Self::Conflict => write!(
-                formatter,
-                "Another device changed this vault. Review the difference before syncing."
-            ),
-            Self::NotApproved => write!(formatter, "This device is not approved to sync."),
-            Self::NotActivated => write!(
-                formatter,
-                "This device has not taken the new vault key yet."
-            ),
-            Self::NotEntitled => write!(
-                formatter,
-                "This account's subscription does not include Sesame Sync."
-            ),
-            Self::NotFound => write!(formatter, "That Sync record does not exist."),
-            Self::StorageFull => write!(
-                formatter,
-                "This vault is too large for the space the service gives it."
-            ),
-            Self::Rejected => write!(formatter, "Sesame Sync could not complete that request."),
-            Self::ServerNeedsUpdate => write!(formatter, "{SERVER_NEEDS_UPDATE}"),
-        }
-    }
-}
-
-impl From<SyncError> for String {
-    fn from(error: SyncError) -> Self {
-        error.to_string()
-    }
-}
-
-pub type SyncResult<T> = Result<T, SyncError>;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StateView {
-    pub vault_id: String,
-    pub vault_epoch: u64,
-    pub current_revision: u64,
-    pub device_state: String,
-    pub activated_epoch: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairingRecord {
-    pub device_id: String,
-    pub signing_key: String,
-    pub package_key: String,
-    pub state: String,
-    pub offer: String,
-    #[serde(default, deserialize_with = "empty_as_none")]
-    pub confirm: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DevicesView {
-    pub pairings: Vec<PairingRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PairingStatus {
-    pub state: String,
-    #[serde(default, deserialize_with = "empty_as_none")]
-    pub answer: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Accepted {
-    pub revision: u64,
-    pub digest: String,
-    pub receipt: String,
-    pub accepted_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServedSnapshot {
-    pub header: Header,
-    pub accepted_at: String,
-    pub ciphertext: String,
-}
-
-fn empty_as_none<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error> {
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.filter(|text| !text.is_empty()))
-}
-
-#[derive(Deserialize)]
-struct Entries {
-    entries: Vec<DeviceListEntry>,
-}
-
-const HEADER_PAGE_SIZE: usize = 500;
-const MAX_HEADERS: usize = 20_000;
 
 async fn collect_header_pages<F, Fut>(after: u64, mut fetch: F) -> SyncResult<Vec<ServedHeader>>
 where
@@ -197,80 +74,6 @@ where
             return Ok(collected);
         }
     }
-}
-
-#[derive(Deserialize)]
-struct Headers {
-    headers: Vec<ServedHeader>,
-}
-
-#[derive(Deserialize)]
-struct Checkpoints {
-    checkpoints: Vec<ServedCheckpoint>,
-}
-
-#[derive(Serialize)]
-struct CheckpointBody<'a> {
-    checkpoint: &'a Checkpoint,
-}
-
-#[derive(Deserialize)]
-struct PackageBody {
-    package: KeyPackageV3,
-}
-
-#[derive(Serialize)]
-struct CreateVaultBody<'a> {
-    entry: &'a DeviceListEntry,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BeginPairingBody<'a> {
-    device_id: &'a str,
-    signing_key: &'a str,
-    package_key: &'a str,
-    message: &'a str,
-}
-
-#[derive(Serialize)]
-struct MessageBody<'a> {
-    message: &'a str,
-}
-
-#[derive(Serialize)]
-struct ApproveBody<'a> {
-    entry: &'a DeviceListEntry,
-    package: &'a KeyPackageV3,
-}
-
-#[derive(Serialize)]
-struct UpgradeKeyBody<'a> {
-    entry: &'a DeviceListEntry,
-}
-
-#[derive(Serialize)]
-struct RemoveBody<'a> {
-    entry: &'a DeviceListEntry,
-    packages: &'a [KeyPackageV3],
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ActivateBody<'a> {
-    package_digest: &'a str,
-}
-
-#[derive(Serialize)]
-struct UploadBody<'a> {
-    header: &'a Header,
-    ciphertext: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResetBody {
-    vault_epoch: u64,
 }
 
 async fn read_capped(response: reqwest::Response) -> SyncResult<Vec<u8>> {
@@ -363,7 +166,11 @@ impl SyncClient {
                 return Err(failure.into());
             }
         };
-        if let Err(failure) = require_sync_enabled(&document, env!("CARGO_PKG_VERSION")) {
+        if let Err(failure) = require_sync_enabled(
+            &document,
+            env!("CARGO_PKG_VERSION"),
+            sesame_sync::DESKTOP_PLATFORM,
+        ) {
             token.zeroize();
             return Err(failure.into());
         }
@@ -396,40 +203,7 @@ impl SyncClient {
     }
 
     fn classify(&self, status: reqwest::StatusCode, body: &[u8]) -> SyncError {
-        let parsed: Option<ErrorEnvelope> = serde_json::from_slice(body).ok();
-        let code = parsed
-            .as_ref()
-            .and_then(|envelope| envelope.error.as_ref())
-            .map(|error| error.code.as_str())
-            .unwrap_or_default();
-        match code {
-            "sync_unavailable" => SyncError::Unavailable("Sesame Sync is not available.".into()),
-            "sync_not_entitled" if self.entitlement_enforced => SyncError::NotEntitled,
-            "sync_not_entitled" => SyncError::Unavailable("Sesame Sync is not available.".into()),
-            "sync_not_activated" => SyncError::NotActivated,
-            "sync_forbidden" => SyncError::NotApproved,
-            "sync_vault_not_found" | "sync_not_found" => SyncError::NotFound,
-            "sync_conflict" | "sync_vault_exists" => SyncError::Conflict,
-            "sync_storage_limit_reached" => SyncError::StorageFull,
-            "sync_invalid" => SyncError::Rejected,
-            "sync_signature_invalid" => SyncError::Failed(
-                "The service did not accept this device's signature. Check that the date and time on this computer are correct."
-                    .into(),
-            ),
-            "sync_replayed" => SyncError::Failed(
-                "The service saw that request twice. Try again.".into(),
-            ),
-            _ => match status {
-                reqwest::StatusCode::UNAUTHORIZED => SyncError::Failed(
-                    "This desktop is no longer linked to the service.".into(),
-                ),
-                reqwest::StatusCode::FORBIDDEN => {
-                    SyncError::Unavailable("Sesame Sync is not available.".into())
-                }
-                reqwest::StatusCode::NOT_FOUND => SyncError::NotFound,
-                _ => SyncError::Failed("Sesame Sync could not complete that request.".into()),
-            },
-        }
+        classify(status.as_u16(), body, self.entitlement_enforced)
     }
 
     async fn dispatch(
@@ -498,8 +272,7 @@ impl SyncClient {
         long: bool,
     ) -> SyncResult<Vec<u8>> {
         let raw = match body {
-            Some(value) => serde_json::to_vec(value)
-                .map_err(|_| SyncError::Failed("Sesame could not prepare the request.".into()))?,
+            Some(value) => encode(value)?,
             None => Vec::new(),
         };
         let mut nonce = [0u8; REQUEST_NONCE_BYTES];
@@ -511,26 +284,21 @@ impl SyncClient {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| SyncError::Failed("This computer's clock is not usable.".into()))?
             .as_secs();
-        let signature = identity.sign_request(&RequestSignature {
-            method: method.as_str(),
-            target: path,
-            body: &raw,
-            token: &self.token,
-            timestamp,
-            nonce: &nonce,
-        });
-        self.dispatch(
-            method,
+        let signature = request_signature_header(
+            identity,
+            method.as_str(),
             path,
-            raw,
-            Some(format!("{timestamp}.{nonce}.{signature}")),
-            long,
-        )
-        .await
+            &raw,
+            &self.token,
+            timestamp,
+            &nonce,
+        );
+        self.dispatch(method, path, raw, Some(signature), long)
+            .await
     }
 
     pub async fn state(&self) -> SyncResult<StateView> {
-        self.read("/v1/sync/state", false).await
+        self.read(PATH_STATE, false).await
     }
 
     pub async fn create_vault(
@@ -541,7 +309,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/vault",
+            PATH_VAULT,
             Some(&CreateVaultBody { entry }),
             false,
         )
@@ -551,14 +319,12 @@ impl SyncClient {
     }
 
     pub async fn device_list(&self, after: u64) -> SyncResult<Vec<DeviceListEntry>> {
-        let entries: Entries = self
-            .read(&format!("/v1/sync/device-list?after={after}"), false)
-            .await?;
+        let entries: Entries = self.read(&device_list_path(after), false).await?;
         Ok(entries.entries)
     }
 
     pub async fn devices(&self) -> SyncResult<DevicesView> {
-        self.read("/v1/sync/devices", false).await
+        self.read(PATH_DEVICES, false).await
     }
 
     pub async fn begin_pairing(
@@ -573,7 +339,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/pairings",
+            PATH_PAIRINGS,
             Some(&BeginPairingBody {
                 device_id,
                 signing_key,
@@ -588,7 +354,7 @@ impl SyncClient {
     }
 
     pub async fn pairing_status(&self) -> SyncResult<PairingStatus> {
-        self.read("/v1/sync/pairings/mine", false).await
+        self.read(PATH_PAIRING_MINE, false).await
     }
 
     pub async fn answer_pairing(
@@ -601,7 +367,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            &format!("/v1/sync/pairings/{device_id}/answer"),
+            &pairing_answer_path(device_id),
             Some(&MessageBody { message: &message }),
             false,
         )
@@ -618,7 +384,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/pairings/mine/confirm",
+            PATH_PAIRING_CONFIRM,
             Some(&MessageBody { message: &message }),
             false,
         )
@@ -634,7 +400,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::DELETE,
-            &format!("/v1/sync/pairings/{device_id}"),
+            &pairing_cancel_path(device_id),
             NO_BODY,
             false,
         )
@@ -651,7 +417,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/devices",
+            PATH_DEVICES,
             Some(&ApproveBody { entry, package }),
             false,
         )
@@ -668,7 +434,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/devices/remove",
+            PATH_DEVICES_REMOVE,
             Some(&RemoveBody { entry, packages }),
             false,
         )
@@ -684,7 +450,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/devices/key",
+            PATH_DEVICES_KEY,
             Some(&UpgradeKeyBody { entry }),
             false,
         )
@@ -702,7 +468,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/devices/rotate",
+            PATH_DEVICES_ROTATE,
             Some(&RemoveBody { entry, packages }),
             false,
         )
@@ -712,7 +478,7 @@ impl SyncClient {
     }
 
     pub async fn key_package(&self) -> SyncResult<KeyPackageV3> {
-        let body: PackageBody = self.read("/v1/sync/key-package", false).await?;
+        let body: PackageBody = self.read(PATH_KEY_PACKAGE, false).await?;
         Ok(body.package)
     }
 
@@ -724,7 +490,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/activate",
+            PATH_ACTIVATE,
             Some(&ActivateBody { package_digest }),
             false,
         )
@@ -742,7 +508,7 @@ impl SyncClient {
         self.write(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/snapshots",
+            PATH_SNAPSHOTS,
             Some(&UploadBody {
                 header,
                 ciphertext: &ciphertext,
@@ -754,16 +520,14 @@ impl SyncClient {
 
     pub async fn headers(&self, after: u64) -> SyncResult<Vec<ServedHeader>> {
         collect_header_pages(after, |cursor| async move {
-            let page: Headers = self
-                .read(&format!("/v1/sync/headers?after={cursor}&limit=500"), false)
-                .await?;
+            let page: Headers = self.read(&headers_path(cursor), false).await?;
             Ok(page.headers)
         })
         .await
     }
 
     pub async fn checkpoints(&self) -> SyncResult<Vec<ServedCheckpoint>> {
-        let page: Checkpoints = self.read("/v1/sync/checkpoints", false).await?;
+        let page: Checkpoints = self.read(PATH_CHECKPOINTS, false).await?;
         Ok(page.checkpoints)
     }
 
@@ -775,7 +539,7 @@ impl SyncClient {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/checkpoints",
+            PATH_CHECKPOINTS,
             Some(&CheckpointBody { checkpoint }),
             false,
         )
@@ -784,14 +548,14 @@ impl SyncClient {
     }
 
     pub async fn snapshot(&self) -> SyncResult<ServedSnapshot> {
-        self.read("/v1/sync/snapshot", true).await
+        self.read(PATH_SNAPSHOT, true).await
     }
 
     pub async fn reset(&self, identity: &DeviceIdentity, vault_epoch: u64) -> SyncResult<()> {
         self.write_raw(
             identity,
             reqwest::Method::POST,
-            "/v1/sync/reset",
+            PATH_RESET,
             Some(&ResetBody { vault_epoch }),
             false,
         )
@@ -801,23 +565,6 @@ impl SyncClient {
 }
 
 const NO_BODY: Option<&()> = None;
-
-fn parse<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> SyncResult<T> {
-    serde_json::from_slice(bytes)
-        .map_err(|_| SyncError::Failed("Sesame could not read the Sync response.".into()))
-}
-
-#[derive(Deserialize)]
-struct ErrorEnvelope {
-    #[serde(default)]
-    error: Option<ErrorBody>,
-}
-
-#[derive(Deserialize)]
-struct ErrorBody {
-    #[serde(default)]
-    code: String,
-}
 
 #[cfg(test)]
 mod tests {

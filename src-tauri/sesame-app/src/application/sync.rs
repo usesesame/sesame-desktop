@@ -15,9 +15,9 @@ use crate::sync::engine::{
     seal_label, verify_server_view, PeerView, ServedCheckpoint, ServerView, VerifiedUpdate,
 };
 use crate::sync::header::{verify_header_chain, Header};
-use crate::sync::identity::DeviceIdentity;
+use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::key_change::PreparedKeyChange;
-use crate::sync::state::SyncState;
+use crate::sync::state::{StateNames, SyncState};
 use crate::vault::crypto::{bytes_match, default_kdf_params, derive_key, encrypt_bytes};
 use crate::vault::util::generate_recovery_kit;
 use crate::vault::{UnlockedVault, VaultResult, VaultState, RECOVERY_WRAP_AAD, WRAP_AAD};

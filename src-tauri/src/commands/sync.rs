@@ -205,7 +205,7 @@ mod device_name_tests {
     use crate::sync::devicelist::DeviceList;
     use crate::sync::engine::{add_entry, create_entry, seal_label, NewDevice};
     use crate::sync::identity::DeviceIdentity;
-    use crate::sync::state::SyncState;
+    use crate::sync::state::{StateNames, SyncState};
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
     const FIRST_KEY: [u8; 32] = [3u8; 32];

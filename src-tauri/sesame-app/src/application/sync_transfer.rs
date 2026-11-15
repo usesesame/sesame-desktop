@@ -18,9 +18,9 @@ use crate::sync::engine::{
 };
 use crate::sync::header::Header;
 use crate::sync::key_change::PreparedKeyChange;
-use crate::sync::rekey_journal::{self, Journal, Outcome, Purpose};
+use crate::sync::rekey_journal::{self, Journal, JournalFiles, Outcome, Purpose};
 use crate::sync::request::KeyPackageV3;
-use crate::sync::state::{payload_digest, SyncState};
+use crate::sync::state::{payload_digest, StateNames, SyncState};
 use crate::vault::{VaultPayload, VaultResult, VaultState};
 
 const SEAL_OVERHEAD_BYTES: usize = 16;

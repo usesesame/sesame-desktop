@@ -1,181 +1,26 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use ed25519_dalek::VerifyingKey;
 use reqwest::{header::DATE, Client};
-use serde::Deserialize;
 
-use super::account_service::{pin_key, read_limited};
+use super::account_service::read_limited;
 use super::capabilities::{
     fetch_signed_document, require_instance, require_linking_enabled, CapabilityError,
 };
-use super::server_address::{fingerprint_of_public_key, normalized_fingerprint, ServerAddress};
-use super::time::parse_http_date;
+use super::server_address::ServerAddress;
 use crate::vault::types::CustomServerPin;
 
-const MAX_INSTANCE_BYTES: usize = 16 * 1024;
-const MAX_NAME_CHARS: usize = 80;
-const MAX_IDENTIFIER_BYTES: usize = 256;
-const SUPPORTED_API_VERSION: u64 = 1;
-const NOT_A_SESAME_SERVER: &str = "That address did not answer like a Sesame server.";
+pub use sesame_sync::server_trust::{
+    check_pinned_instance, pin_key, InstanceInfo, ServerFailure, MAX_INSTANCE_BYTES,
+    NOT_A_SESAME_SERVER,
+};
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ServerFailure {
-    Unreachable,
-    Incompatible(String),
-    Invalid(String),
-    KeyChanged,
-    LinkMismatch,
-    ClockDifference(String),
-}
+#[cfg(test)]
+pub(crate) use sesame_sync::server_trust::{parse_version, MAX_IDENTIFIER_BYTES, MAX_NAME_CHARS};
 
-impl ServerFailure {
-    pub fn message(&self) -> String {
-        match self {
-            Self::Unreachable => {
-                "Sesame could not reach that server. Check the address and your connection."
-                    .to_string()
-            }
-            Self::Incompatible(message) | Self::Invalid(message) | Self::ClockDifference(message) => {
-                message.clone()
-            }
-            Self::KeyChanged => "This server now uses a different key than the one this desktop pinned. Disconnect, then pair again only if you expect the change.".to_string(),
-            Self::LinkMismatch => "The server's fingerprint does not match the pairing link. Do not pair with this server.".to_string(),
-        }
-    }
-}
-
-impl From<ServerFailure> for String {
-    fn from(failure: ServerFailure) -> Self {
-        failure.message()
-    }
+pub fn parse_instance(body: &[u8], client_version: &str) -> Result<InstanceInfo, ServerFailure> {
+    sesame_sync::server_trust::parse_instance(body, client_version, sesame_sync::DESKTOP_PLATFORM)
 }
 
 fn invalid() -> ServerFailure {
     ServerFailure::Invalid(NOT_A_SESAME_SERVER.to_string())
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InstanceDocument {
-    instance_id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    version: String,
-    api_version: u64,
-    minimum_client_version: String,
-    #[serde(default)]
-    maximum_client_version: Option<String>,
-    capability_key_id: String,
-    capability_public_key: String,
-    fingerprint: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct InstanceInfo {
-    pub instance_id: String,
-    pub name: String,
-    pub version: String,
-    pub capability_key_id: String,
-    pub capability_public_key: String,
-    pub fingerprint: String,
-    key: VerifyingKey,
-}
-
-impl InstanceInfo {
-    pub fn key(&self) -> &VerifyingKey {
-        &self.key
-    }
-
-    pub fn pin(&self) -> CustomServerPin {
-        CustomServerPin {
-            instance_id: self.instance_id.clone(),
-            name: self.name.clone(),
-            capability_key_id: self.capability_key_id.clone(),
-            capability_public_key: self.capability_public_key.clone(),
-            fingerprint: self.fingerprint.clone(),
-        }
-    }
-}
-
-pub fn parse_version(value: &str) -> Option<[u32; 3]> {
-    let core = value.split(['-', '+']).next()?;
-    let mut parts = core.split('.');
-    let mut numbers = [0u32; 3];
-    for number in &mut numbers {
-        let part = parts.next()?;
-        if part.is_empty() || part.len() > 9 || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        *number = part.parse().ok()?;
-    }
-    parts.next().is_none().then_some(numbers)
-}
-
-fn display_version(version: [u32; 3]) -> String {
-    format!("{}.{}.{}", version[0], version[1], version[2])
-}
-
-fn bounded_identifier(value: &str) -> bool {
-    !value.is_empty() && value.len() <= MAX_IDENTIFIER_BYTES && !value.chars().any(char::is_control)
-}
-
-pub fn parse_instance(body: &[u8], client_version: &str) -> Result<InstanceInfo, ServerFailure> {
-    let document: InstanceDocument = serde_json::from_slice(body).map_err(|_| invalid())?;
-    if document.api_version != SUPPORTED_API_VERSION {
-        return Err(ServerFailure::Incompatible(format!(
-            "This server uses API version {}, and this version of Sesame supports version {SUPPORTED_API_VERSION}. Update Sesame or the server.",
-            document.api_version
-        )));
-    }
-    let client = parse_version(client_version).ok_or_else(invalid)?;
-    let minimum = parse_version(&document.minimum_client_version).ok_or_else(invalid)?;
-    let maximum = match &document.maximum_client_version {
-        Some(value) => Some(parse_version(value).ok_or_else(invalid)?),
-        None => None,
-    };
-    if maximum.is_some_and(|maximum| maximum < minimum) {
-        return Err(invalid());
-    }
-    if client < minimum {
-        return Err(ServerFailure::Incompatible(format!(
-            "This server needs Sesame {} or newer. Update Sesame, then try again.",
-            display_version(minimum)
-        )));
-    }
-    if let Some(maximum) = maximum.filter(|maximum| client > *maximum) {
-        return Err(ServerFailure::Incompatible(format!(
-            "This server supports Sesame up to {}. Update the server, then try again.",
-            display_version(maximum)
-        )));
-    }
-    if !bounded_identifier(&document.instance_id)
-        || !bounded_identifier(&document.capability_key_id)
-        || document.name.chars().count() > MAX_NAME_CHARS
-        || document.name.len() > MAX_IDENTIFIER_BYTES
-        || document.name.chars().any(char::is_control)
-        || document.version.chars().count() > MAX_NAME_CHARS
-        || document.version.chars().any(char::is_control)
-    {
-        return Err(invalid());
-    }
-    let raw_key = URL_SAFE_NO_PAD
-        .decode(&document.capability_public_key)
-        .map_err(|_| invalid())?;
-    let key = VerifyingKey::from_bytes(raw_key.as_slice().try_into().map_err(|_| invalid())?)
-        .map_err(|_| invalid())?;
-    let fingerprint = fingerprint_of_public_key(&raw_key);
-    if normalized_fingerprint(&document.fingerprint).as_deref() != Some(fingerprint.as_str()) {
-        return Err(invalid());
-    }
-    Ok(InstanceInfo {
-        instance_id: document.instance_id,
-        name: document.name,
-        version: document.version,
-        capability_key_id: document.capability_key_id,
-        capability_public_key: document.capability_public_key,
-        fingerprint,
-        key,
-    })
 }
 
 pub async fn fetch_instance(
@@ -198,7 +43,7 @@ pub async fn fetch_instance(
         .headers()
         .get(DATE)
         .and_then(|value| value.to_str().ok())
-        .and_then(parse_http_date);
+        .and_then(super::time::parse_http_date);
     let body = read_limited(response, MAX_INSTANCE_BYTES)
         .await
         .ok_or_else(invalid)?;
@@ -232,8 +77,12 @@ pub async fn inspect_server(
     })?;
     require_instance(&document, &info.instance_id)
         .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
-    require_linking_enabled(&document, env!("CARGO_PKG_VERSION"))
-        .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
+    require_linking_enabled(
+        &document,
+        env!("CARGO_PKG_VERSION"),
+        sesame_sync::DESKTOP_PLATFORM,
+    )
+    .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
     Ok(info)
 }
 
@@ -244,9 +93,7 @@ pub async fn verify_pinned_server(
 ) -> Result<Option<u64>, ServerFailure> {
     let key = pin_key(pin).ok_or_else(invalid)?;
     let (info, date) = fetch_instance(client, address).await?;
-    if info.fingerprint != pin.fingerprint || info.capability_key_id != pin.capability_key_id {
-        return Err(ServerFailure::KeyChanged);
-    }
+    check_pinned_instance(&info, pin)?;
     let document =
         fetch_signed_document(client, address.as_str(), &key, Some(&pin.capability_key_id))
             .await
@@ -278,6 +125,8 @@ mod tests {
     use super::*;
     use crate::network::account_service::client_for_base;
     use crate::network::test_server::{closed_port_base, FakeSesame, Reply, TestServer};
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
 
     const CLIENT: &str = "0.3.0";
 
