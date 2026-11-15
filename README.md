@@ -17,8 +17,9 @@ repositories.
 
 ## Run it
 
-You need Node.js 24.20 and Rust 1.98.0. Windows also needs WebView2, and Linux
-needs WebKitGTK 4.1 and the tray libraries.
+You need Node.js 24.20 and Rust 1.98.0 with `rustfmt` and `clippy`, which
+`rustup component add rustfmt clippy` adds. Windows also needs WebView2, and
+Linux needs WebKitGTK 4.1 and the tray libraries.
 
 On Debian and Ubuntu:
 
@@ -52,12 +53,15 @@ npm.cmd ci
 npm.cmd run tauri:dev:browser
 ```
 
-`npm run desktop:ci` runs every check a pull request needs, and
+`npm run desktop:ci` runs the local checks, and CI also checks the generated
+bindings and runs the browser helper for real.
 [CONTRIBUTING.md](CONTRIBUTING.md) explains the workflow and the security
 rules for vault, browser and sign-in code. To build installers, run
 `npm run release:bundle:windows:unsigned` for the Windows installer or
 `npm run release:bundle:linux:unsigned` for the deb, rpm and AppImage, which
-also needs `patchelf`, `dpkg-deb` and `rpmbuild`.
+also needs `patchelf`, `dpkg-deb` and `rpmbuild`. A local AppImage still
+carries its own GLib until you run `node tools/strip-appimage-host-libs.mjs`
+on it, as CI does for releases.
 
 ## What works where
 
@@ -84,8 +88,8 @@ A few things on Linux need your attention:
 - PIN unlock and account linking need a Secret Service wallet. Sesame starts
   `gnome-keyring-daemon` or `ksecretd` when one is installed, so on Arch
   install `gnome-keyring` or `kwallet` if you have neither.
-- The AppImage uses your system's GLib 2.80 or newer, so GLib security fixes
-  arrive with your normal updates.
+- The released AppImage uses your system's GLib 2.80 or newer, so GLib
+  security fixes arrive with your normal updates.
 - After you update the AppImage, start it once so it refreshes the browser
   helper it copies to `~/.local/share/sesame/browser-host`.
 
