@@ -1,36 +1,19 @@
 //! Vaults are encrypted here and only ciphertext leaves; nothing here returns key material or reaches the webview.
 
-pub mod canonical;
-pub mod checkpoint;
-pub mod client;
-pub mod devicelist;
-pub mod engine;
-pub mod floor;
-pub mod header;
-pub mod identity;
-pub mod key_change;
-pub mod keys;
-pub mod pairing;
-pub mod pake;
-pub mod rekey_journal;
-pub mod request;
-pub mod state;
-pub mod xwing;
-
 pub mod conflict_backup;
-pub mod coordinator;
+pub mod floor;
+pub mod identity;
+pub mod rekey_journal;
+pub mod state;
 
-#[cfg(any(test, fuzzing))]
-pub mod fuzz_entry;
+pub use sesame_sync::{
+    canonical, checkpoint, coordinator, devicelist, engine, header, key_change, keys, pairing,
+    pake, request, xwing,
+};
 
-#[cfg(test)]
-mod fuzz_entry_tests;
+mod protection;
 
-#[cfg(test)]
-mod v3_contract_tests;
-
-#[cfg(test)]
-mod engine_tests;
+pub mod client;
 
 #[cfg(test)]
 mod e2e_tests;

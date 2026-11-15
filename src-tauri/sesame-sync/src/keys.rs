@@ -10,7 +10,7 @@ use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
-use crate::vault::VaultResult;
+use sesame_core::VaultResult;
 
 /// Domain separation: one purpose, one info string, one protocol version.
 const KEY_PACKAGE_INFO: &[u8] = b"sesame-sync-key-package-v1";

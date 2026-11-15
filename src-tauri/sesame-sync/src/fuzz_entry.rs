@@ -9,7 +9,7 @@ use super::pake;
 use super::request::KeyPackageV3;
 use super::xwing::{SecretKey, SEED_BYTES};
 
-const FIXTURE: &str = include_str!("../../../contracts/sync/v3/v3-fixture.json");
+const FIXTURE: &str = include_str!("../../contracts/sync/v3/v3-fixture.json");
 const VAULT: &str = "vaultAAAAAAAAAAAA01";
 const EPOCH: u64 = 1;
 

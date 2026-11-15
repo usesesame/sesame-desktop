@@ -3,5 +3,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = sesame_lib::sync_fuzz::device_list(data);
+    let _ = sesame_sync::fuzz_entry::device_list(data);
 });

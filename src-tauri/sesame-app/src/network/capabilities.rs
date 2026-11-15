@@ -1,38 +1,19 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use serde::Deserialize;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+use ed25519_dalek::VerifyingKey;
 
 use super::account_service::{read_limited, service_api_base_url, service_client};
 use crate::vault::VaultResult;
 
-const MAX_CAPABILITY_BYTES: usize = 16 * 1024;
-const ISSUED_AT_TOLERANCE_SECS: i64 = 5 * 60;
-const CLOCK_DIFFERENCE: &str = "This computer's clock and the server's clock differ, so Sesame cannot rely on the server's settings. Check the date and time on both, then try again.";
-const CAPABILITY_INVALID: &str = "Sesame capability configuration is invalid.";
+pub use sesame_sync::capabilities::{
+    require_instance, require_linking_enabled, require_sync_enabled, verify_capability_envelope,
+    CapabilityError, Document, CAPABILITY_INVALID, MAX_CAPABILITY_BYTES,
+};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Envelope {
-    payload: String,
-    signature: String,
-    #[serde(default)]
-    key_id: Option<String>,
-}
+#[cfg(test)]
+pub(crate) use sesame_sync::capabilities::version_lt;
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Document {
-    schema_version: u8,
-    minimum_desktop_version: String,
-    features: std::collections::BTreeMap<String, bool>,
-    expires_at: chrono::DateTime<chrono::Utc>,
-    #[serde(default)]
-    instance_id: Option<String>,
-    #[serde(default)]
-    issued_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-pub fn official_capability_public_key() -> VaultResult<String> {
+pub(crate) fn official_capability_public_key() -> VaultResult<String> {
     option_env!("SESAME_CAPABILITY_PUBLIC_KEY")
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -56,27 +37,6 @@ fn official_capability_key() -> VaultResult<VerifyingKey> {
     .map_err(|_| "Desktop capability verification key is invalid.")?)
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum CapabilityError {
-    Untrusted,
-    ClockDifference,
-    Unavailable(String),
-}
-
-impl From<CapabilityError> for String {
-    fn from(error: CapabilityError) -> Self {
-        match error {
-            CapabilityError::Untrusted => "Sesame capability signature is invalid.".to_string(),
-            CapabilityError::ClockDifference => CLOCK_DIFFERENCE.to_string(),
-            CapabilityError::Unavailable(message) => message,
-        }
-    }
-}
-
-fn unavailable(message: &str) -> CapabilityError {
-    CapabilityError::Unavailable(message.to_string())
-}
-
 pub async fn require_desktop_linking() -> VaultResult<()> {
     let key = official_capability_key()?;
     let client = service_client()?;
@@ -84,10 +44,11 @@ pub async fn require_desktop_linking() -> VaultResult<()> {
     Ok(require_linking_enabled(
         &document,
         env!("CARGO_PKG_VERSION"),
+        sesame_sync::DESKTOP_PLATFORM,
     )?)
 }
 
-pub async fn fetch_signed_document(
+pub(crate) async fn fetch_signed_document(
     client: &reqwest::Client,
     base_url: &str,
     key: &VerifyingKey,
@@ -98,118 +59,20 @@ pub async fn fetch_signed_document(
         .send()
         .await
         .map_err(|_| {
-            unavailable("Sesame could not retrieve the signed capability configuration.")
+            CapabilityError::Unavailable(
+                "Sesame could not retrieve the signed capability configuration.".to_string(),
+            )
         })?;
     if !response.status().is_success() {
-        return Err(unavailable(
-            "Sesame capability configuration is unavailable. Desktop linking stays disabled.",
+        return Err(CapabilityError::Unavailable(
+            "Sesame capability configuration is unavailable. Desktop linking stays disabled."
+                .to_string(),
         ));
     }
     let body = read_limited(response, MAX_CAPABILITY_BYTES)
         .await
-        .ok_or_else(|| unavailable(CAPABILITY_INVALID))?;
+        .ok_or_else(|| CapabilityError::Unavailable(CAPABILITY_INVALID.to_string()))?;
     verify_capability_envelope(&body, key, expected_key_id, chrono::Utc::now())
-}
-
-pub fn verify_capability_envelope(
-    body: &[u8],
-    key: &VerifyingKey,
-    expected_key_id: Option<&str>,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<Document, CapabilityError> {
-    let envelope: Envelope =
-        serde_json::from_slice(body).map_err(|_| unavailable(CAPABILITY_INVALID))?;
-    if let Some(expected) = expected_key_id {
-        if envelope.key_id.as_deref() != Some(expected) {
-            return Err(CapabilityError::Untrusted);
-        }
-    }
-    let payload = URL_SAFE_NO_PAD
-        .decode(envelope.payload)
-        .map_err(|_| unavailable(CAPABILITY_INVALID))?;
-    let signature = Signature::from_slice(
-        &URL_SAFE_NO_PAD
-            .decode(envelope.signature)
-            .map_err(|_| unavailable(CAPABILITY_INVALID))?,
-    )
-    .map_err(|_| unavailable(CAPABILITY_INVALID))?;
-    key.verify(&payload, &signature)
-        .map_err(|_| CapabilityError::Untrusted)?;
-    let document: Document =
-        serde_json::from_slice(&payload).map_err(|_| unavailable(CAPABILITY_INVALID))?;
-    if document.schema_version != 1 {
-        return Err(unavailable("Desktop linking is currently unavailable."));
-    }
-    if document.expires_at <= now
-        || document.issued_at.is_some_and(|issued| {
-            issued > now + chrono::Duration::seconds(ISSUED_AT_TOLERANCE_SECS)
-        })
-    {
-        return Err(CapabilityError::ClockDifference);
-    }
-    Ok(document)
-}
-
-pub fn require_instance(document: &Document, expected: &str) -> Result<(), CapabilityError> {
-    if document.instance_id.as_deref() != Some(expected) {
-        return Err(unavailable(
-            "The server's signed document names a different server than the one this desktop paired with.",
-        ));
-    }
-    Ok(())
-}
-
-pub fn require_linking_enabled(
-    document: &Document,
-    client_version: &str,
-) -> Result<(), CapabilityError> {
-    if !document
-        .features
-        .get("desktopLinking")
-        .copied()
-        .unwrap_or(false)
-    {
-        return Err(unavailable("Desktop linking is currently unavailable."));
-    }
-    if version_lt(client_version, &document.minimum_desktop_version) {
-        return Err(unavailable("Update Sesame before linking this desktop."));
-    }
-    Ok(())
-}
-
-pub fn require_sync_enabled(
-    document: &Document,
-    client_version: &str,
-) -> Result<(), CapabilityError> {
-    if !document.features.get("sync").copied().unwrap_or(false) {
-        return Err(unavailable(
-            "Sesame Sync is not turned on for this service.",
-        ));
-    }
-    if version_lt(client_version, &document.minimum_desktop_version) {
-        return Err(unavailable("Update Sesame before using Sync."));
-    }
-    Ok(())
-}
-
-fn version_lt(current: &str, minimum: &str) -> bool {
-    let parse = |value: &str| {
-        value
-            .split('.')
-            .take(3)
-            .map(|part| part.parse::<u32>().unwrap_or(0))
-            .collect::<Vec<_>>()
-    };
-    let current = parse(current);
-    let minimum = parse(minimum);
-    for index in 0..3 {
-        let a = current.get(index).copied().unwrap_or(0);
-        let b = minimum.get(index).copied().unwrap_or(0);
-        if a != b {
-            return a < b;
-        }
-    }
-    false
 }
 
 #[cfg(test)]
@@ -242,7 +105,7 @@ mod tests {
         let fake = FakeSesame::new(1);
         let document = verify(&fake, Some("key-1")).unwrap();
         assert_eq!(document.schema_version, 1);
-        assert!(require_linking_enabled(&document, CLIENT).is_ok());
+        assert!(require_linking_enabled(&document, CLIENT, sesame_sync::DESKTOP_PLATFORM).is_ok());
     }
 
     #[test]
@@ -396,7 +259,7 @@ mod tests {
         let mut fake = FakeSesame::new(1);
         fake.desktop_linking = false;
         let disabled = verify(&fake, None).unwrap();
-        assert!(require_linking_enabled(&disabled, CLIENT).is_err());
+        assert!(require_linking_enabled(&disabled, CLIENT, sesame_sync::DESKTOP_PLATFORM).is_err());
 
         let fake = FakeSesame::new(1);
         let mut payload = fake.capability_payload();
@@ -408,12 +271,13 @@ mod tests {
             now(),
         )
         .unwrap();
-        let error = require_linking_enabled(&document, CLIENT).unwrap_err();
+        let error =
+            require_linking_enabled(&document, CLIENT, sesame_sync::DESKTOP_PLATFORM).unwrap_err();
         assert_eq!(
             String::from(error),
             "Update Sesame before linking this desktop."
         );
-        assert!(require_linking_enabled(&document, "0.4.0").is_ok());
+        assert!(require_linking_enabled(&document, "0.4.0", sesame_sync::DESKTOP_PLATFORM).is_ok());
     }
 
     #[test]

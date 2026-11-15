@@ -88,7 +88,7 @@ test('the Sync client never hands key material to the webview', () => {
 })
 
 test('signing and key agreement use separate keys', () => {
-  const identity = read('src-tauri', 'sesame-app', 'src', 'sync', 'identity.rs')
+  const identity = read('src-tauri', 'sesame-sync', 'src', 'identity.rs')
   assert.match(identity, /signing:\s*SigningKey/)
   assert.match(identity, /encryption:\s*EncryptionKeypair/)
 })
@@ -152,7 +152,7 @@ test('the first run notice says Sync is off, asks for nothing, and is shown once
 })
 
 test('both X25519 exchanges refuse a non-contributory result', () => {
-  const keys = read('src-tauri', 'sesame-app', 'src', 'sync', 'keys.rs')
+  const keys = read('src-tauri', 'sesame-sync', 'src', 'keys.rs')
   assert.match(
     keys,
     /fn contributory_shared_secret\(/,
@@ -194,7 +194,7 @@ test('the conflict screen shows both sides as they are', () => {
 })
 
 test('a coordinator drives Sync, and never resolves a conflict itself', () => {
-  const coordinator = read('src-tauri', 'sesame-app', 'src', 'sync', 'coordinator.rs')
+  const coordinator = read('src-tauri', 'sesame-sync', 'src', 'coordinator.rs')
   for (const [required, why] of [
     ['pub fn begin(', 'nothing claims the right to run a single transfer'],
     ['follow_up', 'concurrent requests are no longer coalesced into one follow-up'],
@@ -218,12 +218,23 @@ test('a coordinator drives Sync, and never resolves a conflict itself', () => {
 })
 
 test('the local Sync state is authenticated', () => {
-  const state = read('src-tauri', 'sesame-app', 'src', 'sync', 'state.rs')
-  assert.match(state, /pub fn write_protected\(/, 'the state is written unauthenticated again')
-  assert.match(state, /protect\(&state_tag\(&body\)\)/, 'the tag is no longer device-protected')
+  const state = read('src-tauri', 'sesame-sync', 'src', 'state.rs')
+  assert.match(state, /pub fn write_protected_with\(/, 'the state is written unauthenticated again')
   assert.match(
     state,
-    /crate::vault::platform::protect_for_device\(bytes\)/,
+    /protector\s*\.protect\(&tag_for\(label, body\)\)/,
+    'the tag is no longer device-protected',
+  )
+  const wrapper = read('src-tauri', 'sesame-app', 'src', 'sync', 'state.rs')
+  assert.match(
+    wrapper,
+    /write_protected_with\(path, base, &DEVICE_PROTECTOR\)/,
+    'the desktop state wrapper no longer routes through device protection',
+  )
+  const protection = read('src-tauri', 'sesame-app', 'src', 'sync', 'protection.rs')
+  assert.match(
+    protection,
+    /crate::vault::platform::protect_for_device\(plaintext\)/,
     'the tag helper no longer routes through the platform device protection',
   )
 
@@ -285,7 +296,7 @@ test('the Go and Rust sides share one v3 fixture and the Rust tests read it', ()
   for (const part of ['chain', 'removalChain', 'headers', 'request', 'receipt', 'keyPackage', 'brokenChains', 'brokenHeaders']) {
     assert.ok(fixture[part], `the fixture lost its ${part} vectors`)
   }
-  const tests = read('src-tauri', 'sesame-app', 'src', 'sync', 'v3_contract_tests.rs')
+  const tests = read('src-tauri', 'sesame-sync', 'src', 'v3_contract_tests.rs')
   assert.match(tests, /contracts[\s\S]*v3[\s\S]*v3-fixture\.json/, 'the Rust tests no longer read the shared fixture')
   assert.ok(!existsSync(join(root, 'src-tauri', 'contracts', 'sync', 'v2')), 'the v2 fixtures are retired with the v2 wire format')
 })
@@ -306,7 +317,7 @@ test('a device list and every header are verified from the stored chain, never f
     const source = read('src-tauri', 'src', 'commands', file)
     assert.doesNotMatch(source, /\.devices\(\)[\s\S]{0,200}state\s*==\s*"approved"[\s\S]{0,80}signing/, `${file} trusts the service listing for an approval`)
   }
-  const engine = read('src-tauri', 'sesame-app', 'src', 'sync', 'engine.rs')
+  const engine = read('src-tauri', 'sesame-sync', 'src', 'engine.rs')
   for (const rule of ['verify_header_chain', 'verify_header(', 'check_receipt', 'floor_for']) {
     assert.ok(engine.includes(rule), `the engine no longer calls ${rule}`)
   }
@@ -334,7 +345,7 @@ test('one canonical AEAD context, shared by encryption and decryption', () => {
   const join = read('src-tauri', 'sesame-app', 'src', 'application', 'sync_join.rs')
   assert.match(join, /head\.aad\(\)/, 'a joining device must decrypt with the header context')
   assert.match(pairing, /join_with_code_in_state\(/, 'the join command does not run the application rule')
-  const header = read('src-tauri', 'sesame-app', 'src', 'sync', 'header.rs')
+  const header = read('src-tauri', 'sesame-sync', 'src', 'header.rs')
   assert.match(header, /pub fn aad\(&self\)/)
 })
 
@@ -348,11 +359,11 @@ test('a new device is added only after a code the person typed, and the approver
   assert.match(applicationJoin, /verify_join\(/, 'the joining device must check the device list and key package through the engine')
   assert.match(pairing, /approve_in_state\(/, 'the approval command does not run the application rule')
   assert.match(pairing, /join_with_code_in_state\(/, 'the join command does not run the application rule')
-  const engine = read('src-tauri', 'sesame-app', 'src', 'sync', 'engine.rs')
+  const engine = read('src-tauri', 'sesame-sync', 'src', 'engine.rs')
   assert.match(engine, /check\.approver\.signing_key/, 'the joining device must take the approver key from the exchange')
   assert.match(engine, /adding\.signer_device_id != approver\.device_id/, 'the entry that added this device must be signed by the device that gave the code')
   assert.doesNotMatch(pairing, /record_verified|fingerprint/, 'the first-sight trust and fingerprint comparison are gone')
-  const pake = read('src-tauri', 'sesame-app', 'src', 'sync', 'pake', 'mod.rs')
+  const pake = read('src-tauri', 'sesame-sync', 'src', 'pake', 'mod.rs')
   assert.match(pake, /CODE_ALPHABET/, 'codes come from a fixed alphabet')
   assert.match(pake, /is_identity\(\)/, 'an identity point must be refused')
 })
@@ -369,8 +380,11 @@ test('every request that changes state carries a device signature', () => {
   }
   const dispatch = client.match(/async fn write_raw\([\s\S]*?\n {4}}\n/)
   assert.ok(dispatch, 'write_raw is no longer one function this test can read')
-  assert.match(dispatch[0], /sign_request\(/)
-  assert.match(dispatch[0], /token: &self\.token/, 'the signature must bind the bearer token')
+  assert.match(dispatch[0], /request_signature_header\(/)
+  assert.match(dispatch[0], /&self\.token/, 'the signature must bind the bearer token')
+  const wire = read('src-tauri', 'sesame-sync', 'src', 'wire.rs')
+  assert.match(wire, /pub fn request_signature_header\(/)
+  assert.match(wire, /token,/, 'the shared signature input must bind the bearer token')
   for (const name of ['state', 'device_list', 'devices', 'pairing_status', 'key_package', 'headers', 'snapshot']) {
     const found = methods.find(([method]) => method === name)
     assert.ok(found, `the client has no ${name}`)
@@ -395,16 +409,24 @@ test('the company-signed Sync floor gates the one place every Sync command conne
   const writers = [
     ...sourceFiles(join('src-tauri', 'src'), /\.rs$/),
     ...sourceFiles(join('src-tauri', 'sesame-app', 'src'), /\.rs$/),
+    ...sourceFiles(join('src-tauri', 'sesame-sync', 'src'), /\.rs$/),
   ].filter((file) => {
     const source = read(file)
     const body = source.slice(0, source.indexOf('#[cfg(test)]') === -1 ? undefined : source.indexOf('#[cfg(test)]'))
-    return /raise_floor\(|record_manifest_floor\(/.test(body)
+    return /raise_floor(?:_with)?\(|record_manifest_floor(?:_with)?\(/.test(body)
   })
   assert.deepEqual(
     writers.map((file) => file.replaceAll('\\', '/')).sort(),
-    ['src-tauri/sesame-app/src/sync/floor.rs', 'src-tauri/src/adapters/network/sync_floor.rs'],
+    [
+      'src-tauri/sesame-app/src/sync/floor.rs',
+      'src-tauri/sesame-sync/src/floor.rs',
+      'src-tauri/src/adapters/network/sync_floor.rs',
+    ],
     'only the company manifest reader may write the Sync floor',
   )
+  const floorWrapper = read('src-tauri', 'sesame-app', 'src', 'sync', 'floor.rs')
+  assert.match(floorWrapper, /record_manifest_floor_with\(/)
+  assert.doesNotMatch(floorWrapper, /write_tagged|raise_floor_with/)
   const floorReader = read('src-tauri', 'src', 'adapters', 'network', 'sync_floor.rs')
   assert.match(floorReader, /configured_endpoint\(\)/)
   assert.match(floorReader, /candidate_trust\(\)/)
@@ -415,7 +437,7 @@ test('the service must say it offers Sync in a signed document before this devic
   const client = read('src-tauri', 'sesame-app', 'src', 'sync', 'client.rs')
   assert.match(client, /fetch_signed_document\(/)
   assert.match(client, /require_sync_enabled\(/)
-  const capabilities = read('src-tauri', 'sesame-app', 'src', 'network', 'capabilities.rs')
+  const capabilities = read('src-tauri', 'sesame-sync', 'src', 'capabilities.rs')
   assert.match(capabilities, /features\s*\.get\("sync"\)/)
 })
 
@@ -513,9 +535,10 @@ test('the fake device protection used by tests never reaches a normal build', ()
   const withFeature = sections.filter((section) => section.includes('test-support'))
   assert.deepEqual(withFeature.map((section) => section.split('\n')[0]), ['[dev-dependencies]'])
   assert.match(manifest, /^\[dependencies\][\s\S]*?^sesame-app = \{ path = "sesame-app" \}$/m)
-  for (const file of ['state.rs', 'identity.rs']) {
-    const source = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'sync', file), 'utf8')
-    assert.doesNotMatch(source, /#\[cfg\(not\(test\)\)\]/, file)
-    assert.match(source, /#\[cfg\(not\(any\(test, feature = "test-support"\)\)\)\]/, file)
-  }
+  const protection = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'sync', 'protection.rs'), 'utf8')
+  assert.doesNotMatch(protection, /#\[cfg\(not\(test\)\)\]/, 'protection.rs')
+  assert.match(protection, /#\[cfg\(not\(any\(test, feature = "test-support"\)\)\)\]/, 'protection.rs')
+  const shared = readFileSync(join(root, 'src-tauri', 'sesame-sync', 'src', 'lib.rs'), 'utf8')
+  assert.match(shared, /#\[cfg\(test\)\]\nmod test_support;/, 'the fake protector must stay a test-only module')
+  assert.doesNotMatch(shared, /test-support/, 'the shared crate must not grow a fake protection feature')
 })

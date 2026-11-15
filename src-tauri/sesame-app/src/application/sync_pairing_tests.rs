@@ -25,7 +25,7 @@ use crate::sync::engine::{
     add_entry, build_header, create_entry, plan_header, seal_label, NewDevice,
 };
 use crate::sync::header::Header;
-use crate::sync::identity::DeviceIdentity;
+use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::pairing::{ApproverIdentity, NewDeviceIdentity};
 use crate::sync::pake::{self, Offer};
 use crate::sync::request::KeyPackageV3;

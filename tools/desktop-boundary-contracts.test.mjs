@@ -201,7 +201,7 @@ test('desktop Sync fixtures are digest-bound local snapshots', () => {
     assert.equal(actual, expected, `${name} no longer matches its recorded source digest`)
   }
 
-  const rust = read('src-tauri', 'sesame-app', 'src', 'sync', 'v3_contract_tests.rs')
+  const rust = read('src-tauri', 'sesame-sync', 'src', 'v3_contract_tests.rs')
   for (const name of Object.keys(source.files)) assert.match(rust, new RegExp(name.replaceAll('.', '\\.')))
   assert.doesNotMatch(rust, /\.\.\/backend\/internal\/syncproto\/testdata/)
 })

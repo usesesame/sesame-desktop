@@ -21,7 +21,7 @@ use crate::application::tests::{Effect, FakeEffects};
 use crate::network::test_server::{Reply, TestServer};
 use crate::sync::client::SyncClient;
 use crate::sync::conflict_backup::{self, Side};
-use crate::sync::identity::DeviceIdentity;
+use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::key_change::PreparedKeyChange;
 use crate::sync::pairing::ApproverIdentity;
 use crate::sync::state::SyncState;

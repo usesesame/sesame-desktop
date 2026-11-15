@@ -1,0 +1,558 @@
+use std::path::{Path, PathBuf};
+
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, Zeroizing};
+
+use super::devicelist::{DeviceList, DeviceListEntry};
+use super::key_change::PreparedRecovery;
+use super::request::KeyPackageV3;
+use crate::DeviceProtector;
+use sesame_core::VaultResult;
+
+pub const JOURNAL_FILE_NAME: &str = "sync-rekey-journal.sesame";
+const JOURNAL_VERSION: u8 = 1;
+const PURPOSE_ADOPTION: &str = "adoption";
+const UNREADABLE: &str = "Sesame could not read the saved vault key change.";
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredJournal {
+    version: u8,
+    vault_id: String,
+    entry_index: u64,
+    entry_digest: String,
+    base_head_digest: String,
+    epoch_after: u64,
+    created_at: u64,
+    protected_key: String,
+    #[serde(default)]
+    recovery: Option<PreparedRecovery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    package_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    adopted_payload_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prospective_payload_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protected_recovery_kit: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Adopt,
+    Discard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    Rekey,
+    Adoption,
+}
+
+pub struct Journal {
+    pub vault_id: String,
+    pub entry_index: u64,
+    pub entry_digest: String,
+    pub base_head_digest: String,
+    pub epoch_after: u64,
+    pub created_at: u64,
+    pub recovery: Option<PreparedRecovery>,
+    pub purpose: Purpose,
+    pub package_digest: Option<String>,
+    pub adopted_payload_digest: Option<String>,
+    pub prospective_payload_digest: Option<String>,
+    recovery_kit: Option<Zeroizing<String>>,
+    key: Zeroizing<[u8; 32]>,
+}
+
+pub fn journal_path(app_local_data_dir: &Path) -> PathBuf {
+    app_local_data_dir.join(JOURNAL_FILE_NAME)
+}
+
+pub fn is_pending(path: &Path) -> bool {
+    path.exists()
+}
+
+pub fn forget(path: &Path) -> VaultResult<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("Sesame could not remove the saved vault key change.".to_string()),
+    }
+}
+
+impl Journal {
+    pub fn new(
+        entry: &DeviceListEntry,
+        base_head_digest: &str,
+        key: &[u8; 32],
+        recovery: PreparedRecovery,
+        created_at: u64,
+    ) -> Self {
+        Self {
+            vault_id: entry.vault_id.clone(),
+            entry_index: entry.index,
+            entry_digest: entry.digest(),
+            base_head_digest: base_head_digest.to_string(),
+            epoch_after: entry.epoch_after,
+            created_at,
+            recovery: Some(recovery),
+            purpose: Purpose::Rekey,
+            package_digest: None,
+            adopted_payload_digest: None,
+            prospective_payload_digest: None,
+            recovery_kit: None,
+            key: Zeroizing::new(*key),
+        }
+    }
+
+    pub fn for_adoption(
+        package: &KeyPackageV3,
+        list: &DeviceList,
+        key: &[u8; 32],
+        recovery: PreparedRecovery,
+        recovery_kit: String,
+        prospective_payload_digest: Option<&str>,
+        created_at: u64,
+    ) -> VaultResult<Self> {
+        let entry_index = list
+            .index_of_digest(&package.entry_digest)
+            .ok_or_else(|| "Sesame could not save the vault key change.".to_string())?;
+        Ok(Self {
+            vault_id: package.vault_id.clone(),
+            entry_index,
+            entry_digest: package.entry_digest.clone(),
+            base_head_digest: list.head_digest().to_string(),
+            epoch_after: package.vault_epoch,
+            created_at,
+            recovery: Some(recovery),
+            purpose: Purpose::Adoption,
+            package_digest: Some(package.digest()),
+            adopted_payload_digest: None,
+            prospective_payload_digest: prospective_payload_digest.map(str::to_string),
+            recovery_kit: Some(Zeroizing::new(recovery_kit)),
+            key: Zeroizing::new(*key),
+        })
+    }
+
+    pub fn key(&self) -> [u8; 32] {
+        *self.key
+    }
+
+    pub fn recovery_kit(&self) -> Option<String> {
+        self.recovery_kit.as_ref().map(|kit| kit.to_string())
+    }
+
+    pub fn adoption_digests(&self) -> [Option<&str>; 2] {
+        [
+            self.adopted_payload_digest.as_deref(),
+            self.prospective_payload_digest.as_deref(),
+        ]
+    }
+
+    pub fn save_with(&self, path: &Path, protector: &dyn DeviceProtector) -> VaultResult<()> {
+        protector.ensure_available()?;
+        let mut protected = protector.protect(self.key.as_slice())?;
+        let protected_recovery_kit = match &self.recovery_kit {
+            Some(kit) => {
+                let mut bytes = kit.as_bytes().to_vec();
+                let protected = protector.protect(&bytes);
+                bytes.zeroize();
+                Some(URL_SAFE_NO_PAD.encode(protected?))
+            }
+            None => None,
+        };
+        let stored = StoredJournal {
+            version: JOURNAL_VERSION,
+            vault_id: self.vault_id.clone(),
+            entry_index: self.entry_index,
+            entry_digest: self.entry_digest.clone(),
+            base_head_digest: self.base_head_digest.clone(),
+            epoch_after: self.epoch_after,
+            created_at: self.created_at,
+            protected_key: URL_SAFE_NO_PAD.encode(&protected),
+            recovery: self.recovery.clone(),
+            purpose: match self.purpose {
+                Purpose::Rekey => None,
+                Purpose::Adoption => Some(PURPOSE_ADOPTION.to_string()),
+            },
+            package_digest: self.package_digest.clone(),
+            adopted_payload_digest: self.adopted_payload_digest.clone(),
+            prospective_payload_digest: self.prospective_payload_digest.clone(),
+            protected_recovery_kit,
+        };
+        protected.zeroize();
+        let body = serde_json::to_vec(&stored)
+            .map_err(|_| "Sesame could not save the vault key change.".to_string())?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| "Sesame could not save the vault key change.".to_string())?;
+        }
+        sesame_core::storage::atomic_replace(path, &body)
+            .map_err(|_| "Sesame could not save the vault key change.".to_string())
+    }
+
+    pub fn load_with(path: &Path, protector: &dyn DeviceProtector) -> VaultResult<Self> {
+        let body = std::fs::read(path).map_err(|_| UNREADABLE.to_string())?;
+        let stored: StoredJournal =
+            serde_json::from_slice(&body).map_err(|_| UNREADABLE.to_string())?;
+        if stored.version != JOURNAL_VERSION
+            || stored.vault_id.is_empty()
+            || stored.entry_index < 2
+            || stored.epoch_after < 2
+            || stored.entry_digest.is_empty()
+        {
+            return Err(UNREADABLE.to_string());
+        }
+        let purpose = match stored.purpose.as_deref() {
+            None => Purpose::Rekey,
+            Some(PURPOSE_ADOPTION) => Purpose::Adoption,
+            Some(_) => return Err(UNREADABLE.to_string()),
+        };
+        if purpose == Purpose::Adoption
+            && (stored.recovery.is_none()
+                || stored.package_digest.is_none()
+                || stored.protected_recovery_kit.is_none())
+        {
+            return Err(UNREADABLE.to_string());
+        }
+        let mut protected = URL_SAFE_NO_PAD
+            .decode(&stored.protected_key)
+            .map_err(|_| UNREADABLE.to_string())?;
+        let opened = protector.unprotect(&protected);
+        protected.zeroize();
+        let mut bytes = opened.map_err(|_| UNREADABLE.to_string())?;
+        let key: Result<[u8; 32], _> = bytes.as_slice().try_into();
+        bytes.zeroize();
+        let key = key.map_err(|_| UNREADABLE.to_string())?;
+        let recovery_kit = match stored.protected_recovery_kit {
+            Some(encoded) => {
+                let mut protected = URL_SAFE_NO_PAD
+                    .decode(&encoded)
+                    .map_err(|_| UNREADABLE.to_string())?;
+                let opened = protector.unprotect(&protected);
+                protected.zeroize();
+                let mut bytes = opened.map_err(|_| UNREADABLE.to_string())?;
+                let text = match String::from_utf8(std::mem::take(&mut bytes)) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        let mut rejected = error.into_bytes();
+                        rejected.zeroize();
+                        return Err(UNREADABLE.to_string());
+                    }
+                };
+                bytes.zeroize();
+                Some(Zeroizing::new(text))
+            }
+            None => None,
+        };
+        Ok(Self {
+            vault_id: stored.vault_id,
+            entry_index: stored.entry_index,
+            entry_digest: stored.entry_digest,
+            base_head_digest: stored.base_head_digest,
+            epoch_after: stored.epoch_after,
+            created_at: stored.created_at,
+            recovery: stored.recovery,
+            purpose,
+            package_digest: stored.package_digest,
+            adopted_payload_digest: stored.adopted_payload_digest,
+            prospective_payload_digest: stored.prospective_payload_digest,
+            recovery_kit,
+            key: Zeroizing::new(key),
+        })
+    }
+
+    pub fn outcome(&self, list: &DeviceList) -> Outcome {
+        let adopt = list.vault_id() == self.vault_id
+            && list.digest_at(self.entry_index) == Some(self.entry_digest.as_str())
+            && list.epoch() == self.epoch_after;
+        if adopt {
+            Outcome::Adopt
+        } else {
+            Outcome::Discard
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{add_entry, create_entry, remove_entry, seal_label, NewDevice};
+    use crate::identity::DeviceIdentity;
+    use crate::key_change::fictional_recovery;
+    use crate::test_support::TestProtector;
+
+    const VAULT: &str = "vaultAAAAAAAAAAAA01";
+
+    struct World {
+        creator: DeviceIdentity,
+        first: DeviceIdentity,
+        second: DeviceIdentity,
+        base: DeviceList,
+    }
+
+    fn world() -> World {
+        let creator = DeviceIdentity::generate().expect("identity");
+        let first = DeviceIdentity::generate().expect("identity");
+        let second = DeviceIdentity::generate().expect("identity");
+        let label = |device: &DeviceIdentity| {
+            seal_label(&[9u8; 32], VAULT, &device.device_id, "Device").expect("label")
+        };
+        let mut list =
+            DeviceList::verify(&[create_entry(&creator, VAULT, &label(&creator))]).expect("list");
+        for joiner in [&first, &second] {
+            let entry = add_entry(
+                &creator,
+                &list,
+                &NewDevice {
+                    device_id: &joiner.device_id,
+                    signing_key: &URL_SAFE_NO_PAD.encode(joiner.signing_public_key()),
+                    package_key: &URL_SAFE_NO_PAD.encode(joiner.package_public_key()),
+                },
+                &label(joiner),
+                0,
+            )
+            .expect("add");
+            list.extend(&entry).expect("extend");
+        }
+        World {
+            creator,
+            first,
+            second,
+            base: list,
+        }
+    }
+
+    fn removal(world: &World, list: &DeviceList, subject: &DeviceIdentity) -> DeviceListEntry {
+        remove_entry(&world.creator, list, &subject.device_id).expect("removal")
+    }
+
+    fn extended(list: &DeviceList, entry: &DeviceListEntry) -> DeviceList {
+        let mut next = list.clone();
+        next.extend(entry).expect("extend");
+        next
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sesame-journal-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        journal_path(&dir)
+    }
+
+    fn rewritten(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        change(&mut body);
+        std::fs::write(path, serde_json::to_vec(&body).unwrap()).unwrap();
+    }
+
+    fn saved(world: &World, name: &str) -> (PathBuf, DeviceListEntry) {
+        let entry = removal(world, &world.base, &world.second);
+        let path = scratch(name);
+        Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1_700_000_000,
+        )
+        .save_with(&path, &TestProtector)
+        .expect("saved");
+        (path, entry)
+    }
+
+    #[test]
+    fn a_saved_journal_loads_with_the_same_key_and_facts() {
+        let world = world();
+        let (path, entry) = saved(&world, "round-trip");
+        assert!(is_pending(&path));
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
+        assert_eq!(loaded.key(), [4u8; 32]);
+        assert_eq!(loaded.vault_id, VAULT);
+        assert_eq!(loaded.entry_index, entry.index);
+        assert_eq!(loaded.entry_digest, entry.digest());
+        assert_eq!(loaded.epoch_after, entry.epoch_after);
+        assert_eq!(loaded.base_head_digest, world.base.head_digest());
+        let recovery = loaded.recovery.as_ref().expect("recovery");
+        assert_eq!(recovery.wrap.nonce, "fictional-nonce");
+        assert_eq!(recovery.kdf.salt, "fictional-salt");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_journal_from_a_build_that_kept_no_recovery_wrap_still_loads_without_one() {
+        let world = world();
+        let (path, _) = saved(&world, "no-recovery");
+        rewritten(&path, |body| {
+            body.as_object_mut().unwrap().remove("recovery");
+        });
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
+        assert!(loaded.recovery.is_none());
+        assert_eq!(loaded.key(), [4u8; 32]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn adoption_digests_are_optional_and_round_trip_separately() {
+        let world = world();
+        let (path, _) = saved(&world, "digests");
+        rewritten(&path, |body| {
+            body["adoptedPayloadDigest"] = serde_json::json!("digest-committed");
+            body["prospectivePayloadDigest"] = serde_json::json!("digest-prospective");
+        });
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
+        assert_eq!(
+            loaded.adoption_digests(),
+            [Some("digest-committed"), Some("digest-prospective")]
+        );
+        rewritten(&path, |body| {
+            body.as_object_mut().unwrap().remove("adoptedPayloadDigest");
+            body.as_object_mut()
+                .unwrap()
+                .remove("prospectivePayloadDigest");
+        });
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
+        assert_eq!(loaded.adoption_digests(), [None, None]);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn saving_again_replaces_the_journal_and_forgetting_twice_is_fine() {
+        let world = world();
+        let (path, entry) = saved(&world, "replace");
+        Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[5u8; 32],
+            fictional_recovery(),
+            1,
+        )
+        .save_with(&path, &TestProtector)
+        .expect("saved");
+        assert_eq!(
+            Journal::load_with(&path, &TestProtector)
+                .expect("loaded")
+                .key(),
+            [5u8; 32]
+        );
+        forget(&path).expect("forgotten");
+        forget(&path).expect("forgetting twice is fine");
+        assert!(!is_pending(&path));
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_damaged_or_foreign_journal_is_refused() {
+        let world = world();
+        let (path, _) = saved(&world, "damaged");
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
+        std::fs::write(&path, b"").unwrap();
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
+
+        let cases: [(&str, serde_json::Value); 7] = [
+            ("version", serde_json::json!(2)),
+            ("vaultId", serde_json::json!("")),
+            ("entryIndex", serde_json::json!(1)),
+            ("epochAfter", serde_json::json!(1)),
+            ("entryDigest", serde_json::json!("")),
+            (
+                "protectedKey",
+                serde_json::json!(URL_SAFE_NO_PAD.encode([4u8; 31])),
+            ),
+            ("protectedKey", serde_json::json!("not base64!")),
+        ];
+        for (field, value) in cases {
+            let (path, _) = saved(&world, "field");
+            rewritten(&path, |body| body[field] = value);
+            assert!(
+                Journal::load_with(&path, &TestProtector).is_err(),
+                "{field}"
+            );
+            let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        }
+        let (path, _) = saved(&world, "extra");
+        rewritten(&path, |body| body["extra"] = serde_json::json!(true));
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_removal_that_reached_the_list_is_adopted() {
+        let world = world();
+        let entry = removal(&world, &world.base, &world.second);
+        let journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
+        let committed = extended(&world.base, &entry);
+        assert_eq!(journal.outcome(&committed), Outcome::Adopt);
+    }
+
+    #[test]
+    fn a_removal_that_never_reached_the_list_is_discarded() {
+        let world = world();
+        let entry = removal(&world, &world.base, &world.second);
+        let journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
+        assert_eq!(journal.outcome(&world.base), Outcome::Discard);
+    }
+
+    #[test]
+    fn another_removal_at_the_same_place_or_a_later_key_change_is_discarded() {
+        let world = world();
+        let ours = removal(&world, &world.base, &world.second);
+        let journal = Journal::new(
+            &ours,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
+
+        let theirs = removal(&world, &world.base, &world.first);
+        assert_eq!(
+            journal.outcome(&extended(&world.base, &theirs)),
+            Outcome::Discard
+        );
+
+        let committed = extended(&world.base, &ours);
+        let later = removal(&world, &committed, &world.first);
+        let moved_on = extended(&committed, &later);
+        assert_eq!(journal.outcome(&moved_on), Outcome::Discard);
+    }
+
+    #[test]
+    fn a_journal_for_another_vault_is_discarded() {
+        let world = world();
+        let entry = removal(&world, &world.base, &world.second);
+        let mut journal = Journal::new(
+            &entry,
+            world.base.head_digest(),
+            &[4u8; 32],
+            fictional_recovery(),
+            1,
+        );
+        journal.vault_id = "vaultBBBBBBBBBBBB02".to_string();
+        assert_eq!(
+            journal.outcome(&extended(&world.base, &entry)),
+            Outcome::Discard
+        );
+    }
+}

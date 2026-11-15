@@ -20,8 +20,8 @@ panic = "warn"
 
 [dependencies]
 sesame-core = { path = "../sesame-core" }
+sesame-sync = { path = "../sesame-sync" }
 base64 = "0.23"
-chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 ed25519-dalek = "3"
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.10"
@@ -30,20 +30,14 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
-sha2 = "0.11"
 idna = "1"
 psl = "2"
 unicode-security = "0.1"
 url = "2.5"
 zeroize = { version = "1.8", features = ["derive"] }
-curve25519-dalek = "5"
-x25519-dalek = { version = "3", features = ["static_secrets"] }
-hkdf = "0.13"
 ts-rs = "12.0.1"
-ml-kem = { version = "=0.3.4", features = ["zeroize"] }
-sha3 = "=0.12.0"
-shake = "0.1"
 tokio = { version = "=1.53.3", features = ["net", "rt", "time"], optional = true }
 
 [dev-dependencies]
+sesame-sync = { path = "../sesame-sync", features = ["test-util"] }
 tokio = { version = "=1.53.3", features = ["net", "rt", "time"] }
