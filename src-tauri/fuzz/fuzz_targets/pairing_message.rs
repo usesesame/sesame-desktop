@@ -3,5 +3,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    sesame_lib::sync_fuzz::pairing_message(data);
+    sesame_sync::fuzz_entry::pairing_message(data);
 });

@@ -10,8 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.sesame]
-path = ".."
+[dependencies.sesame-sync]
+path = "../sesame-sync"
+features = ["fuzz-entry"]
 
 [[bin]]
 name = "envelope"
