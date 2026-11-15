@@ -1,51 +1,26 @@
 # Sesame
 
-Sesame keeps your passwords and recovery details in a local vault. You can use
-the desktop without an account, and optional sync keeps an encrypted copy on
-the server you choose.
+Sesame is a password manager that keeps your vault on your own computer. You
+can use it without an account, and optional Sync keeps an encrypted copy on a
+server you choose. That server never sees your master password, your recovery
+kit or anything inside the vault.
 
-The account service, public website, and browser extension are separate
-projects. The server receives encrypted vault data and has no key to read it,
-while your master password and recovery kit stay on your devices.
+Sesame is early software and nobody independent has reviewed it yet, so don't
+keep your only copy of important passwords in it for now.
 
-Sesame is early software, and no independent security review has happened yet,
-for the vault or for Sync. Do not rely on it for your only copy of important
-credentials for now.
-
-## Repository shape
-
-This repository contains the desktop app and native-messaging host. The other
-projects have their own releases and CI.
-
-| Path | What it is | Required to use a local vault? |
-| --- | --- | --- |
-| `src/` | Svelte desktop interface | Yes |
-| `src-tauri/` | Tauri host and Rust vault core | Yes |
-| `design/` | Desktop design tokens | Yes |
-| `tools/` | Contract tests, release evidence, and CI helpers | No |
-
-Other Sesame projects:
-
-- [sesame-browser-extension](https://github.com/usesesame/sesame-browser-extension):
-  the Chrome, Edge, and experimental Firefox packages
-- [sesame-server](https://github.com/usesesame/sesame-server): the vault-blind
-  Go API, account portal, and administration portal
-- [sesame-website](https://github.com/usesesame/sesame-website): the static
-  public site
-
-The desktop must work when hosted services are unavailable. Sync is optional
-and off until a person turns it on in Settings. It has not had an independent
-review, and the screen says so.
-
-Before changing vault, browser, or authentication code, read the security
-rules in [CONTRIBUTING.md](CONTRIBUTING.md).
+This repository holds the desktop app for Windows and Linux and the browser
+helper that the extension talks to. The
+[browser extension](https://github.com/usesesame/sesame-browser-extension),
+the [server](https://github.com/usesesame/sesame-server) and the
+[website](https://github.com/usesesame/sesame-website) live in their own
+repositories.
 
 ## Run it
 
-Requirements: Node.js 24.20 and Rust 1.98.0. Windows also needs WebView2.
-Linux needs WebKitGTK 4.1 and the tray libraries:
+You need Node.js 24.20 and Rust 1.98.0. Windows also needs WebView2, and Linux
+needs WebKitGTK 4.1 and the tray libraries.
 
-Debian and Ubuntu:
+On Debian and Ubuntu:
 
 ```sh
 sudo apt-get install --no-install-recommends \
@@ -54,13 +29,20 @@ sudo apt-get install --no-install-recommends \
   libdbus-1-dev libsecret-tools build-essential curl wget file pkg-config xdg-utils
 ```
 
-Arch Linux:
+On Arch Linux:
 
 ```sh
 sudo pacman -Syu
 sudo pacman -S --needed \
   webkit2gtk-4.1 base-devel curl wget file openssl \
   libayatana-appindicator librsvg libsecret xdg-utils
+```
+
+Then start the app. On Linux:
+
+```sh
+npm ci
+npm run desktop:linux:dev
 ```
 
 On Windows:
@@ -70,22 +52,14 @@ npm.cmd ci
 npm.cmd run tauri:dev:browser
 ```
 
-On Linux, after installing the dependencies above:
+`npm run desktop:ci` runs every check a pull request needs, and
+[CONTRIBUTING.md](CONTRIBUTING.md) explains the workflow and the security
+rules for vault, browser and sign-in code. To build installers, run
+`npm run release:bundle:windows:unsigned` for the Windows installer or
+`npm run release:bundle:linux:unsigned` for the deb, rpm and AppImage, which
+also needs `patchelf`, `dpkg-deb` and `rpmbuild`.
 
-```sh
-npm ci
-npm run desktop:linux:dev
-```
-
-`npm run release:bundle:windows:unsigned` builds the NSIS installer.
-`npm run release:bundle:linux:unsigned` builds the deb, rpm, and AppImage, and
-also needs `patchelf`, `dpkg-deb`, and `rpmbuild`.
-
-`npm run desktop:test` runs the unit, vault core, and contract tests.
-`npm run desktop:ci` is the full local check. The contributor workflow is in
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Platforms
+## What works where
 
 | Capability | Windows | Linux |
 | --- | --- | --- |
@@ -101,54 +75,29 @@ also needs `patchelf`, `dpkg-deb`, and `rpmbuild`.
 | Account linking | Yes | Secret Service wallet, validation pending |
 | Signed desktop updates | Yes | No |
 
-On Linux:
+A few things on Linux need your attention:
 
-- Idle time comes from GNOME or KDE. On other desktops Sesame locks after the
-  automatic-lock delay without keyboard or pointer activity in its own window,
-  so work in other programs does not keep the vault open, and Settings says so.
-- Screen lock comes from systemd logind or the screen saver service. When
-  neither answers, Settings says the vault will not follow the screen lock.
-  Sesame looks for missing sources again every 30 seconds and locks the vault
-  once the automatic-lock delay has passed with no source answering after one
-  had.
-- Sesame asks the kernel to keep the vault key out of swap and crash dumps.
-  When the kernel refuses, for example under a low memory lock limit, the key
-  stays in ordinary memory that Sesame wipes on lock, and the diagnostics log
-  records `key_page_fallback`.
-- Wayland has no global-hotkey protocol. Use the tray icon, or start Sesame
-  with `GDK_BACKEND=x11`.
-- The AppImage sets `GDK_BACKEND=x11`, so on a Wayland desktop its window runs
-  through XWayland. Other X11 programs can then observe that window's keyboard
-  input and clipboard, which Wayland otherwise isolates. The deb and rpm
-  packages do not set this.
+- Wayland has no global shortcut, so open quick access from the tray icon or
+  start Sesame with `GDK_BACKEND=x11`. The AppImage always sets
+  `GDK_BACKEND=x11`, and [SECURITY.md](.github/SECURITY.md#known-limits)
+  explains what that costs on Wayland.
 - PIN unlock and account linking need a Secret Service wallet. Sesame starts
-  `gnome-keyring-daemon` or `ksecretd` when none is running. On Arch, install
-  `gnome-keyring` or `kwallet` if the desktop has neither.
-- The AppImage uses your system's GLib instead of bundling its own, so GLib
-  security fixes reach it through normal system updates. It needs GLib 2.80
-  or newer.
-- The AppImage has no stable path, so it copies its browser helper to
-  `~/.local/share/sesame/browser-host` and registers that copy. Start the
-  AppImage once after an update to refresh the copy. Unlike the deb and rpm,
-  the copy sits in a folder your own programs can write to.
+  `gnome-keyring-daemon` or `ksecretd` when one is installed, so on Arch
+  install `gnome-keyring` or `kwallet` if you have neither.
+- The AppImage uses your system's GLib 2.80 or newer, so GLib security fixes
+  arrive with your normal updates.
+- After you update the AppImage, start it once so it refreshes the browser
+  helper it copies to `~/.local/share/sesame/browser-host`.
 
-The wallet on Linux and DPAPI on Windows protect the PIN data from other
-users. They do not protect it from other programs running as you, so the PIN
-is a convenience unlock. See [.github/SECURITY.md](.github/SECURITY.md#known-limits).
+The rest of the limits, including what the PIN does and doesn't protect, are
+in [SECURITY.md](.github/SECURITY.md#known-limits).
 
-## Licence and trademarks
+## Licence and security
 
 Sesame is licensed under the
-[GNU Affero General Public License v3.0 or later](LICENSE). It covers the
-desktop app and native-messaging host in this repository. The related Sesame
-repositories publish their own licence files.
+[GNU Affero General Public License v3.0 or later](LICENSE). A modified build or
+hosted service can't present itself as official Sesame, and the
+[trademark policy](TRADEMARKS.md) says what it must rename.
 
-The licence does not let a modified build or hosted service present itself as
-official Sesame. The [trademark policy](TRADEMARKS.md) sets what modified
-distributions must rename.
-
-## Security
-
-Security issues should be reported through [.github/SECURITY.md](.github/SECURITY.md),
-not a public issue. Examples, fixtures, screenshots, and bug reports must use
-fictional data.
+Report security problems through [SECURITY.md](.github/SECURITY.md), not a
+public issue, and use made-up data in examples, screenshots and bug reports.
