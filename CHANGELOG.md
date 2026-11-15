@@ -4,6 +4,41 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.5.3
+
+### Everyday use
+
+- Deleting a login from its editor asks inside the editor, so choosing Keep
+  editing keeps any unsaved changes.
+- Every delete notice has an Undo button that brings the item back from
+  Trash, and the notices and delete dialogs say that Trash keeps items for
+  30 days.
+- A password shown in the login editor is hidden again after 30 seconds,
+  unless the cursor is still in the password field.
+- Error messages appear above open dialogs instead of behind them.
+- Buttons that show only an icon have a tooltip with their name.
+
+### Sync
+
+- If a device lost the server's answer while adopting a new vault key, a
+  retry now finishes the adoption and shows the new recovery kit. Before, the
+  retry was refused and the kit was never shown.
+- A checkpoint save that finished after Sync was turned off could bring the
+  Sync state back. It now refuses and removes what it wrote.
+- Replacing the vault key on a device with no local changes now uploads the
+  vault under the new key, so other devices can read it.
+- Going back to 0.5.2 in the middle of an interrupted key adoption is not
+  supported, because 0.5.2 cannot read the record that 0.5.3 writes for it.
+
+### Unlock
+
+- Unlocking with the recovery kit resets the PIN attempt count, as the PIN
+  error message already said it would.
+- The approval Sesame records after an unlock is tied to that unlock, so a
+  lock at the same moment can no longer carry it over to the next session.
+- A recovery kit replacement is refused if the vault was locked while Sesame
+  waited for the server.
+
 ## 0.5.2
 
 ### Security
