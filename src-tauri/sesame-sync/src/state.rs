@@ -241,6 +241,7 @@ pub fn write_tagged_with(
         std::fs::create_dir_all(parent)
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
+    keep_staged_body(path, label, protector)?;
     let protected = protector
         .protect(&tag_for(label, body))
         .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
@@ -250,6 +251,26 @@ pub fn write_tagged_with(
     sesame_core::storage::atomic_replace(path, body)?;
     let _ = std::fs::remove_file(&next);
     Ok(())
+}
+
+fn keep_staged_body(path: &Path, label: &[u8], protector: &dyn DeviceProtector) -> VaultResult<()> {
+    let next = next_path(path);
+    let Ok(staged) = std::fs::read(&next) else {
+        return Ok(());
+    };
+    let Some(expected) = std::fs::read(tag_path(path))
+        .ok()
+        .and_then(|protected| protector.unprotect(&protected).ok())
+    else {
+        return Ok(());
+    };
+    let current_matches = std::fs::read(path)
+        .map(|body| matches_tag(label, &body, &expected))
+        .unwrap_or(false);
+    if current_matches || !matches_tag(label, &staged, &expected) {
+        return Ok(());
+    }
+    sesame_core::storage::atomic_replace(path, &staged)
 }
 
 fn matches_tag(label: &[u8], body: &[u8], expected: &[u8]) -> bool {
@@ -486,6 +507,47 @@ mod tests {
         assert_eq!(read_protected(&path), Some(next.clone()));
         assert_eq!(read_protected(&path), Some(next));
         assert!(!next_path(&path).exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    struct StopsBeforeSaving;
+
+    impl DeviceProtector for StopsBeforeSaving {
+        fn ensure_available(&self) -> VaultResult<()> {
+            Ok(())
+        }
+
+        fn protect(&self, _plaintext: &[u8]) -> VaultResult<Vec<u8>> {
+            Err("stopped".to_string())
+        }
+
+        fn unprotect(&self, protected: &[u8]) -> VaultResult<Vec<u8>> {
+            Ok(protected.to_vec())
+        }
+    }
+
+    #[test]
+    fn a_second_interrupted_save_cannot_lose_a_state_that_only_the_next_file_held() {
+        let dir = dir_for("two-interrupted-saves");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = path_for(&dir);
+        write_protected(&path, &sample_base(3)).unwrap();
+
+        let staged = sample_base(4);
+        let staged_body = serde_json::to_vec(&staged).unwrap();
+        sesame_core::storage::atomic_replace(&next_path(&path), &staged_body).unwrap();
+        sesame_core::storage::atomic_replace(
+            &tag_path(&path),
+            &protect(&tag_for(STATE_TAG_LABEL, &staged_body)).unwrap(),
+        )
+        .unwrap();
+
+        let later = serde_json::to_vec(&sample_base(5)).unwrap();
+        assert!(write_tagged_with(&path, STATE_TAG_LABEL, &later, &StopsBeforeSaving).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), staged_body);
+        sesame_core::storage::atomic_replace(&next_path(&path), &later).unwrap();
+
+        assert_eq!(read_protected(&path), Some(staged));
         std::fs::remove_dir_all(&dir).ok();
     }
 
