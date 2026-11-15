@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use super::ensure_crypto_provider;
-use super::server_address::{fingerprint_of_public_key, normalized_fingerprint, ServerAddress};
+use super::server_address::ServerAddress;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::redirect::Policy;
+pub use sesame_sync::server_trust::pin_key;
 use zeroize::Zeroize;
 
 use crate::vault::platform::unprotect_for_device;
@@ -11,7 +12,6 @@ use crate::vault::types::{CustomServerPin, ServiceConnectionFile};
 use crate::vault::{VaultResult, SERVICE_CONNECTION_FORMAT_VERSION};
 
 const BOUND_TOKEN_PREFIX: &str = "sesame-server-token-v1\n";
-const MAX_PIN_FIELD_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServiceTarget {
@@ -161,21 +161,6 @@ fn parse_service_connection(
     Ok(connection)
 }
 
-pub fn pin_key(pin: &CustomServerPin) -> Option<ed25519_dalek::VerifyingKey> {
-    let fields = [&pin.instance_id, &pin.name, &pin.capability_key_id];
-    if fields.iter().any(|field| field.len() > MAX_PIN_FIELD_BYTES)
-        || pin.instance_id.is_empty()
-        || pin.capability_key_id.is_empty()
-    {
-        return None;
-    }
-    let raw = URL_SAFE_NO_PAD.decode(&pin.capability_public_key).ok()?;
-    let key = ed25519_dalek::VerifyingKey::from_bytes(raw.as_slice().try_into().ok()?).ok()?;
-    let fingerprint = normalized_fingerprint(&pin.fingerprint)?;
-    (fingerprint == pin.fingerprint && fingerprint == fingerprint_of_public_key(&raw))
-        .then_some(key)
-}
-
 pub fn service_target(connection: &ServiceConnectionFile) -> VaultResult<ServiceTarget> {
     match &connection.custom_server {
         None => Ok(ServiceTarget::Official {
@@ -232,8 +217,10 @@ fn unbound_token(api_base_url: &str, custom: bool, stored: &str) -> VaultResult<
 
 #[cfg(test)]
 mod tests {
+    use super::super::server_address::fingerprint_of_public_key;
     use super::*;
     use ed25519_dalek::SigningKey;
+    use sesame_sync::server_trust::MAX_PIN_FIELD_BYTES;
 
     const API_BASE_URL: &str = "https://api.example.test";
     const CUSTOM_BASE_URL: &str = "https://sesame.home.example.test/vault";
