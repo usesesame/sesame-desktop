@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::sync::devicelist::{DeviceList, DeviceListEntry};
-use crate::sync::header::Header;
-use crate::vault::VaultResult;
+use crate::devicelist::{DeviceList, DeviceListEntry};
+use crate::header::Header;
+use crate::DeviceProtector;
+use sesame_core::VaultResult;
 
 pub const STATE_FILE_NAME: &str = "sync-state.json";
 
@@ -91,7 +92,7 @@ pub struct SyncState {
     #[serde(default)]
     pub last_checkpoint: Option<PostedCheckpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_join: Option<crate::sync::pairing::ApproverIdentity>,
+    pub pending_join: Option<crate::pairing::ApproverIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_confirmation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,18 +143,22 @@ impl SyncState {
     }
 
     /// Device names this device could open once. They are cosmetic, so a value that cannot be read is forgotten.
-    pub fn remembered_names(&self) -> std::collections::BTreeMap<String, String> {
+    pub fn remembered_names_with(
+        &self,
+        protector: &dyn DeviceProtector,
+    ) -> std::collections::BTreeMap<String, String> {
         self.names
             .as_deref()
             .and_then(|encoded| URL_SAFE_NO_PAD.decode(encoded).ok())
-            .and_then(|protected| unprotect(&protected).ok())
+            .and_then(|protected| protector.unprotect(&protected).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default()
     }
 
-    pub fn remember_names(
+    pub fn remember_names_with(
         &mut self,
         names: &std::collections::BTreeMap<String, String>,
+        protector: &dyn DeviceProtector,
     ) -> VaultResult<()> {
         if names.is_empty() {
             self.names = None;
@@ -161,11 +166,11 @@ impl SyncState {
         }
         let bytes = serde_json::to_vec(names)
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
-        self.names = Some(URL_SAFE_NO_PAD.encode(protect(&bytes)?));
+        self.names = Some(URL_SAFE_NO_PAD.encode(protector.protect(&bytes)?));
         Ok(())
     }
 
-    pub fn list(&self) -> Result<DeviceList, crate::sync::canonical::ProofError> {
+    pub fn list(&self) -> Result<DeviceList, crate::canonical::ProofError> {
         DeviceList::verify(&self.entries)
     }
 
@@ -226,37 +231,23 @@ fn state_tag(body: &[u8]) -> Vec<u8> {
     tag_for(STATE_TAG_LABEL, body)
 }
 
-#[cfg(any(test, feature = "test-support"))]
-fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    Ok(bytes.to_vec())
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    Ok(bytes.to_vec())
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    crate::vault::platform::protect_for_device(bytes)
-        .map_err(|_| "Sesame could not record the Sync state.".to_string())
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn unprotect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    crate::vault::platform::unprotect_for_device(bytes)
-}
-
-pub fn write_tagged(path: &Path, label: &[u8], body: &[u8]) -> VaultResult<()> {
+pub fn write_tagged_with(
+    path: &Path,
+    label: &[u8],
+    body: &[u8],
+    protector: &dyn DeviceProtector,
+) -> VaultResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     }
-    let protected = protect(&tag_for(label, body))?;
+    let protected = protector
+        .protect(&tag_for(label, body))
+        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
     let next = next_path(path);
-    crate::vault::storage::atomic_replace(&next, body)?;
-    crate::vault::storage::atomic_replace(&tag_path(path), &protected)?;
-    crate::vault::storage::atomic_replace(path, body)?;
+    sesame_core::storage::atomic_replace(&next, body)?;
+    sesame_core::storage::atomic_replace(&tag_path(path), &protected)?;
+    sesame_core::storage::atomic_replace(path, body)?;
     let _ = std::fs::remove_file(&next);
     Ok(())
 }
@@ -273,9 +264,13 @@ fn matches_tag(label: &[u8], body: &[u8], expected: &[u8]) -> bool {
             == 0
 }
 
-pub fn read_tagged(path: &Path, label: &[u8]) -> Option<Vec<u8>> {
+pub fn read_tagged_with(
+    path: &Path,
+    label: &[u8],
+    protector: &dyn DeviceProtector,
+) -> Option<Vec<u8>> {
     let protected = std::fs::read(tag_path(path)).ok()?;
-    let expected = unprotect(&protected).ok()?;
+    let expected = protector.unprotect(&protected).ok()?;
     if let Ok(body) = std::fs::read(path) {
         if matches_tag(label, &body, &expected) {
             return Some(body);
@@ -286,20 +281,24 @@ pub fn read_tagged(path: &Path, label: &[u8]) -> Option<Vec<u8>> {
     if !matches_tag(label, &body, &expected) {
         return None;
     }
-    if crate::vault::storage::atomic_replace(path, &body).is_ok() {
+    if sesame_core::storage::atomic_replace(path, &body).is_ok() {
         let _ = std::fs::remove_file(&next);
     }
     Some(body)
 }
 
-pub fn write_protected(path: &Path, base: &SyncState) -> VaultResult<()> {
+pub fn write_protected_with(
+    path: &Path,
+    base: &SyncState,
+    protector: &dyn DeviceProtector,
+) -> VaultResult<()> {
     let body = serde_json::to_vec(base)
         .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
-    write_tagged(path, STATE_TAG_LABEL, &body)
+    write_tagged_with(path, STATE_TAG_LABEL, &body, protector)
 }
 
-pub fn read_protected(path: &Path) -> Option<SyncState> {
-    let body = read_tagged(path, STATE_TAG_LABEL)?;
+pub fn read_protected_with(path: &Path, protector: &dyn DeviceProtector) -> Option<SyncState> {
+    let body = read_tagged_with(path, STATE_TAG_LABEL, protector)?;
     let state: SyncState = serde_json::from_slice(&body).ok()?;
     if state.version != STATE_VERSION || state.vault_id.is_empty() || state.device_id.is_empty() {
         return None;
@@ -308,7 +307,7 @@ pub fn read_protected(path: &Path) -> Option<SyncState> {
     Some(state)
 }
 
-pub fn tagged_files_exist(path: &Path) -> bool {
+pub(crate) fn tagged_files_exist(path: &Path) -> bool {
     path.exists() || tag_path(path).exists() || next_path(path).exists()
 }
 
@@ -346,6 +345,19 @@ pub fn decide_upload(base_revision: u64, server_revision: u64) -> UploadDecision
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestProtector;
+
+    fn write_protected(path: &Path, base: &SyncState) -> VaultResult<()> {
+        write_protected_with(path, base, &TestProtector)
+    }
+
+    fn read_protected(path: &Path) -> Option<SyncState> {
+        read_protected_with(path, &TestProtector)
+    }
+
+    fn protect(bytes: &[u8]) -> VaultResult<Vec<u8>> {
+        TestProtector.protect(bytes)
+    }
 
     fn dir_for(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("sesame-sync-state-{name}-{}", std::process::id()))
@@ -464,8 +476,8 @@ mod tests {
 
         let next = sample_base(4);
         let body = serde_json::to_vec(&next).unwrap();
-        crate::vault::storage::atomic_replace(&next_path(&path), &body).unwrap();
-        crate::vault::storage::atomic_replace(
+        sesame_core::storage::atomic_replace(&next_path(&path), &body).unwrap();
+        sesame_core::storage::atomic_replace(
             &tag_path(&path),
             &protect(&tag_for(STATE_TAG_LABEL, &body)).unwrap(),
         )
@@ -486,7 +498,7 @@ mod tests {
         write_protected(&path, &old).unwrap();
 
         let body = serde_json::to_vec(&sample_base(4)).unwrap();
-        crate::vault::storage::atomic_replace(&next_path(&path), &body).unwrap();
+        sesame_core::storage::atomic_replace(&next_path(&path), &body).unwrap();
 
         assert_eq!(read_protected(&path), Some(old));
         std::fs::remove_dir_all(&dir).ok();

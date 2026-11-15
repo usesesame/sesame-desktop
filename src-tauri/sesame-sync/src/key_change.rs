@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::vault::types::{CipherBlob, KdfParams};
-use crate::vault::VaultResult;
+use sesame_core::types::{CipherBlob, KdfParams};
+use sesame_core::VaultResult;
 
 pub const STAGED_LIFETIME: Duration = Duration::from_secs(10 * 60);
 const NOT_READY: &str = "Show and save the new recovery kit first.";
@@ -60,7 +60,7 @@ impl PreparedKeyChange {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn is_staged(&self) -> bool {
         self.staged.lock().is_ok_and(|guard| guard.is_some())
     }
@@ -72,7 +72,7 @@ impl Drop for PreparedKeyChange {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn fictional_recovery() -> PreparedRecovery {
     PreparedRecovery {
         wrap: CipherBlob {

@@ -118,7 +118,7 @@ impl KeyPackageV3 {
             || !opaque_id(&self.sender_device_id)
             || !opaque_id(&self.recipient_device_id)
             || self.vault_epoch == 0
-            || !crate::sync::canonical::valid_digest(&self.entry_digest)
+            || !crate::canonical::valid_digest(&self.entry_digest)
         {
             return Err(ProofError::invalid("key package fields"));
         }

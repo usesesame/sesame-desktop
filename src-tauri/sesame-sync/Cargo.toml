@@ -1,0 +1,41 @@
+[package]
+name = "sesame-sync"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+description = "Portable Sesame Sync v3 protocol, device state, and file boundaries shared by every Sesame frontend."
+authors = ["Sesame"]
+edition = "2021"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"
+
+[lib]
+name = "sesame_sync"
+
+[features]
+fuzz-entry = []
+test-util = []
+
+[dependencies]
+sesame-core = { path = "../sesame-core" }
+base64 = "0.23"
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
+chrono = { version = "0.4", features = ["serde"] }
+curve25519-dalek = "5"
+ed25519-dalek = "3"
+hkdf = "0.13"
+ml-kem = { version = "=0.3.4", features = ["zeroize"] }
+rand = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+sha3 = "=0.12.0"
+shake = "0.1"
+url = "2.5"
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+zeroize = { version = "1.8", features = ["derive"] }

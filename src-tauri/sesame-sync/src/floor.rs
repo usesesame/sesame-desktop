@@ -5,8 +5,9 @@ use base64::Engine;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::sync::state::{read_tagged, write_tagged};
-use crate::vault::VaultResult;
+use crate::state::{read_tagged_with, tagged_files_exist, write_tagged_with};
+use crate::DeviceProtector;
+use sesame_core::VaultResult;
 
 pub const FLOOR_FILE_NAME: &str = "sync-floor.json";
 const PAYLOAD_LABEL: &str = "sesame-sync-floor-v1";
@@ -164,17 +165,22 @@ pub fn floor_path(app_local_data_dir: &Path) -> PathBuf {
     app_local_data_dir.join(FLOOR_FILE_NAME)
 }
 
-pub fn read_floor(path: &Path) -> Option<StoredFloor> {
-    let body = read_tagged(path, TAG_LABEL)?;
+pub fn read_floor_with(path: &Path, protector: &dyn DeviceProtector) -> Option<StoredFloor> {
+    let body = read_tagged_with(path, TAG_LABEL, protector)?;
     let stored: StoredFloor = serde_json::from_slice(&body).ok()?;
     Version::parse_floor(&stored.minimum)?;
     Some(stored)
 }
 
-pub fn raise_floor(path: &Path, verified_minimum: &str, now: u64) -> VaultResult<StoredFloor> {
+pub fn raise_floor_with(
+    path: &Path,
+    verified_minimum: &str,
+    now: u64,
+    protector: &dyn DeviceProtector,
+) -> VaultResult<StoredFloor> {
     let incoming =
         Version::parse_floor(verified_minimum).ok_or_else(|| FloorError::Malformed.to_string())?;
-    let kept = match read_floor(path) {
+    let kept = match read_floor_with(path, protector) {
         Some(stored) if Version::parse_floor(&stored.minimum) > Some(incoming) => stored.minimum,
         _ => verified_minimum.to_string(),
     };
@@ -184,21 +190,22 @@ pub fn raise_floor(path: &Path, verified_minimum: &str, now: u64) -> VaultResult
     };
     let body = serde_json::to_vec(&stored)
         .map_err(|_| "Sesame could not record the Sync version notice.".to_string())?;
-    write_tagged(path, TAG_LABEL, &body)?;
+    write_tagged_with(path, TAG_LABEL, &body, protector)?;
     Ok(stored)
 }
 
-pub fn record_manifest_floor(
+pub fn record_manifest_floor_with(
     path: &Path,
     manifest: &serde_json::Value,
     encoded_public_key: &str,
     expected_key_id: &str,
     now: u64,
+    protector: &dyn DeviceProtector,
 ) -> VaultResult<Option<StoredFloor>> {
     match verify_manifest_floor(manifest, encoded_public_key, expected_key_id)
         .map_err(|error| error.to_string())?
     {
-        Some(minimum) => raise_floor(path, &minimum, now).map(Some),
+        Some(minimum) => raise_floor_with(path, &minimum, now, protector).map(Some),
         None => Ok(None),
     }
 }
@@ -210,20 +217,27 @@ pub enum FloorState {
     Damaged,
 }
 
-pub fn floor_state(path: &Path) -> FloorState {
-    match read_floor(path) {
+pub fn floor_state_with(path: &Path, protector: &dyn DeviceProtector) -> FloorState {
+    match read_floor_with(path, protector) {
         Some(stored) => FloorState::Present(stored),
-        None if crate::sync::state::tagged_files_exist(path) => FloorState::Damaged,
+        None if tagged_files_exist(path) => FloorState::Damaged,
         None => FloorState::Absent,
     }
 }
 
-pub fn confirmed_at(path: &Path) -> Option<u64> {
-    read_floor(path).map(|stored| stored.confirmed_at)
+pub fn confirmed_at_with(path: &Path, protector: &dyn DeviceProtector) -> Option<u64> {
+    read_floor_with(path, protector).map(|stored| stored.confirmed_at)
 }
 
-pub fn require_allowed(build_version: &str, path: &Path, can_fetch: bool) -> Result<(), String> {
-    let stored = match floor_state(path) {
+pub fn require_allowed_with(
+    build_version: &str,
+    client_platform: &str,
+    path: &Path,
+    can_fetch: bool,
+    protector: &dyn DeviceProtector,
+) -> Result<(), String> {
+    let _ = client_platform;
+    let stored = match floor_state_with(path, protector) {
         FloorState::Absent => return Ok(()),
         FloorState::Damaged if can_fetch => return Err(DAMAGED_REFUSAL.to_string()),
         FloorState::Damaged => return Ok(()),
@@ -239,8 +253,52 @@ pub fn require_allowed(build_version: &str, path: &Path, can_fetch: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestProtector;
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
+
+    fn read_floor(path: &Path) -> Option<StoredFloor> {
+        read_floor_with(path, &TestProtector)
+    }
+
+    fn raise_floor(path: &Path, verified_minimum: &str, now: u64) -> VaultResult<StoredFloor> {
+        raise_floor_with(path, verified_minimum, now, &TestProtector)
+    }
+
+    fn record_manifest_floor(
+        path: &Path,
+        manifest: &serde_json::Value,
+        encoded_public_key: &str,
+        expected_key_id: &str,
+        now: u64,
+    ) -> VaultResult<Option<StoredFloor>> {
+        record_manifest_floor_with(
+            path,
+            manifest,
+            encoded_public_key,
+            expected_key_id,
+            now,
+            &TestProtector,
+        )
+    }
+
+    fn floor_state(path: &Path) -> FloorState {
+        floor_state_with(path, &TestProtector)
+    }
+
+    fn confirmed_at(path: &Path) -> Option<u64> {
+        confirmed_at_with(path, &TestProtector)
+    }
+
+    fn require_allowed(build_version: &str, path: &Path, can_fetch: bool) -> Result<(), String> {
+        require_allowed_with(
+            build_version,
+            crate::DESKTOP_PLATFORM,
+            path,
+            can_fetch,
+            &TestProtector,
+        )
+    }
 
     const KEY_ID: &str = "fictional-candidate-key";
     const DIGEST: &str = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";

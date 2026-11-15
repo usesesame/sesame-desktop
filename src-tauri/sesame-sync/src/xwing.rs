@@ -6,8 +6,8 @@ use shake::{ExtendableOutput, Shake256, Update, XofReader};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::vault::util::fill_secret;
-use crate::vault::VaultResult;
+use sesame_core::util::fill_secret;
+use sesame_core::VaultResult;
 
 pub const SEED_BYTES: usize = 32;
 pub const PUBLIC_KEY_BYTES: usize = 1216;

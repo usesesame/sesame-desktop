@@ -409,8 +409,8 @@ fn an_upload_receipt_for_another_header_is_refused() {
 
 mod join {
     use super::*;
-    use crate::sync::pairing::ApproverIdentity;
-    use crate::sync::request::KeyPackageV3;
+    use crate::pairing::ApproverIdentity;
+    use crate::request::KeyPackageV3;
 
     struct Setup {
         vault_key: [u8; 32],
@@ -606,7 +606,7 @@ mod join {
 
 mod peers {
     use super::*;
-    use crate::sync::checkpoint::Checkpoint;
+    use crate::checkpoint::Checkpoint;
 
     const NOW: u64 = 1_800_000_600;
 
@@ -882,7 +882,7 @@ mod peers {
 
 mod removal_packages {
     use super::*;
-    use crate::sync::request::KeyPackageV3;
+    use crate::request::KeyPackageV3;
 
     fn package_for(
         world: &World,

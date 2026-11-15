@@ -11,9 +11,10 @@ use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-use crate::sync::keys::{EncryptionKeypair, X25519_KEY_BYTES};
-use crate::sync::xwing::SecretKey as HybridSecretKey;
-use crate::vault::VaultResult;
+use crate::keys::{EncryptionKeypair, X25519_KEY_BYTES};
+use crate::xwing::SecretKey as HybridSecretKey;
+use crate::DeviceProtector;
+use sesame_core::VaultResult;
 
 pub const IDENTITY_FILE_NAME: &str = "sync-identity.sesame";
 const SIGNING_SEED_BYTES: usize = 32;
@@ -31,30 +32,6 @@ struct StoredIdentity {
     protected_encryption_secret: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     protected_hybrid_seed: Option<String>,
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub fn protect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    Ok(bytes.to_vec())
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub fn unprotect_for_device(bytes: &[u8]) -> VaultResult<Vec<u8>> {
-    Ok(bytes.to_vec())
-}
-
-#[cfg(not(any(test, feature = "test-support")))]
-pub use crate::vault::platform::{protect_for_device, unprotect_for_device};
-
-pub fn ensure_device_protection() -> VaultResult<()> {
-    #[cfg(any(test, feature = "test-support"))]
-    {
-        Ok(())
-    }
-    #[cfg(not(any(test, feature = "test-support")))]
-    {
-        crate::vault::platform::ensure_device_protection()
-    }
 }
 
 pub struct DeviceIdentity {
@@ -108,7 +85,7 @@ impl DeviceIdentity {
         Ok(self)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn without_hybrid_key(mut self) -> Self {
         self.hybrid = None;
         self
@@ -116,30 +93,30 @@ impl DeviceIdentity {
 
     pub fn sign_entry(
         &self,
-        entry: crate::sync::devicelist::DeviceListEntry,
-    ) -> crate::sync::devicelist::DeviceListEntry {
+        entry: crate::devicelist::DeviceListEntry,
+    ) -> crate::devicelist::DeviceListEntry {
         entry.sign(&self.signing)
     }
 
-    pub fn sign_header(&self, header: crate::sync::header::Header) -> crate::sync::header::Header {
+    pub fn sign_header(&self, header: crate::header::Header) -> crate::header::Header {
         header.sign(&self.signing)
     }
 
     pub fn sign_checkpoint(
         &self,
-        checkpoint: crate::sync::checkpoint::Checkpoint,
-    ) -> crate::sync::checkpoint::Checkpoint {
+        checkpoint: crate::checkpoint::Checkpoint,
+    ) -> crate::checkpoint::Checkpoint {
         checkpoint.sign(&self.signing)
     }
 
-    pub fn sign_request(&self, request: &crate::sync::request::RequestSignature<'_>) -> String {
+    pub fn sign_request(&self, request: &crate::request::RequestSignature<'_>) -> String {
         request.sign(&self.signing)
     }
 
     pub fn sign_key_package(
         &self,
-        package: crate::sync::request::KeyPackageV3,
-    ) -> crate::sync::request::KeyPackageV3 {
+        package: crate::request::KeyPackageV3,
+    ) -> crate::request::KeyPackageV3 {
         package.sign(&self.signing)
     }
 
@@ -154,25 +131,25 @@ impl DeviceIdentity {
                 .hybrid
                 .as_ref()
                 .ok_or("This device key package could not be read.")?;
-            return crate::sync::keys::open_vault_key_hybrid(sealed, hybrid, vault_id, epoch);
+            return crate::keys::open_vault_key_hybrid(sealed, hybrid, vault_id, epoch);
         }
-        crate::sync::keys::open_vault_key(sealed, &self.encryption, vault_id)
+        crate::keys::open_vault_key(sealed, &self.encryption, vault_id)
     }
 
-    pub fn save(&self, path: &Path) -> VaultResult<()> {
-        ensure_device_protection()?;
+    pub fn save_with(&self, path: &Path, protector: &dyn DeviceProtector) -> VaultResult<()> {
+        protector.ensure_available()?;
         let mut signing_seed = self.signing.to_bytes();
-        let protected_signing = protect_for_device(&signing_seed);
+        let protected_signing = protector.protect(&signing_seed);
         signing_seed.zeroize();
 
         let mut encryption_secret = self.encryption.secret_bytes();
-        let protected_encryption = protect_for_device(&encryption_secret);
+        let protected_encryption = protector.protect(&encryption_secret);
         encryption_secret.zeroize();
 
         let protected_hybrid_seed = match &self.hybrid {
             Some(hybrid) => {
                 let mut seed = hybrid.seed_bytes();
-                let protected = protect_for_device(&seed);
+                let protected = protector.protect(&seed);
                 seed.zeroize();
                 Some(URL_SAFE_NO_PAD.encode(protected?))
             }
@@ -196,12 +173,12 @@ impl DeviceIdentity {
                 .map_err(|_| "Sesame could not save the device keys.".to_string())?;
         }
         // Atomic write: a crash must not destroy the only copy of these approved keys.
-        crate::vault::storage::atomic_replace(path, &body)
+        sesame_core::storage::atomic_replace(path, &body)
             .map_err(|_| "Sesame could not save the device keys.".to_string())
     }
 
     /// A file from another machine or user fails at the DPAPI unprotect, as intended.
-    pub fn load(path: &Path) -> VaultResult<Self> {
+    pub fn load_with(path: &Path, protector: &dyn DeviceProtector) -> VaultResult<Self> {
         let body = std::fs::read(path)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
         #[derive(Deserialize)]
@@ -216,7 +193,7 @@ impl DeviceIdentity {
         let stored: StoredIdentity = serde_json::from_slice(&body)
             .map_err(|_| "Sesame could not read the device keys.".to_string())?;
 
-        let mut signing_seed = unprotect_for_device(
+        let mut signing_seed = protector.unprotect(
             &URL_SAFE_NO_PAD
                 .decode(&stored.protected_signing_seed)
                 .map_err(|_| "Sesame could not read the device keys.".to_string())?,
@@ -228,7 +205,7 @@ impl DeviceIdentity {
         let signing = SigningKey::from_bytes(&signing_array);
         signing_seed.zeroize();
 
-        let mut encryption_secret = unprotect_for_device(
+        let mut encryption_secret = protector.unprotect(
             &URL_SAFE_NO_PAD
                 .decode(&stored.protected_encryption_secret)
                 .map_err(|_| "Sesame could not read the device keys.".to_string())?,
@@ -242,12 +219,12 @@ impl DeviceIdentity {
 
         let hybrid = match (&stored.protected_hybrid_seed, stored.version) {
             (Some(encoded), 2) => {
-                let mut seed = unprotect_for_device(
+                let mut seed = protector.unprotect(
                     &URL_SAFE_NO_PAD
                         .decode(encoded)
                         .map_err(|_| "Sesame could not read the device keys.".to_string())?,
                 )?;
-                let array: [u8; crate::sync::xwing::SEED_BYTES] = seed
+                let array: [u8; crate::xwing::SEED_BYTES] = seed
                     .as_slice()
                     .try_into()
                     .map_err(|_| "Sesame could not read the device keys.".to_string())?;
@@ -267,13 +244,16 @@ impl DeviceIdentity {
     }
 }
 
-pub fn load_or_create(path: &Path) -> VaultResult<DeviceIdentity> {
-    match DeviceIdentity::load(path) {
+pub fn load_or_create_with(
+    path: &Path,
+    protector: &dyn DeviceProtector,
+) -> VaultResult<DeviceIdentity> {
+    match DeviceIdentity::load_with(path, protector) {
         Ok(existing) => Ok(existing),
         Err(error) if error == WRITTEN_BY_NEWER_BUILD => Err(error),
         Err(_) => {
             let generated = DeviceIdentity::generate()?;
-            generated.save(path)?;
+            generated.save_with(path, protector)?;
             Ok(generated)
         }
     }
@@ -304,8 +284,9 @@ pub fn random_opaque_id() -> VaultResult<String> {
 #[cfg(test)]
 mod hybrid_tests {
     use super::*;
-    use crate::sync::keys::{seal_vault_key, seal_vault_key_hybrid};
-    use crate::sync::xwing::PUBLIC_KEY_BYTES;
+    use crate::keys::{seal_vault_key, seal_vault_key_hybrid};
+    use crate::test_support::TestProtector;
+    use crate::xwing::PUBLIC_KEY_BYTES;
 
     fn scratch(name: &str) -> PathBuf {
         let dir =
@@ -326,8 +307,8 @@ mod hybrid_tests {
     fn a_saved_hybrid_identity_loads_with_the_same_public_key_and_opens_packages() {
         let path = scratch("round-trip");
         let identity = DeviceIdentity::generate().expect("identity");
-        identity.save(&path).expect("saved");
-        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        identity.save_with(&path, &TestProtector).expect("saved");
+        let loaded = DeviceIdentity::load_with(&path, &TestProtector).expect("loaded");
         assert_eq!(loaded.package_public_key(), identity.package_public_key());
         let sealed = seal_vault_key_hybrid(
             &[9u8; 32],
@@ -351,12 +332,12 @@ mod hybrid_tests {
         let identity = DeviceIdentity::generate()
             .expect("identity")
             .without_hybrid_key();
-        identity.save(&path).expect("saved");
+        identity.save_with(&path, &TestProtector).expect("saved");
         let body: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(body["version"], 1);
         assert!(body.get("protected_hybrid_seed").is_none());
-        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        let loaded = DeviceIdentity::load_with(&path, &TestProtector).expect("loaded");
         assert!(!loaded.has_hybrid_key());
         assert_eq!(loaded.package_public_key().len(), X25519_KEY_BYTES);
         let sealed = seal_vault_key(
@@ -379,7 +360,7 @@ mod hybrid_tests {
         let path = scratch("version");
         DeviceIdentity::generate()
             .expect("identity")
-            .save(&path)
+            .save_with(&path, &TestProtector)
             .expect("saved");
         let body: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -443,11 +424,11 @@ mod hybrid_tests {
         let path = scratch("unknown");
         DeviceIdentity::generate()
             .expect("identity")
-            .save(&path)
+            .save_with(&path, &TestProtector)
             .expect("saved");
         rewritten(&path, |body| body["version"] = serde_json::json!(3));
         let before = std::fs::read(&path).unwrap();
-        assert!(DeviceIdentity::load(&path).is_err());
+        assert!(DeviceIdentity::load_with(&path, &TestProtector).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -457,7 +438,7 @@ mod hybrid_tests {
         let path = scratch("agree");
         DeviceIdentity::generate()
             .expect("identity")
-            .save(&path)
+            .save_with(&path, &TestProtector)
             .expect("saved");
         rewritten(&path, |body| {
             body.as_object_mut()
@@ -465,29 +446,32 @@ mod hybrid_tests {
                 .remove("protected_hybrid_seed");
         });
         assert!(
-            DeviceIdentity::load(&path).is_err(),
+            DeviceIdentity::load_with(&path, &TestProtector).is_err(),
             "version 2 without a seed"
         );
 
         DeviceIdentity::generate()
             .expect("identity")
-            .save(&path)
+            .save_with(&path, &TestProtector)
             .expect("saved");
         rewritten(&path, |body| body["version"] = serde_json::json!(1));
         assert!(
-            DeviceIdentity::load(&path).is_err(),
+            DeviceIdentity::load_with(&path, &TestProtector).is_err(),
             "version 1 with a seed"
         );
 
         DeviceIdentity::generate()
             .expect("identity")
-            .save(&path)
+            .save_with(&path, &TestProtector)
             .expect("saved");
         for seed in ["", "AAAA", "not base64!"] {
             rewritten(&path, |body| {
                 body["protected_hybrid_seed"] = serde_json::json!(seed)
             });
-            assert!(DeviceIdentity::load(&path).is_err(), "seed {seed:?}");
+            assert!(
+                DeviceIdentity::load_with(&path, &TestProtector).is_err(),
+                "seed {seed:?}"
+            );
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -496,12 +480,12 @@ mod hybrid_tests {
     fn a_copied_identity_file_restores_the_same_device_and_keys() {
         let path = scratch("restore");
         let identity = DeviceIdentity::generate().expect("identity");
-        identity.save(&path).expect("saved");
+        identity.save_with(&path, &TestProtector).expect("saved");
         let restored = path.with_file_name("restored.sesame");
         std::fs::copy(&path, &restored).unwrap();
         forget(&path).expect("forgotten");
-        assert!(DeviceIdentity::load(&path).is_err());
-        let loaded = DeviceIdentity::load(&restored).expect("restored");
+        assert!(DeviceIdentity::load_with(&path, &TestProtector).is_err());
+        let loaded = DeviceIdentity::load_with(&restored, &TestProtector).expect("restored");
         assert_eq!(loaded.device_id, identity.device_id);
         assert_eq!(loaded.package_public_key(), identity.package_public_key());
         assert_eq!(loaded.signing_public_key(), identity.signing_public_key());
@@ -514,9 +498,9 @@ mod hybrid_tests {
         let first = DeviceIdentity::generate()
             .expect("identity")
             .without_hybrid_key();
-        first.save(&path).expect("saved");
+        first.save_with(&path, &TestProtector).expect("saved");
         assert_eq!(
-            DeviceIdentity::load(&path)
+            DeviceIdentity::load_with(&path, &TestProtector)
                 .expect("loaded")
                 .package_public_key()
                 .len(),
@@ -526,8 +510,8 @@ mod hybrid_tests {
         forget(&path).expect("forgetting twice is fine");
         assert!(!path.exists());
         let second = DeviceIdentity::generate().expect("identity");
-        second.save(&path).expect("saved");
-        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        second.save_with(&path, &TestProtector).expect("saved");
+        let loaded = DeviceIdentity::load_with(&path, &TestProtector).expect("loaded");
         assert_ne!(loaded.device_id, first.device_id);
         assert_ne!(loaded.signing_public_key(), first.signing_public_key());
         assert_eq!(loaded.package_public_key().len(), PUBLIC_KEY_BYTES);
@@ -537,16 +521,18 @@ mod hybrid_tests {
     #[test]
     fn setup_keeps_a_file_from_a_newer_build_and_replaces_one_it_cannot_read() {
         let path = scratch("load-or-create");
-        let created = load_or_create(&path).expect("created");
+        let created = load_or_create_with(&path, &TestProtector).expect("created");
         assert!(created.has_hybrid_key());
         assert_eq!(
-            load_or_create(&path).expect("loaded").device_id,
+            load_or_create_with(&path, &TestProtector)
+                .expect("loaded")
+                .device_id,
             created.device_id
         );
 
         rewritten(&path, |body| body["version"] = serde_json::json!(3));
         let before = std::fs::read(&path).unwrap();
-        assert!(load_or_create(&path).is_err());
+        assert!(load_or_create_with(&path, &TestProtector).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
 
         std::fs::write(
@@ -556,16 +542,18 @@ mod hybrid_tests {
         .unwrap();
         let before = std::fs::read(&path).unwrap();
         assert_eq!(
-            load_or_create(&path).err().as_deref(),
+            load_or_create_with(&path, &TestProtector).err().as_deref(),
             Some(WRITTEN_BY_NEWER_BUILD)
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);
 
         std::fs::write(&path, b"damaged").unwrap();
-        let replaced = load_or_create(&path).expect("replaced");
+        let replaced = load_or_create_with(&path, &TestProtector).expect("replaced");
         assert_ne!(replaced.device_id, created.device_id);
         assert_eq!(
-            DeviceIdentity::load(&path).expect("loads").device_id,
+            DeviceIdentity::load_with(&path, &TestProtector)
+                .expect("loads")
+                .device_id,
             replaced.device_id
         );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -578,19 +566,19 @@ mod hybrid_tests {
             .expect("identity")
             .without_hybrid_key();
         let classical_public = older.package_public_key();
-        older.save(&path).expect("saved");
-        let loaded = DeviceIdentity::load(&path).expect("loaded");
+        older.save_with(&path, &TestProtector).expect("saved");
+        let loaded = DeviceIdentity::load_with(&path, &TestProtector).expect("loaded");
         let upgraded = loaded.with_hybrid_key().expect("hybrid");
         let hybrid_public = upgraded.package_public_key();
         assert_eq!(hybrid_public.len(), PUBLIC_KEY_BYTES);
         let again = upgraded.with_hybrid_key().expect("hybrid");
         assert_eq!(again.package_public_key(), hybrid_public);
-        again.save(&path).expect("saved");
+        again.save_with(&path, &TestProtector).expect("saved");
 
         let body: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(body["version"], 2);
-        let reloaded = DeviceIdentity::load(&path).expect("reloaded");
+        let reloaded = DeviceIdentity::load_with(&path, &TestProtector).expect("reloaded");
         assert_eq!(reloaded.package_public_key(), hybrid_public);
         assert_eq!(reloaded.device_id, older.device_id);
         assert_eq!(reloaded.signing_public_key(), older.signing_public_key());

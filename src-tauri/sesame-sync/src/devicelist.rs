@@ -408,7 +408,7 @@ pub fn verify_with_key(
 #[cfg(test)]
 mod hybrid_key_tests {
     use super::*;
-    use crate::sync::canonical::HYBRID_KEY_BYTES;
+    use crate::canonical::HYBRID_KEY_BYTES;
     use ed25519_dalek::SigningKey;
 
     fn entry_with(package_key: &str) -> DeviceListEntry {

@@ -444,7 +444,7 @@ fn the_go_key_replacement_and_rotation_chain_verifies_and_rust_signs_the_same_en
             .decode(&desktop.package_key)
             .expect("key")
             .len(),
-        crate::sync::xwing::PUBLIC_KEY_BYTES
+        crate::xwing::PUBLIC_KEY_BYTES
     );
 
     let signed = |index: usize, template: DeviceListEntry| {

@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["sesame-core", "sesame-app"]
+members = ["sesame-core", "sesame-sync", "sesame-app"]
 # Every existing `cargo test`/`clippy`/`check` invocation in this repo's npm
 # scripts and CI passes `--manifest-path src-tauri/Cargo.toml` without
 # `--workspace`, because that predates this workspace existing. Cargo's
 # default scope for that invocation is `default-members`, not `members`, so
 # without this, `sesame-core` would silently stop being tested/linted by
 # every one of those existing commands the moment it was extracted.
-default-members = [".", "sesame-core", "sesame-app"]
+default-members = [".", "sesame-core", "sesame-sync", "sesame-app"]
 
 [patch.crates-io]
 glib = { path = "vendor/glib" }

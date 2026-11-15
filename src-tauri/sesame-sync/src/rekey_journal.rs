@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::devicelist::{DeviceList, DeviceListEntry};
-use super::identity::{ensure_device_protection, protect_for_device, unprotect_for_device};
 use super::key_change::PreparedRecovery;
 use super::request::KeyPackageV3;
-use crate::vault::VaultResult;
+use crate::DeviceProtector;
+use sesame_core::VaultResult;
 
 pub const JOURNAL_FILE_NAME: &str = "sync-rekey-journal.sesame";
 const JOURNAL_VERSION: u8 = 1;
@@ -154,13 +154,13 @@ impl Journal {
         ]
     }
 
-    pub fn save(&self, path: &Path) -> VaultResult<()> {
-        ensure_device_protection()?;
-        let mut protected = protect_for_device(self.key.as_slice())?;
+    pub fn save_with(&self, path: &Path, protector: &dyn DeviceProtector) -> VaultResult<()> {
+        protector.ensure_available()?;
+        let mut protected = protector.protect(self.key.as_slice())?;
         let protected_recovery_kit = match &self.recovery_kit {
             Some(kit) => {
                 let mut bytes = kit.as_bytes().to_vec();
-                let protected = protect_for_device(&bytes);
+                let protected = protector.protect(&bytes);
                 bytes.zeroize();
                 Some(URL_SAFE_NO_PAD.encode(protected?))
             }
@@ -192,11 +192,11 @@ impl Journal {
             std::fs::create_dir_all(parent)
                 .map_err(|_| "Sesame could not save the vault key change.".to_string())?;
         }
-        crate::vault::storage::atomic_replace(path, &body)
+        sesame_core::storage::atomic_replace(path, &body)
             .map_err(|_| "Sesame could not save the vault key change.".to_string())
     }
 
-    pub fn load(path: &Path) -> VaultResult<Self> {
+    pub fn load_with(path: &Path, protector: &dyn DeviceProtector) -> VaultResult<Self> {
         let body = std::fs::read(path).map_err(|_| UNREADABLE.to_string())?;
         let stored: StoredJournal =
             serde_json::from_slice(&body).map_err(|_| UNREADABLE.to_string())?;
@@ -223,7 +223,7 @@ impl Journal {
         let mut protected = URL_SAFE_NO_PAD
             .decode(&stored.protected_key)
             .map_err(|_| UNREADABLE.to_string())?;
-        let opened = unprotect_for_device(&protected);
+        let opened = protector.unprotect(&protected);
         protected.zeroize();
         let mut bytes = opened.map_err(|_| UNREADABLE.to_string())?;
         let key: Result<[u8; 32], _> = bytes.as_slice().try_into();
@@ -234,7 +234,7 @@ impl Journal {
                 let mut protected = URL_SAFE_NO_PAD
                     .decode(&encoded)
                     .map_err(|_| UNREADABLE.to_string())?;
-                let opened = unprotect_for_device(&protected);
+                let opened = protector.unprotect(&protected);
                 protected.zeroize();
                 let mut bytes = opened.map_err(|_| UNREADABLE.to_string())?;
                 let text = match String::from_utf8(std::mem::take(&mut bytes)) {
@@ -282,9 +282,10 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::engine::{add_entry, create_entry, remove_entry, seal_label, NewDevice};
-    use crate::sync::identity::DeviceIdentity;
-    use crate::sync::key_change::fictional_recovery;
+    use crate::engine::{add_entry, create_entry, remove_entry, seal_label, NewDevice};
+    use crate::identity::DeviceIdentity;
+    use crate::key_change::fictional_recovery;
+    use crate::test_support::TestProtector;
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
 
@@ -362,7 +363,7 @@ mod tests {
             fictional_recovery(),
             1_700_000_000,
         )
-        .save(&path)
+        .save_with(&path, &TestProtector)
         .expect("saved");
         (path, entry)
     }
@@ -372,7 +373,7 @@ mod tests {
         let world = world();
         let (path, entry) = saved(&world, "round-trip");
         assert!(is_pending(&path));
-        let loaded = Journal::load(&path).expect("loaded");
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
         assert_eq!(loaded.key(), [4u8; 32]);
         assert_eq!(loaded.vault_id, VAULT);
         assert_eq!(loaded.entry_index, entry.index);
@@ -392,7 +393,7 @@ mod tests {
         rewritten(&path, |body| {
             body.as_object_mut().unwrap().remove("recovery");
         });
-        let loaded = Journal::load(&path).expect("loaded");
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
         assert!(loaded.recovery.is_none());
         assert_eq!(loaded.key(), [4u8; 32]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -406,7 +407,7 @@ mod tests {
             body["adoptedPayloadDigest"] = serde_json::json!("digest-committed");
             body["prospectivePayloadDigest"] = serde_json::json!("digest-prospective");
         });
-        let loaded = Journal::load(&path).expect("loaded");
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
         assert_eq!(
             loaded.adoption_digests(),
             [Some("digest-committed"), Some("digest-prospective")]
@@ -417,7 +418,7 @@ mod tests {
                 .unwrap()
                 .remove("prospectivePayloadDigest");
         });
-        let loaded = Journal::load(&path).expect("loaded");
+        let loaded = Journal::load_with(&path, &TestProtector).expect("loaded");
         assert_eq!(loaded.adoption_digests(), [None, None]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
@@ -433,13 +434,18 @@ mod tests {
             fictional_recovery(),
             1,
         )
-        .save(&path)
+        .save_with(&path, &TestProtector)
         .expect("saved");
-        assert_eq!(Journal::load(&path).expect("loaded").key(), [5u8; 32]);
+        assert_eq!(
+            Journal::load_with(&path, &TestProtector)
+                .expect("loaded")
+                .key(),
+            [5u8; 32]
+        );
         forget(&path).expect("forgotten");
         forget(&path).expect("forgetting twice is fine");
         assert!(!is_pending(&path));
-        assert!(Journal::load(&path).is_err());
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -448,9 +454,9 @@ mod tests {
         let world = world();
         let (path, _) = saved(&world, "damaged");
         std::fs::write(&path, b"not json").unwrap();
-        assert!(Journal::load(&path).is_err());
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
         std::fs::write(&path, b"").unwrap();
-        assert!(Journal::load(&path).is_err());
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
 
         let cases: [(&str, serde_json::Value); 7] = [
             ("version", serde_json::json!(2)),
@@ -467,12 +473,15 @@ mod tests {
         for (field, value) in cases {
             let (path, _) = saved(&world, "field");
             rewritten(&path, |body| body[field] = value);
-            assert!(Journal::load(&path).is_err(), "{field}");
+            assert!(
+                Journal::load_with(&path, &TestProtector).is_err(),
+                "{field}"
+            );
             let _ = std::fs::remove_dir_all(path.parent().unwrap());
         }
         let (path, _) = saved(&world, "extra");
         rewritten(&path, |body| body["extra"] = serde_json::json!(true));
-        assert!(Journal::load(&path).is_err());
+        assert!(Journal::load_with(&path, &TestProtector).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

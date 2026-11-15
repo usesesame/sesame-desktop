@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 
-use crate::vault::crypto::encrypt_bytes;
-use crate::vault::{UnlockedVault, VaultFile, VaultResult, PAYLOAD_AAD, VAULT_FORMAT_VERSION};
+use sesame_core::crypto::encrypt_bytes;
 use sesame_core::loader::{AuthenticatedPayload, Credential, VaultLoader};
+use sesame_core::{UnlockedVault, VaultFile, VaultResult, PAYLOAD_AAD, VAULT_FORMAT_VERSION};
 
 pub const BACKUP_DIR_NAME: &str = "sync-conflict-backups";
 
@@ -97,7 +97,7 @@ fn create_new_file_with(
 ) -> VaultResult<PathBuf> {
     for _ in 0..8 {
         let mut suffix = [0_u8; 8];
-        crate::vault::util::fill_random(&mut suffix);
+        sesame_core::util::fill_random(&mut suffix);
         let name = format!(
             "{stamp}-{}-{revision}-{}.sesame",
             side.slug(),
@@ -287,13 +287,56 @@ pub fn prune_counting(directory: &Path, keep: &[PathBuf]) -> Pruned {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TestVault;
+    use sesame_core::api::create_vault;
+    use sesame_core::storage::commit_payload_change;
+    use sesame_core::util::random_id;
+    use sesame_core::{VaultEntry, VaultState};
     use std::time::{Duration, SystemTime};
+
+    const TEST_PASSWORD: &str = "fictional master password";
+
+    struct TestVault {
+        state: VaultState,
+        directory: PathBuf,
+    }
+
+    impl TestVault {
+        fn with_login(id: &str, url: &str) -> Self {
+            let (opened, _) =
+                create_vault(TEST_PASSWORD, "Fictional vault").expect("created test vault");
+            let directory = std::env::temp_dir().join(format!("sesame-command-{}", random_id()));
+            let path = directory.join("vault.sesame");
+            let mut session =
+                UnlockedVault::from_opened(path.clone(), &opened).expect("unlocked vault");
+            session.setup_complete = true;
+            let mut payload = session.open_payload().expect("opened payload").clone();
+            let mut entry = VaultEntry::default();
+            entry.id = id.to_string();
+            entry.title = "Northwind".to_string();
+            entry.url = url.to_string();
+            entry.username = "fictional-user".to_string();
+            entry.password = "fictional-stored-secret".to_string();
+            entry.updated_at = 41;
+            entry.password_updated_at = 42;
+            entry.revision = 7;
+            payload.entries.push(entry);
+            commit_payload_change(&mut session, payload).expect("seeded payload");
+            let state = VaultState::default();
+            *state.session.lock().expect("session lock") = Some(session);
+            Self { state, directory }
+        }
+    }
+
+    impl Drop for TestVault {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
             "sesame-recovery-{name}-{}",
-            crate::vault::random_id()
+            sesame_core::util::random_id()
         ));
         std::fs::create_dir_all(&directory).expect("scratch directory");
         directory
