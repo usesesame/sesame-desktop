@@ -184,6 +184,20 @@ good-faith report that turns out to be out of scope is not held against you.
   Where the system permits a same-user process to attach to that web process,
   that process can read displayed secrets. This waits on the renderer
   isolation work.
+- On Linux, Sesame asks the kernel to keep the vault key out of swap and crash
+  dumps. When the kernel refuses, for example under a low memory lock limit,
+  the key stays in ordinary memory that Sesame wipes on lock, and the
+  diagnostics log records `key_page_fallback`.
+- On Linux the screen lock signal comes from systemd logind or the screen saver
+  service. When neither answers, Settings says the vault will not follow the
+  screen lock. Sesame looks for the missing sources every 30 seconds. If one of
+  them answered earlier and now neither they nor the desktop's idle time
+  answer, Sesame locks the vault once the automatic lock delay passes. While
+  the desktop still reports idle time, the idle lock covers it instead.
+- The AppImage copies its browser helper to
+  `~/.local/share/sesame/browser-host` because the mounted image has no stable
+  path. Unlike the deb and rpm, that copy sits in a folder your own programs can
+  write to, and the app checks the copy by the contents of its executable.
 - On a Linux desktop that reports no idle time, the automatic lock counts
   activity in the Sesame window, which the interface reports to the app. Code
   running inside the window can report activity and keep the lock from firing,
