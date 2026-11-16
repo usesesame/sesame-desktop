@@ -8,7 +8,7 @@
   import type { ItemDetail as ItemDetailShape } from '../item-fields'
   import { platformCapabilities } from '../platform'
   import { useAppStores } from '../stores/app-stores'
-  import type { BreachCheckResult, ItemKind, VaultPane } from '../types'
+  import type { BreachCheckResult, ItemKind, PendingChangeView, VaultPane } from '../types'
   import { FAVOURITES_FILTER, RECENT_FILTER, SORT_MODES, sortModeLabels, tagFilter, tagFromFilter } from '../vault-collections'
   import { itemKindIcon, itemKindLabel, itemKindMeta, itemTags, uniqueTags, type VaultItem } from '../vault-items'
   import AddItemMenu from './AddItemMenu.svelte'
@@ -17,10 +17,18 @@
   import LoginFieldsPanel from './LoginFieldsPanel.svelte'
   import PanelResizer from './PanelResizer.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
+  import PendingChangesNotice from './PendingChangesNotice.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
   import { PANEL_WIDTH_LIMITS, readPanelWidths, storePanelWidths } from '../preferences'
   import { NARROW_LAYOUT_QUERY, paneGridTemplate } from '../vault-layout'
 
+  export let pendingChanges: PendingChangeView[] = []
+  export let pendingWorking: string | null = null
+  export let onKeepPending: (change: PendingChangeView) => void = () => {}
+  export let onGoBackPending: (change: PendingChangeView) => void = () => {}
+  export let onDiscardPending: (change: PendingChangeView) => void = () => {}
+  export let onCopyPending: (change: PendingChangeView) => void = () => {}
+  export let onEditPending: (change: PendingChangeView) => void = () => {}
   export let allItems: VaultItem[] = []
   export let visibleItems: VaultItem[] = []
   export let recentItems: VaultItem[] = []
@@ -413,6 +421,7 @@
     <button class="text-button empty-add" on:click={() => onOpenNewLogin()}>Add a login instead</button>
   </section>
 {:else}
+  <PendingChangesNotice changes={pendingChanges.filter((change) => !($vault.loginCard && $selection.activeItemKind === 'login' && change.itemId === $vault.loginCard.id))} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} />
   <div class="vault-layout pane-{pane}" style={layoutStyle}>
     <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
@@ -601,6 +610,8 @@
           </div>
         </div>
 
+        <PendingChangesNotice placement="login" label="Waiting on this login" changes={pendingChanges.filter((change) => change.itemId === loginCard.id)} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} />
+
         {#if activeIssue && selectedEntry}
           <section class="checkup-fix-panel" aria-labelledby="checkup-fix-title">
             <span class="checkup-fix-icon"><Icon name="shield-alert" size={17} /></span>
@@ -608,7 +619,7 @@
               {#if activePasswordIssues.length}
                 {#each activePasswordIssues as issue (issue.kind)}<p>{issue.explanation}</p>{/each}
                 <span class="password-score"><span class="password-score-track"><span class="password-score-fill" style="width: {selectedEntry.passwordScore}%"></span></span>Password score {selectedEntry.passwordScore}/100</span>
-                <p>Sesame opens the site. Choose Change password in the browser helper to fill your current password and a generated one; save the update after the site accepts it.</p>
+                <p>Sesame opens the site. Choose Change password in the browser extension, then keep the new password here once the site accepts it.</p>
               {:else if activeIssue === 'duplicate'}<p>Compare matching records and keep the values you trust.</p>
               {:else if activeIssue === 'url'}<p>Add the sign-in page so Sesame can open and match this login.</p>
               {:else if activeIssue === 'totp'}<p>Add the site's authenticator secret if it supports app-based 2FA.</p>

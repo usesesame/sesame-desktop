@@ -41,6 +41,8 @@ function stores(): AppStores {
     browserCardFill: noRequest,
     browserTotpFill: noRequest,
     browserSave: noRequest,
+    browserChange: noRequest,
+    browserCreate: noRequest,
   } as unknown as AppStores
 }
 

@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v8/request.schema.json",
+  "title": "Sesame browser request v8",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/change"
+    },
+    {
+      "$ref": "#/$defs/create"
+    },
+    {
+      "$ref": "#/$defs/pending"
+    }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "origin": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "handle": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "origin",
+        "style",
+        "size"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "change"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "style": {
+          "enum": [
+            "characters",
+            "passphrase"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 64
+        }
+      },
+      "description": "size is 16 to 64 characters, or 5 to 10 words for a passphrase."
+    },
+    "create": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "origin",
+        "style",
+        "size"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "create"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "style": {
+          "enum": [
+            "characters",
+            "passphrase"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 64
+        }
+      },
+      "description": "size is 16 to 64 characters, or 5 to 10 words for a passphrase."
+    },
+    "pending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "origin",
+        "handle",
+        "action"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "pending"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "origin": {
+          "$ref": "#/$defs/origin"
+        },
+        "handle": {
+          "$ref": "#/$defs/handle"
+        },
+        "action": {
+          "enum": [
+            "filled",
+            "notFilled",
+            "accepted"
+          ]
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Only with accepted."
+        }
+      }
+    }
+  }
+}

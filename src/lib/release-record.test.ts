@@ -9,7 +9,7 @@ function entry(partial: Partial<ReleaseEntryView>): ReleaseEntryView {
   return { seq: 1, at: 1_800_000_000, kind: 'browserFill', outcome: 'released', fields: [], count: 1, late: false, ...partial }
 }
 
-const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'cleared', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost']
+const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'cleared', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost']
 const ALL_OUTCOMES: Outcome[] = ['released', 'saved', 'updated', 'denied', 'timedOut', 'connectionClosed', 'vaultChanged', 'withdrawn', 'lookalike', 'noMatch', 'locked', 'busy', 'mismatch', 'replayed', 'neverSave', 'noted']
 
 function readable(text: string) {

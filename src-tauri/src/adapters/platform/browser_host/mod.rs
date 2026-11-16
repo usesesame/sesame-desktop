@@ -532,6 +532,9 @@ fn unavailable_without_desktop(request: &BrowserRequest) -> BrowserResponse {
         "save" => BrowserResponse::save_unavailable(&request.request_id, "desktopUnavailable"),
         "card" => BrowserResponse::card_unavailable(&request.request_id, "desktopUnavailable"),
         "totp" => BrowserResponse::totp_unavailable(&request.request_id, "desktopUnavailable"),
+        "change" | "create" | "pending" => {
+            BrowserResponse::operation_unavailable(request, "desktopUnavailable")
+        }
         _ => BrowserResponse::unavailable(request, "desktopUnavailable"),
     }
 }
@@ -789,8 +792,12 @@ mod boundary_tests {
             "fill" => crate::browser_protocol::LOOKALIKE_PROTOCOL_VERSION,
             "card" => crate::browser_protocol::CARD_PROTOCOL_VERSION,
             "totp" => crate::browser_protocol::TOTP_PROTOCOL_VERSION,
+            "change" | "create" | "pending" => {
+                crate::browser_protocol::PENDING_PASSWORD_PROTOCOL_VERSION
+            }
             _ => crate::browser_protocol::PROTOCOL_VERSION,
         };
+        let generates = matches!(message_type, "change" | "create");
         BrowserRequest {
             version,
             message_type: message_type.to_string(),
@@ -807,6 +814,11 @@ mod boundary_tests {
             password: (message_type == "save").then(|| "fictional-password".to_string()),
             title: None,
             kind: (message_type == "save").then(|| "new".to_string()),
+            style: generates.then(|| "characters".to_string()),
+            size: generates.then_some(20),
+            handle: (message_type == "pending")
+                .then(|| "fictional-handle-for-examples-only-AAAAAAAA".to_string()),
+            action: (message_type == "pending").then(|| "filled".to_string()),
         }
     }
 
@@ -818,6 +830,9 @@ mod boundary_tests {
             ("fill", "fill-unavailable"),
             ("card", "card-unavailable"),
             ("totp", "totp-unavailable"),
+            ("change", "change-unavailable"),
+            ("create", "create-unavailable"),
+            ("pending", "pending-unavailable"),
         ] {
             let request = request(message_type);
             assert!(request.validate(), "{message_type} request validates");
@@ -852,6 +867,10 @@ mod boundary_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -888,6 +907,10 @@ mod boundary_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -937,6 +960,10 @@ mod boundary_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -998,6 +1025,10 @@ mod boundary_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -1023,6 +1054,41 @@ mod boundary_tests {
             Some("Unsupported protocol version.")
         );
         assert!(response.validate_for(&request));
+    }
+
+    #[test]
+    fn a_change_create_or_pending_request_at_another_version_never_reaches_the_desktop() {
+        for message_type in ["change", "create", "pending"] {
+            let mut request = request(message_type);
+            assert!(request.validate());
+            request.version = crate::browser_protocol::SITE_MATCH_PROTOCOL_VERSION;
+            let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+            let mut output = Vec::new();
+            let response_count =
+                serve_with_relay(&mut input.as_slice(), &mut output, |_| unreachable!())
+                    .expect("the host answers");
+            assert_eq!(response_count, 1);
+            let response = decode_frame(&output);
+            assert_eq!(response.message_type, "error");
+            assert_eq!(
+                response.message.as_deref(),
+                Some("Unsupported protocol version.")
+            );
+        }
+    }
+
+    #[test]
+    fn a_relayed_change_answer_with_an_unexpected_secret_is_refused() {
+        let request = request("pending");
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+        let mut output = Vec::new();
+        let result = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
+            let mut response = BrowserResponse::pending_state(request, "confirmed");
+            response.password = Some("fictional-example-value".to_string());
+            response
+        });
+        assert!(result.is_err());
+        assert!(output.is_empty());
     }
 
     #[test]

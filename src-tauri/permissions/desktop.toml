@@ -188,6 +188,14 @@ commands.allow = [
   "resolve_browser_card_fill",
   "get_pending_browser_totp_fill",
   "resolve_browser_totp_fill",
+  "get_pending_browser_change",
+  "resolve_browser_change",
+  "get_pending_browser_create",
+  "resolve_browser_create",
+  "list_pending_changes",
+  "keep_pending_change",
+  "go_back_pending_change",
+  "discard_pending_login",
 ]
 
 [[permission]]

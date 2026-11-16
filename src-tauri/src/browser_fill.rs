@@ -17,13 +17,15 @@ use crate::{
 };
 
 pub(crate) use crate::application::browser_fill::{
-    BrowserCardRequestEvent, BrowserFillRequestEvent, BrowserIdentityRequestEvent,
-    BrowserSaveRequestEvent, BrowserTotpRequestEvent,
+    BrowserCardRequestEvent, BrowserChangeRequestEvent, BrowserCreateRequestEvent,
+    BrowserFillRequestEvent, BrowserIdentityRequestEvent, BrowserSaveRequestEvent,
+    BrowserTotpRequestEvent,
 };
 pub(crate) use crate::application::browser_fill_broker::BrowserFillState;
 
 use crate::application::browser_fill::{ApprovalDecision, ApprovalKind, NormalizedOrigin};
 use crate::application::browser_fill_broker::ApprovalEvent;
+use crate::application::pending_changes;
 use crate::application::release_record::{browser_draft, record};
 use crate::application::DesktopEffects;
 use crate::vault::release_record::Outcome;
@@ -31,6 +33,7 @@ use crate::vault::release_record::Outcome;
 use crate::browser_host::HOST_FILE_NAME;
 
 const APPROVAL_POLL: Duration = Duration::from_millis(200);
+pub(crate) const PENDING_CHANGES_CHANGED: &str = "pending-changes-changed";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,6 +203,14 @@ pub fn pending_totp(state: State<'_, BrowserFillState>) -> Option<BrowserTotpReq
     state.pending_totp_request()
 }
 
+pub fn pending_change(state: State<'_, BrowserFillState>) -> Option<BrowserChangeRequestEvent> {
+    state.pending_change_request()
+}
+
+pub fn pending_create(state: State<'_, BrowserFillState>) -> Option<BrowserCreateRequestEvent> {
+    state.pending_create_request()
+}
+
 fn handle_pipe_payload(
     app: &AppHandle,
     payload: Vec<u8>,
@@ -225,9 +236,18 @@ fn handle_pipe_payload(
         "identity" => identity_response(app, &vault, &fill_state, &effects, &request, peer),
         "card" => card_response(app, &vault, &fill_state, &effects, &request, peer),
         "totp" => totp_response(app, &vault, &fill_state, &effects, &request, peer),
+        "change" => change_response(app, &vault, &fill_state, &effects, &request, peer),
+        "create" => create_response(app, &vault, &fill_state, &effects, &request, peer),
+        "pending" => pending_changes::pending_response_in_state(&vault, &request),
         _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
     crate::commands::announce_release_record(app);
+    if matches!(
+        request.message_type.as_str(),
+        "change" | "create" | "pending"
+    ) {
+        let _ = app.emit_to("main", PENDING_CHANGES_CHANGED, ());
+    }
     response_bytes(response)
 }
 
@@ -449,6 +469,88 @@ fn totp_response(
     }
 }
 
+fn change_response(
+    app: &AppHandle,
+    vault: &VaultState,
+    fill_state: &BrowserFillState,
+    effects: &dyn DesktopEffects,
+    request: &BrowserRequest,
+    peer: &PipePeer,
+) -> BrowserResponse {
+    match pending_changes::change_response_in_state(vault, fill_state, effects, request) {
+        BrowserReply::Response(response) => *response,
+        BrowserReply::Approval(offer) => {
+            bring_to_foreground(app);
+            emit_browser_approval_request(app, &offer.approval);
+            let decision = match wait_for_decision(
+                app,
+                fill_state,
+                vault,
+                offer.approval.approval_id(),
+                &request.request_id,
+                offer.approval.origin(),
+                offer.approval.epoch(),
+                offer.deadline,
+                offer.receiver,
+                peer,
+                offer.approval.kind(),
+            ) {
+                Ok(decision) => decision,
+                Err(reason) => return BrowserResponse::operation_unavailable(request, reason),
+            };
+            pending_changes::complete_change_in_state(
+                vault,
+                effects,
+                request,
+                &offer.approval,
+                decision,
+                &|| peer.is_connected(),
+            )
+        }
+    }
+}
+
+fn create_response(
+    app: &AppHandle,
+    vault: &VaultState,
+    fill_state: &BrowserFillState,
+    effects: &dyn DesktopEffects,
+    request: &BrowserRequest,
+    peer: &PipePeer,
+) -> BrowserResponse {
+    match pending_changes::create_response_in_state(vault, fill_state, effects, request) {
+        BrowserReply::Response(response) => *response,
+        BrowserReply::Approval(offer) => {
+            bring_to_foreground(app);
+            emit_browser_approval_request(app, &offer.approval);
+            let decision = match wait_for_decision(
+                app,
+                fill_state,
+                vault,
+                offer.approval.approval_id(),
+                &request.request_id,
+                offer.approval.origin(),
+                offer.approval.epoch(),
+                offer.deadline,
+                offer.receiver,
+                peer,
+                offer.approval.kind(),
+            ) {
+                Ok(decision) => decision,
+                Err(reason) => return BrowserResponse::operation_unavailable(request, reason),
+            };
+            pending_changes::complete_create_in_state(
+                vault,
+                effects,
+                request,
+                &offer.approval,
+                decision,
+                &|| peer.is_connected(),
+            )
+        }
+    }
+}
+
 fn emit_browser_approval_request(app: &AppHandle, approval: &BrowserApproval) {
     match approval.event() {
         ApprovalEvent::Fill(event) => {
@@ -465,6 +567,12 @@ fn emit_browser_approval_request(app: &AppHandle, approval: &BrowserApproval) {
         }
         ApprovalEvent::Totp(event) => {
             let _ = app.emit("browser-totp-request", event.clone());
+        }
+        ApprovalEvent::Change(event) => {
+            let _ = app.emit("browser-change-request", event.clone());
+        }
+        ApprovalEvent::Create(event) => {
+            let _ = app.emit("browser-create-request", event.clone());
         }
     }
 }

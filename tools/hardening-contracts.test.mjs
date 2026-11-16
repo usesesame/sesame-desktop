@@ -1709,6 +1709,8 @@ test('the browser approval commands hand their decisions to the application modu
     ['resolve_browser_identity_fill', /resolve_browser_identity_fill_in_state\(/],
     ['resolve_browser_card_fill', /resolve_browser_card_fill_in_state\(/],
     ['resolve_browser_totp_fill', /resolve_browser_totp_fill_in_state\(/],
+    ['resolve_browser_change', /resolve_browser_change_in_state\(/],
+    ['resolve_browser_create', /resolve_browser_create_in_state\(/],
   ]
   for (const [name, call] of routes) {
     assert.match(braceBody(commands, commands.indexOf(`fn ${name}(`)), call, `${name} does not call its application rule`)
@@ -1717,6 +1719,18 @@ test('the browser approval commands hand their decisions to the application modu
   for (const name of ['resolve', 'resolve_save', 'resolve_identity', 'resolve_card', 'resolve_totp']) {
     assert.doesNotMatch(commands, new RegExp(`browser_fill::${name}\\(`), `${name} still runs in the command layer`)
   }
+
+  const pending = withoutComments(read('src-tauri', 'sesame-app', 'src', 'application', 'pending_changes.rs'))
+  for (const name of ['complete_change_in_state', 'complete_create_in_state']) {
+    const body = braceBody(pending, pending.indexOf(`fn ${name}(`))
+    const commit = body.indexOf('commit_payload_change(')
+    for (const check of ['peer_connected()', 'vault.session_epoch() != approval.epoch', 'generate_password(']) {
+      const at = body.indexOf(check)
+      assert.ok(at >= 0 && at < commit, `${name} writes the vault before ${check}`)
+    }
+  }
+  const report = braceBody(pending, pending.indexOf('fn pending_response_in_state('))
+  assert.doesNotMatch(report, /payload_with_saved_login|Some\(old_password|go_back/, 'a browser report can change which password is live')
 
   const save = braceBody(application, application.indexOf('fn resolve_browser_save_in_state('))
   assert.match(save, /if !approved \{[\s\S]*resolve_save\(state, effects, approval_id, false\)\?;[\s\S]*return Ok\(None\);/, 'a denied save no longer resolves the broker before returning')
@@ -1774,14 +1788,14 @@ test('no native messaging message type can reach the Activity record', () => {
   assert.ok(dispatch, 'the browser message dispatch moved')
   assert.deepEqual(
     [...dispatch[1].matchAll(/"([a-z]+)" =>/g)].map((match) => match[1]),
-    ['capabilities', 'activate', 'fill', 'save', 'identity', 'card', 'totp'],
+    ['capabilities', 'activate', 'fill', 'save', 'identity', 'card', 'totp', 'change', 'create', 'pending'],
   )
   const protocol = read('src-tauri', 'sesame-app', 'src', 'browser_protocol.rs')
   const response = protocol.match(/pub struct BrowserResponse \{([\s\S]*?)\n\}/)
   assert.ok(response, 'the browser response type moved')
   assert.deepEqual(
     [...response[1].matchAll(/pub ([a-z_]+):/g)].map((match) => match[1]),
-    ['version', 'message_type', 'request_id', 'installed', 'desktop_available', 'locked', 'fill_available', 'opened', 'username', 'password', 'match_kind', 'reason', 'message', 'lookalike', 'saved', 'identity', 'card', 'code', 'remaining_seconds'],
+    ['version', 'message_type', 'request_id', 'installed', 'desktop_available', 'locked', 'fill_available', 'opened', 'username', 'password', 'match_kind', 'reason', 'message', 'lookalike', 'saved', 'identity', 'card', 'code', 'remaining_seconds', 'current_password', 'new_password', 'handle', 'state'],
   )
   const browserSide = [
     protocol,

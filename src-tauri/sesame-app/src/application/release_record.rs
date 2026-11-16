@@ -41,6 +41,8 @@ pub fn entry_kind(kind: ApprovalKind) -> EntryKind {
         ApprovalKind::Identity => EntryKind::BrowserIdentity,
         ApprovalKind::Card => EntryKind::BrowserCard,
         ApprovalKind::Totp => EntryKind::BrowserTotp,
+        ApprovalKind::Change => EntryKind::BrowserChange,
+        ApprovalKind::Create => EntryKind::BrowserCreate,
     }
 }
 

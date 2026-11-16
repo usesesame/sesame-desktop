@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usesesame.app/contracts/browser/v8/response.schema.json",
+  "title": "Sesame browser response v8",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/changed"
+    },
+    {
+      "$ref": "#/$defs/changeUnavailable"
+    },
+    {
+      "$ref": "#/$defs/changeLookalike"
+    },
+    {
+      "$ref": "#/$defs/created"
+    },
+    {
+      "$ref": "#/$defs/createUnavailable"
+    },
+    {
+      "$ref": "#/$defs/pendingState"
+    },
+    {
+      "$ref": "#/$defs/pendingUnavailable"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "handle": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "matchKind": {
+      "enum": [
+        "exact",
+        "wwwAlias",
+        "site"
+      ]
+    },
+    "lookalikeHost": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f /?#@:]+$"
+    },
+    "reason": {
+      "enum": [
+        "desktopUnavailable",
+        "locked",
+        "noMatch",
+        "approvalUnavailable",
+        "approvalDeclined",
+        "approvalTimeout",
+        "staleRequest",
+        "invalidSelection",
+        "multipleMatches"
+      ]
+    },
+    "changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "currentPassword",
+        "newPassword",
+        "handle",
+        "matchKind"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "changed"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "currentPassword": {
+          "$ref": "#/$defs/credential"
+        },
+        "newPassword": {
+          "$ref": "#/$defs/credential"
+        },
+        "handle": {
+          "$ref": "#/$defs/handle"
+        },
+        "matchKind": {
+          "$ref": "#/$defs/matchKind"
+        }
+      }
+    },
+    "changeUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "reason"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "change-unavailable"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        }
+      }
+    },
+    "changeLookalike": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "reason",
+        "lookalike"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "change-unavailable"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "reason": {
+          "const": "lookalike"
+        },
+        "lookalike": {
+          "$ref": "#/$defs/lookalikeHost"
+        }
+      }
+    },
+    "created": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "password",
+        "handle"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "created"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "password": {
+          "$ref": "#/$defs/credential"
+        },
+        "handle": {
+          "$ref": "#/$defs/handle"
+        }
+      }
+    },
+    "createUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "reason"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "create-unavailable"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        }
+      }
+    },
+    "pendingState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "state"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "pending-state"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "state": {
+          "enum": [
+            "unconfirmed",
+            "confirmed",
+            "returned",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "pendingUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "reason"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "pending-unavailable"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "type",
+        "requestId",
+        "message"
+      ],
+      "properties": {
+        "version": {
+          "const": 8
+        },
+        "type": {
+          "const": "error"
+        },
+        "requestId": {
+          "$ref": "#/$defs/requestId"
+        },
+        "message": {
+          "enum": [
+            "Unsupported protocol version.",
+            "Invalid browser request.",
+            "Unsupported browser request.",
+            "Browser response unavailable."
+          ]
+        }
+      }
+    }
+  }
+}

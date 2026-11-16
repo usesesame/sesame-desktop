@@ -3,11 +3,16 @@ use tauri::{AppHandle, State};
 use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::application::browser_fill::{
     never_save_browser_site_in_state, never_save_sites_in_state, remove_never_save_site_in_state,
-    resolve_browser_card_fill_in_state, resolve_browser_fill_in_state,
+    resolve_browser_card_fill_in_state, resolve_browser_change_in_state,
+    resolve_browser_create_in_state, resolve_browser_fill_in_state,
     resolve_browser_identity_fill_in_state, resolve_browser_save_in_state,
     resolve_browser_totp_fill_in_state,
 };
 use crate::application::file_choices::{resolve_path, FilePurpose, FileSelectionState};
+use crate::application::pending_changes::{
+    discard_pending_login_in_state, go_back_pending_change_in_state, keep_pending_change_in_state,
+    list_pending_changes_in_state, PendingChangeList,
+};
 use crate::vault::{SaveLoginResult, VaultResult, VaultState};
 use crate::{browser_fill, browser_host, diagnostics};
 
@@ -204,4 +209,77 @@ pub fn get_pending_browser_totp_fill(
     state: State<'_, browser_fill::BrowserFillState>,
 ) -> Option<browser_fill::BrowserTotpRequestEvent> {
     browser_fill::pending_totp(state)
+}
+
+#[tauri::command]
+pub fn resolve_browser_change(
+    app: AppHandle,
+    state: State<'_, browser_fill::BrowserFillState>,
+    approval_id: String,
+    login_id: Option<String>,
+) -> VaultResult<()> {
+    resolve_browser_change_in_state(
+        &state,
+        &DesktopHostEffects::new(&app),
+        &approval_id,
+        login_id,
+    )
+}
+
+#[tauri::command]
+pub fn get_pending_browser_change(
+    state: State<'_, browser_fill::BrowserFillState>,
+) -> Option<browser_fill::BrowserChangeRequestEvent> {
+    browser_fill::pending_change(state)
+}
+
+#[tauri::command]
+pub fn resolve_browser_create(
+    app: AppHandle,
+    state: State<'_, browser_fill::BrowserFillState>,
+    approval_id: String,
+    approved: bool,
+) -> VaultResult<()> {
+    resolve_browser_create_in_state(
+        &state,
+        &DesktopHostEffects::new(&app),
+        &approval_id,
+        approved,
+    )
+}
+
+#[tauri::command]
+pub fn get_pending_browser_create(
+    state: State<'_, browser_fill::BrowserFillState>,
+) -> Option<browser_fill::BrowserCreateRequestEvent> {
+    browser_fill::pending_create(state)
+}
+
+#[tauri::command]
+pub fn list_pending_changes(state: State<'_, VaultState>) -> VaultResult<PendingChangeList> {
+    list_pending_changes_in_state(&state)
+}
+
+#[tauri::command]
+pub fn keep_pending_change(
+    state: State<'_, VaultState>,
+    id: String,
+) -> VaultResult<PendingChangeList> {
+    keep_pending_change_in_state(&state, &id)
+}
+
+#[tauri::command]
+pub fn go_back_pending_change(
+    state: State<'_, VaultState>,
+    id: String,
+) -> VaultResult<PendingChangeList> {
+    go_back_pending_change_in_state(&state, &id)
+}
+
+#[tauri::command]
+pub fn discard_pending_login(
+    state: State<'_, VaultState>,
+    id: String,
+) -> VaultResult<PendingChangeList> {
+    discard_pending_login_in_state(&state, &id)
 }
