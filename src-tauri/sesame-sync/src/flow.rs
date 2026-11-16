@@ -24,9 +24,9 @@ pub enum TransferChoice {
 pub fn plan_transfer(
     local: &SyncState,
     server: &StateView,
-    local_payload: &[u8],
+    local_payload: &sesame_core::types::VaultPayload,
 ) -> TransferChoice {
-    if local.has_local_changes(local_payload) {
+    if local.has_local_changes(local_payload).unwrap_or(true) {
         return TransferChoice::Upload;
     }
     if server.current_revision > local.head_revision() {
@@ -153,7 +153,18 @@ pub fn new_join_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::payload_digest;
+    use crate::state::{change_digest, payload_digest};
+    use sesame_core::types::VaultPayload;
+
+    fn vault(name: &str) -> VaultPayload {
+        let mut payload = VaultPayload::default();
+        payload.vault_name = name.into();
+        payload
+    }
+
+    fn digest_of(name: &str) -> String {
+        change_digest(&vault(name)).expect("digest")
+    }
 
     fn local(revision: u64, digest: &str) -> SyncState {
         let mut state = SyncState::new("vaultAAAAAAAAAAAA01", "deviceAAAAAAAAAAAAAA01");
@@ -191,23 +202,22 @@ mod tests {
 
     #[test]
     fn local_changes_win_over_a_newer_server_revision() {
-        let state = local(3, &payload_digest(b"old"));
+        let state = local(3, &digest_of("old"));
         assert_eq!(
-            plan_transfer(&state, &server(5), b"new"),
+            plan_transfer(&state, &server(5), &vault("new")),
             TransferChoice::Upload
         );
     }
 
     #[test]
     fn a_clean_device_downloads_only_when_the_server_is_ahead() {
-        let digest = payload_digest(b"same");
-        let state = local(3, &digest);
+        let state = local(3, &digest_of("same"));
         assert_eq!(
-            plan_transfer(&state, &server(4), b"same"),
+            plan_transfer(&state, &server(4), &vault("same")),
             TransferChoice::Download { server_revision: 4 }
         );
         assert_eq!(
-            plan_transfer(&state, &server(3), b"same"),
+            plan_transfer(&state, &server(3), &vault("same")),
             TransferChoice::AlreadyCurrent
         );
     }

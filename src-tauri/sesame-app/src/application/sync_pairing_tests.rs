@@ -437,6 +437,17 @@ fn lost_pairing_responses_keep_the_authenticated_context_and_resume_without_pair
             |state| write_protected(&path, state),
             &no_wait,
         ));
+        if lost == "package" {
+            let (resumed, received) =
+                first.expect("a package read that never arrived keeps the join waiting");
+            assert_eq!(received, package);
+            assert_eq!(resumed.entries, approved.entries);
+            assert!(resumed.pending_confirmation.is_none());
+            assert_eq!(package_reads.load(Ordering::SeqCst), 2);
+            assert_eq!(read_protected(&path), Some(resumed));
+            std::fs::remove_dir_all(directory).expect("remove fixture");
+            continue;
+        }
         assert!(first.is_err(), "{lost}");
         let retained = read_protected(&path).expect("the authenticated context persists");
         assert_eq!(retained, unfinished, "{lost}");
@@ -601,6 +612,200 @@ fn a_cancelled_pairing_stops_the_join_loop_before_it_asks_for_the_answer() {
     );
     assert!(store.load_join_state().expect("state").is_none());
     assert!(effects.calls().is_empty());
+}
+
+#[test]
+fn a_busy_or_unreachable_service_keeps_the_join_waiting_until_a_real_answer() {
+    let _pairing = pairing_state_guard();
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let scratch = Scratch::new();
+    let store = scratch.store();
+    let effects = FakeEffects::new(PathBuf::new());
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counted = polls.clone();
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
+        "/v1/sync/state" => Reply::json(403, &json!({"error":{"code":"sync_forbidden"}})),
+        "/v1/sync/pairings" => Reply::bytes(204, Vec::new()),
+        "/v1/sync/pairings/mine" => match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Reply::json(503, &json!({"error":{"code":"sync_unavailable"}}))
+                .with_header("Retry-After", "5"),
+            1 => Reply::json(429, &json!({"error":{"code":"too_many_attempts"}}))
+                .with_header("Retry-After", "1"),
+            2 => Reply::disconnect(),
+            3 => Reply::bytes(503, b"overloaded".to_vec()).with_header("Retry-After", "never"),
+            4 => Reply::json(200, &json!({"state": "offered"})),
+            _ => Reply::json(403, &json!({"error":{"code":"sync_forbidden"}})),
+        },
+        other => panic!("unexpected route {other}"),
+    });
+    let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+    reset_cancellation();
+    let pauses = AtomicUsize::new(0);
+    let pause = || {
+        pauses.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(())
+    };
+
+    let result = block_on(join_with_code_in_state(
+        &vault.state,
+        &store,
+        &effects,
+        &client,
+        JoinRequest {
+            code: "ABCDEFGHJK",
+            label: "Fictional tablet",
+            master_password: PASSWORD,
+            pending: None,
+        },
+        pause,
+    ));
+
+    assert_eq!(refusal(result), "This device is not approved to sync.");
+    assert_eq!(polls.load(Ordering::SeqCst), 6);
+    assert_eq!(
+        pauses.load(Ordering::SeqCst),
+        2 + 1 + 1 + 2 + 1,
+        "each wait follows the Retry-After the service named"
+    );
+    assert!(effects.calls().is_empty());
+}
+
+#[test]
+fn a_busy_join_poll_neither_cancels_the_pairing_nor_forgets_this_device() {
+    let _pairing = pairing_state_guard();
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let scratch = Scratch::new();
+    let store = scratch.store();
+    let effects = FakeEffects::new(PathBuf::new());
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
+        "/v1/sync/state" => Reply::json(
+            200,
+            &json!({
+                "vaultId": "fictionalVault00000001",
+                "vaultEpoch": 1,
+                "currentRevision": 1,
+                "deviceState": "pairing",
+                "activatedEpoch": 0,
+            }),
+        ),
+        "/v1/sync/pairings" => Reply::bytes(204, Vec::new()),
+        "/v1/sync/pairings/mine" => Reply::json(503, &json!({"error":{"code":"sync_unavailable"}}))
+            .with_header("Retry-After", "3"),
+        other => panic!("unexpected route {other}"),
+    });
+    let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+    reset_cancellation();
+    let pauses = AtomicUsize::new(0);
+    let pause = || {
+        pauses.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(())
+    };
+    let identity_seen = AtomicBool::new(false);
+    let watched = || {
+        if pauses.load(Ordering::SeqCst) >= 3 {
+            identity_seen.store(store.identity_present(), Ordering::SeqCst);
+            set_cancelled();
+        }
+        pause()
+    };
+
+    let result = block_on(join_with_code_in_state(
+        &vault.state,
+        &store,
+        &effects,
+        &client,
+        JoinRequest {
+            code: "ABCDEFGHJK",
+            label: "Fictional tablet",
+            master_password: PASSWORD,
+            pending: None,
+        },
+        watched,
+    ));
+    reset_cancellation();
+
+    assert_eq!(refusal(result), "Pairing was cancelled.");
+    assert!(
+        identity_seen.load(Ordering::SeqCst),
+        "the device keys survive every busy answer"
+    );
+    let cancels = server
+        .requests()
+        .iter()
+        .filter(|request| request.method == "DELETE")
+        .count();
+    assert_eq!(cancels, 1, "only the person's own cancel ends the pairing");
+    assert!(
+        server
+            .requests()
+            .iter()
+            .filter(|request| request.path == "/v1/sync/pairings/mine")
+            .count()
+            >= 3
+    );
+}
+
+#[test]
+fn a_busy_or_unreachable_service_keeps_the_approver_waiting_for_the_new_device() {
+    let _pairing = pairing_state_guard();
+    let approver = Approver::new();
+    let store = approver.store();
+    let state = vault_state_json(&approver.state.vault_id, 1, 1, 1);
+    let header = approver.header.clone();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let counted = polls.clone();
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
+        "/v1/sync/checkpoints" => Reply::json(404, &json!({"error":{"code":"sync_not_found"}})),
+        "/v1/sync/state" => Reply::json(200, &state),
+        path if path.starts_with("/v1/sync/device-list") => {
+            Reply::json(200, &json!({"entries": []}))
+        }
+        path if path.starts_with("/v1/sync/headers") => {
+            Reply::json(200, &json!({"headers": [header.clone()]}))
+        }
+        "/v1/sync/devices" => match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Reply::json(503, &json!({"error":{"code":"rate_limit_unavailable"}})),
+            1 => Reply::disconnect(),
+            2 => Reply::json(429, &json!({"error":{"code":"too_many_attempts"}}))
+                .with_header("Retry-After", "6"),
+            3 => Reply::json(200, &json!({"pairings": []})),
+            _ => Reply::json(403, &json!({"error":{"code":"sync_forbidden"}})),
+        },
+        other => panic!("unexpected route {other}"),
+    });
+    let client = approver.client(&server);
+    reset_cancellation();
+    let pauses = AtomicUsize::new(0);
+    let pause = || {
+        pauses.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(())
+    };
+
+    let result = block_on(approve_in_state(
+        &approver.vault.state,
+        &store,
+        &client,
+        &approver.identity,
+        ApproveRequest {
+            code: "ABCDEFGHJK",
+            started: Instant::now(),
+            allow_classical: false,
+        },
+        pause,
+    ));
+
+    assert_eq!(refusal(result), "This device is not approved to sync.");
+    assert_eq!(polls.load(Ordering::SeqCst), 5);
+    assert_eq!(pauses.load(Ordering::SeqCst), 2 + 1 + 2 + 1);
+    assert!(server
+        .requests()
+        .iter()
+        .all(|request| request.method != "DELETE"));
+}
+
+#[test]
+fn the_pairing_polls_stay_inside_the_service_rate_limit() {
+    assert!(crate::application::sync_pairing::PAIRING_POLL >= std::time::Duration::from_secs(3));
 }
 
 #[test]

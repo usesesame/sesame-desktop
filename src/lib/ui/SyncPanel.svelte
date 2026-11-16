@@ -46,8 +46,13 @@
   let showBackups = false
 
   $: coordinatorNote = describeCoordinatorState($syncPanel.coordinator)
-  $: statusLabel = $syncPanel.needsNewKey ? 'Needs the new key' : (stateLabels[$syncPanel.state] ?? 'Unknown')
-  $: statusLine = $syncPanel.needsNewKey ? 'This device needs the new vault key before it can sync.' : [summary + '.', coordinatorNote].filter(Boolean).join(' ')
+  $: stopped = $syncPanel.state === 'approved' && $syncPanel.coordinator.phase === 'halted'
+  $: statusLabel = $syncPanel.needsNewKey ? 'Needs the new key' : stopped ? 'Needs attention' : (stateLabels[$syncPanel.state] ?? 'Unknown')
+  $: statusLine = $syncPanel.needsNewKey
+    ? 'This device needs the new vault key before it can sync.'
+    : stopped
+      ? coordinatorNote
+      : [summary + '.', coordinatorNote].filter(Boolean).join(' ')
   $: floorCheck = describeFloorCheck($syncPanel.state, $syncPanel.floorCheckedAt)
   $: confirmation = describeConfirmation($syncPanel.state, $syncPanel.confirmedAt, others.length, $syncPanel.peerChecksSkipped)
 

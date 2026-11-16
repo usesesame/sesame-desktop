@@ -50,6 +50,14 @@ pub fn pairing_cancel_path(device_id: &str) -> String {
     format!("{PATH_PAIRINGS}/{device_id}")
 }
 
+pub const SYNC_TURNED_OFF: &str = "Sesame Sync is turned off on this server, so this device cannot sync. Your vault on this device still works. Ask whoever runs the server to turn Sync on.";
+pub const SYNC_NOT_AVAILABLE: &str = "Sesame Sync is not available.";
+pub const LINK_ENDED: &str = "This desktop is no longer linked to your Sesame account. Link it again in Settings with a new one-time code. If Sync still does not resume, turn Sync off on this device and join again with a code from another device.";
+pub const BUSY_DEFAULT_SECS: u64 = 5;
+pub const RATE_LIMITED_DEFAULT_SECS: u64 = 30;
+pub const RETRY_AFTER_MIN_SECS: u64 = 1;
+pub const RETRY_AFTER_MAX_SECS: u64 = 300;
+
 #[derive(Debug)]
 pub enum SyncError {
     Unavailable(String),
@@ -59,6 +67,11 @@ pub enum SyncError {
     NotEntitled,
     NotFound,
     StorageFull,
+    TooLarge,
+    Busy { retry_after_secs: u64 },
+    RateLimited { retry_after_secs: u64 },
+    LinkEnded,
+    Unreachable,
     Rejected,
     ServerNeedsUpdate,
     Failed(String),
@@ -86,6 +99,17 @@ impl std::fmt::Display for SyncError {
                 formatter,
                 "This vault is too large for the space the service gives it."
             ),
+            Self::TooLarge => write!(formatter, "This vault is too large for Sesame Sync."),
+            Self::Busy { .. } => write!(
+                formatter,
+                "Sesame Sync is busy right now. Try again in a few seconds."
+            ),
+            Self::RateLimited { .. } => write!(
+                formatter,
+                "This device sent Sesame Sync too many requests. Wait a minute, then try again."
+            ),
+            Self::LinkEnded => write!(formatter, "{LINK_ENDED}"),
+            Self::Unreachable => write!(formatter, "Sesame could not reach Sesame Sync."),
             Self::Rejected => write!(formatter, "Sesame Sync could not complete that request."),
             Self::ServerNeedsUpdate => write!(formatter, "{SERVER_NEEDS_UPDATE}"),
         }
@@ -120,17 +144,48 @@ pub fn name_the_old_server(error: SyncError, package_key: &str) -> SyncError {
     }
 }
 
-pub fn classify(status: u16, body: &[u8], entitlement_enforced: bool) -> SyncError {
+pub fn retry_after_secs(header: Option<&str>, default: u64) -> u64 {
+    header
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(|value| value.parse::<u64>().unwrap_or(u64::MAX))
+        .unwrap_or(default)
+        .clamp(RETRY_AFTER_MIN_SECS, RETRY_AFTER_MAX_SECS)
+}
+
+pub fn classify(
+    status: u16,
+    retry_after: Option<&str>,
+    body: &[u8],
+    entitlement_enforced: bool,
+) -> SyncError {
     let parsed: Option<ErrorEnvelope> = serde_json::from_slice(body).ok();
     let code = parsed
         .as_ref()
         .and_then(|envelope| envelope.error.as_ref())
         .map(|error| error.code.as_str())
         .unwrap_or_default();
+    match (status, code) {
+        (503, _) => {
+            return SyncError::Busy {
+                retry_after_secs: retry_after_secs(retry_after, BUSY_DEFAULT_SECS),
+            }
+        }
+        (429, _) => {
+            return SyncError::RateLimited {
+                retry_after_secs: retry_after_secs(retry_after, RATE_LIMITED_DEFAULT_SECS),
+            }
+        }
+        (413, "sync_storage_limit_reached") => return SyncError::StorageFull,
+        (413, _) => return SyncError::TooLarge,
+        (401, code) if code != "sync_signature_invalid" => return SyncError::LinkEnded,
+        (403, "sync_unavailable") => return SyncError::Unavailable(SYNC_TURNED_OFF.into()),
+        _ => {}
+    }
     match code {
-        "sync_unavailable" => SyncError::Unavailable("Sesame Sync is not available.".into()),
+        "sync_unavailable" => SyncError::Unavailable(SYNC_NOT_AVAILABLE.into()),
         "sync_not_entitled" if entitlement_enforced => SyncError::NotEntitled,
-        "sync_not_entitled" => SyncError::Unavailable("Sesame Sync is not available.".into()),
+        "sync_not_entitled" => SyncError::Unavailable(SYNC_NOT_AVAILABLE.into()),
         "sync_not_activated" => SyncError::NotActivated,
         "sync_forbidden" => SyncError::NotApproved,
         "sync_vault_not_found" | "sync_not_found" => SyncError::NotFound,
@@ -145,8 +200,7 @@ pub fn classify(status: u16, body: &[u8], entitlement_enforced: bool) -> SyncErr
             "The service saw that request twice. Try again.".into(),
         ),
         _ => match status {
-            401 => SyncError::Failed("This desktop is no longer linked to the service.".into()),
-            403 => SyncError::Unavailable("Sesame Sync is not available.".into()),
+            403 => SyncError::Unavailable(SYNC_NOT_AVAILABLE.into()),
             404 => SyncError::NotFound,
             _ => SyncError::Failed("Sesame Sync could not complete that request.".into()),
         },
@@ -347,48 +401,146 @@ mod tests {
         let cases = [
             (
                 "sync_unavailable",
-                400,
-                SyncError::Unavailable("Sesame Sync is not available.".into()),
+                403,
+                SyncError::Unavailable(SYNC_TURNED_OFF.into()),
             ),
-            ("sync_not_activated", 400, SyncError::NotActivated),
+            (
+                "sync_unavailable",
+                400,
+                SyncError::Unavailable(SYNC_NOT_AVAILABLE.into()),
+            ),
+            (
+                "sync_unavailable",
+                503,
+                SyncError::Busy {
+                    retry_after_secs: 5,
+                },
+            ),
+            (
+                "rate_limit_unavailable",
+                503,
+                SyncError::Busy {
+                    retry_after_secs: 5,
+                },
+            ),
+            (
+                "too_many_attempts",
+                429,
+                SyncError::RateLimited {
+                    retry_after_secs: 5,
+                },
+            ),
+            ("sync_not_activated", 403, SyncError::NotActivated),
             ("sync_forbidden", 403, SyncError::NotApproved),
             ("sync_vault_not_found", 404, SyncError::NotFound),
             ("sync_not_found", 404, SyncError::NotFound),
             ("sync_conflict", 409, SyncError::Conflict),
             ("sync_vault_exists", 409, SyncError::Conflict),
             ("sync_storage_limit_reached", 413, SyncError::StorageFull),
+            ("sync_too_large", 413, SyncError::TooLarge),
             ("sync_invalid", 400, SyncError::Rejected),
+            ("not_authenticated", 401, SyncError::LinkEnded),
+            (
+                "sync_signature_invalid",
+                401,
+                SyncError::Failed(
+                    "The service did not accept this device's signature. Check that the date and time on this computer are correct."
+                        .into(),
+                ),
+            ),
         ];
         for (code, status, expected) in cases {
             let body = serde_json::to_vec(&json!({"error":{"code":code}})).unwrap();
             assert_eq!(
-                format!("{:?}", classify(status, &body, true)),
+                format!("{:?}", classify(status, Some("5"), &body, true)),
                 format!("{:?}", expected),
-                "{code}"
+                "{code} {status}"
             );
         }
-        assert!(matches!(classify(400, b"{}", true), SyncError::Failed(_)));
+        assert!(matches!(
+            classify(400, None, b"{}", true),
+            SyncError::Failed(_)
+        ));
     }
 
     #[test]
     fn entitlement_is_enforced_only_for_the_official_service() {
         let body = br#"{"error":{"code":"sync_not_entitled"}}"#;
-        assert!(matches!(classify(402, body, true), SyncError::NotEntitled));
         assert!(matches!(
-            classify(402, body, false),
+            classify(402, None, body, true),
+            SyncError::NotEntitled
+        ));
+        assert!(matches!(
+            classify(402, None, body, false),
             SyncError::Unavailable(_)
         ));
     }
 
     #[test]
     fn unknown_codes_fall_back_to_the_http_status() {
-        assert!(matches!(classify(401, b"{}", false), SyncError::Failed(_)));
         assert!(matches!(
-            classify(403, b"{}", false),
+            classify(401, None, b"{}", false),
+            SyncError::LinkEnded
+        ));
+        assert!(matches!(
+            classify(403, None, b"{}", false),
             SyncError::Unavailable(_)
         ));
-        assert!(matches!(classify(404, b"{}", false), SyncError::NotFound));
-        assert!(matches!(classify(500, b"{}", false), SyncError::Failed(_)));
+        assert!(matches!(
+            classify(404, None, b"{}", false),
+            SyncError::NotFound
+        ));
+        assert!(matches!(
+            classify(413, None, b"not json", false),
+            SyncError::TooLarge
+        ));
+        assert!(matches!(
+            classify(500, None, b"{}", false),
+            SyncError::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn a_busy_answer_waits_as_told_within_safe_bounds() {
+        let busy = |header: Option<&str>| match classify(503, header, b"", false) {
+            SyncError::Busy { retry_after_secs } => retry_after_secs,
+            _ => 0,
+        };
+        assert_eq!(busy(Some("5")), 5);
+        assert_eq!(busy(Some(" 42 ")), 42);
+        assert_eq!(busy(None), BUSY_DEFAULT_SECS);
+        assert_eq!(busy(Some("")), BUSY_DEFAULT_SECS);
+        assert_eq!(busy(Some("soon")), BUSY_DEFAULT_SECS);
+        assert_eq!(busy(Some("-5")), BUSY_DEFAULT_SECS);
+        assert_eq!(busy(Some("2.5")), BUSY_DEFAULT_SECS);
+        assert_eq!(
+            busy(Some("Wed, 21 Oct 2026 07:28:00 GMT")),
+            BUSY_DEFAULT_SECS
+        );
+        assert_eq!(busy(Some("0")), RETRY_AFTER_MIN_SECS);
+        assert_eq!(busy(Some("86400")), RETRY_AFTER_MAX_SECS);
+        assert_eq!(
+            busy(Some("99999999999999999999999999")),
+            RETRY_AFTER_MAX_SECS
+        );
+    }
+
+    #[test]
+    fn a_rate_limit_without_a_usable_wait_falls_back_to_its_own_default() {
+        for header in [None, Some("later"), Some("")] {
+            assert!(matches!(
+                classify(429, header, b"{}", false),
+                SyncError::RateLimited {
+                    retry_after_secs: RATE_LIMITED_DEFAULT_SECS
+                }
+            ));
+        }
+        assert!(matches!(
+            classify(429, Some("12"), b"{}", false),
+            SyncError::RateLimited {
+                retry_after_secs: 12
+            }
+        ));
     }
 
     #[test]

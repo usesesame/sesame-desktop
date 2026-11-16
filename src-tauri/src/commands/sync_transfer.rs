@@ -240,6 +240,11 @@ pub async fn sync_now(
     if manual.unwrap_or(false) {
         coordinator.retry_after_user_action();
     }
+    if coordinator.halted_size().is_some() {
+        if let Some(vault_bytes) = crate::application::sync::sync_size_in_state(&state) {
+            coordinator.vault_resized(vault_bytes);
+        }
+    }
     if !coordinator.begin() {
         return sync_coordinator_status(coordinator).await;
     }

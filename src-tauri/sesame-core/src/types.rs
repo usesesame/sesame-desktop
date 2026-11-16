@@ -1998,6 +1998,82 @@ impl VaultPayload {
         ids
     }
 
+    pub fn clear_usage_bookkeeping(&mut self) {
+        self.revision = 0;
+        macro_rules! clear_items {
+            ($($collection:ident),*) => {
+                $(
+                    for item in self.$collection.iter_mut() {
+                        item.last_used_at = None;
+                        item.updated_at = 0;
+                        item.revision = 0;
+                    }
+                )*
+            };
+        }
+        clear_items!(
+            entries,
+            identities,
+            secure_notes,
+            cards,
+            wifi_networks,
+            ssh_keys,
+            software_licenses,
+            documents,
+            custom_records
+        );
+    }
+
+    pub fn keep_newer_use_from(&mut self, local: &VaultPayload) {
+        let mut used = std::collections::HashMap::new();
+        macro_rules! collect_use {
+            ($($collection:ident),*) => {
+                $(
+                    for item in local.$collection.iter() {
+                        if let Some(at) = item.last_used_at {
+                            used.insert(item.id.as_str(), at);
+                        }
+                    }
+                )*
+            };
+        }
+        collect_use!(
+            entries,
+            identities,
+            secure_notes,
+            cards,
+            wifi_networks,
+            ssh_keys,
+            software_licenses,
+            documents,
+            custom_records
+        );
+        macro_rules! keep_use {
+            ($($collection:ident),*) => {
+                $(
+                    for item in self.$collection.iter_mut() {
+                        if let Some(&at) = used.get(item.id.as_str()) {
+                            if item.last_used_at.is_none_or(|current| current < at) {
+                                item.last_used_at = Some(at);
+                            }
+                        }
+                    }
+                )*
+            };
+        }
+        keep_use!(
+            entries,
+            identities,
+            secure_notes,
+            cards,
+            wifi_networks,
+            ssh_keys,
+            software_licenses,
+            documents,
+            custom_records
+        );
+    }
+
     pub fn item_metadata_mut(&mut self, id: &str) -> Option<&mut dyn ItemMetadata> {
         macro_rules! find_item {
             ($collection:expr) => {

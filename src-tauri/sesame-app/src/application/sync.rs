@@ -116,12 +116,47 @@ impl SyncStore {
     }
 }
 
+pub const BUSY_PREFIX: &str = "sync_busy:";
+pub const TOO_LARGE_PREFIX: &str = "sync_too_large:";
+pub const SEAL_OVERHEAD_BYTES: u64 = 16;
+
+pub fn too_large_message(vault_bytes: u64, limit_bytes: u64) -> String {
+    format!("{TOO_LARGE_PREFIX}{vault_bytes}:{limit_bytes}:This vault is too large to sync. Remove large attachments to make it smaller, then try again.")
+}
+
 pub fn present(error: SyncError) -> String {
+    let text = error.to_string();
     match error {
-        SyncError::NotEntitled => format!("sync_not_entitled:{}", SyncError::NotEntitled),
+        SyncError::NotEntitled => format!("sync_not_entitled:{text}"),
         SyncError::Conflict => "sync_conflict:0".to_string(),
-        other => other.to_string(),
+        SyncError::Busy { retry_after_secs } | SyncError::RateLimited { retry_after_secs } => {
+            format!("{BUSY_PREFIX}{retry_after_secs}:{text}")
+        }
+        SyncError::TooLarge => too_large_message(0, crate::sync::canonical::MAX_CIPHERTEXT_BYTES),
+        SyncError::StorageFull => too_large_message(0, 0),
+        _ => text,
     }
+}
+
+pub fn sync_size_of(vault: &UnlockedVault) -> Result<u64, String> {
+    let payload = vault.open_payload()?;
+    let padded = crate::vault::crypto::serialize_payload(&payload)?;
+    Ok(u64::try_from(padded.len())
+        .unwrap_or(u64::MAX)
+        .saturating_add(SEAL_OVERHEAD_BYTES))
+}
+
+pub fn require_sync_size(vault_bytes: u64) -> Result<(), String> {
+    let limit = crate::sync::canonical::MAX_CIPHERTEXT_BYTES;
+    if vault_bytes > limit {
+        return Err(too_large_message(vault_bytes, limit));
+    }
+    Ok(())
+}
+
+pub fn sync_size_in_state(state: &VaultState) -> Option<u64> {
+    let session = state.session.lock().ok()?;
+    sync_size_of(session.as_ref()?).ok()
 }
 
 pub fn present_proof(error: ProofError) -> String {
@@ -159,6 +194,11 @@ pub fn local_payload_bytes(vault: &UnlockedVault) -> Result<(Vec<u8>, usize), St
     let bytes = serde_json::to_vec(&*payload)
         .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
     Ok((bytes, payload.entries.len()))
+}
+
+pub fn vault_has_local_changes(local: &SyncState, vault: &UnlockedVault) -> Result<bool, String> {
+    let payload = vault.open_payload()?;
+    local.has_local_changes(&payload)
 }
 
 pub fn verify_master_password(vault: &UnlockedVault, master_password: &str) -> Result<(), String> {
@@ -501,8 +541,7 @@ pub fn local_status_in_state(
                 .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
             session
                 .as_ref()
-                .and_then(|unlocked| local_payload_bytes(unlocked).ok())
-                .is_some_and(|(plaintext, _)| local.has_local_changes(&plaintext))
+                .is_some_and(|unlocked| vault_has_local_changes(local, unlocked).unwrap_or(true))
         }
         None => false,
     };
@@ -623,6 +662,16 @@ pub async fn create_vault_in_state(
             )
         }
         Err(other) => return Err(present(other)),
+    }
+    {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        let unlocked = session
+            .as_ref()
+            .ok_or("Unlock Sesame before setting up Sync.")?;
+        require_sync_size(sync_size_of(unlocked)?)?;
     }
     let path = store.identity_path();
     let identity = crate::sync::identity::load_or_create(&path)?;
@@ -758,6 +807,9 @@ pub struct SyncCoordinatorView {
     pub phase: String,
     pub halt: String,
     pub conflict_revision: i64,
+    pub retry_after_seconds: u64,
+    pub vault_bytes: u64,
+    pub limit_bytes: u64,
     pub pending: bool,
     pub last_success_revision: i64,
     pub consecutive_failures: u32,
@@ -767,10 +819,24 @@ pub struct SyncCoordinatorView {
 pub fn coordinator_view(status: &crate::sync::coordinator::Status) -> SyncCoordinatorView {
     use crate::sync::coordinator::{Halt, Phase};
 
+    let mut retry_after_seconds = 0;
+    let mut sizes = (0, 0);
     let (phase, halt, conflict_revision) = match &status.phase {
         Phase::Idle => ("idle", "", 0),
         Phase::Working => ("working", "", 0),
         Phase::Retrying { .. } => ("retrying", "", 0),
+        Phase::Waiting { retry_after_secs } => {
+            retry_after_seconds = *retry_after_secs;
+            ("busy", "", 0)
+        }
+        Phase::Halted(Halt::TooLarge {
+            vault_bytes,
+            limit_bytes,
+        }) => {
+            sizes = (*vault_bytes, *limit_bytes);
+            ("halted", "too_large", 0)
+        }
+        Phase::Halted(Halt::LinkEnded) => ("halted", "link_ended", 0),
         Phase::GaveUp => ("gave_up", "", 0),
         Phase::Paused => ("paused", "locked", 0),
         Phase::Halted(Halt::Revoked) => ("halted", "revoked", 0),
@@ -788,6 +854,9 @@ pub fn coordinator_view(status: &crate::sync::coordinator::Status) -> SyncCoordi
         phase: phase.to_string(),
         halt: halt.to_string(),
         conflict_revision,
+        retry_after_seconds,
+        vault_bytes: sizes.0,
+        limit_bytes: sizes.1,
         pending: status.pending,
         last_success_revision: status.last_success_revision.unwrap_or(0),
         consecutive_failures: status.consecutive_failures,

@@ -10,6 +10,8 @@ pub enum Halt {
     Conflict { server_revision: i64 },
     NeedsNewKey,
     Locked,
+    TooLarge { vault_bytes: u64, limit_bytes: u64 },
+    LinkEnded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +19,7 @@ pub enum Phase {
     Idle,
     Working,
     Retrying { attempt: u32 },
+    Waiting { retry_after_secs: u64 },
     GaveUp,
     Paused,
     Halted(Halt),
@@ -50,6 +53,7 @@ pub enum Outcome {
     Downloaded { revision: i64 },
     AlreadyCurrent,
     Transient,
+    Busy { retry_after_secs: u64 },
     Halt(Halt),
 }
 
@@ -167,6 +171,28 @@ impl Coordinator {
             Phase::Halted(Halt::NotEntitled)
                 | Phase::Halted(Halt::Incompatible)
                 | Phase::Halted(Halt::FloorDamaged)
+                | Phase::Halted(Halt::LinkEnded)
+        ) {
+            state.status.phase = Phase::Idle;
+            state.status.pending = false;
+        }
+    }
+
+    pub fn halted_size(&self) -> Option<u64> {
+        let state = self.inner.lock().ok()?;
+        match state.status.phase {
+            Phase::Halted(Halt::TooLarge { vault_bytes, .. }) => Some(vault_bytes),
+            _ => None,
+        }
+    }
+
+    pub fn vault_resized(&self, vault_bytes: u64) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if matches!(
+            state.status.phase,
+            Phase::Halted(Halt::TooLarge { vault_bytes: halted, .. }) if halted != vault_bytes
         ) {
             state.status.phase = Phase::Idle;
             state.status.pending = false;
@@ -209,6 +235,12 @@ impl Coordinator {
                 // Terminal: retrying a final answer hammers the service.
                 state.status.phase = Phase::Halted(halt);
                 state.status.pending = false;
+                state.follow_up = false;
+                false
+            }
+            Outcome::Busy { retry_after_secs } => {
+                state.status.phase = Phase::Waiting { retry_after_secs };
+                state.status.pending = true;
                 state.follow_up = false;
                 false
             }
@@ -382,6 +414,75 @@ mod tests {
             coordinator.retry_after_user_action();
             assert_eq!(coordinator.begin(), retried);
         }
+    }
+
+    #[test]
+    fn a_busy_server_never_counts_toward_giving_up() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Transient);
+        for _ in 0..(MAX_ATTEMPTS * 3) {
+            assert!(coordinator.begin());
+            coordinator.finish(Outcome::Busy {
+                retry_after_secs: 5,
+            });
+            let status = coordinator.status();
+            assert_eq!(
+                status.phase,
+                Phase::Waiting {
+                    retry_after_secs: 5
+                }
+            );
+            assert_eq!(status.consecutive_failures, 1);
+            assert!(status.pending);
+        }
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::AlreadyCurrent);
+        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert_eq!(coordinator.status().consecutive_failures, 0);
+    }
+
+    #[test]
+    fn a_vault_too_large_to_sync_stops_until_its_size_changes() {
+        let coordinator = Coordinator::new();
+        let halt = Halt::TooLarge {
+            vault_bytes: 12_000_000,
+            limit_bytes: 10_485_760,
+        };
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(halt.clone()));
+        assert_eq!(coordinator.halted_size(), Some(12_000_000));
+        assert!(!coordinator.begin());
+
+        coordinator.retry_after_user_action();
+        coordinator.vault_resized(12_000_000);
+        assert_eq!(coordinator.status().phase, Phase::Halted(halt));
+        assert!(!coordinator.begin());
+
+        coordinator.vault_resized(9_000_000);
+        assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert_eq!(coordinator.halted_size(), None);
+        assert!(coordinator.begin());
+    }
+
+    #[test]
+    fn a_new_size_only_ends_a_size_stop() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::Fork));
+        coordinator.vault_resized(1);
+        assert_eq!(coordinator.status().phase, Phase::Halted(Halt::Fork));
+        assert_eq!(coordinator.halted_size(), None);
+    }
+
+    #[test]
+    fn an_ended_desktop_link_stops_sync_until_a_person_tries_again() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::LinkEnded));
+        assert!(!coordinator.begin());
+        coordinator.retry_after_user_action();
+        assert!(coordinator.begin());
     }
 
     #[test]

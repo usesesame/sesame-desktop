@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SyncConflictSide } from '../types'
 import { controllerStore } from './controller-store'
 
-export type SyncActivity = 'idle' | 'pending' | 'syncing' | 'synced' | 'offline' | 'failing' | 'attention'
+export type SyncActivity = 'idle' | 'pending' | 'syncing' | 'synced' | 'waiting' | 'offline' | 'failing' | 'attention'
 
 export interface SyncControllerState {
   activity: SyncActivity
@@ -43,6 +43,9 @@ export interface SyncCoordinatorView {
   phase: string
   halt: string
   conflictRevision: number
+  retryAfterSeconds?: number
+  vaultBytes?: number
+  limitBytes?: number
   pending: boolean
   lastSuccessRevision: number
   consecutiveFailures: number
@@ -172,11 +175,44 @@ function writeCache(enrolled: boolean, state: string) {
 }
 
 const ENTITLEMENT_PREFIX = 'sync_not_entitled:'
+const BUSY_PREFIX = 'sync_busy:'
+const TOO_LARGE_PREFIX = 'sync_too_large:'
+const MEBIBYTE = 1024 * 1024
 
-function readableMessage(error: unknown, fallback: string) {
-  const message = typeof error === 'string' ? error : fallback
-  return message.startsWith(ENTITLEMENT_PREFIX) ? message.slice(ENTITLEMENT_PREFIX.length) : message
+export const LINK_ENDED_TEXT = 'This desktop is no longer linked to your Sesame account. Link it again in Settings with a new one-time code. If Sync still does not resume, turn Sync off on this device and join again with a code from another device.'
+const TRASH_NOTE = 'Deleted items stay in the trash for 30 days and still count toward the vault\'s size.'
+
+function megabytes(bytes: number): string {
+  const value = Math.round((bytes / MEBIBYTE) * 10) / 10
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)} MB`
 }
+
+export function describeTooLarge(vaultBytes: number, limitBytes: number, stopped: boolean): string {
+  const size = vaultBytes > 0
+    ? limitBytes > 0
+      ? `This vault is ${megabytes(vaultBytes)}, and Sesame Sync accepts a vault up to ${megabytes(limitBytes)}.`
+      : `This vault is ${megabytes(vaultBytes)}, which is more than the space this Sync server gives it.`
+    : 'This vault is too large for Sesame Sync.'
+  const next = stopped
+    ? 'Sync stopped and tries again after the vault changes. Remove large attachments from documents to make it smaller.'
+    : 'Remove large attachments from documents to make it smaller, then try again.'
+  return `${size} ${next} ${TRASH_NOTE}`
+}
+
+export function syncErrorText(error: unknown, fallback: string): string {
+  const message = typeof error === 'string' ? error : fallback
+  if (message.startsWith(ENTITLEMENT_PREFIX)) return message.slice(ENTITLEMENT_PREFIX.length)
+  if (message.startsWith(BUSY_PREFIX)) {
+    const text = message.slice(BUSY_PREFIX.length).split(':').slice(1).join(':')
+    return text || 'Sesame Sync is busy right now. Try again in a few seconds.'
+  }
+  if (message.startsWith(TOO_LARGE_PREFIX)) {
+    const [vaultBytes, limitBytes] = message.slice(TOO_LARGE_PREFIX.length).split(':').map((value) => Number.parseInt(value, 10))
+    return describeTooLarge(Number.isFinite(vaultBytes) ? vaultBytes : 0, Number.isFinite(limitBytes) ? limitBytes : 0, false)
+  }
+  return message
+}
+
 
 export type SyncChromeTone = 'ok' | 'busy' | 'warn'
 
@@ -185,6 +221,8 @@ export function describeCoordinatorState(state: {
   halt: string
   consecutiveFailures: number
   lastSuccessRevision: number
+  vaultBytes?: number
+  limitBytes?: number
 }): string {
   if (state.phase === 'paused') return 'Sync is paused while the vault is locked.'
   if (state.phase === 'halted') {
@@ -205,6 +243,10 @@ export function describeCoordinatorState(state: {
         return 'This device needs the new vault key. Open Sync and take it.'
       case 'locked':
         return 'Unlock Sesame to keep syncing.'
+      case 'too_large':
+        return describeTooLarge(state.vaultBytes ?? 0, state.limitBytes ?? 0, true)
+      case 'link_ended':
+        return LINK_ENDED_TEXT
       default:
         return 'Sesame Sync stopped.'
     }
@@ -212,6 +254,7 @@ export function describeCoordinatorState(state: {
   if (state.phase === 'gave_up') {
     return 'Sesame could not reach your sync server after several tries. It tries again every 30 minutes, and Sync now tries right away.'
   }
+  if (state.phase === 'busy') return 'Sesame Sync is busy right now. Sesame will try again shortly.'
   if (state.phase === 'retrying') {
     return `Could not reach Sesame Sync. Trying again (${state.consecutiveFailures}).`
   }
@@ -235,6 +278,8 @@ export function describeSyncForChrome(state: Pick<SyncControllerState, 'enrolled
       return { label: 'Synced vault · Changes not synced yet', tone: 'busy' }
     case 'syncing':
       return { label: 'Synced vault · Syncing…', tone: 'busy' }
+    case 'waiting':
+      return { label: 'Synced vault · Server busy, will retry', tone: 'busy' }
     case 'offline':
       return { label: 'Synced vault · Offline, will retry', tone: 'warn' }
     case 'failing':
@@ -274,8 +319,7 @@ export function createSyncController() {
       store.patch({ working: false, error: '', alarm: message.slice(forkPrefix.length) })
       return
     }
-    const entitlementPrefix = 'sync_not_entitled:'
-    store.patch({ working: false, error: message.startsWith(entitlementPrefix) ? message.slice(entitlementPrefix.length) : message })
+    store.patch({ working: false, error: syncErrorText(message, message) })
   }
 
   async function loadConflictDetails() {
@@ -322,7 +366,7 @@ export function createSyncController() {
     }
   }
 
-  async function loadLocal() {
+  async function loadLocal(): Promise<boolean | undefined> {
     try {
       const local = await invoke<{ state: string; revision: number; unsynced?: boolean }>('sync_local_status')
       const enrolled = local.state !== 'not_enrolled'
@@ -334,8 +378,9 @@ export function createSyncController() {
         activity: unsynced && activity !== 'syncing' ? 'pending' : activity === 'pending' && !unsynced ? 'synced' : activity,
       })
       writeCache(enrolled, local.state)
+      return unsynced
     } catch {
-      return
+      return undefined
     }
   }
 
@@ -362,13 +407,15 @@ export function createSyncController() {
       store.patch({
         working: false,
         loadError:
-          readableMessage(error, 'Sesame could not read the Sync status.'),
+          syncErrorText(error, 'Sesame could not read the Sync status.'),
       })
     }
   }
 
   let countdown: ReturnType<typeof setInterval> | undefined
   let changeTimer: ReturnType<typeof setTimeout> | undefined
+  let busyTimer: ReturnType<typeof setTimeout> | undefined
+  let vaultChangedSinceRun = false
   let rerun = false
   let lastAutoAttemptAt = 0
 
@@ -376,6 +423,8 @@ export function createSyncController() {
     switch (status.phase) {
       case 'working':
         return 'syncing'
+      case 'busy':
+        return 'waiting'
       case 'retrying':
         return 'offline'
       case 'gave_up':
@@ -394,6 +443,16 @@ export function createSyncController() {
       clearInterval(countdown)
       countdown = undefined
     }
+  }
+
+  function scheduleAfterBusy(status: SyncCoordinatorView) {
+    if (busyTimer !== undefined) clearTimeout(busyTimer)
+    busyTimer = undefined
+    if (status.phase !== 'busy') return
+    busyTimer = setTimeout(() => {
+      busyTimer = undefined
+      void api.autoSync()
+    }, Math.max(1, status.retryAfterSeconds ?? 0) * 1000)
   }
 
   const api = {
@@ -469,7 +528,7 @@ export function createSyncController() {
         await refresh()
       } catch (error) {
         stopCountdown()
-        const message = typeof error === 'string' ? error : 'Sesame could not add that device.'
+        const message = syncErrorText(error, 'Sesame could not add that device.')
         store.patch({
           pairingPhase: 'idle',
           pairingCode: '',
@@ -511,7 +570,7 @@ export function createSyncController() {
       } catch (error) {
         store.patch({
           working: false,
-          loadError: typeof error === 'string' ? error : 'Sesame could not turn Sync off.',
+          loadError: syncErrorText(error, 'Sesame could not turn Sync off.'),
         })
       }
     },
@@ -526,7 +585,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           preparedRecoveryKit: '',
-          loadError: readableMessage(error, 'Sesame could not prepare the new recovery kit.'),
+          loadError: syncErrorText(error, 'Sesame could not prepare the new recovery kit.'),
         })
       }
     },
@@ -548,7 +607,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           preparedRecoveryKit: '',
-          loadError: readableMessage(error, 'Sesame could not remove that device.'),
+          loadError: syncErrorText(error, 'Sesame could not remove that device.'),
         })
       }
     },
@@ -561,7 +620,7 @@ export function createSyncController() {
       } catch (error) {
         store.patch({
           working: false,
-          loadError: readableMessage(error, 'Sesame could not upgrade the key on this device.'),
+          loadError: syncErrorText(error, 'Sesame could not upgrade the key on this device.'),
         })
       }
     },
@@ -579,7 +638,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           preparedRecoveryKit: '',
-          loadError: readableMessage(error, 'Sesame could not change the vault key.'),
+          loadError: syncErrorText(error, 'Sesame could not change the vault key.'),
         })
       }
     },
@@ -590,7 +649,8 @@ export function createSyncController() {
     loadLocal,
     async autoSync() {
       const current = store.value()
-      const halted = current.coordinator.phase === 'halted'
+      const sizeMayHaveChanged = vaultChangedSinceRun && current.coordinator.halt === 'too_large'
+      const halted = current.coordinator.phase === 'halted' && !sizeMayHaveChanged
       if (current.activity === 'syncing') {
         rerun = true
         return
@@ -598,14 +658,18 @@ export function createSyncController() {
       if (current.working || current.state !== 'approved' || current.needsNewKey || halted || current.alarm) {
         return
       }
-      const wait = autoSyncBackoffMs(current.coordinator.consecutiveFailures)
+      const wait = current.coordinator.phase === 'busy'
+        ? Math.max(1, current.coordinator.retryAfterSeconds ?? 0) * 1000
+        : autoSyncBackoffMs(current.coordinator.consecutiveFailures)
       if (wait > 0 && Date.now() - lastAutoAttemptAt < wait) return
       lastAutoAttemptAt = Date.now()
+      vaultChangedSinceRun = false
       store.patch({ activity: 'syncing' })
       try {
         const status = await invoke<SyncCoordinatorView>('sync_now')
         store.patch({ coordinator: status, activity: activityFor(status), lastSyncedAt: status.phase === 'idle' ? Date.now() : store.value().lastSyncedAt })
         noteCoordinator(status)
+        scheduleAfterBusy(status)
         if (status.halt === 'needs_new_key') store.patch({ needsNewKey: true })
         if (status.halt === 'conflict') {
           store.patch({
@@ -645,6 +709,8 @@ export function createSyncController() {
         window.removeEventListener('online', onOnline)
         if (changeTimer !== undefined) clearTimeout(changeTimer)
         changeTimer = undefined
+        if (busyTimer !== undefined) clearTimeout(busyTimer)
+        busyTimer = undefined
       }
     },
     vaultChanged() {
@@ -653,7 +719,11 @@ export function createSyncController() {
       if (changeTimer !== undefined) clearTimeout(changeTimer)
       changeTimer = setTimeout(() => {
         changeTimer = undefined
-        void api.autoSync()
+        void loadLocal().then((unsynced) => {
+          if (unsynced === false) return
+          vaultChangedSinceRun = true
+          void api.autoSync()
+        })
       }, CHANGE_DELAY_MS)
     },
     async syncNow() {
@@ -702,7 +772,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           loadError:
-            readableMessage(error, 'Sesame could not restore that copy.'),
+            syncErrorText(error, 'Sesame could not restore that copy.'),
         })
       }
     },
@@ -716,7 +786,7 @@ export function createSyncController() {
         store.patch({
           working: false,
           loadError:
-            readableMessage(error, 'Sesame could not reset Sesame Sync.'),
+            syncErrorText(error, 'Sesame could not reset Sesame Sync.'),
         })
       }
     },

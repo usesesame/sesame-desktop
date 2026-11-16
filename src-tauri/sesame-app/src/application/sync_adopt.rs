@@ -53,14 +53,7 @@ pub fn finish_adoption_in_state(
 }
 
 pub fn digest_after_commit(payload: &VaultPayload) -> Result<String, String> {
-    let mut committed = payload.clone();
-    committed.revision = committed.revision.saturating_add(1);
-    let mut bytes = serde_json::to_vec(&committed)
-        .map_err(|_| "Sesame could not read the synced vault.".to_string())?;
-    let digest = crate::sync::state::payload_digest(&bytes);
-    bytes.zeroize();
-    committed.zeroize();
-    Ok(digest)
+    crate::sync::state::change_digest(payload)
 }
 
 pub fn digest_kept_through_adoption(
@@ -69,12 +62,10 @@ pub fn digest_kept_through_adoption(
     adopted_digests: [Option<&str>; 2],
 ) -> Result<Option<String>, String> {
     let payload = vault.open_payload()?;
-    let mut bytes = serde_json::to_vec(&*payload)
-        .map_err(|_| "Sesame could not read the local vault.".to_string())?;
-    let digest = crate::sync::state::payload_digest(&bytes);
-    let unchanged =
-        state.payload_digest == digest || adopted_digests.contains(&Some(digest.as_str()));
-    bytes.zeroize();
+    let mut unchanged = !state.has_local_changes(&payload)?;
+    for adopted in adopted_digests.into_iter().flatten() {
+        unchanged = unchanged || crate::sync::state::digest_describes(adopted, &payload)?;
+    }
     if !unchanged {
         return Ok(None);
     }
