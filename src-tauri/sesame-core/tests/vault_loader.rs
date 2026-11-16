@@ -80,8 +80,21 @@ fn format_one_is_rejected_consistently_before_credentials_or_replacement() {
 
 #[test]
 fn inspection_reports_migration_without_authenticating_or_guessing_labels() {
-    let current = VaultLoader::inspect(FIXTURE).expect("inspection");
-    assert_eq!(current.state, FormatState::Current);
+    let format_10 = VaultLoader::inspect(FIXTURE).expect("inspection");
+    assert_eq!(format_10.state, FormatState::NeedsMigration);
+    let mut current = fixture();
+    current.format_version = sesame_core::VAULT_FORMAT_VERSION;
+    let current_bytes = serde_json::to_vec(&current).expect("current envelope");
+    assert_eq!(
+        VaultLoader::inspect(&current_bytes)
+            .expect("current inspection")
+            .state,
+        FormatState::Current
+    );
+    assert_eq!(
+        VaultLoader::open(&current, Credential::MasterPassword(PASSWORD)).err(),
+        Some(LoadFailure::Authentication)
+    );
     for format in 2..=9 {
         let mut file = fixture();
         file.format_version = format;
@@ -135,10 +148,10 @@ fn failures_distinguish_credentials_ciphertext_and_authenticated_schema() {
 #[test]
 fn envelope_failures_are_bounded_and_do_not_become_wrong_password() {
     let mut file = fixture();
-    file.format_version = 11;
+    file.format_version = 12;
     assert_eq!(
         VaultLoader::validate(&file),
-        Err(LoadFailure::NewerFormat { format: 11 })
+        Err(LoadFailure::NewerFormat { format: 12 })
     );
     file = fixture();
     file.kdf.memory_kib = u32::MAX;
@@ -235,15 +248,21 @@ fn named_password_path_does_not_accept_a_recovery_kit() {
 fn migration_is_in_memory_and_resealed_result_is_idempotent() {
     let opened = VaultLoader::load(FIXTURE, Credential::MasterPassword(PASSWORD)).expect("open");
     assert!(opened.migration.payload_changed);
-    assert!(!opened.migration.envelope_changed);
+    assert!(opened.migration.envelope_changed);
     assert_eq!(opened.migration.source_format, 10);
+    assert_eq!(
+        opened.migration.target_format,
+        sesame_core::VAULT_FORMAT_VERSION
+    );
     let sealed = api::seal_vault(&opened).expect("seal");
     let reopened =
         VaultLoader::open(&sealed, Credential::MasterPassword(PASSWORD)).expect("reopen");
     assert!(!reopened.migration.required());
     assert_eq!(opened.payload.entries.len(), reopened.payload.entries.len());
+    let mut expected = fixture();
+    expected.format_version = sesame_core::VAULT_FORMAT_VERSION;
     assert_eq!(
-        serde_json::to_vec(&fixture()).expect("unchanged envelope"),
+        serde_json::to_vec(&expected).expect("upgraded envelope"),
         serde_json::to_vec(&opened.file).expect("read-only open")
     );
 }

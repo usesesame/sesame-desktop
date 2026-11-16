@@ -77,14 +77,18 @@ use std::sync::{
 pub const CORE_API_VERSION: u32 = 1;
 
 /// The later format generations bind the cleartext format and setup state into the payload AEAD.
-pub const VAULT_FORMAT_VERSION: u8 = 10;
+pub const VAULT_FORMAT_VERSION: u8 = 11;
+pub const SETUP_STATE_FORMAT: u8 = 10;
 pub const WRAP_AAD: &[u8] = b"sesame:wrapped-vault-key:v1";
 pub const RECOVERY_WRAP_AAD: &[u8] = b"sesame:recovery-wrapped-vault-key:v1";
 pub const PIN_WRAP_AAD: &[u8] = b"sesame:pin-wrapped-vault-key:v1";
 pub const LEGACY_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:v1";
 pub const FORMAT_9_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:9";
-pub const PENDING_SETUP_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:pending";
-pub const PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:complete";
+pub const FORMAT_10_PENDING_SETUP_PAYLOAD_AAD: &[u8] =
+    b"sesame:vault-payload:format:10:setup:pending";
+pub const FORMAT_10_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:complete";
+pub const PENDING_SETUP_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:11:setup:pending";
+pub const PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:11:setup:complete";
 /// CNG key-name prefix; never a secret, names a device-local key.
 pub const HELLO_KEY_NAME_PREFIX: &str = "sesame-vault-hello-";
 pub const MAX_BACKUP_BYTES: u64 = 64 * 1024 * 1024;
@@ -111,6 +115,8 @@ pub fn payload_aad_for_file(
     match (format_version, setup_complete) {
         (2..=8, true) => Ok(LEGACY_PAYLOAD_AAD),
         (9, true) => Ok(FORMAT_9_PAYLOAD_AAD),
+        (10, false) => Ok(FORMAT_10_PENDING_SETUP_PAYLOAD_AAD),
+        (10, true) => Ok(FORMAT_10_PAYLOAD_AAD),
         (VAULT_FORMAT_VERSION, false) => Ok(PENDING_SETUP_PAYLOAD_AAD),
         (VAULT_FORMAT_VERSION, true) => Ok(PAYLOAD_AAD),
         _ => Err("This vault uses a format Sesame does not understand yet.".into()),
@@ -262,6 +268,7 @@ pub struct UnlockedVault {
     pub pin_wrap: Option<PinWrap>,
     pub hello_wrap: Option<HelloWrap>,
     pub setup_complete: bool,
+    format_upgrade_pending: bool,
     records: record_store::VaultRecordStore,
 }
 
@@ -280,8 +287,13 @@ impl UnlockedVault {
             pin_wrap: opened.file.pin_wrap.clone(),
             hello_wrap: opened.file.hello_wrap.clone(),
             setup_complete: opened.file.setup_complete,
+            format_upgrade_pending: opened.migration.source_format < VAULT_FORMAT_VERSION,
             records: record_store::VaultRecordStore::from_payload(&opened.payload)?,
         })
+    }
+
+    pub fn format_upgrade_pending(&self) -> bool {
+        self.format_upgrade_pending
     }
 
     pub fn open_payload(&self) -> VaultResult<record_store::OpenedPayload> {

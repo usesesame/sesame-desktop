@@ -170,10 +170,14 @@ fn persist_payload(
             payload: encrypted_payload,
         };
         if keep_previous {
+            if session.format_upgrade_pending {
+                crate::backup::preserve_vault_before_upgrade(&session.path)?;
+            }
             write_vault_file(&session.path, &file)?;
         } else {
             write_vault_file_without_previous(&session.path, &file)?;
         }
+        session.format_upgrade_pending = false;
         session.records = next_records;
         Ok(())
     })();

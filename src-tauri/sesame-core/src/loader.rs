@@ -10,7 +10,7 @@ use crate::{
     crypto::{decrypt_bytes, derive_key, unwrap_with_password, validate_kdf_params},
     migration::{migrate_payload, migrate_vault_file, MIN_SUPPORTED_VAULT_FORMAT},
     payload_aad_for_file, BackupCompatibility, CipherBlob, VaultFile, VaultPayload,
-    MAX_VAULT_FILE_BYTES, RECOVERY_WRAP_AAD, VAULT_FORMAT_VERSION, WRAP_AAD,
+    MAX_VAULT_FILE_BYTES, RECOVERY_WRAP_AAD, SETUP_STATE_FORMAT, VAULT_FORMAT_VERSION, WRAP_AAD,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -243,7 +243,7 @@ impl VaultLoader {
                         RECOVERY_WRAP_AAD,
                         LoadFailure::WrongRecoveryKit,
                     ),
-                    _ if file.format_version < VAULT_FORMAT_VERSION => unwrap(
+                    _ if file.format_version < SETUP_STATE_FORMAT => unwrap(
                         &normalized,
                         &file.kdf,
                         &file.key_wrap,

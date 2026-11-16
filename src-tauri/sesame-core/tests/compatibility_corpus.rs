@@ -4,7 +4,10 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 use sesame_core::loader::{Credential, VaultLoader};
-use sesame_core::{encrypt_bytes, payload_aad_for_file, VAULT_FORMAT_VERSION};
+use sesame_core::storage::persist_session;
+use sesame_core::{
+    encrypt_bytes, payload_aad_for_file, random_id, UnlockedVault, VAULT_FORMAT_VERSION,
+};
 use sha2::{Digest, Sha256};
 
 const PUBLISHED_RELEASES: [&str; 5] = ["v0.1.0", "v0.1.1", "v0.2.0", "v0.2.1", "v0.2.2"];
@@ -125,7 +128,10 @@ fn open_fixture(tag: &str) {
     );
 
     let file = VaultLoader::read(&path).expect("the current reader accepts the fixture");
-    assert_eq!(file.format_version, VAULT_FORMAT_VERSION);
+    assert_eq!(
+        u64::from(file.format_version),
+        entry["formatVersion"].as_u64().expect("recorded format")
+    );
     assert!(file.setup_complete);
 
     let master_password = entry["secrets"]["masterPassword"]
@@ -167,6 +173,7 @@ fn open_fixture(tag: &str) {
         entry["expectedMigration"]["fileChanged"]
             .as_bool()
             .expect("fileChanged")
+            || file.format_version < VAULT_FORMAT_VERSION
     );
     assert_eq!(
         opened.migration.payload_changed,
@@ -475,5 +482,66 @@ fn every_fixture_opens_after_its_payload_is_padded_with_spaces() {
             VaultLoader::authenticate(&padded_file, Credential::MasterPassword(password))
                 .expect("authenticated padded payload");
         assert_eq!(authenticated.bytes().len(), PADDED_PAYLOAD_BYTES);
+    }
+}
+
+#[test]
+fn every_format_10_fixture_upgrades_on_save_and_keeps_its_original_copy() {
+    for tag in PUBLISHED_RELEASES {
+        let entry = fixture_entry(tag);
+        let source = corpus_dir().join(entry["fileName"].as_str().expect("file name"));
+        let original = fs::read(&source).expect("fixture bytes");
+        let password = entry["secrets"]["masterPassword"]
+            .as_str()
+            .expect("password");
+        let recovery_kit = entry["secrets"]["recoveryKit"]
+            .as_str()
+            .expect("recovery kit");
+        let directory = std::env::temp_dir().join(format!("sesame-corpus-upgrade-{}", random_id()));
+        fs::create_dir_all(&directory).expect("test directory");
+        let vault = directory.join("vault.sesame");
+        fs::write(&vault, &original).expect("copied fixture");
+
+        let file = VaultLoader::read(&vault).expect("fixture envelope");
+        let opened = VaultLoader::open(&file, Credential::MasterPassword(password))
+            .expect("opened the fixture");
+        let mut session = UnlockedVault::from_opened(vault.clone(), &opened).expect("session");
+        persist_session(&mut session).expect("saved the upgrade");
+
+        let backups = fs::read_dir(directory.join("backups"))
+            .expect("backup folder")
+            .flatten()
+            .map(|backup| backup.path())
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1, "{tag}");
+        assert_eq!(
+            fs::read(&backups[0]).expect("backup bytes"),
+            original,
+            "{tag}"
+        );
+
+        let upgraded = VaultLoader::read(&vault).expect("upgraded envelope");
+        assert_eq!(upgraded.format_version, VAULT_FORMAT_VERSION, "{tag}");
+        assert!(upgraded.setup_complete, "{tag}");
+        for credential in [
+            Credential::MasterPassword(password),
+            Credential::RecoveryKit(recovery_kit),
+        ] {
+            let reopened = VaultLoader::open(&upgraded, credential)
+                .unwrap_or_else(|error| panic!("{tag} upgrade did not reopen: {error:?}"));
+            assert!(!reopened.migrated, "{tag}");
+            assert_eq!(reopened.payload.vault_id, opened.payload.vault_id, "{tag}");
+            assert_eq!(
+                counts_of(&reopened.payload),
+                counts_of(&opened.payload),
+                "{tag}"
+            );
+            assert_eq!(
+                all_stable_ids(&reopened.payload),
+                all_stable_ids(&opened.payload),
+                "{tag}"
+            );
+        }
+        let _ = fs::remove_dir_all(&directory);
     }
 }
