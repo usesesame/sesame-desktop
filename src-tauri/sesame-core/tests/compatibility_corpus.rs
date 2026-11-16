@@ -10,7 +10,7 @@ use sesame_core::{
 };
 use sha2::{Digest, Sha256};
 
-const PUBLISHED_RELEASES: [&str; 5] = ["v0.1.0", "v0.1.1", "v0.2.0", "v0.2.1", "v0.2.2"];
+const PUBLISHED_RELEASES: [&str; 6] = ["v0.1.0", "v0.1.1", "v0.2.0", "v0.2.1", "v0.2.2", "v0.5.3"];
 
 fn corpus_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compatibility")
@@ -416,6 +416,11 @@ fn fixture_v0_2_2_opens_and_matches_its_recorded_evidence() {
     open_fixture("v0.2.2");
 }
 
+#[test]
+fn fixture_v0_5_3_opens_and_matches_its_recorded_evidence() {
+    open_fixture("v0.5.3");
+}
+
 const PADDED_PAYLOAD_BYTES: usize = 24 * 1024;
 
 fn reseal_with_padding(file: &sesame_core::VaultFile, password: &str) -> Vec<u8> {
@@ -541,6 +546,239 @@ fn every_format_10_fixture_upgrades_on_save_and_keeps_its_original_copy() {
                 all_stable_ids(&opened.payload),
                 "{tag}"
             );
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
+}
+
+type WrittenField = (String, String, bool);
+type WrittenLogin = (String, Vec<WrittenField>);
+
+fn raw_legacy_fields(item: &Value) -> Vec<WrittenField> {
+    item["legacyFields"]
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .map(|field| {
+                    (
+                        field["label"].as_str().expect("legacy label").to_string(),
+                        field["value"].as_str().expect("legacy value").to_string(),
+                        field["secret"].as_bool().unwrap_or(false),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn written_legacy_fields(payload: &Value) -> Vec<WrittenLogin> {
+    let mut logins = Vec::new();
+    for item in payload["items"].as_array().expect("tagged items") {
+        if item["kind"] == "login" {
+            logins.push((
+                item["id"].as_str().expect("login id").to_string(),
+                raw_legacy_fields(item),
+            ));
+        }
+    }
+    for trashed in payload["trash"].as_array().expect("trash") {
+        let item = &trashed["item"];
+        if item["kind"] == "login" {
+            logins.push((
+                item["id"].as_str().expect("trashed login id").to_string(),
+                raw_legacy_fields(item),
+            ));
+        }
+    }
+    for entry in payload["history"].as_array().expect("history") {
+        if entry["item"]["kind"] == "login" {
+            logins.push((
+                entry["id"].as_str().expect("history id").to_string(),
+                raw_legacy_fields(&entry["item"]),
+            ));
+        }
+    }
+    logins
+}
+
+fn upgraded_login<'a>(
+    payload: &'a sesame_core::VaultPayload,
+    id: &str,
+) -> &'a sesame_core::VaultEntry {
+    let active = payload.entries.iter().find(|entry| entry.id == id);
+    let trashed = payload
+        .trash
+        .iter()
+        .find_map(|trashed| match &trashed.item {
+            sesame_core::TaggedItem::Login(entry) if entry.id == id => Some(entry),
+            _ => None,
+        });
+    let history = payload.history.iter().find_map(|entry| match &entry.item {
+        sesame_core::TaggedItem::Login(login) if entry.id == id => Some(login),
+        _ => None,
+    });
+    active
+        .or(trashed)
+        .or(history)
+        .unwrap_or_else(|| panic!("upgraded vault lost login {id}"))
+}
+
+fn fixture_credential<'a>(use_kit: bool, password: &'a str, kit: &'a str) -> Credential<'a> {
+    if use_kit {
+        Credential::RecoveryKit(kit)
+    } else {
+        Credential::MasterPassword(password)
+    }
+}
+
+#[test]
+fn fixture_v0_5_3_upgrades_to_format_11_and_moves_login_legacy_fields() {
+    let tag = "v0.5.3";
+    let entry = fixture_entry(tag);
+    let source = corpus_dir().join(entry["fileName"].as_str().expect("file name"));
+    let original = fs::read(&source).expect("fixture bytes");
+    assert_eq!(
+        digest_of(&original),
+        entry["digestSha256"].as_str().expect("recorded digest")
+    );
+    let password = entry["secrets"]["masterPassword"]
+        .as_str()
+        .expect("password");
+    let recovery_kit = entry["secrets"]["recoveryKit"]
+        .as_str()
+        .expect("recovery kit");
+
+    let fixture = VaultLoader::parse(&original).expect("fixture envelope");
+    assert_eq!(fixture.format_version, 10);
+    let written: Value = serde_json::from_slice(
+        VaultLoader::authenticate(&fixture, Credential::MasterPassword(password))
+            .expect("authenticated the fixture payload")
+            .bytes(),
+    )
+    .expect("parsed the fixture payload");
+    let written = written_legacy_fields(&written);
+    let recorded = entry["legacyFields"]
+        .as_object()
+        .expect("recorded legacy fields");
+    assert_eq!(
+        written
+            .iter()
+            .filter(|(_, fields)| !fields.is_empty())
+            .count(),
+        recorded.len()
+    );
+    for (id, fields) in recorded {
+        let (_, actual) = written
+            .iter()
+            .find(|(written_id, _)| written_id == id)
+            .unwrap_or_else(|| panic!("{tag} has no login {id}"));
+        let expected = fields
+            .as_array()
+            .expect("recorded fields")
+            .iter()
+            .map(|field| {
+                (
+                    field["label"].as_str().expect("label").to_string(),
+                    field["secret"].as_bool().expect("secret flag"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual
+                .iter()
+                .map(|(label, _, secret)| (label.clone(), *secret))
+                .collect::<Vec<_>>(),
+            expected,
+            "{tag} {id}"
+        );
+    }
+    assert!(written
+        .iter()
+        .flat_map(|(_, fields)| fields)
+        .any(|(_, _, secret)| *secret));
+    assert!(written
+        .iter()
+        .flat_map(|(_, fields)| fields)
+        .any(|(_, _, secret)| !*secret));
+
+    for open_with_kit in [false, true] {
+        let directory =
+            std::env::temp_dir().join(format!("sesame-corpus-format-11-{}", random_id()));
+        fs::create_dir_all(&directory).expect("test directory");
+        let vault = directory.join("vault.sesame");
+        fs::write(&vault, &original).expect("copied fixture");
+
+        let file = VaultLoader::read(&vault).expect("fixture envelope");
+        let opened = VaultLoader::open(
+            &file,
+            fixture_credential(open_with_kit, password, recovery_kit),
+        )
+        .expect("opened the fixture");
+        assert!(opened.migrated);
+        let mut session = UnlockedVault::from_opened(vault.clone(), &opened).expect("session");
+        persist_session(&mut session).expect("saved the upgrade");
+        drop(session);
+
+        let backups = fs::read_dir(directory.join("backups"))
+            .expect("backup folder")
+            .flatten()
+            .map(|backup| backup.path())
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("sesame-before-upgrade-")));
+        assert_eq!(fs::read(&backups[0]).expect("backup bytes"), original);
+
+        let upgraded = VaultLoader::read(&vault).expect("upgraded envelope");
+        assert_eq!(upgraded.format_version, VAULT_FORMAT_VERSION);
+        assert_eq!(upgraded.format_version, 11);
+        assert!(upgraded.setup_complete);
+        for reopen_with_kit in [false, true] {
+            let raw: Value = serde_json::from_slice(
+                VaultLoader::authenticate(
+                    &upgraded,
+                    fixture_credential(reopen_with_kit, password, recovery_kit),
+                )
+                .expect("authenticated the upgraded payload")
+                .bytes(),
+            )
+            .expect("parsed the upgraded payload");
+            for (id, fields) in written_legacy_fields(&raw) {
+                assert!(fields.is_empty(), "{tag} {id} kept legacy fields on disk");
+            }
+
+            let reopened = VaultLoader::open(
+                &upgraded,
+                fixture_credential(reopen_with_kit, password, recovery_kit),
+            )
+            .unwrap_or_else(|error| panic!("{tag} upgrade did not reopen: {error:?}"));
+            assert!(!reopened.migrated);
+            assert_eq!(reopened.payload.vault_id, opened.payload.vault_id);
+            assert_eq!(counts_of(&reopened.payload), counts_of(&opened.payload));
+            assert_eq!(
+                all_stable_ids(&reopened.payload),
+                all_stable_ids(&opened.payload)
+            );
+            for (id, fields) in &written {
+                let login = upgraded_login(&reopened.payload, id);
+                assert!(login.legacy_fields.is_empty(), "{tag} {id}");
+                let moved = login
+                    .custom_fields
+                    .iter()
+                    .map(|field| {
+                        let secret = match field.kind.as_str() {
+                            "secret" => true,
+                            "text" => false,
+                            other => panic!("{tag} {id} moved a field as {other}"),
+                        };
+                        (field.label.clone(), field.value.clone(), secret)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(&moved, fields, "{tag} {id}");
+            }
         }
         let _ = fs::remove_dir_all(&directory);
     }
