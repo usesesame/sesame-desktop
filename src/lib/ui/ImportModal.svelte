@@ -147,7 +147,7 @@
         <div><dt>Website address unusable</dt><dd>{$imports.preview.invalidUrls}</dd></div>
         <div><dt>No 2FA secret found</dt><dd>{$imports.preview.noTotp}</dd></div>
         <div><dt>2FA secret unusable</dt><dd>{$imports.preview.invalidTotp}</dd></div>
-        <div><dt>Fields kept as Legacy data</dt><dd>{$imports.preview.preservedLegacyFields}</dd></div>
+        <div><dt>Extra fields kept</dt><dd>{$imports.preview.preservedLegacyFields}</dd></div>
         <div><dt>Secure notes found</dt><dd>{$imports.preview.secureNotes}</dd></div>
         <div><dt>Cards found</dt><dd>{$imports.preview.cards}</dd></div>
         <div><dt>Saved identities found</dt><dd>{$imports.preview.identities}</dd></div>
@@ -161,7 +161,7 @@
         <div class="import-conflict-note"><Icon name="copy" size={16} /><p><strong>Conflicting account details stay separate.</strong><span>Imported as separate logins for review. Existing logins are never overwritten.</span></p></div>
       {/if}
       {#if $imports.preview.preservedLegacyFields > 0}
-        <div class="import-conflict-note"><Icon name="archive" size={16} /><p><strong>Extra imported fields are retained.</strong><span>Sesame keeps them in Legacy data on the related login. Review them after import.</span></p></div>
+        <div class="import-conflict-note"><Icon name="archive" size={16} /><p><strong>Extra imported fields are retained.</strong><span>A login keeps them as custom fields, hidden unless the export marked them as plain text. Other items keep them in Legacy data. Review them after import.</span></p></div>
       {/if}
       {#if $imports.preview.passkeysNotImported > 0}
         <div class="import-conflict-note"><Icon name="key" size={16} /><p><strong>Passkeys are left in your old manager.</strong><span>Sesame has no passkey item yet, so {$imports.preview.passkeysNotImported === 1 ? 'one passkey stays' : `these ${$imports.preview.passkeysNotImported} passkeys stay`} where {$imports.preview.passkeysNotImported === 1 ? 'it is' : 'they are'}. Keep that manager until Sesame can store them.</span></p></div>

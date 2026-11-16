@@ -134,28 +134,28 @@ fn unlock(path: &Path) -> (UnlockedVault, bool) {
     (session, opened.migrated)
 }
 
-fn assert_legacy_fields_kept(entry: &VaultEntry) {
-    assert!(entry.custom_fields.is_empty());
-    assert_eq!(entry.legacy_fields.len(), 2);
-    assert_eq!(entry.legacy_fields[0].label, "Member number");
-    assert_eq!(entry.legacy_fields[0].value, VISIBLE_VALUE);
-    assert!(!entry.legacy_fields[0].secret);
-    assert_eq!(entry.legacy_fields[1].label, "Security answer");
-    assert_eq!(entry.legacy_fields[1].value, SECRET_VALUE);
-    assert!(entry.legacy_fields[1].secret);
+fn assert_legacy_fields_moved(entry: &VaultEntry) {
+    assert!(entry.legacy_fields.is_empty());
+    assert_eq!(entry.custom_fields.len(), 2);
+    assert_eq!(entry.custom_fields[0].label, "Member number");
+    assert_eq!(entry.custom_fields[0].value, VISIBLE_VALUE);
+    assert_eq!(entry.custom_fields[0].kind, "text");
+    assert_eq!(entry.custom_fields[1].label, "Security answer");
+    assert_eq!(entry.custom_fields[1].value, SECRET_VALUE);
+    assert_eq!(entry.custom_fields[1].kind, "secret");
     assert_eq!(entry.match_rule, MatchRule::Exact);
 }
 
 fn assert_payload_migrated(payload: &VaultPayload) {
-    assert_legacy_fields_kept(&payload.entries[0]);
+    assert_legacy_fields_moved(&payload.entries[0]);
     let TaggedItem::Login(trashed) = &payload.trash[0].item else {
         panic!("trashed login");
     };
-    assert_legacy_fields_kept(trashed);
+    assert_legacy_fields_moved(trashed);
     let TaggedItem::Login(previous) = &payload.history[0].item else {
         panic!("history login");
     };
-    assert_legacy_fields_kept(previous);
+    assert_legacy_fields_moved(previous);
     assert!(payload.never_save_sites.is_empty());
 }
 

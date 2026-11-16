@@ -152,7 +152,7 @@
 
     {#if mergeKeepId && conflicts.length > 0}
       <div class="merge-fields">
-        <p class="merge-fields-head"><strong>These fields differ.</strong> Choose which value survives. Passwords, 2FA secrets, notes and backup codes stay hidden, and you can show one password at a time.</p>
+        <p class="merge-fields-head"><strong>These fields differ.</strong> Choose which value survives. Passwords, 2FA secrets, notes and backup codes stay hidden, custom fields show only their names, and you can show one password at a time.</p>
         {#each conflicts as field (field.field)}
           <fieldset class="merge-field">
             <legend>{field.label}</legend>

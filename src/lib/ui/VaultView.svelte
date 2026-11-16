@@ -13,6 +13,7 @@
   import AddItemMenu from './AddItemMenu.svelte'
   import ItemFilterMenu from './ItemFilterMenu.svelte'
   import ItemDetail from './ItemDetail.svelte'
+  import LoginFieldsPanel from './LoginFieldsPanel.svelte'
   import PanelResizer from './PanelResizer.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import WebsiteIcon from './WebsiteIcon.svelte'
@@ -58,7 +59,10 @@
   export let onMoveItem: (folderId?: string) => void
   export let onItemCopy: (value: string, label: string) => void
   export let onCopyBackupCodes: () => void
-  export let onCopyLegacySecret: (index: number, label: string) => void
+  export let loginFieldsRevealed: Record<string, string> = {}
+  export let onCopyLoginField: (key: string, label: string) => void
+  export let onRevealLoginField: (key: string) => void
+  export let onHideLoginField: (key: string) => void
   export let onItemCopyField: (key: string, label: string) => void
   export let onItemReveal: (key: string) => void
   export let onItemHide: (key: string) => void
@@ -678,12 +682,15 @@
             <p class="item-notes">{loginCard.matchRule === 'site' ? 'Whole site. Sesame also offers this login on other addresses under the same site, and says so before it fills.' : 'Never fill. Sesame does not offer this login in the browser.'}</p>
           </section>
         {/if}
-        {#if loginCard.legacyFields?.length}
-          <section class="details-section">
-            <div class="section-heading"><h3>Legacy data</h3></div>
-            {#each loginCard.legacyFields as field, index (index)}<p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button class="text-button" on:click={() => (field.secret ? onCopyLegacySecret(index, field.label) : onCopy(field.value, field.label))}>Copy</button></p>{/each}
-          </section>
-        {/if}
+        <LoginFieldsPanel
+          fields={loginCard.customFields ?? []}
+          secretFields={loginCard.secretFields ?? []}
+          revealed={loginFieldsRevealed}
+          onCopy={onCopy}
+          onCopyField={onCopyLoginField}
+          onReveal={onRevealLoginField}
+          onHide={onHideLoginField}
+        />
       {:else}
         <div class="select-entry state-panel"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item</h2><p>Its details will appear here.</p></div>
       {/if}

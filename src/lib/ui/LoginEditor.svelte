@@ -9,6 +9,7 @@
   import { grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
   import { messageFor } from '../controllers/feedback-controller'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
+  import LoginCustomFields from './LoginCustomFields.svelte'
   import type { Folder, LoginInput, MatchRule } from '../types'
   import { onDestroy } from 'svelte'
 
@@ -347,6 +348,7 @@
     </section>
 
     <label>Notes<textarea name="login-notes" bind:value={loginDraft.notes} maxlength="20000" placeholder="Anything useful to remember about this account…" autocomplete="off"></textarea></label>
+    <LoginCustomFields fields={loginDraft.customFields ?? []} onChange={(customFields) => { loginDraft = { ...loginDraft, customFields }; dirty = true }} />
   </div>
 
   {#if confirmingDelete}

@@ -124,7 +124,7 @@ test('a login export with unsupported items names them and keeps the old manager
   const accounting: ImportAccounting = { supplied: 5, accepted: 3, retained: 1, unsupported: 1, malformed: 0, reasons: [{ reason: 'unsupportedItemType', count: 1 }] }
   renderModal({ source: 'bitwarden-json', preview: preview(accounting) })
   const list = screen.getByRole('region', { name: 'What happens to each item in this file' })
-  expect(within(list).getByText('Added, with extra fields kept in Legacy data')).toBeTruthy()
+  expect(within(list).getByText('Added, with extra fields kept')).toBeTruthy()
   expect(within(list).getByText('Items of a type Sesame cannot import yet')).toBeTruthy()
   expect(screen.getByRole('note').textContent).toBe('Sesame will not add 1 item, so it exists only in your old password manager. Keep it until you have saved that item somewhere else.')
 })

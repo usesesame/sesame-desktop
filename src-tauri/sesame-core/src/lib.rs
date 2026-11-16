@@ -5,6 +5,7 @@ pub mod api;
 pub mod backup;
 pub mod card_expiry;
 pub mod crypto;
+pub mod custom_fields;
 pub mod ffi;
 pub mod history;
 pub mod imports;

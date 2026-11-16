@@ -25,6 +25,11 @@ fn fictional_payload() -> VaultPayload {
         value: format!("{CANARY}-legacy"),
         secret: true,
     }];
+    login.custom_fields = vec![CustomFieldEntry {
+        label: "Security answer".to_string(),
+        value: format!("{CANARY}-login-field"),
+        kind: "secret".to_string(),
+    }];
     payload.entries = vec![login];
 
     let mut identity = Identity::default();
@@ -167,6 +172,7 @@ fn every_item_kind_is_exported_with_its_secrets() {
         "trashed-body",
         "legacy",
         "import-source",
+        "login-field",
     ] {
         assert!(
             text.contains(&format!("{CANARY}-{secret}")),
@@ -189,6 +195,15 @@ fn every_item_kind_is_exported_with_its_secrets() {
     ] {
         assert_eq!(document[list].as_array().expect(list).len(), 1, "{list}");
     }
+}
+
+#[test]
+fn a_login_exports_its_custom_fields_with_their_kind() {
+    let document = exported();
+    let field = &document["logins"][0]["customFields"][0];
+    assert_eq!(field["label"], "Security answer");
+    assert_eq!(field["value"], format!("{CANARY}-login-field"));
+    assert_eq!(field["kind"], "secret");
 }
 
 #[test]

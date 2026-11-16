@@ -333,10 +333,10 @@ fn secrets_keep_their_zero_width_characters_byte_for_byte() {
     );
     assert_eq!(login.totp.as_deref(), Some("ABCDEF\t\u{200C}\u{200D}"));
     assert_eq!(
-        login.legacy_fields[0].value,
+        login.custom_fields[0].value,
         "note\u{200C}\u{200D}\u{0007}secret"
     );
-    assert!(login.legacy_fields[0].secret);
+    assert_eq!(login.custom_fields[0].kind, "secret");
     let key = &parsed.ssh_keys[0];
     assert_eq!(
         key.private_key,

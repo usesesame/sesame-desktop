@@ -746,6 +746,8 @@ fn save_new_login(vault: &VaultState, payload: SavePayload) -> VaultResult<SaveL
         recovery_not_applicable: false,
         notes: String::new(),
         match_rule: None,
+        custom_fields: None,
+        kept_secrets: None,
     };
     let entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();

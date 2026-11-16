@@ -923,6 +923,10 @@ pub fn merged_duplicate_payload(
     if let Some(source) = chosen_backup_codes {
         merged.backup_codes = source.backup_codes.clone();
     }
+    let chosen_custom_fields = chosen(&choices.custom_fields)?;
+    if let Some(source) = chosen_custom_fields {
+        merged.custom_fields = source.custom_fields.clone();
+    }
 
     // Undecided fields keep the survivor's value, blanks filled from the first duplicate.
     for source in &removed_entries {
@@ -963,6 +967,9 @@ pub fn merged_duplicate_payload(
         if choices.notes.is_none() {
             fill_option_if_blank(&mut merged.notes, &source.notes);
         }
+        if chosen_custom_fields.is_none() {
+            add_missing_custom_fields(&mut merged.custom_fields, &source.custom_fields);
+        }
     }
     if merged.recovery_not_applicable {
         merged.backup_codes.clear();
@@ -982,6 +989,19 @@ pub fn merged_duplicate_payload(
         .ok_or("The login you chose to keep no longer exists.")?;
     *kept_entry = merged;
     Ok(next_payload)
+}
+
+fn add_missing_custom_fields(target: &mut Vec<CustomFieldEntry>, source: &[CustomFieldEntry]) {
+    for field in source {
+        let present = target.iter().any(|existing| {
+            existing.label == field.label
+                && existing.kind == field.kind
+                && existing.value == field.value
+        });
+        if !present {
+            target.push(field.clone());
+        }
+    }
 }
 
 fn fill_string_if_blank(target: &mut String, source: &str) {

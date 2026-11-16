@@ -1,5 +1,5 @@
 use sesame_core::backup::{csv_export_bytes, identities_csv_bytes};
-use sesame_core::types::{Folder, Identity, VaultEntry, VaultPayload};
+use sesame_core::types::{CustomFieldEntry, Folder, Identity, VaultEntry, VaultPayload};
 use sesame_core::util::split_backup_codes;
 
 fn export_with(entry: VaultEntry) -> String {
@@ -189,4 +189,28 @@ fn an_exported_file_is_private_on_unix() {
     assert_eq!(mode(), 0o600);
 
     std::fs::remove_dir_all(&directory).expect("removed test directory");
+}
+
+#[test]
+fn custom_fields_export_one_per_line_with_a_neutralised_cell() {
+    let mut entry = VaultEntry::default();
+    entry.title = "Example".into();
+    entry.custom_fields = vec![
+        CustomFieldEntry {
+            label: "=Member".into(),
+            value: "fictional-42".into(),
+            kind: "text".into(),
+        },
+        CustomFieldEntry {
+            label: "Answer".into(),
+            value: "fictional-hidden".into(),
+            kind: "secret".into(),
+        },
+    ];
+    let csv = export_with(entry);
+
+    assert_eq!(
+        cell(&csv, "custom_fields"),
+        "'=Member: fictional-42\nAnswer: fictional-hidden"
+    );
 }
