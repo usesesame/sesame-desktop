@@ -1,6 +1,6 @@
 import { get } from 'svelte/store'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppStores } from '../stores/app-stores'
+import { createAppStores, type AppStores } from '../stores/app-stores'
 import type { RecordKind } from '../item-fields'
 import type { VaultSnapshot } from '../types'
 import { copyItemField, getSecureNote, grantPresence, recordItemUse, releaseItemField, searchItems, setSecureNoteLock } from '../vault'
@@ -514,3 +514,41 @@ describe('note lock', () => {
   })
 })
 
+
+describe('what the item list recomputes', () => {
+  function countedList() {
+    const stores = createAppStores()
+    stores.vault.patch({ snapshot: snapshotWith([{ id: 'a', title: 'Alpha' }, { id: 'b', title: 'Beta' }]) })
+    const login = { openEditor: () => {}, openNew: () => {}, clearSelection: () => {}, selectEntry: async () => {} } as unknown as LoginController
+    const editors = Object.fromEntries(recordKinds.map((kind) => [kind, { openNew: () => {}, openEditor: () => {}, requestDelete: () => {} }])) as unknown as Record<RecordKind, RecordEditor>
+    const controller = createItemController({ stores, feedback: createFeedbackController(), login, presence: createPresenceController(), editors })
+    let emitted = 0
+    const stop = controller.visibleItems.subscribe(() => { emitted += 1 })
+    return { stores, controller, emitted: () => emitted, stop }
+  }
+
+  it('does not refilter or re-sort when an item is selected or a field is revealed', async () => {
+    const { stores, controller, emitted, stop } = countedList()
+    const before = emitted()
+    await controller.select('a', 'login')
+    stores.selection.patch({ activeItemId: 'b', activeItemKind: 'card', recentItemIds: ['b', 'a'] })
+    controller.state.patch({ revealed: { pin: 'fictional-pin' }, loading: true })
+    stores.vault.patch({ loginCard: null })
+    expect(emitted()).toBe(before)
+    stop()
+  })
+
+  it('still recomputes when the vault, the filters or the search results change', () => {
+    const { stores, controller, emitted, stop } = countedList()
+    const before = emitted()
+    stores.selection.patch({ sortMode: 'recent' })
+    expect(emitted()).toBe(before + 1)
+    stores.selection.patch({ collectionFilter: '$favourites' })
+    expect(emitted()).toBe(before + 2)
+    controller.state.patch({ searchMatchIds: ['b'] })
+    expect(emitted()).toBe(before + 3)
+    stores.vault.patch({ snapshot: snapshotWith([{ id: 'c', title: 'Gamma' }]) })
+    expect(emitted()).toBe(before + 4)
+    stop()
+  })
+})

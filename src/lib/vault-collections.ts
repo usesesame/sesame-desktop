@@ -39,8 +39,10 @@ export const sortModeLabels: Record<SortMode, string> = {
   weakest: 'Weakest first',
 }
 
+const titleCollator = new Intl.Collator(undefined, { sensitivity: 'base' })
+
 function byTitle(left: VaultItem, right: VaultItem): number {
-  return left.title.localeCompare(right.title, undefined, { sensitivity: 'base' })
+  return titleCollator.compare(left.title, right.title)
 }
 
 export function sortCollectionItems(
