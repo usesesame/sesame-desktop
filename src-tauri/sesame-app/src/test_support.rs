@@ -105,6 +105,7 @@ pub fn login_input(id: Option<&str>, url: &str, password: &str) -> LoginInput {
         recovery_phone: String::new(),
         recovery_not_applicable: false,
         notes: String::new(),
+        match_rule: None,
     }
 }
 

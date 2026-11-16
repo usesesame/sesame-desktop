@@ -916,6 +916,9 @@ pub fn merged_duplicate_payload(
     if let Some(source) = chosen(&choices.recovery_phone)? {
         merged.recovery_phone = source.recovery_phone.clone();
     }
+    if let Some(source) = chosen(&choices.match_rule)? {
+        merged.match_rule = source.match_rule;
+    }
     let chosen_backup_codes = chosen(&choices.backup_codes)?;
     if let Some(source) = chosen_backup_codes {
         merged.backup_codes = source.backup_codes.clone();

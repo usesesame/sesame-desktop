@@ -9,7 +9,7 @@
   import { grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
   import { messageFor } from '../controllers/feedback-controller'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
-  import type { Folder, LoginInput } from '../types'
+  import type { Folder, LoginInput, MatchRule } from '../types'
   import { onDestroy } from 'svelte'
 
   const PASSWORD_HIDE_AFTER_MS = 30_000
@@ -225,6 +225,25 @@
     }
   }
 
+  const matchRuleOptions: { value: MatchRule; label: string }[] = [
+    { value: 'exact', label: 'This address only' },
+    { value: 'site', label: 'Whole site' },
+    { value: 'never', label: 'Never fill' },
+  ]
+  $: matchRuleNote = describeMatchRule(loginDraft.matchRule ?? 'exact', loginDraft.url)
+
+  function describeMatchRule(rule: MatchRule, url: string): string {
+    if (rule === 'never') return 'Sesame never offers this login in the browser. You can still copy it from here.'
+    const host = hostOf(url)
+    if (rule === 'site') return `Sesame also offers this login on other addresses under the same site as ${host || 'the saved address'}, such as a sign-in subdomain, and says so before it fills.`
+    return `Sesame offers this login only on ${host || 'the saved address'} and its www form.`
+  }
+
+  function setMatchRule(value: string) {
+    loginDraft = { ...loginDraft, matchRule: value as MatchRule }
+    dirty = true
+  }
+
   function setFolder(folderId: string) {
     const folder = folderOptions.find((candidate) => candidate.id === folderId)
     loginDraft = { ...loginDraft, folderId: folder?.id, folder: folder?.name ?? '' }
@@ -251,7 +270,11 @@
     <label>Login name<input name="login-title" bind:this={nameInput} bind:value={loginDraft.title} on:input={onNameInput} required maxlength="160" placeholder="e.g. GitHub…" autocomplete="off" /></label>
     <label>Website <span class="field-hint">Used for opening and browser filling; "www" is treated as the same site</span><input name="login-url" bind:this={urlInput} value={loginDraft.url} on:input={onUrlInput} maxlength="2048" placeholder="e.g. github.com…" inputmode="url" autocomplete="off" spellcheck="false" /></label>
     {#if existingNote}<p class="suggestion-note" role="status">{existingNote}</p>{/if}
-    <label>Additional websites <span class="field-hint">One http or https address per line. Sesame does not fill across origins.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" autocomplete="off" spellcheck="false"></textarea></label>
+    <label>Additional websites <span class="field-hint">One http or https address per line. Sesame fills on these only when browser filling is set to Whole site.</span><textarea name="login-urls" value={(loginDraft.urls ?? []).join('\n')} on:input={(event) => (loginDraft = { ...loginDraft, urls: event.currentTarget.value.split('\n').map((value) => value.trim()).filter(Boolean) })} placeholder="https://github.com/login" autocomplete="off" spellcheck="false"></textarea></label>
+    <label>Browser filling
+      <SelectMenu label="Browser filling" value={loginDraft.matchRule ?? 'exact'} options={matchRuleOptions} onChange={setMatchRule} />
+    </label>
+    <p class="suggestion-note">{matchRuleNote}</p>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
     {#if tagHints.length}
       <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${tag}`} on:click={() => addTag(tag)}>{tag}</button>{/each}</p>

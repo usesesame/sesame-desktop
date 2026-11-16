@@ -2064,6 +2064,6 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         import_source: None,
         legacy_fields: Vec::new(),
         custom_fields: Vec::new(),
-        match_rule: MatchRule::Exact,
+        match_rule: input.match_rule.unwrap_or_default(),
     })
 }

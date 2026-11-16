@@ -54,6 +54,7 @@ commands.allow = [
   "preview_trashed_item",
   "preview_history_version",
   "get_merge_comparison",
+  "list_never_save_sites",
 ]
 
 [[permission]]
@@ -95,6 +96,7 @@ commands.allow = [
   "restore_trashed_item",
   "restore_history_version",
   "merge_duplicate_logins",
+  "remove_never_save_site",
 ]
 
 [[permission]]
@@ -179,6 +181,7 @@ commands.allow = [
   "resolve_browser_fill",
   "get_pending_browser_save",
   "resolve_browser_save",
+  "never_save_browser_site",
   "get_pending_browser_identity_fill",
   "resolve_browser_identity_fill",
   "get_pending_browser_card_fill",

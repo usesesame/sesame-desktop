@@ -10,6 +10,7 @@
   export let working = false
   export let onCancel: () => void
   export let onConfirm: () => void
+  export let onNeverForSite: () => void
 
   const { browserSave } = useAppStores()
   const remainingSeconds = () => Math.max(0, Math.ceil((request.expiresAtUnixMs - Date.now()) / 1_000))
@@ -58,6 +59,13 @@
     <code>{request.origin}</code>
   </div>
 
+  {#if isUpdate && selectedCandidate?.matchKind === 'site'}
+    <div class="browser-fill-alias">
+      <Icon name="alert" size={16} />
+      <p><strong>Matched by site</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code> and set to fill on the whole site, so Sesame offers to update it from <code>{request.origin}</code>.</span></p>
+    </div>
+  {/if}
+
   {#if isUpdate && needsChoice}
     <p class="tiny-note">More than one saved login matches this site. Choose which one to update.</p>
     <div class="browser-fill-candidates" role="radiogroup" aria-label="Saved logins for {request.hostname}">
@@ -65,7 +73,8 @@
         <label class:selected={$browserSave.selectedId === candidate.id}>
           <input type="radio" name="browser-save-update-target" value={candidate.id} checked={$browserSave.selectedId === candidate.id} on:change={() => browserSave.patch({ selectedId: candidate.id })} disabled={working} />
           <span class="entry-avatar">{candidate.title.slice(0, 1).toUpperCase() || '?'}</span>
-          <span><strong>{candidate.title}</strong><small>{candidate.username || candidate.email || 'No username saved'}</small></span>
+          <span><strong>{candidate.title}</strong><small>{candidate.username || candidate.email || 'No username saved'}</small>{#if candidate.matchKind === 'site'}<small class="candidate-origin">{candidate.savedOrigin}</small>{/if}</span>
+          {#if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
         </label>
       {/each}
     </div>
@@ -84,6 +93,7 @@
   <div class="browser-fill-footer">
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
+      <button type="button" class="text-button" disabled={working || remaining === 0 || $approvalWait.ms > 0} on:click={onNeverForSite}>Never for this site</button>
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Discard</button>
       <button
         type="button"

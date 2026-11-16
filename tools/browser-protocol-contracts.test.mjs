@@ -12,6 +12,7 @@ const fillMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v3')
 const totpCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v4')
 const capabilitiesCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v6')
 const lookalikeCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v5')
+const siteMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v7')
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -34,6 +35,7 @@ test('the published contract matches the implementation that serves it', () => {
 test('only the current contract version of each message type is accepted', () => {
   const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
   const v6 = json(join(capabilitiesCanonical, 'contract.json'))
+  const v7 = json(join(siteMatchCanonical, 'contract.json'))
   const matrix = {
     capabilities: 6,
     activate: 1,
@@ -41,11 +43,16 @@ test('only the current contract version of each message type is accepted', () =>
     save: 1,
     card: 2,
     totp: 4,
-    fill: 5,
+    fill: 7,
   }
 
-  assert.deepEqual(v6.messageVersions, matrix)
-  assert.match(rust, /"fill" => version == LOOKALIKE_PROTOCOL_VERSION/)
+  assert.deepEqual(v6.messageVersions, { ...matrix, fill: 5 })
+  assert.deepEqual(v7.messageVersions, matrix)
+  assert.deepEqual(v7.acceptedFillVersions, [5, 7])
+  assert.match(
+    rust,
+    /"fill" => matches!\(\s*version,\s*LOOKALIKE_PROTOCOL_VERSION \| SITE_MATCH_PROTOCOL_VERSION\s*\)/,
+  )
   assert.match(rust, /"totp" => version == TOTP_PROTOCOL_VERSION/)
   assert.match(rust, /"card" => version == CARD_PROTOCOL_VERSION/)
   assert.match(
@@ -54,9 +61,8 @@ test('only the current contract version of each message type is accepted', () =>
   )
   assert.match(rust, /supported_protocol_version\(&self\.message_type, self\.version\)/)
 
-  const directories = { 1: 'v1', 2: 'v2', 4: 'v4', 5: 'v5', 6: 'v6' }
+  const directories = { 1: 'v1', 2: 'v2', 4: 'v4', 5: 'v5', 6: 'v6', 7: 'v7' }
   for (const [messageType, version] of Object.entries(matrix)) {
-    if (messageType === 'fill') continue
     const contract = json(join(root, 'src-tauri', 'contracts', 'browser', directories[version], 'contract.json'))
     assert.ok(
       contract.requestTypes.includes(messageType),
@@ -265,7 +271,7 @@ test('fill match protocol v3 reports the enforced rule and is regression-vectore
     ),
   )
   assert.match(rust, /pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;/)
-  assert.match(rust, /fn valid_match_kind\(value: &str\) -> bool/)
+  assert.match(rust, /fn valid_match_kind\(value: &str, version: u8\) -> bool/)
   assert.match(rust, /"exact" \| "wwwAlias"/)
 })
 
@@ -430,4 +436,74 @@ test('totp protocol v4 derives a code only after an origin approval', () => {
   assert.match(rust, /pub const TOTP_PROTOCOL_VERSION: u8 = 4;/)
   assert.match(rust, /fn valid_totp_code\(value: &str\) -> bool/)
   assert.match(rust, /self\.message_type != "totp" && !no_code/)
+})
+
+test('site match protocol v7 adds the site rule without reaching an older request', () => {
+  const contract = json(join(siteMatchCanonical, 'contract.json'))
+  const requestSchema = json(join(siteMatchCanonical, 'request.schema.json'))
+  const responseSchema = json(join(siteMatchCanonical, 'response.schema.json'))
+  const vectors = json(join(siteMatchCanonical, 'vectors.json'))
+  const v5Contract = json(join(lookalikeCanonical, 'contract.json'))
+  const v5ResponseSchema = json(join(lookalikeCanonical, 'response.schema.json'))
+  const rust = readFileSync(join(root, 'src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'), 'utf8')
+  const replies = readFileSync(
+    join(root, 'src-tauri', 'sesame-app', 'src', 'application', 'browser_replies.rs'),
+    'utf8',
+  )
+
+  assert.equal(contract.tag, 'browser-protocol-v7')
+  assert.equal(contract.protocolVersion, 7)
+  assert.deepEqual(contract.requestTypes, ['fill'])
+  assert.deepEqual(contract.matchKinds, ['exact', 'wwwAlias', 'site'])
+  assert.deepEqual(v5Contract.matchKinds, ['exact', 'wwwAlias'])
+  assert.deepEqual(v5ResponseSchema.$defs.matchKind.enum, ['exact', 'wwwAlias'])
+  assert.equal(contract.compatibility.minimumHostProtocolVersion, 7)
+  assert.equal(contract.compatibility.currentHostProtocolVersion, 7)
+  assert.deepEqual(contract.unavailableReasons, v5Contract.unavailableReasons)
+  assert.deepEqual(contract.limits, v5Contract.limits)
+  assert.match(contract.bindings.matchKind, /private section/)
+  assert.match(contract.bindings.loginRules, /version 5 request receives exact and wwwAlias matches only/)
+  assert.equal(requestSchema.properties.version.const, 7)
+  assert.equal(requestSchema.properties.type.const, 'fill')
+  assert.equal(requestSchema.additionalProperties, false)
+  assert.deepEqual(requestSchema.required, ['version', 'type', 'requestId', 'origin'])
+  assert.deepEqual(responseSchema.$defs.matchKind.enum, contract.matchKinds)
+  for (const name of ['fillBoth', 'fillUsername', 'fillPassword', 'fillUnavailable', 'lookalikeUnavailable', 'error']) {
+    assert.equal(responseSchema.$defs[name].properties.version.const, 7, `${name} is not on version 7`)
+    assert.equal(responseSchema.$defs[name].additionalProperties, false)
+  }
+  for (const name of ['fillBoth', 'fillUsername', 'fillPassword']) {
+    assert.ok(responseSchema.$defs[name].required.includes('matchKind'), `${name} requires matchKind`)
+  }
+
+  assert.equal(vectors.protocolVersion, contract.protocolVersion)
+  assert.equal(vectors.fictionalDataOnly, true)
+  assert.ok(
+    vectors.responseCases.some((entry) => entry.hostValid === true && entry.message.matchKind === 'site'),
+    'no accepted vector reports the site rule',
+  )
+  assert.ok(
+    vectors.responseCases.some(
+      (entry) => entry.hostValid === false && entry.request.version === 5 && entry.message.matchKind === 'site',
+    ),
+    'no vector refuses the site rule on protocol five',
+  )
+  assert.ok(
+    vectors.responseCases.some((entry) => entry.hostValid === true && entry.message.reason === 'lookalike'),
+    'no vector keeps the lookalike warning on protocol seven',
+  )
+  assert.ok(
+    vectors.requestCases.some((entry) => entry.valid === false && entry.message.version === 6),
+    'no vector refuses a fill request on protocol six',
+  )
+
+  assert.match(rust, /pub const SITE_MATCH_PROTOCOL_VERSION: u8 = 7;/)
+  assert.match(rust, /\(value == "site" && fill_carries_site_match\(version\)\)/)
+  assert.match(rust, /include_str!\(\s*"\.\.\/\.\.\/contracts\/browser\/v7\/vectors\.json"\s*\)/)
+  const fillStart = replies.indexOf('pub fn fill_response_in_state(')
+  const fillBody = replies.slice(fillStart, replies.indexOf('fill_state.begin(', fillStart))
+  assert.match(fillBody, /fill_carries_site_match\(request\.version\)/, 'fill offers site matches without checking the request version')
+  const completeStart = replies.indexOf('pub fn complete_fill_in_state(')
+  const completeBody = replies.slice(completeStart, replies.indexOf('\n}\n', completeStart))
+  assert.match(completeBody, /login_match\(\s*entry,\s*&approval\.origin,\s*fill_carries_site_match\(request\.version\),?\s*\)/, 'the release no longer rechecks the rule under the vault lock')
 })

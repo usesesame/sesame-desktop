@@ -6,7 +6,9 @@ use crate::browser_protocol::{CardFillFields, MAX_CREDENTIAL_FIELD_BYTES};
 use crate::vault::imports::entry_from_input;
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::util::unix_timestamp;
-use crate::vault::{Card, LoginInput, SaveLoginResult, VaultEntry, VaultResult, VaultState};
+use crate::vault::{
+    Card, LoginInput, MatchRule, SaveLoginResult, VaultEntry, VaultResult, VaultState,
+};
 
 use super::browser_fill_broker::BrowserFillState;
 
@@ -94,6 +96,7 @@ impl NormalizedOrigin {
 pub enum OriginMatchKind {
     Exact,
     WwwAlias,
+    Site,
 }
 
 impl OriginMatchKind {
@@ -101,6 +104,7 @@ impl OriginMatchKind {
         match self {
             Self::Exact => "exact",
             Self::WwwAlias => "wwwAlias",
+            Self::Site => "site",
         }
     }
 }
@@ -127,6 +131,60 @@ pub fn origin_match_kind(
     base.contains('.').then_some(OriginMatchKind::WwwAlias)
 }
 
+pub fn registrable_domain(hostname: &str) -> Option<&str> {
+    if !hostname.contains('.') || hostname.contains(':') {
+        return None;
+    }
+    match Host::parse(hostname) {
+        Ok(Host::Domain(domain)) if domain == hostname => psl::domain_str(hostname),
+        _ => None,
+    }
+}
+
+pub fn same_site(saved: &NormalizedOrigin, requested: &NormalizedOrigin) -> bool {
+    saved.scheme == requested.scheme
+        && saved.port == requested.port
+        && registrable_domain(&saved.hostname)
+            .zip(registrable_domain(&requested.hostname))
+            .is_some_and(|(saved_site, requested_site)| saved_site == requested_site)
+}
+
+pub fn login_match(
+    entry: &VaultEntry,
+    requested: &NormalizedOrigin,
+    allow_site: bool,
+) -> Option<(OriginMatchKind, NormalizedOrigin)> {
+    if entry.match_rule == MatchRule::Never {
+        return None;
+    }
+    if let Some(saved) = NormalizedOrigin::from_saved_url(&entry.url) {
+        if let Some(kind) = origin_match_kind(&saved, requested) {
+            return Some((kind, saved));
+        }
+    }
+    if !allow_site || entry.match_rule != MatchRule::Site {
+        return None;
+    }
+    std::iter::once(&entry.url)
+        .chain(entry.urls.iter())
+        .filter_map(|url| NormalizedOrigin::from_saved_url(url))
+        .find(|saved| same_site(saved, requested))
+        .map(|saved| (OriginMatchKind::Site, saved))
+}
+
+pub const MAX_NEVER_SAVE_SITES: usize = 500;
+
+pub fn never_save_origin(value: &str) -> Option<String> {
+    NormalizedOrigin::from_request(value.trim()).map(|origin| origin.canonical())
+}
+
+pub fn never_saves(sites: &[String], origin: &NormalizedOrigin) -> bool {
+    let canonical = origin.canonical();
+    sites
+        .iter()
+        .any(|site| never_save_origin(site).as_deref() == Some(canonical.as_str()))
+}
+
 #[derive(Clone, Serialize, ts_rs::TS)]
 #[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
@@ -137,7 +195,7 @@ pub struct BrowserFillCandidate {
     /// Never crosses the pipe to the extension; only the desktop's own approval modal.
     pub email: String,
     pub saved_origin: String,
-    #[ts(type = "'exact' | 'wwwAlias'")]
+    #[ts(type = "'exact' | 'wwwAlias' | 'site'")]
     pub match_kind: &'static str,
 }
 
@@ -215,6 +273,8 @@ pub struct TotpFillCandidate {
     pub id: String,
     pub title: String,
     pub username: String,
+    pub saved_origin: String,
+    pub match_kind: &'static str,
 }
 
 #[derive(Clone, Serialize)]
@@ -391,6 +451,93 @@ pub fn resolve_browser_save_in_state(
     }
 }
 
+pub fn never_save_browser_site_in_state(
+    state: &BrowserFillState,
+    vault: &VaultState,
+    effects: &dyn DesktopEffects,
+    approval_id: &str,
+) -> VaultResult<Vec<String>> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err(APPROVAL_GONE.into());
+    }
+    ensure_save_approval_ready(state, approval_id)?;
+    let (origin, epoch) = state
+        .save_origin_if_bound(approval_id)
+        .ok_or(APPROVAL_EXPIRED)?;
+    let sites = add_never_save_site(vault, &origin.canonical(), Some(epoch));
+    let _ = resolve_save(state, effects, approval_id, false);
+    sites
+}
+
+pub fn never_save_sites_in_state(vault: &VaultState) -> VaultResult<Vec<String>> {
+    let session = vault
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    Ok(session.open_payload()?.never_save_sites.clone())
+}
+
+pub fn add_never_save_site_in_state(vault: &VaultState, origin: &str) -> VaultResult<Vec<String>> {
+    add_never_save_site(vault, origin, None)
+}
+
+fn add_never_save_site(
+    vault: &VaultState,
+    origin: &str,
+    approval_epoch: Option<u64>,
+) -> VaultResult<Vec<String>> {
+    let origin =
+        never_save_origin(origin).ok_or("Sesame can only skip saving for a website address.")?;
+    change_never_save_sites(vault, approval_epoch, |sites| {
+        if !sites.contains(&origin) {
+            if sites.len() >= MAX_NEVER_SAVE_SITES {
+                return Err("The list of sites Sesame never saves is full.".to_string());
+            }
+            sites.push(origin);
+        }
+        Ok(())
+    })
+}
+
+pub fn remove_never_save_site_in_state(
+    vault: &VaultState,
+    origin: &str,
+) -> VaultResult<Vec<String>> {
+    let origin = origin.trim().to_string();
+    change_never_save_sites(vault, None, |sites| {
+        sites.retain(|site| *site != origin);
+        Ok(())
+    })
+}
+
+fn change_never_save_sites(
+    vault: &VaultState,
+    approval_epoch: Option<u64>,
+    change: impl FnOnce(&mut Vec<String>) -> VaultResult<()>,
+) -> VaultResult<Vec<String>> {
+    let mut session = vault
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session
+        .as_mut()
+        .ok_or("Unlock your vault before changing this list.")?;
+    if approval_epoch.is_some_and(|epoch| epoch != vault.session_epoch()) {
+        return Err(APPROVAL_EXPIRED.into());
+    }
+    let current = session.open_payload()?;
+    let mut next_payload = current.clone();
+    change(&mut next_payload.never_save_sites)?;
+    let sites = next_payload.never_save_sites.clone();
+    if sites == current.never_save_sites {
+        return Ok(sites);
+    }
+    commit_payload_change(session, next_payload)?;
+    vault.advance_session_epoch();
+    Ok(sites)
+}
+
 pub fn resolve_browser_identity_fill_in_state(
     state: &BrowserFillState,
     effects: &dyn DesktopEffects,
@@ -539,7 +686,7 @@ fn save_payload(state: &BrowserFillState, approval_id: &str) -> Option<SavePaylo
     state.save_payload_if_bound(approval_id)
 }
 
-/// Re-verifies at commit time that the target is still a saved login at this exact origin (or its www. alias).
+/// Re-verifies at commit time that the target still matches this origin under its current rule.
 pub fn verify_update_target(
     entries: &[VaultEntry],
     origin_canonical: &str,
@@ -548,13 +695,9 @@ pub fn verify_update_target(
     let Some(origin) = NormalizedOrigin::from_request(origin_canonical) else {
         return false;
     };
-    entries.iter().any(|entry| {
-        entry.id == target_id
-            && NormalizedOrigin::from_saved_url(&entry.url)
-                .as_ref()
-                .and_then(|saved| origin_match_kind(saved, &origin))
-                .is_some()
-    })
+    entries
+        .iter()
+        .any(|entry| entry.id == target_id && login_match(entry, &origin, true).is_some())
 }
 
 fn rejected_decision(
@@ -580,7 +723,10 @@ fn ensure_save_approval_ready(state: &BrowserFillState, approval_id: &str) -> Va
     })
 }
 
+const NEVER_SAVE_SITE: &str = "Sesame never saves logins for this site.";
+
 fn save_new_login(vault: &VaultState, payload: SavePayload) -> VaultResult<SaveLoginResult> {
+    let origin = NormalizedOrigin::from_request(&payload.origin).ok_or(APPROVAL_EXPIRED)?;
     let input = LoginInput {
         urls: Vec::new(),
         tags: Vec::new(),
@@ -599,6 +745,7 @@ fn save_new_login(vault: &VaultState, payload: SavePayload) -> VaultResult<SaveL
         recovery_phone: String::new(),
         recovery_not_applicable: false,
         notes: String::new(),
+        match_rule: None,
     };
     let entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
@@ -616,6 +763,9 @@ fn save_new_login(vault: &VaultState, payload: SavePayload) -> VaultResult<SaveL
         );
     }
     let current = session.open_payload()?;
+    if never_saves(&current.never_save_sites, &origin) {
+        return Err(NEVER_SAVE_SITE.to_string());
+    }
     let mut next_payload = current.clone();
     next_payload.entries.push(entry);
     commit_payload_change(session, next_payload)?;
@@ -658,6 +808,11 @@ fn save_login_update(
     }
     // Re-verified under the lock: still exactly this origin's saved login.
     let current = session.open_payload()?;
+    if NormalizedOrigin::from_request(&payload.origin)
+        .is_none_or(|origin| never_saves(&current.never_save_sites, &origin))
+    {
+        return Err(NEVER_SAVE_SITE.to_string());
+    }
     if !verify_update_target(&current.entries, &payload.origin, &target_id) {
         return Err("That saved login no longer matches this site.".to_string());
     }

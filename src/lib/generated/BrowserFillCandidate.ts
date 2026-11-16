@@ -4,4 +4,4 @@ export type BrowserFillCandidate = { id: string, title: string, username: string
 /**
  * Never crosses the pipe to the extension; only the desktop's own approval modal.
  */
-email: string, savedOrigin: string, matchKind: 'exact' | 'wwwAlias', };
+email: string, savedOrigin: string, matchKind: 'exact' | 'wwwAlias' | 'site', };

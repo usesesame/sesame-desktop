@@ -672,6 +672,12 @@
             {#each loginCard.urls.slice(1) as url, index (index)}<p><a href={url} target="_blank" rel="noreferrer noopener">{url}</a></p>{/each}
           </section>
         {/if}
+        {#if loginCard.matchRule && loginCard.matchRule !== 'exact'}
+          <section class="details-section">
+            <div class="section-heading"><h3>Browser filling</h3><button class="text-button" on:click={onOpenLoginEditor}>Edit</button></div>
+            <p class="item-notes">{loginCard.matchRule === 'site' ? 'Whole site. Sesame also offers this login on other addresses under the same site, and says so before it fills.' : 'Never fill. Sesame does not offer this login in the browser.'}</p>
+          </section>
+        {/if}
         {#if loginCard.legacyFields?.length}
           <section class="details-section">
             <div class="section-heading"><h3>Legacy data</h3></div>

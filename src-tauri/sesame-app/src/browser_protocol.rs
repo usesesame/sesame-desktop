@@ -7,6 +7,7 @@ pub const CARD_PROTOCOL_VERSION: u8 = 2;
 pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
 pub const TOTP_PROTOCOL_VERSION: u8 = 4;
 pub const LOOKALIKE_PROTOCOL_VERSION: u8 = 5;
+pub const SITE_MATCH_PROTOCOL_VERSION: u8 = 7;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
 pub const MAX_LOOKALIKE_HOST_CHARS: usize = 128;
@@ -59,7 +60,10 @@ pub fn parse_card_fields(value: &str) -> Option<Vec<String>> {
 
 pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
     match message_type {
-        "fill" => version == LOOKALIKE_PROTOCOL_VERSION,
+        "fill" => matches!(
+            version,
+            LOOKALIKE_PROTOCOL_VERSION | SITE_MATCH_PROTOCOL_VERSION
+        ),
         "totp" => version == TOTP_PROTOCOL_VERSION,
         "card" => version == CARD_PROTOCOL_VERSION,
         "capabilities" => version == CAPABILITIES_PROTOCOL_VERSION,
@@ -71,8 +75,19 @@ pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
 pub fn fill_carries_match_kind(version: u8) -> bool {
     matches!(
         version,
-        FILL_MATCH_PROTOCOL_VERSION | LOOKALIKE_PROTOCOL_VERSION
+        FILL_MATCH_PROTOCOL_VERSION | LOOKALIKE_PROTOCOL_VERSION | SITE_MATCH_PROTOCOL_VERSION
     )
+}
+
+pub fn fill_carries_lookalike(version: u8) -> bool {
+    matches!(
+        version,
+        LOOKALIKE_PROTOCOL_VERSION | SITE_MATCH_PROTOCOL_VERSION
+    )
+}
+
+pub fn fill_carries_site_match(version: u8) -> bool {
+    version == SITE_MATCH_PROTOCOL_VERSION
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -464,7 +479,7 @@ impl BrowserResponse {
 
     pub fn lookalike_unavailable(request: &BrowserRequest, lookalike: String) -> Self {
         Self {
-            version: LOOKALIKE_PROTOCOL_VERSION,
+            version: request.version,
             message_type: "fill-unavailable".into(),
             request_id: request.request_id.clone(),
             installed: None,
@@ -740,7 +755,7 @@ impl BrowserResponse {
         if self.match_kind.is_some() && !match_kind_allowed {
             return false;
         }
-        let lookalike_allowed = request.version == LOOKALIKE_PROTOCOL_VERSION
+        let lookalike_allowed = fill_carries_lookalike(request.version)
             && request.message_type == "fill"
             && self.message_type == "fill-unavailable"
             && self.reason.as_deref() == Some("lookalike");
@@ -830,7 +845,9 @@ impl BrowserResponse {
                     _ => false,
                 };
                 let match_kind_valid = if fill_carries_match_kind(request.version) {
-                    self.match_kind.as_deref().is_some_and(valid_match_kind)
+                    self.match_kind
+                        .as_deref()
+                        .is_some_and(|kind| valid_match_kind(kind, request.version))
                 } else {
                     self.match_kind.is_none()
                 };
@@ -846,7 +863,7 @@ impl BrowserResponse {
             ("fill", "fill-unavailable") => {
                 let reason_valid = self.reason.as_deref().is_some_and(|reason| {
                     valid_reason(reason)
-                        && (reason != "lookalike" || request.version == LOOKALIKE_PROTOCOL_VERSION)
+                        && (reason != "lookalike" || fill_carries_lookalike(request.version))
                 });
                 let lookalike_valid = match self.reason.as_deref() {
                     Some("lookalike") => {
@@ -982,8 +999,8 @@ fn valid_lookalike_host(value: &str) -> bool {
         && matches!(url::Host::parse(value), Ok(url::Host::Domain(domain)) if domain == value)
 }
 
-fn valid_match_kind(value: &str) -> bool {
-    matches!(value, "exact" | "wwwAlias")
+fn valid_match_kind(value: &str, version: u8) -> bool {
+    matches!(value, "exact" | "wwwAlias") || (value == "site" && fill_carries_site_match(version))
 }
 
 fn valid_totp_code(value: &str) -> bool {
@@ -1300,6 +1317,103 @@ mod tests {
             !BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string())
                 .validate_for(&fill_request(LOOKALIKE_PROTOCOL_VERSION + 1))
         );
+    }
+
+    #[test]
+    fn fill_is_accepted_on_versions_five_and_seven_only() {
+        assert!(fill_request(LOOKALIKE_PROTOCOL_VERSION).validate());
+        assert!(fill_request(SITE_MATCH_PROTOCOL_VERSION).validate());
+        for version in [
+            PROTOCOL_VERSION,
+            FILL_MATCH_PROTOCOL_VERSION,
+            TOTP_PROTOCOL_VERSION,
+            CAPABILITIES_PROTOCOL_VERSION,
+            SITE_MATCH_PROTOCOL_VERSION + 1,
+        ] {
+            assert!(
+                !fill_request(version).validate(),
+                "fill accepted on {version}"
+            );
+        }
+        let mut totp = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        totp.message_type = "totp".to_string();
+        assert!(!totp.validate());
+        let mut save = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        save.message_type = "save".to_string();
+        save.kind = Some("new".to_string());
+        save.password = Some("fictional-example-value".to_string());
+        assert!(!save.validate());
+    }
+
+    #[test]
+    fn only_version_seven_carries_the_site_match_kind() {
+        let site_request = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        let site = BrowserResponse::fill_with_match_kind(
+            &site_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "site",
+        );
+        assert_eq!(site.version, SITE_MATCH_PROTOCOL_VERSION);
+        assert!(site.validate_for(&site_request));
+
+        for kind in ["exact", "wwwAlias"] {
+            assert!(BrowserResponse::fill_with_match_kind(
+                &site_request,
+                "person@example.test".to_string(),
+                "fictional-example-value".to_string(),
+                kind,
+            )
+            .validate_for(&site_request));
+        }
+        assert!(!BrowserResponse::fill_with_match_kind(
+            &site_request,
+            "person@example.test".to_string(),
+            "fictional-example-value".to_string(),
+            "parentDomain",
+        )
+        .validate_for(&site_request));
+
+        for version in [FILL_MATCH_PROTOCOL_VERSION, LOOKALIKE_PROTOCOL_VERSION] {
+            let older = fill_request(version);
+            let smuggled = BrowserResponse::fill_with_match_kind(
+                &older,
+                "person@example.test".to_string(),
+                "fictional-example-value".to_string(),
+                "site",
+            );
+            assert!(!smuggled.validate_for(&older), "site accepted on {version}");
+        }
+        assert!(!site.validate_for(&fill_request(LOOKALIKE_PROTOCOL_VERSION)));
+    }
+
+    #[test]
+    fn version_seven_keeps_the_lookalike_reason() {
+        let request = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        let response = BrowserResponse::lookalike_unavailable(&request, "apple.com".to_string());
+        assert_eq!(response.version, SITE_MATCH_PROTOCOL_VERSION);
+        assert!(response.validate_for(&request));
+        assert!(!response.validate_for(&fill_request(LOOKALIKE_PROTOCOL_VERSION)));
+        assert!(BrowserResponse::unavailable(&request, "noMatch").validate_for(&request));
+    }
+
+    #[test]
+    fn the_version_seven_vectors_replay_against_the_host_rules() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../../contracts/browser/v7/vectors.json"))
+                .expect("vectors");
+        for case in vectors["requestCases"].as_array().expect("request cases") {
+            let valid = serde_json::from_value::<BrowserRequest>(case["message"].clone())
+                .is_ok_and(|request| request.validate());
+            assert_eq!(valid, case["valid"] == true, "{}", case["name"]);
+        }
+        for case in vectors["responseCases"].as_array().expect("response cases") {
+            let request: BrowserRequest =
+                serde_json::from_value(case["request"].clone()).expect("request");
+            let accepted = serde_json::from_value::<BrowserResponse>(case["message"].clone())
+                .is_ok_and(|response| response.validate_for(&request));
+            assert_eq!(accepted, case["hostValid"] == true, "{}", case["name"]);
+        }
     }
 
     #[test]

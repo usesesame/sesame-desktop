@@ -240,6 +240,7 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
         recovery_not_applicable: entry.recovery_not_applicable,
         notes: entry.notes.clone(),
         legacy_fields: crate::secret_fields::redacted_legacy(&entry.legacy_fields),
+        match_rule: entry.match_rule,
     }
 }
 
@@ -311,7 +312,18 @@ pub fn merge_comparison_for(group: &[&VaultEntry]) -> MergeComparison {
             field("backupCodes", "Backup codes", true, &|entry| {
                 entry.backup_codes.join("\n")
             }),
+            field("matchRule", "Browser filling", false, &|entry| {
+                match_rule_label(entry.match_rule).to_string()
+            }),
         ],
+    }
+}
+
+fn match_rule_label(rule: MatchRule) -> &'static str {
+    match rule {
+        MatchRule::Exact => "This address only",
+        MatchRule::Site => "Whole site",
+        MatchRule::Never => "Never fill",
     }
 }
 

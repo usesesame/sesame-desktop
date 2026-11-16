@@ -47,6 +47,9 @@ pub mod browser_fill_tests;
 pub mod browser_replies_tests;
 
 #[cfg(test)]
+pub mod browser_url_rules_tests;
+
+#[cfg(test)]
 pub mod imports_tests;
 
 #[cfg(test)]

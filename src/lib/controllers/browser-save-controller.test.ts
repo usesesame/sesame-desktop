@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserSaveRequest, VaultSnapshot } from '../types'
+import { get } from 'svelte/store'
+import { neverSaveSites } from '../never-save-sites'
 import { createAppStores } from '../stores/app-stores'
 import { createBrowserSaveController } from './browser-save-controller'
 import { createFeedbackController } from './feedback-controller'
@@ -7,6 +9,7 @@ import type { ModalController } from './modal-controller'
 
 const vaultApi = vi.hoisted(() => ({
   getPendingBrowserSave: vi.fn(),
+  neverSaveBrowserSite: vi.fn(),
   onVaultLocked: vi.fn(),
   recordDiagnostic: vi.fn(),
   resolveBrowserSave: vi.fn(),
@@ -104,5 +107,57 @@ describe('browser save notices', () => {
     expect(stores.selection.value().securityFilter).toBe('old-password')
     expect(stores.vault.value().snapshot).toBeNull()
     expect(vaultApi.resolveBrowserSave).toHaveBeenCalledWith('approval-1', false, 'login-a')
+  })
+})
+
+describe('never for this site', () => {
+  it('sends only the approval id and shows the returned list', async () => {
+    vaultApi.neverSaveBrowserSite.mockResolvedValue(['https://example.test'])
+    const { stores, feedback, controller } = harness('login-a')
+    controller.receive(request('new'))
+
+    await controller.neverForSite()
+
+    expect(vaultApi.neverSaveBrowserSite).toHaveBeenCalledWith('approval-1')
+    expect(vaultApi.resolveBrowserSave).not.toHaveBeenCalled()
+    expect(get(neverSaveSites)).toEqual(['https://example.test'])
+    expect(stores.browserSave.value().request).toBeNull()
+    expect(feedback.state.value().notice?.title).toBe('Site skipped')
+  })
+
+  it('reports a refusal and still closes the prompt', async () => {
+    vaultApi.neverSaveBrowserSite.mockRejectedValue(new Error('That browser approval expired or is no longer available.'))
+    const { stores, feedback, controller } = harness('login-a')
+    controller.receive(request('new'))
+
+    await controller.neverForSite()
+
+    expect(stores.browserSave.value().request).toBeNull()
+    expect(stores.browserSave.value().working).toBe(false)
+    expect(feedback.state.value().errorMessage).toBeTruthy()
+  })
+
+  it('drops a result that arrives after the vault locks', async () => {
+    let finish: (sites: string[]) => void = () => {}
+    vaultApi.neverSaveBrowserSite.mockReturnValue(new Promise<string[]>((resolve) => { finish = resolve }))
+    const { feedback, controller } = harness('login-a')
+    controller.receive(request('new'))
+
+    const pending = controller.neverForSite()
+    controller.clearSecrets()
+    finish(['https://example.test'])
+    await pending
+
+    expect(get(neverSaveSites)).toBeNull()
+    expect(feedback.state.value().notice).toBeNull()
+  })
+
+  it('forgets the list when the vault locks', () => {
+    neverSaveSites.set(['https://example.test'])
+    const { controller } = harness('login-a')
+
+    controller.clearSecrets()
+
+    expect(get(neverSaveSites)).toBeNull()
   })
 })

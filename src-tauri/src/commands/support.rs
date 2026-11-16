@@ -2,6 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::application::browser_fill::{
+    never_save_browser_site_in_state, never_save_sites_in_state, remove_never_save_site_in_state,
     resolve_browser_card_fill_in_state, resolve_browser_fill_in_state,
     resolve_browser_identity_fill_in_state, resolve_browser_save_in_state,
     resolve_browser_totp_fill_in_state,
@@ -107,6 +108,29 @@ pub fn resolve_browser_save(
         approved,
         selected_id,
     )
+}
+
+#[tauri::command]
+pub fn never_save_browser_site(
+    app: AppHandle,
+    state: State<'_, browser_fill::BrowserFillState>,
+    vault: State<'_, VaultState>,
+    approval_id: String,
+) -> VaultResult<Vec<String>> {
+    never_save_browser_site_in_state(&state, &vault, &DesktopHostEffects::new(&app), &approval_id)
+}
+
+#[tauri::command]
+pub fn list_never_save_sites(vault: State<'_, VaultState>) -> VaultResult<Vec<String>> {
+    never_save_sites_in_state(&vault)
+}
+
+#[tauri::command]
+pub fn remove_never_save_site(
+    vault: State<'_, VaultState>,
+    origin: String,
+) -> VaultResult<Vec<String>> {
+    remove_never_save_site_in_state(&vault, &origin)
 }
 
 #[tauri::command]

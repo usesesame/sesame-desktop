@@ -315,6 +315,7 @@ pub struct LoginCard {
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub legacy_fields: Vec<LegacyField>,
+    pub match_rule: MatchRule,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -414,6 +415,8 @@ pub struct LoginInput {
     pub recovery_not_applicable: bool,
     #[serde(default)]
     pub notes: String,
+    #[serde(default)]
+    pub match_rule: Option<MatchRule>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -458,6 +461,8 @@ pub struct MergeChoices {
     pub recovery_phone: Option<String>,
     #[serde(default)]
     pub backup_codes: Option<String>,
+    #[serde(default)]
+    pub match_rule: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1843,7 +1848,8 @@ pub struct VaultEntry {
     pub match_rule: MatchRule,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchRule {
     #[default]
