@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
+use crate::sync::coordinator::{Coordinator, ManualRun};
 use crate::test_support::TestVault;
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
 use crate::vault::recovery_health::RecoveryHealth;
@@ -21,6 +22,7 @@ use super::records::{
 };
 use super::reveal::{copy_item_field_in_state, item_field_in_state};
 use super::search::search_items_in_state;
+use super::sync::SyncStore;
 use super::DesktopEffects;
 
 pub(super) use crate::test_support::grant;
@@ -94,6 +96,7 @@ pub(super) struct FakeEffects<'a> {
     health: RecoveryHealth,
     throttle: Mutex<Option<PersistedPinThrottle>>,
     epoch_advance_on_pin_write: Option<&'a VaultState>,
+    sync: Option<(PathBuf, Coordinator)>,
     calls: Mutex<Vec<Effect>>,
 }
 
@@ -107,7 +110,15 @@ impl<'a> FakeEffects<'a> {
             health: RecoveryHealth::default(),
             throttle: Mutex::new(None),
             epoch_advance_on_pin_write: None,
+            sync: None,
             calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(super) fn with_sync(path: PathBuf, data_dir: PathBuf, coordinator: Coordinator) -> Self {
+        Self {
+            sync: Some((data_dir, coordinator)),
+            ..Self::new(path)
         }
     }
 
@@ -170,6 +181,12 @@ impl DesktopEffects for FakeEffects<'_> {
 
     fn observe_unlock(&self, _snapshot: &VaultSnapshot) {
         self.record(Effect::ObserveUnlock);
+    }
+
+    fn claim_idle_sync_store(&self) -> Option<(SyncStore, ManualRun)> {
+        let (data_dir, coordinator) = self.sync.as_ref()?;
+        let run = coordinator.begin_manual()?;
+        Some((SyncStore::new(data_dir.clone()), run))
     }
 
     fn observe_lock(&self, state: &VaultState) {
@@ -375,6 +392,135 @@ fn unlocking_installs_the_session_and_records_the_effects_in_order() {
             },
         ]
     );
+}
+
+struct SyncDigestCase {
+    vault: TestVault,
+    data_dir: PathBuf,
+}
+
+impl SyncDigestCase {
+    fn with_stored_digest(digest: impl FnOnce(&crate::vault::VaultPayload) -> String) -> Self {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let opened = VaultState::default();
+        unlock_vault_in_state(
+            &opened,
+            &ReleasePresence::default(),
+            &FakeEffects::new(vault.path().to_path_buf()),
+            Zeroizing::new(MASTER_PASSWORD.to_string()),
+        )
+        .expect("unlocked");
+        let stored = {
+            let session = opened.session.lock().expect("session lock");
+            let payload = session
+                .as_ref()
+                .expect("unlocked")
+                .open_payload()
+                .expect("payload");
+            digest(&payload)
+        };
+        let data_dir = std::env::temp_dir().join(format!("sesame-sync-digest-{}", random_id()));
+        std::fs::create_dir_all(&data_dir).expect("sync directory");
+        let mut local = crate::sync::state::SyncState::new("fictional-vault", "fictional-device");
+        local.payload_digest = stored;
+        SyncStore::new(data_dir.clone())
+            .save_state(&local)
+            .expect("saved Sync state");
+        Self { vault, data_dir }
+    }
+
+    fn stored_digest(&self) -> String {
+        SyncStore::new(self.data_dir.clone())
+            .load_state()
+            .expect("Sync state")
+            .expect("saved Sync state")
+            .payload_digest
+    }
+
+    fn unlock(&self, coordinator: &Coordinator) -> VaultState {
+        let state = VaultState::default();
+        let effects = FakeEffects::with_sync(
+            self.vault.path().to_path_buf(),
+            self.data_dir.clone(),
+            coordinator.clone(),
+        );
+        unlock_vault_in_state(
+            &state,
+            &ReleasePresence::default(),
+            &effects,
+            Zeroizing::new(MASTER_PASSWORD.to_string()),
+        )
+        .expect("unlocked");
+        state
+    }
+}
+
+impl Drop for SyncDigestCase {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.data_dir);
+    }
+}
+
+fn legacy_digest(payload: &crate::vault::VaultPayload) -> String {
+    crate::sync::state::payload_digest(&serde_json::to_vec(payload).expect("serialized payload"))
+}
+
+#[test]
+fn unlocking_upgrades_an_older_sync_digest_so_a_later_use_is_not_a_change() {
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let coordinator = Coordinator::new();
+
+    let state = case.unlock(&coordinator);
+
+    let expected = {
+        let session = state.session.lock().expect("session lock");
+        let payload = session
+            .as_ref()
+            .expect("unlocked")
+            .open_payload()
+            .expect("payload");
+        crate::sync::state::change_digest(&payload).expect("change digest")
+    };
+    assert_eq!(case.stored_digest(), expected);
+    assert!(coordinator.begin(), "unlocking leaves no Sync run behind");
+    coordinator.finish(crate::sync::coordinator::Outcome::AlreadyCurrent);
+
+    super::logins::record_item_use_in_state(&state, "fictional-login").expect("recorded use");
+    let local = SyncStore::new(case.data_dir.clone())
+        .load_state()
+        .expect("Sync state")
+        .expect("saved Sync state");
+    let session = state.session.lock().expect("session lock");
+    assert!(
+        !super::sync::vault_has_local_changes(&local, session.as_ref().expect("unlocked"))
+            .expect("compared")
+    );
+}
+
+#[test]
+fn unlocking_keeps_an_older_sync_digest_that_does_not_match_the_vault() {
+    let case = SyncDigestCase::with_stored_digest(|payload| {
+        let mut edited = payload.clone();
+        edited.entries[0].username = "fictional-user-edited".into();
+        legacy_digest(&edited)
+    });
+    let before = case.stored_digest();
+
+    case.unlock(&Coordinator::new());
+
+    assert_eq!(case.stored_digest(), before);
+}
+
+#[test]
+fn unlocking_leaves_the_sync_digest_to_a_run_already_in_progress() {
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let before = case.stored_digest();
+    let coordinator = Coordinator::new();
+    assert!(coordinator.begin());
+
+    case.unlock(&coordinator);
+
+    assert_eq!(case.stored_digest(), before);
 }
 
 #[test]

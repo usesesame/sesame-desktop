@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tauri::AppHandle;
 
@@ -8,16 +8,14 @@ use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::adapters::network::sync::connect;
 use crate::application::sync::SyncStore;
 use crate::application::sync_pairing::{
-    cancel_pairing, clear_shown_code, pairing_code, take_shown_code,
+    cancel_pairing, clear_shown_code, pairing_code, take_shown_code, PAIRING_POLL,
 };
 use crate::vault::VaultState;
 
 pub use crate::application::sync_pairing::{ApprovedDeviceView, PairingCodeView};
 
-const POLL: Duration = Duration::from_secs(2);
-
 async fn pause() {
-    let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(POLL)).await;
+    let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(PAIRING_POLL)).await;
 }
 
 #[tauri::command]

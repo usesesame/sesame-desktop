@@ -202,8 +202,18 @@ impl SyncClient {
         &self.instance_key
     }
 
-    fn classify(&self, status: reqwest::StatusCode, body: &[u8]) -> SyncError {
-        classify(status.as_u16(), body, self.entitlement_enforced)
+    fn classify(
+        &self,
+        status: reqwest::StatusCode,
+        retry_after: Option<&str>,
+        body: &[u8],
+    ) -> SyncError {
+        classify(
+            status.as_u16(),
+            retry_after,
+            body,
+            self.entitlement_enforced,
+        )
     }
 
     async fn dispatch(
@@ -232,16 +242,18 @@ impl SyncClient {
         if !raw.is_empty() {
             request = request.header("Content-Type", "application/json").body(raw);
         }
-        let response = request
-            .send()
-            .await
-            .map_err(|_| SyncError::Failed("Sesame could not reach Sesame Sync.".into()))?;
+        let response = request.send().await.map_err(|_| SyncError::Unreachable)?;
         let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let bytes = read_capped(response).await?;
         if status.is_success() {
             return Ok(bytes);
         }
-        Err(self.classify(status, &bytes))
+        Err(self.classify(status, retry_after.as_deref(), &bytes))
     }
 
     async fn read<T: for<'de> Deserialize<'de>>(&self, path: &str, long: bool) -> SyncResult<T> {
@@ -916,6 +928,7 @@ mod tests {
         assert!(matches!(
             client.classify(
                 reqwest::StatusCode::BAD_REQUEST,
+                None,
                 br#"{"error":{"code":"sync_invalid"}}"#
             ),
             SyncError::Rejected
@@ -927,19 +940,80 @@ mod tests {
     }
 
     #[test]
+    fn the_wait_a_busy_server_names_reaches_the_caller() {
+        let server = TestServer::start(|request: &Recorded| match request.path.as_str() {
+            "/v1/sync/state" => Reply::json(
+                503,
+                &serde_json::json!({"error":{"code":"sync_unavailable"}}),
+            )
+            .with_header("Retry-After", "7"),
+            "/v1/sync/devices" => Reply::json(
+                503,
+                &serde_json::json!({"error":{"code":"rate_limit_unavailable"}}),
+            ),
+            "/v1/sync/key-package" => Reply::json(
+                429,
+                &serde_json::json!({"error":{"code":"too_many_attempts"}}),
+            )
+            .with_header("Retry-After", "100000"),
+            "/v1/sync/snapshot" => Reply::bytes(503, b"<html>overloaded</html>".to_vec())
+                .with_header("Retry-After", "soon"),
+            other => panic!("unexpected route {other}"),
+        });
+        let client = SyncClient::for_tests(&server.base(), "fictional-device-token", "key");
+        assert!(matches!(
+            crate::test_support::block_on(client.state()),
+            Err(SyncError::Busy {
+                retry_after_secs: 7
+            })
+        ));
+        assert!(matches!(
+            crate::test_support::block_on(client.devices()),
+            Err(SyncError::Busy {
+                retry_after_secs: 5
+            })
+        ));
+        assert!(matches!(
+            crate::test_support::block_on(client.key_package()),
+            Err(SyncError::RateLimited {
+                retry_after_secs: 300
+            })
+        ));
+        assert!(matches!(
+            crate::test_support::block_on(client.snapshot()),
+            Err(SyncError::Busy {
+                retry_after_secs: 5
+            })
+        ));
+    }
+
+    #[test]
+    fn a_server_that_cannot_be_reached_is_told_apart_from_one_that_refused() {
+        let client = SyncClient::for_tests(
+            &crate::network::test_server::closed_port_base(),
+            "fictional-device-token",
+            "key",
+        );
+        assert!(matches!(
+            crate::test_support::block_on(client.state()),
+            Err(SyncError::Unreachable)
+        ));
+    }
+
+    #[test]
     fn a_self_hosted_server_is_never_asked_for_an_entitlement() {
         let body = br#"{"error":{"code":"sync_not_entitled"}}"#;
         let fake = FakeSesame::new(1);
         let server = TestServer::start(sync_enabled(&fake));
         let own = connect(&custom(&server, &fake)).unwrap();
         assert!(matches!(
-            own.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            own.classify(reqwest::StatusCode::PAYMENT_REQUIRED, None, body),
             SyncError::Unavailable(_)
         ));
         let mut official = SyncClient::for_tests(&server.base(), "fictional-device-token", "key");
         official.entitlement_enforced = true;
         assert!(matches!(
-            official.classify(reqwest::StatusCode::PAYMENT_REQUIRED, body),
+            official.classify(reqwest::StatusCode::PAYMENT_REQUIRED, None, body),
             SyncError::NotEntitled
         ));
     }

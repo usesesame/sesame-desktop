@@ -5,8 +5,9 @@ use zeroize::Zeroize;
 
 use crate::application::sync::{
     local_payload_bytes, prepare_recovery, present, present_proof, refresh, require_activated,
-    signed_revision, transfer_result, unix_now, vault_id_of, verify_master_password, Refreshed,
-    SyncStore, SyncTransferResult, NOT_ACTIVATED,
+    require_sync_size, signed_revision, too_large_message, transfer_result, unix_now,
+    vault_has_local_changes, vault_id_of, verify_master_password, Refreshed, SyncStore,
+    SyncTransferResult, BUSY_PREFIX, NOT_ACTIVATED, SEAL_OVERHEAD_BYTES, TOO_LARGE_PREFIX,
 };
 use crate::application::sync_adopt::{adopt_with, digest_after_commit, KeptThroughAdoption};
 use crate::application::sync_recovery::backup_stamp;
@@ -20,10 +21,8 @@ use crate::sync::header::Header;
 use crate::sync::key_change::PreparedKeyChange;
 use crate::sync::rekey_journal::{self, Journal, JournalFiles, Outcome, Purpose};
 use crate::sync::request::KeyPackageV3;
-use crate::sync::state::{payload_digest, StateNames, SyncState};
+use crate::sync::state::{change_digest, payload_digest, StateNames, SyncState};
 use crate::vault::{VaultPayload, VaultResult, VaultState};
-
-const SEAL_OVERHEAD_BYTES: usize = 16;
 
 fn decode_bytes(value: &str) -> Result<Vec<u8>, String> {
     URL_SAFE_NO_PAD
@@ -53,25 +52,24 @@ pub async fn upload_on_in_state(
     let list = refreshed.update.list;
     let plan = plan_header(&identity.device_id, &list, previous.as_ref()).map_err(present_proof)?;
     let aad = plan.aad();
-    let (blob, entry_count, plaintext_digest) = {
+    let (blob, entry_count, plaintext_digest, vault_bytes) = {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let unlocked = session.as_ref().ok_or("Unlock Sesame before syncing.")?;
-        let (plaintext, entries) = local_payload_bytes(unlocked)?;
-        let digest = payload_digest(&plaintext);
-        let padded = crate::vault::crypto::serialize_payload(&*unlocked.open_payload()?)?;
-        if padded.len() + SEAL_OVERHEAD_BYTES
-            > crate::sync::canonical::MAX_CIPHERTEXT_BYTES as usize
-        {
-            return Err(
-                "This vault is too large to sync yet. Sync accepts a vault up to 10 MiB.".into(),
-            );
-        }
+        let payload = unlocked.open_payload()?;
+        let entries = payload.entries.len();
+        let digest = change_digest(&payload)?;
+        let padded = crate::vault::crypto::serialize_payload(&payload)?;
+        drop(payload);
+        let vault_bytes = u64::try_from(padded.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(SEAL_OVERHEAD_BYTES);
+        require_sync_size(vault_bytes)?;
         let blob = unlocked
             .expose_vault_key(|key| crate::vault::crypto::encrypt_bytes(key, &padded, &aad))?;
-        (blob, entries, digest)
+        (blob, entries, digest, vault_bytes)
     };
     let nonce = decode_bytes(&blob.nonce)?;
     let ciphertext = decode_bytes(&blob.ciphertext)?;
@@ -85,7 +83,13 @@ pub async fn upload_on_in_state(
     let accepted = client
         .upload(&identity, &header, &ciphertext)
         .await
-        .map_err(present)?;
+        .map_err(|error| match error {
+            SyncError::TooLarge => {
+                too_large_message(vault_bytes, crate::sync::canonical::MAX_CIPHERTEXT_BYTES)
+            }
+            SyncError::StorageFull => too_large_message(vault_bytes, 0),
+            other => present(other),
+        })?;
     let receipt = verify_accepted(
         &header,
         &accepted.digest,
@@ -203,8 +207,12 @@ pub fn decrypt_remote(
 
 pub fn apply_remote_payload(
     unlocked: &mut crate::vault::UnlockedVault,
-    payload: VaultPayload,
+    mut payload: VaultPayload,
 ) -> Result<(String, usize), String> {
+    {
+        let local = unlocked.open_payload()?;
+        payload.keep_newer_use_from(&local);
+    }
     let entries = payload.entries.len();
     let digest = digest_after_commit(&payload)?;
     crate::vault::storage::commit_payload_change(unlocked, payload)?;
@@ -266,8 +274,7 @@ pub async fn download_vault_in_state(
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let unlocked = session.as_mut().ok_or("Unlock Sesame before syncing.")?;
-        let (plaintext, _) = local_payload_bytes(unlocked)?;
-        if local.has_local_changes(&plaintext) {
+        if vault_has_local_changes(&local, unlocked)? {
             return Err("This device has changes that are not synced yet. Upload them, or resolve the difference.".into());
         }
         let authenticated = unlocked
@@ -556,7 +563,16 @@ pub fn every_member_has_the_newer_key(list: &DeviceList) -> bool {
 }
 
 pub fn refused_before_commit(error: &SyncError) -> bool {
-    !matches!(error, SyncError::Unavailable(_) | SyncError::Failed(_))
+    !matches!(
+        error,
+        SyncError::Unavailable(_)
+            | SyncError::Failed(_)
+            | SyncError::Busy { .. }
+            | SyncError::RateLimited { .. }
+            | SyncError::TooLarge
+            | SyncError::LinkEnded
+            | SyncError::Unreachable
+    )
 }
 
 pub struct RekeyRequest<'a> {
@@ -1046,7 +1062,33 @@ pub fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Out
     if message.starts_with("sync_fork:") {
         return Outcome::Halt(Halt::Fork);
     }
-    if message.contains("not approved") || message.contains("no longer") {
+    if let Some(rest) = message.strip_prefix(BUSY_PREFIX) {
+        if let Some(seconds) = rest
+            .split(':')
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            return Outcome::Busy {
+                retry_after_secs: seconds.clamp(
+                    sesame_sync::wire::RETRY_AFTER_MIN_SECS,
+                    sesame_sync::wire::RETRY_AFTER_MAX_SECS,
+                ),
+            };
+        }
+    }
+    if let Some(rest) = message.strip_prefix(TOO_LARGE_PREFIX) {
+        let mut sizes = rest.splitn(3, ':').map(|value| value.parse::<u64>());
+        if let (Some(Ok(vault_bytes)), Some(Ok(limit_bytes))) = (sizes.next(), sizes.next()) {
+            return Outcome::Halt(Halt::TooLarge {
+                vault_bytes,
+                limit_bytes,
+            });
+        }
+    }
+    if message == sesame_sync::wire::LINK_ENDED {
+        return Outcome::Halt(Halt::LinkEnded);
+    }
+    if message.contains("not approved") {
         return Outcome::Halt(Halt::Revoked);
     }
     if message.starts_with("sync_not_entitled:") {
@@ -1124,14 +1166,29 @@ where
 
     let local = reconcile_pending_upload_in_state(store, client, local).await?;
     let server = client.state().await.map_err(present)?;
-    let has_local_changes = {
+    let (has_local_changes, upgraded_digest) = {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let unlocked = session.as_ref().ok_or("sync_locked")?;
-        let (plaintext, _) = local_payload_bytes(unlocked)?;
-        local.has_local_changes(&plaintext)
+        let payload = unlocked.open_payload()?;
+        let changed = local.has_local_changes(&payload)?;
+        let upgraded = if changed {
+            None
+        } else {
+            local.upgraded_digest(&payload)?
+        };
+        (changed, upgraded)
+    };
+    let local = match upgraded_digest {
+        Some(digest) => {
+            let mut next = local;
+            next.payload_digest = digest;
+            store.save_state(&next)?;
+            next
+        }
+        None => local,
     };
     if has_local_changes || must_publish_after_key_change(&local, &server) {
         let transfer = reconnect().await?;

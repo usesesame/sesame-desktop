@@ -9,8 +9,8 @@ use zeroize::Zeroize;
 use crate::application::sync::{present, present_proof, SyncStore};
 use crate::application::sync_adopt::{digest_after_commit, finish_adoption_in_state};
 use crate::application::sync_pairing::{
-    cancelled, clean_join_label, reset_cancellation, verify_master_password_now_in_state,
-    PAIRING_WINDOW,
+    cancelled, clean_join_label, keep_polling, reset_cancellation,
+    verify_master_password_now_in_state, PAIRING_WINDOW,
 };
 use crate::application::DesktopEffects;
 use crate::sync::client::{SyncClient, SyncError};
@@ -196,7 +196,13 @@ where
         if started.elapsed() >= PAIRING_WINDOW {
             return Err("The other device did not answer in time.".into());
         }
-        let status = client.pairing_status().await.map_err(present)?;
+        let status = match client.pairing_status().await {
+            Ok(status) => status,
+            Err(error) => {
+                keep_polling(error, pause).await?;
+                continue;
+            }
+        };
         if status.state == "answered" {
             if let Some(answer) = status.answer {
                 break answer;
@@ -307,7 +313,7 @@ where
         match client.key_package().await {
             Ok(package) => return Ok(package),
             Err(SyncError::NotFound | SyncError::NotApproved) => {}
-            Err(other) => return Err(present(other)),
+            Err(other) => keep_polling(other, pause).await?,
         }
         if waited.elapsed() >= APPROVAL_WAIT {
             return Err("The other device did not approve this one in time.".into());

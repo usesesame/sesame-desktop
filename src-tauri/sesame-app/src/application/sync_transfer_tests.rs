@@ -218,6 +218,134 @@ fn an_upload_on_a_locked_vault_sends_nothing_and_keeps_the_sync_state() {
     );
 }
 
+fn size_refusal(message: &str) -> (u64, u64) {
+    let sizes: Vec<u64> = message
+        .strip_prefix(crate::application::sync::TOO_LARGE_PREFIX)
+        .expect("a size refusal")
+        .splitn(3, ':')
+        .take(2)
+        .map(|value| value.parse().expect("a size"))
+        .collect();
+    (sizes[0], sizes[1])
+}
+
+fn upload_against(
+    vault: &TestVault,
+    snapshot: Reply,
+) -> (
+    Result<(), String>,
+    TestServer,
+    SyncState,
+    SyncStore,
+    Scratch,
+) {
+    let vault_id = vault_id_of_test_vault(vault);
+    let scratch = Scratch::new();
+    let store = scratch.store();
+    let identity = DeviceIdentity::generate().expect("identity");
+    identity
+        .save(&store.identity_path())
+        .expect("saved identity");
+    let mut state = SyncState::new(&vault_id, &identity.device_id);
+    state.entries = labels(&vault_id, &[&identity]);
+    state.activated_epoch = 1;
+    store.save_state(&state).expect("saved state");
+    let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
+        "/v1/sync/checkpoints" => checkpoint_not_found(),
+        "/v1/sync/state" => Reply::json(200, &state_json(&vault_id, 1, 0, "approved", 1)),
+        path if path.starts_with("/v1/sync/device-list") => {
+            Reply::json(200, &json!({"entries": []}))
+        }
+        "/v1/sync/snapshots" => snapshot.clone(),
+        other => panic!("unexpected route {other}"),
+    });
+    let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+    let result = block_on(upload_vault_in_state(&vault.state, &store, &client)).map(|_| ());
+    (result, server, state, store, scratch)
+}
+
+#[test]
+fn a_vault_over_the_sync_limit_uploads_nothing_and_names_its_size() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    vault.seed(|payload| payload.entries[0].notes = Some("n".repeat(11 * 1024 * 1024)));
+    let (result, server, state, store, _scratch) =
+        upload_against(&vault, Reply::json(500, &json!({})));
+
+    let refusal = result.expect_err("an oversized vault cannot upload");
+    let (vault_bytes, limit_bytes) = size_refusal(&refusal);
+    assert!(vault_bytes > limit_bytes);
+    assert_eq!(limit_bytes, crate::sync::canonical::MAX_CIPHERTEXT_BYTES);
+    assert!(!server
+        .paths()
+        .iter()
+        .any(|path| path == "/v1/sync/snapshots"));
+    assert_eq!(store.load_state().expect("state"), Some(state));
+    assert_eq!(
+        classify_transfer_failure(&refusal),
+        crate::sync::coordinator::Outcome::Halt(crate::sync::coordinator::Halt::TooLarge {
+            vault_bytes,
+            limit_bytes
+        })
+    );
+}
+
+#[test]
+fn a_size_the_service_refuses_halts_with_this_vault_size() {
+    for (code, expected_limit) in [
+        (
+            "sync_too_large",
+            crate::sync::canonical::MAX_CIPHERTEXT_BYTES,
+        ),
+        ("sync_storage_limit_reached", 0),
+    ] {
+        let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        let (result, _server, _state, _store, _scratch) =
+            upload_against(&vault, Reply::json(413, &json!({"error":{"code":code}})));
+
+        let refusal = result.expect_err("the service refused the size");
+        let (vault_bytes, limit_bytes) = size_refusal(&refusal);
+        assert!(vault_bytes > 0, "{code}");
+        assert!(
+            vault_bytes < crate::sync::canonical::MAX_CIPHERTEXT_BYTES,
+            "{code}"
+        );
+        assert_eq!(limit_bytes, expected_limit, "{code}");
+    }
+}
+
+#[test]
+fn a_busy_service_during_an_upload_is_reported_as_busy_and_keeps_the_pending_record() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let (result, server, _state, store, _scratch) = upload_against(
+        &vault,
+        Reply::json(503, &json!({"error":{"code":"sync_unavailable"}}))
+            .with_header("Retry-After", "9"),
+    );
+
+    let refusal = result.expect_err("a busy service did not take the upload");
+    assert_eq!(
+        classify_transfer_failure(&refusal),
+        crate::sync::coordinator::Outcome::Busy {
+            retry_after_secs: 9
+        }
+    );
+    assert_eq!(
+        server
+            .paths()
+            .iter()
+            .filter(|path| path.as_str() == "/v1/sync/snapshots")
+            .count(),
+        1,
+        "a busy answer is not retried inside the same run"
+    );
+    assert!(store
+        .load_state()
+        .expect("state")
+        .expect("saved")
+        .pending_upload
+        .is_some());
+}
+
 #[test]
 fn a_lost_upload_answer_is_settled_from_the_service_head_instead_of_a_conflict() {
     let scratch = Scratch::new();
@@ -1038,6 +1166,15 @@ mod key_change_tests {
         for unknown in [
             SyncError::Unavailable("offline".into()),
             SyncError::Failed("timed out".into()),
+            SyncError::Busy {
+                retry_after_secs: 5,
+            },
+            SyncError::RateLimited {
+                retry_after_secs: 30,
+            },
+            SyncError::TooLarge,
+            SyncError::LinkEnded,
+            SyncError::Unreachable,
         ] {
             assert!(!refused_before_commit(&unknown), "{unknown:?}");
         }
@@ -1140,8 +1277,9 @@ mod applied_digest_tests {
     }
 
     fn has_changes(state: &SyncState, vault: &UnlockedVault) -> bool {
-        let (plaintext, _) = local_payload_bytes(vault).expect("bytes");
-        state.has_local_changes(&plaintext)
+        state
+            .has_local_changes(&vault.open_payload().expect("payload"))
+            .expect("digest")
     }
 
     #[test]
@@ -1249,7 +1387,7 @@ mod applied_digest_tests {
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
         state.payload_digest = kept.expect("a clean vault keeps its digest");
-        assert!(!state.has_local_changes(&bytes_of(&vault)));
+        assert!(!has_changes(&state, &vault));
     }
 
     #[test]
@@ -1259,7 +1397,7 @@ mod applied_digest_tests {
         let mut edited = vault.open_payload().expect("payload").clone();
         edited.vault_name = "Fictional vault edited offline".into();
         crate::vault::storage::commit_payload_change(&mut vault, edited).expect("edit");
-        assert!(state.has_local_changes(&bytes_of(&vault)));
+        assert!(has_changes(&state, &vault));
 
         assert_eq!(
             crate::application::sync_adopt::digest_kept_through_adoption(
@@ -1272,7 +1410,7 @@ mod applied_digest_tests {
         );
         let payload = vault.open_payload().expect("payload").clone();
         adopt_with(&mut vault, [5u8; 32], payload, PASSWORD, None).expect("adopted");
-        assert!(state.has_local_changes(&bytes_of(&vault)));
+        assert!(has_changes(&state, &vault));
     }
 
     #[test]
@@ -1283,7 +1421,11 @@ mod applied_digest_tests {
         remote.revision = 12;
         let expected = digest_after_commit(&remote).expect("digest");
         adopt_with(&mut vault, [6u8; 32], remote, PASSWORD, None).expect("adopted");
-        assert_eq!(payload_digest(&bytes_of(&vault)), expected);
+        assert_eq!(
+            crate::sync::state::change_digest(&vault.open_payload().expect("payload"))
+                .expect("digest"),
+            expected
+        );
     }
 
     #[test]
@@ -1325,7 +1467,7 @@ mod applied_digest_tests {
             shown.get(&creator.device_id).map(String::as_str),
             Some("Fictional laptop")
         );
-        assert!(!state.has_local_changes(&bytes_of(&vault)));
+        assert!(!has_changes(&state, &vault));
     }
 
     #[test]
@@ -1868,11 +2010,13 @@ mod adoption_and_publish_tests {
         .map(|_| ())
     }
 
-    fn stored_plaintext(vault: &TestVault) -> Vec<u8> {
+    fn changed_since(state: &SyncState, vault: &TestVault) -> bool {
         let session = vault.state.session.lock().expect("session lock");
-        local_payload_bytes(session.as_ref().expect("unlocked"))
-            .expect("payload")
-            .0
+        crate::application::sync::vault_has_local_changes(
+            state,
+            session.as_ref().expect("unlocked"),
+        )
+        .expect("digest")
     }
 
     #[test]
@@ -1894,7 +2038,7 @@ mod adoption_and_publish_tests {
             .expect("state")
             .expect("saved state");
         assert!(
-            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            !changed_since(&saved, &fixture.vault),
             "an adoption-only revision bump is not a local edit"
         );
     }
@@ -1920,7 +2064,7 @@ mod adoption_and_publish_tests {
             .expect("state")
             .expect("saved state");
         assert!(
-            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            changed_since(&saved, &fixture.vault),
             "the edit made between attempts is still local"
         );
     }
@@ -2018,7 +2162,7 @@ mod adoption_and_publish_tests {
             .expect("state")
             .expect("saved state");
         assert!(
-            !saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            !changed_since(&saved, &fixture.vault),
             "the adoption's revision bump is not a local edit"
         );
     }
@@ -2049,7 +2193,7 @@ mod adoption_and_publish_tests {
             .expect("state")
             .expect("saved state");
         assert!(
-            saved.has_local_changes(&stored_plaintext(&fixture.vault)),
+            changed_since(&saved, &fixture.vault),
             "the edit made after the failed replay is still local"
         );
     }
@@ -2358,6 +2502,263 @@ mod adoption_and_publish_tests {
         };
         assert_eq!(name, "Fictional vault from the acting device");
     }
+
+    struct TwoDevices {
+        laptop: TestVault,
+        desktop: TestVault,
+        laptop_store: SyncStore,
+        desktop_store: SyncStore,
+        server: TestServer,
+        instance: String,
+        _scratch: [Scratch; 2],
+    }
+
+    impl TwoDevices {
+        fn run(&self, on_laptop: bool) -> Result<crate::sync::coordinator::Outcome, String> {
+            let (vault, store, token) = if on_laptop {
+                (&self.laptop, &self.laptop_store, ACTING_TOKEN)
+            } else {
+                (&self.desktop, &self.desktop_store, RECIPIENT_TOKEN)
+            };
+            let base = self.server.base();
+            let instance = self.instance.clone();
+            let client = SyncClient::for_tests(&base, token, &instance);
+            let local = store.load_state().expect("state").expect("saved state");
+            block_on(
+                crate::application::sync_transfer::run_one_transfer_in_state(
+                    &vault.state,
+                    store,
+                    &client,
+                    &FakeEffects::new(PathBuf::new()),
+                    local,
+                    move || {
+                        let base = base.clone();
+                        let instance = instance.clone();
+                        async move { Ok(SyncClient::for_tests(&base, token, &instance)) }
+                    },
+                ),
+            )
+        }
+
+        fn uploads(&self) -> usize {
+            self.server
+                .paths()
+                .iter()
+                .filter(|path| path.as_str() == "/v1/sync/snapshots")
+                .count()
+        }
+    }
+
+    fn login_of(vault: &TestVault) -> crate::vault::VaultEntry {
+        let session = vault.state.session.lock().expect("session lock");
+        session
+            .as_ref()
+            .expect("unlocked")
+            .open_payload()
+            .expect("payload")
+            .entries
+            .iter()
+            .find(|entry| entry.id == "fictional-login")
+            .expect("shared login")
+            .clone()
+    }
+
+    fn vault_name_of(vault: &TestVault) -> String {
+        let session = vault.state.session.lock().expect("session lock");
+        session
+            .as_ref()
+            .expect("unlocked")
+            .open_payload()
+            .expect("payload")
+            .vault_name
+            .clone()
+    }
+
+    fn two_synced_devices() -> TwoDevices {
+        use crate::sync::coordinator::Outcome;
+
+        let laptop = TestVault::with_login("fictional-login", "https://northwind.example");
+        let vault_id = vault_id_of_test_vault(&laptop);
+        let desktop = TestVault::with_login("fictional-other", "https://contoso.example");
+        let (key, payload) = {
+            let session = laptop.state.session.lock().expect("session lock");
+            let unlocked = session.as_ref().expect("unlocked");
+            (
+                unlocked.expose_vault_key(|key| Ok(*key)).expect("key"),
+                unlocked.open_payload().expect("payload").clone(),
+            )
+        };
+        {
+            let mut session = desktop.state.session.lock().expect("session lock");
+            adopt_with(
+                session.as_mut().expect("unlocked"),
+                key,
+                payload,
+                PASSWORD,
+                None,
+            )
+            .expect("the desktop holds the same vault");
+        }
+        let scratch = [Scratch::new(), Scratch::new()];
+        let laptop_store = scratch[0].store();
+        let desktop_store = scratch[1].store();
+        let laptop_identity = DeviceIdentity::generate().expect("laptop identity");
+        let desktop_identity = DeviceIdentity::generate().expect("desktop identity");
+        laptop_identity
+            .save(&laptop_store.identity_path())
+            .expect("saved identity");
+        desktop_identity
+            .save(&desktop_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&laptop_identity, &desktop_identity]);
+        let mut laptop_state = SyncState::new(&vault_id, &laptop_identity.device_id);
+        laptop_state.entries = entries.clone();
+        laptop_state.activated_epoch = 1;
+        laptop_store
+            .save_state(&laptop_state)
+            .expect("laptop state");
+        let mut desktop_state = SyncState::new(&vault_id, &desktop_identity.device_id);
+        desktop_state.entries = entries.clone();
+        desktop_state.activated_epoch = 1;
+        state_digest(&desktop, &mut desktop_state);
+        desktop_store
+            .save_state(&desktop_state)
+            .expect("desktop state");
+        let mut world = FakeSyncWorld::new(&vault_id, entries, 1);
+        world
+            .tokens
+            .insert(ACTING_TOKEN.into(), laptop_identity.device_id.clone());
+        world
+            .tokens
+            .insert(RECIPIENT_TOKEN.into(), desktop_identity.device_id.clone());
+        world.activated.insert(laptop_identity.device_id.clone(), 1);
+        world
+            .activated
+            .insert(desktop_identity.device_id.clone(), 1);
+        let instance = world.instance_key();
+        let world = Arc::new(Mutex::new(world));
+        let server = TestServer::start(handler(world));
+        let devices = TwoDevices {
+            laptop,
+            desktop,
+            laptop_store,
+            desktop_store,
+            server,
+            instance,
+            _scratch: scratch,
+        };
+        assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 1 }));
+        assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 1 }));
+        assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.run(false), Ok(Outcome::AlreadyCurrent));
+        devices
+    }
+
+    #[test]
+    fn two_devices_that_only_used_the_vault_while_apart_sync_without_a_conflict() {
+        use crate::sync::coordinator::Outcome;
+
+        let devices = two_synced_devices();
+        crate::application::logins::record_item_use_in_state(
+            &devices.laptop.state,
+            "fictional-login",
+        )
+        .expect("laptop use");
+        crate::application::logins::record_item_use_in_state(
+            &devices.desktop.state,
+            "fictional-login",
+        )
+        .expect("desktop use");
+        devices.desktop.seed(|payload| {
+            payload.entries[0].last_used_at = Some(4_000_000_000);
+        });
+
+        assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.run(false), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.uploads(), 1, "use alone never uploads");
+        assert!(login_of(&devices.laptop).last_used_at.is_some());
+        assert_eq!(
+            login_of(&devices.desktop).last_used_at,
+            Some(4_000_000_000),
+            "each device keeps its own use times"
+        );
+    }
+
+    #[test]
+    fn an_edit_on_one_device_and_use_on_the_other_download_without_a_conflict() {
+        use crate::sync::coordinator::Outcome;
+
+        let devices = two_synced_devices();
+        devices.laptop.seed(|payload| {
+            payload.vault_name = "Fictional vault renamed on the laptop".into();
+        });
+        crate::application::logins::record_item_use_in_state(
+            &devices.desktop.state,
+            "fictional-login",
+        )
+        .expect("desktop use");
+        let used_at = login_of(&devices.desktop)
+            .last_used_at
+            .expect("recorded use");
+
+        assert_eq!(devices.run(false), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 2 }));
+        assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 2 }));
+        assert_eq!(
+            vault_name_of(&devices.desktop),
+            "Fictional vault renamed on the laptop"
+        );
+        assert_eq!(
+            login_of(&devices.desktop).last_used_at,
+            Some(used_at),
+            "the download keeps the newer use time recorded here"
+        );
+        assert_eq!(devices.run(false), Ok(Outcome::AlreadyCurrent));
+        assert_eq!(devices.uploads(), 2);
+    }
+
+    #[test]
+    fn an_edit_on_one_device_keeps_the_newer_use_time_it_carries() {
+        use crate::sync::coordinator::Outcome;
+
+        let devices = two_synced_devices();
+        devices.desktop.seed(|payload| {
+            payload.entries[0].last_used_at = Some(1_000);
+        });
+        devices.laptop.seed(|payload| {
+            payload.entries[0].last_used_at = Some(2_000);
+            payload.entries[0].title = "Northwind edited on the laptop".into();
+        });
+
+        assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 2 }));
+        assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 2 }));
+        let login = login_of(&devices.desktop);
+        assert_eq!(login.title, "Northwind edited on the laptop");
+        assert_eq!(login.last_used_at, Some(2_000));
+    }
+
+    #[test]
+    fn edits_on_both_devices_still_conflict() {
+        use crate::sync::coordinator::Outcome;
+
+        let devices = two_synced_devices();
+        devices.laptop.seed(|payload| {
+            payload.vault_name = "Fictional vault renamed on the laptop".into();
+        });
+        devices.desktop.seed(|payload| {
+            payload.entries[0].username = "fictional-user-edited-on-the-desktop".into();
+        });
+
+        assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 2 }));
+        assert_eq!(devices.run(false), Err("sync_conflict:2".to_string()));
+        assert_eq!(devices.uploads(), 2, "the conflicting side uploads nothing");
+        assert_eq!(
+            login_of(&devices.desktop).username,
+            "fictional-user-edited-on-the-desktop",
+            "a conflict leaves the local edit in place"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2430,6 +2831,114 @@ mod coordinator_classification_tests {
         assert_eq!(
             classify_transfer_failure(crate::application::sync::NOT_ACTIVATED),
             Outcome::Halt(Halt::NeedsNewKey)
+        );
+    }
+
+    #[test]
+    fn a_busy_or_rate_limited_service_waits_as_told_and_never_counts_as_a_failure() {
+        assert_eq!(
+            classify_transfer_failure(&present(SyncError::Busy {
+                retry_after_secs: 7
+            })),
+            Outcome::Busy {
+                retry_after_secs: 7
+            }
+        );
+        assert_eq!(
+            classify_transfer_failure(&present(SyncError::RateLimited {
+                retry_after_secs: 40
+            })),
+            Outcome::Busy {
+                retry_after_secs: 40
+            }
+        );
+        assert_eq!(
+            classify_transfer_failure("sync_busy:999999:Sesame Sync is busy."),
+            Outcome::Busy {
+                retry_after_secs: 300
+            }
+        );
+        assert_eq!(
+            classify_transfer_failure("sync_busy:0:Sesame Sync is busy."),
+            Outcome::Busy {
+                retry_after_secs: 1
+            }
+        );
+        for malformed in [
+            "sync_busy:",
+            "sync_busy:soon:Sesame Sync is busy.",
+            "sync_busy:-4:x",
+            "x sync_busy:5:y",
+        ] {
+            assert_eq!(
+                classify_transfer_failure(malformed),
+                Outcome::Transient,
+                "{malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_vault_too_large_to_sync_halts_with_its_size_and_the_limit() {
+        assert_eq!(
+            classify_transfer_failure(&crate::application::sync::too_large_message(
+                12_000_000, 10_485_760
+            )),
+            Outcome::Halt(Halt::TooLarge {
+                vault_bytes: 12_000_000,
+                limit_bytes: 10_485_760
+            })
+        );
+        assert_eq!(
+            classify_transfer_failure(&present(SyncError::TooLarge)),
+            Outcome::Halt(Halt::TooLarge {
+                vault_bytes: 0,
+                limit_bytes: crate::sync::canonical::MAX_CIPHERTEXT_BYTES
+            })
+        );
+        for malformed in [
+            "sync_too_large:",
+            "sync_too_large:big:10:x",
+            "sync_too_large:5",
+        ] {
+            assert_eq!(
+                classify_transfer_failure(malformed),
+                Outcome::Transient,
+                "{malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_full_sync_server_gets_its_own_message_and_never_a_size_of_zero() {
+        let message = present(SyncError::StorageFull);
+        assert_eq!(message, crate::application::sync::STORAGE_FULL);
+        assert!(!message.starts_with(crate::application::sync::TOO_LARGE_PREFIX));
+        assert!(!matches!(
+            classify_transfer_failure(&message),
+            Outcome::Halt(Halt::TooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn an_ended_desktop_link_is_never_mistaken_for_a_removed_device() {
+        assert_eq!(
+            classify_transfer_failure(&present(SyncError::LinkEnded)),
+            Outcome::Halt(Halt::LinkEnded)
+        );
+        for message in [
+            "That saved login no longer exists.",
+            "The service no longer has this vault.",
+        ] {
+            assert_eq!(
+                classify_transfer_failure(message),
+                Outcome::Transient,
+                "{message}"
+            );
+        }
+        assert_eq!(
+            classify_transfer_failure(&present(SyncError::Unreachable)),
+            Outcome::Transient
         );
     }
 

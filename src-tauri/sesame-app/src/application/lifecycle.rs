@@ -30,6 +30,9 @@ pub fn install_unlocked_session(
             ));
         }
     }
+    if let Some((store, _run)) = effects.claim_idle_sync_store() {
+        let _ = crate::application::sync::upgrade_legacy_digest(&store, &unlocked);
+    }
     let snapshot = unlocked.snapshot();
     effects.observe_unlock(&snapshot);
     *session = Some(unlocked);

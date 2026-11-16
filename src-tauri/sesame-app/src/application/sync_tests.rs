@@ -339,6 +339,42 @@ fn a_locked_vault_does_not_create_a_synced_vault_and_leaves_the_service_untouche
 }
 
 #[test]
+fn a_vault_too_large_to_sync_is_refused_before_the_service_vault_exists() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    vault.seed(|payload| payload.entries[0].notes = Some("n".repeat(11 * 1024 * 1024)));
+    let scratch = Scratch::new();
+    let store = scratch.store();
+    let server = TestServer::start(|request| {
+        assert_eq!(request.path, "/v1/sync/state");
+        Reply::json(404, &json!({"error":{"code":"sync_vault_not_found"}}))
+    });
+    let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+
+    let refusal = block_on(create_vault_in_state(
+        &vault.state,
+        &store,
+        &client,
+        "Fictional laptop",
+    ))
+    .map(|_| ())
+    .expect_err("an oversized vault cannot turn Sync on");
+
+    let limit = crate::sync::canonical::MAX_CIPHERTEXT_BYTES;
+    let sizes: Vec<u64> = refusal
+        .strip_prefix(crate::application::sync::TOO_LARGE_PREFIX)
+        .expect("the size refusal")
+        .splitn(3, ':')
+        .take(2)
+        .map(|value| value.parse().expect("a size"))
+        .collect();
+    assert!(sizes[0] > limit);
+    assert_eq!(sizes[1], limit);
+    assert!(store.load_state().expect("state").is_none());
+    assert!(!store.identity_present());
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
 fn a_successful_create_stores_the_first_device_and_reports_the_enrolled_status() {
     let vault = TestVault::with_login("fictional-login", "https://northwind.example");
     let scratch = Scratch::new();
@@ -725,6 +761,42 @@ fn the_coordinator_view_reports_the_halt_without_the_service() {
     assert_eq!(view.last_success_revision, 0);
     assert_eq!(view.consecutive_failures, 3);
     assert_eq!(view.downloads_applied, 2);
+    assert_eq!(view.retry_after_seconds, 0);
+}
+
+#[test]
+fn the_coordinator_view_carries_the_wait_and_the_sizes_the_panel_shows() {
+    use crate::sync::coordinator::{Halt, Phase, Status};
+
+    let waiting = coordinator_view(&Status {
+        phase: Phase::Waiting {
+            retry_after_secs: 5,
+        },
+        ..Status::default()
+    });
+    assert_eq!(waiting.phase, "busy");
+    assert_eq!(waiting.halt, "");
+    assert_eq!(waiting.retry_after_seconds, 5);
+
+    let too_large = coordinator_view(&Status {
+        phase: Phase::Halted(Halt::TooLarge {
+            vault_bytes: 12_000_000,
+            limit_bytes: 10_485_760,
+        }),
+        ..Status::default()
+    });
+    assert_eq!(too_large.phase, "halted");
+    assert_eq!(too_large.halt, "too_large");
+    assert_eq!(too_large.vault_bytes, 12_000_000);
+    assert_eq!(too_large.limit_bytes, 10_485_760);
+    assert_eq!(too_large.retry_after_seconds, 0);
+
+    let link = coordinator_view(&Status {
+        phase: Phase::Halted(Halt::LinkEnded),
+        ..Status::default()
+    });
+    assert_eq!(link.halt, "link_ended");
+    assert_eq!(link.vault_bytes, 0);
 }
 
 #[test]

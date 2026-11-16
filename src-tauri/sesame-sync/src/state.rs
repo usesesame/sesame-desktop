@@ -178,8 +178,16 @@ impl SyncState {
         self.head.as_ref().map_or(0, |header| header.revision)
     }
 
-    pub fn has_local_changes(&self, payload: &[u8]) -> bool {
-        self.payload_digest != payload_digest(payload)
+    pub fn has_local_changes(&self, payload: &VaultPayload) -> VaultResult<bool> {
+        Ok(!digest_describes(&self.payload_digest, payload)?)
+    }
+
+    pub fn upgraded_digest(&self, payload: &VaultPayload) -> VaultResult<Option<String>> {
+        let current = change_digest(payload)?;
+        if self.payload_digest == current || !matches_full_digest(&self.payload_digest, payload)? {
+            return Ok(None);
+        }
+        Ok(Some(current))
     }
 
     pub fn require_join_complete(&self) -> VaultResult<()> {
@@ -200,8 +208,39 @@ pub fn payload_digest(payload: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(digest.finalize())
 }
 
+pub fn change_digest(payload: &VaultPayload) -> VaultResult<String> {
+    let mut normalized = payload.clone();
+    normalized.clear_usage_bookkeeping();
+    let serialized = serde_json::to_vec(&normalized);
+    normalized.zeroize();
+    let mut bytes =
+        serialized.map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
+    let mut digest = Sha256::new();
+    digest.update(b"sesame-sync-change-v1");
+    digest.update(&bytes);
+    bytes.zeroize();
+    Ok(URL_SAFE_NO_PAD.encode(digest.finalize()))
+}
+
+pub fn digest_describes(stored: &str, payload: &VaultPayload) -> VaultResult<bool> {
+    if stored == change_digest(payload)? {
+        return Ok(true);
+    }
+    matches_full_digest(stored, payload)
+}
+
+fn matches_full_digest(stored: &str, payload: &VaultPayload) -> VaultResult<bool> {
+    let mut bytes = serde_json::to_vec(payload)
+        .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
+    let matches = stored == payload_digest(&bytes);
+    bytes.zeroize();
+    Ok(matches)
+}
+
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use sesame_core::types::VaultPayload;
+use zeroize::Zeroize;
 
 pub fn state_path(app_local_data_dir: &Path) -> PathBuf {
     app_local_data_dir.join(STATE_FILE_NAME)
@@ -655,6 +694,94 @@ mod tests {
         write_protected(&path, &sample_base(2)).unwrap();
         assert_eq!(read_protected(&path).map(|base| base.floor), Some(2));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn used_vault() -> VaultPayload {
+        let mut entry = sesame_core::types::VaultEntry::default();
+        entry.id = "fictional-login".into();
+        entry.title = "Northwind".into();
+        entry.password = "fictional-stored-secret".into();
+        entry.updated_at = 41;
+        entry.revision = 7;
+        let mut payload = VaultPayload::default();
+        payload.vault_name = "Fictional vault".into();
+        payload.entries = vec![entry];
+        payload.revision = 3;
+        payload
+    }
+
+    fn state_with(digest: String) -> SyncState {
+        let mut state = SyncState::new("vault-1-0000000000000", "device-1-000000000000");
+        state.payload_digest = digest;
+        state
+    }
+
+    #[test]
+    fn recording_use_does_not_read_as_a_local_change() {
+        let before = used_vault();
+        let state = state_with(change_digest(&before).unwrap());
+        let mut used = before.clone();
+        used.entries[0].last_used_at = Some(1_800_000_000);
+        used.entries[0].updated_at = 1_800_000_000;
+        used.entries[0].revision = 8;
+        used.revision = 4;
+
+        assert_eq!(
+            change_digest(&used).unwrap(),
+            change_digest(&before).unwrap()
+        );
+        assert!(!state.has_local_changes(&used).unwrap());
+    }
+
+    #[test]
+    fn every_real_edit_still_reads_as_a_local_change() {
+        let before = used_vault();
+        let state = state_with(change_digest(&before).unwrap());
+        let edits: [fn(&mut VaultPayload); 5] = [
+            |vault| vault.entries[0].password = "fictional-new-secret".into(),
+            |vault| vault.entries[0].title = "Northwind renamed".into(),
+            |vault| vault.entries[0].favourite = true,
+            |vault| vault.vault_name = "Fictional vault renamed".into(),
+            |vault| {
+                vault.entries.pop();
+            },
+        ];
+        for edit in edits {
+            let mut edited = before.clone();
+            edit(&mut edited);
+            assert!(state.has_local_changes(&edited).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_digest_written_by_an_earlier_version_is_still_honoured_and_upgraded() {
+        let vault = used_vault();
+        let legacy = state_with(payload_digest(&serde_json::to_vec(&vault).unwrap()));
+        assert!(!legacy.has_local_changes(&vault).unwrap());
+        assert_eq!(
+            legacy.upgraded_digest(&vault).unwrap(),
+            Some(change_digest(&vault).unwrap())
+        );
+
+        let mut edited = vault.clone();
+        edited.vault_name = "Fictional vault edited before the update".into();
+        assert!(legacy.has_local_changes(&edited).unwrap());
+        assert_eq!(legacy.upgraded_digest(&edited).unwrap(), None);
+
+        let current = state_with(change_digest(&vault).unwrap());
+        assert_eq!(current.upgraded_digest(&vault).unwrap(), None);
+    }
+
+    #[test]
+    fn an_empty_or_foreign_digest_always_reads_as_changed() {
+        let vault = used_vault();
+        assert!(state_with(String::new()).has_local_changes(&vault).unwrap());
+        assert!(state_with("not-a-digest".into())
+            .has_local_changes(&vault)
+            .unwrap());
+        assert!(state_with(payload_digest(b"other bytes"))
+            .has_local_changes(&vault)
+            .unwrap());
     }
 
     #[test]

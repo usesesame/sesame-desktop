@@ -1,7 +1,7 @@
-import { derived } from 'svelte/store'
+import { derived, readable, type Readable } from 'svelte/store'
 import { itemDetail, type ItemDetail, type ItemRecordView, type RecordKind } from '../item-fields'
 import type { AppStores } from '../stores/app-stores'
-import type { ItemKind } from '../types'
+import type { ItemKind, SecurityFilter } from '../types'
 import {
   bulkAssignFolder,
   copyItemField,
@@ -21,7 +21,7 @@ import {
   searchItems,
   setItemFavourite,
 } from '../vault'
-import { itemMatchesCollection, rememberRecent, sortCollectionItems } from '../vault-collections'
+import { itemMatchesCollection, rememberRecent, sortCollectionItems, type SortMode } from '../vault-collections'
 import { itemMatchesQuery, vaultItems, type VaultItem } from '../vault-items'
 import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
@@ -39,6 +39,34 @@ const recordLoaders: Record<RecordKind, (id: string) => Promise<ItemRecordView>>
   software_license: getSoftwareLicense,
   document: getDocument,
   custom_record: getCustomRecord,
+}
+
+function distinct<T, U>(source: Readable<T>, pick: (value: T) => U, same: (left: U, right: U) => boolean): Readable<U> {
+  return readable<U>(undefined as U, (set) => {
+    let latest: { value: U } | null = null
+    return source.subscribe((value) => {
+      const next = pick(value)
+      if (latest && same(latest.value, next)) return
+      latest = { value: next }
+      set(next)
+    })
+  })
+}
+
+interface ListFilters {
+  searchQuery: string
+  securityFilter: SecurityFilter
+  categoryFilter: ItemKind | null
+  collectionFilter: string | null
+  sortMode: SortMode
+}
+
+function sameFilters(left: ListFilters, right: ListFilters): boolean {
+  return left.searchQuery === right.searchQuery
+    && left.securityFilter === right.securityFilter
+    && left.categoryFilter === right.categoryFilter
+    && left.collectionFilter === right.collectionFilter
+    && left.sortMode === right.sortMode
 }
 
 export interface RecordEditor {
@@ -89,27 +117,36 @@ export function createItemController({ stores, feedback, login, presence, editor
     }
   }
 
-  const allItems = derived(vault, ($vault) => vaultItems($vault.snapshot))
+  const snapshot = distinct(vault, ($vault) => $vault.snapshot, (left, right) => left === right)
+  const allItems = derived(snapshot, ($snapshot) => vaultItems($snapshot))
+  const listFilters = distinct(selection, ($selection): ListFilters => ({
+    searchQuery: $selection.searchQuery,
+    securityFilter: $selection.securityFilter,
+    categoryFilter: $selection.categoryFilter,
+    collectionFilter: $selection.collectionFilter,
+    sortMode: $selection.sortMode,
+  }), sameFilters)
+  const searchMatchIds = distinct(state, ($state) => $state.searchMatchIds, (left, right) => left === right)
 
-  const visibleItems = derived([allItems, selection, state], ([$allItems, $selection, $state]) => {
-    const query = $selection.searchQuery.trim().toLowerCase()
-    const rustMatches = new Set($state.searchMatchIds)
+  const visibleItems = derived([allItems, listFilters, searchMatchIds], ([$allItems, $filters, $searchMatchIds]) => {
+    const query = $filters.searchQuery.trim().toLowerCase()
+    const rustMatches = new Set($searchMatchIds)
     const matched = $allItems.filter((item) => {
-      const securityFilter = $selection.securityFilter
+      const securityFilter = $filters.securityFilter
       if (securityFilter && !item.issueKinds.includes(securityFilter)) return false
-      if ($selection.categoryFilter && item.kind !== $selection.categoryFilter) return false
+      if ($filters.categoryFilter && item.kind !== $filters.categoryFilter) return false
       if (query && !itemMatchesQuery(item, query) && !rustMatches.has(item.id)) return false
-      return itemMatchesCollection(item, $selection.collectionFilter)
+      return itemMatchesCollection(item, $filters.collectionFilter)
     })
-    if (!query || !$state.searchMatchIds.length) {
-      return sortCollectionItems(matched, $selection.collectionFilter, $selection.sortMode)
+    if (!query || !$searchMatchIds.length) {
+      return sortCollectionItems(matched, $filters.collectionFilter, $filters.sortMode)
     }
-    const rank = new Map($state.searchMatchIds.map((id, index) => [id, index]))
+    const rank = new Map($searchMatchIds.map((id, index) => [id, index]))
     const ranked = matched
       .filter((item) => rank.has(item.id))
       .sort((left, right) => rank.get(left.id)! - rank.get(right.id)!)
     const unranked = matched.filter((item) => !rank.has(item.id))
-    return [...ranked, ...sortCollectionItems(unranked, $selection.collectionFilter, $selection.sortMode)]
+    return [...ranked, ...sortCollectionItems(unranked, $filters.collectionFilter, $filters.sortMode)]
   })
 
   const recentItems = derived([allItems, selection], ([$allItems, $selection]) => $selection.recentItemIds

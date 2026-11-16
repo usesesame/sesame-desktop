@@ -20,6 +20,33 @@ use crate::sync::request::KeyPackageV3;
 use crate::vault::VaultState;
 
 pub const PAIRING_WINDOW: Duration = Duration::from_secs(10 * 60);
+pub const PAIRING_POLL: Duration = Duration::from_secs(3);
+
+pub fn poll_again_after(error: &SyncError) -> Option<u64> {
+    match error {
+        SyncError::Busy { retry_after_secs } | SyncError::RateLimited { retry_after_secs } => {
+            Some(*retry_after_secs)
+        }
+        SyncError::Unreachable => Some(0),
+        _ => None,
+    }
+}
+
+pub async fn keep_polling<P, F>(error: SyncError, pause: &P) -> Result<(), String>
+where
+    P: Fn() -> F,
+    F: Future<Output = ()>,
+{
+    let Some(wait) = poll_again_after(&error) else {
+        return Err(present(error));
+    };
+    let rounds = wait.div_ceil(PAIRING_POLL.as_secs().max(1)).max(1);
+    for _ in 0..rounds {
+        cancelled()?;
+        pause().await;
+    }
+    Ok(())
+}
 
 struct ShownCode {
     code: String,
@@ -201,7 +228,13 @@ where
         if started.elapsed() >= PAIRING_WINDOW {
             return Err("No device entered the code in time.".into());
         }
-        let view = client.devices().await.map_err(present)?;
+        let view = match client.devices().await {
+            Ok(view) => view,
+            Err(error) => {
+                keep_polling(error, &pause).await?;
+                continue;
+            }
+        };
         if let Some(found) = view
             .pairings
             .into_iter()
@@ -253,7 +286,13 @@ where
         if started.elapsed() >= PAIRING_WINDOW {
             return Err("The new device did not finish in time.".into());
         }
-        let view = client.devices().await.map_err(present)?;
+        let view = match client.devices().await {
+            Ok(view) => view,
+            Err(error) => {
+                keep_polling(error, &pause).await?;
+                continue;
+            }
+        };
         if let Some(found) = view
             .pairings
             .into_iter()

@@ -6,8 +6,10 @@ use zeroize::Zeroizing;
 use crate::application::breach_scan::{
     BreachScanProgress, BreachScanState, BREACH_SCAN_FINISHED_EVENT, BREACH_SCAN_PROGRESS_EVENT,
 };
+use crate::application::sync::SyncStore;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
+use crate::sync::coordinator::ManualRun;
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
@@ -33,6 +35,15 @@ impl DesktopEffects for DesktopHostEffects<'_> {
 
     fn observe_unlock(&self, snapshot: &VaultSnapshot) {
         crate::rollback_guard::observe_unlock(self.app, snapshot);
+    }
+
+    fn claim_idle_sync_store(&self) -> Option<(SyncStore, ManualRun)> {
+        let run = self
+            .app
+            .try_state::<crate::sync::coordinator::Coordinator>()?
+            .begin_manual()?;
+        let data_dir = self.app.path().app_local_data_dir().ok()?;
+        Some((SyncStore::new(data_dir), run))
     }
 
     fn observe_lock(&self, state: &VaultState) {

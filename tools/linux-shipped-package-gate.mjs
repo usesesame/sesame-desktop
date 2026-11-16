@@ -173,6 +173,8 @@ function registrationPaths(environment) {
     path.join(environment.XDG_CONFIG_HOME, 'google-chrome', 'NativeMessagingHosts', manifest),
     path.join(environment.XDG_CONFIG_HOME, 'chromium', 'NativeMessagingHosts', manifest),
     path.join(environment.XDG_CONFIG_HOME, 'net.imput.helium', 'NativeMessagingHosts', manifest),
+    path.join(environment.XDG_CONFIG_HOME, 'BraveSoftware', 'Brave-Browser', 'NativeMessagingHosts', manifest),
+    path.join(environment.XDG_CONFIG_HOME, 'vivaldi', 'NativeMessagingHosts', manifest),
     path.join(environment.XDG_CONFIG_HOME, 'microsoft-edge', 'NativeMessagingHosts', manifest),
     path.join(environment.HOME, '.mozilla', 'native-messaging-hosts', manifest),
   ]

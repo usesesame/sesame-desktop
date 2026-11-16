@@ -52,6 +52,8 @@ pub fn plan() -> Result<RegistrationPlan, RegistrationError> {
             chromium("google-chrome"),
             chromium("chromium"),
             chromium("net.imput.helium"),
+            chromium("BraveSoftware/Brave-Browser"),
+            chromium("vivaldi"),
         ],
         edge: vec![chromium("microsoft-edge")],
         firefox: vec![home
@@ -128,14 +130,39 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_registers_chrome_chromium_and_helium() {
+    fn the_plan_registers_every_chromium_browser_it_supports() {
         let plan = plan().expect("a registration plan");
-        let vendors: Vec<_> = plan
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").expect("a home directory")).join(".config")
+            });
+        let folders: Vec<_> = plan
             .chrome
             .iter()
-            .filter_map(|path| path.parent()?.parent()?.file_name())
+            .filter_map(|path| path.parent()?.parent()?.strip_prefix(&config).ok())
+            .map(|folder| folder.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(vendors, ["google-chrome", "chromium", "net.imput.helium"]);
+        assert_eq!(
+            folders,
+            [
+                "google-chrome",
+                "chromium",
+                "net.imput.helium",
+                "BraveSoftware/Brave-Browser",
+                "vivaldi",
+            ]
+        );
+        for path in &plan.chrome {
+            assert_eq!(
+                path.parent().and_then(|folder| folder.file_name()),
+                Some(std::ffi::OsStr::new("NativeMessagingHosts"))
+            );
+            assert_eq!(
+                path.file_name(),
+                Some(std::ffi::OsStr::new(&format!("{HOST_NAME}.json")))
+            );
+        }
     }
 
     #[test]

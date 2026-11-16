@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { get } from 'svelte/store'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { autoSyncBackoffMs, createSyncController, describeCoordinatorState, describeFloorCheck, describeSyncForChrome } from './sync-controller'
+import { autoSyncBackoffMs, createSyncController, describeCoordinatorState, describeFloorCheck, describeSyncForChrome, describeTooLarge, syncErrorText } from './sync-controller'
 
 const core = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => core)
@@ -310,6 +310,41 @@ describe('knowing at once whether this vault is synced', () => {
   })
 })
 
+describe('what Sesame says when the service is busy, full or unlinked', () => {
+  it('names the vault size and the limit and says what to do', () => {
+    const text = describeCoordinatorState({ phase: 'halted', halt: 'too_large', consecutiveFailures: 0, lastSuccessRevision: 3, vaultBytes: 12.34 * 1024 * 1024, limitBytes: 10 * 1024 * 1024 })
+    expect(text).toBe('This vault is 12.3 MB, and Sesame Sync accepts a vault up to 10 MB. Sync stopped and tries again after the vault changes. Remove large attachments from documents to make it smaller. Deleted items stay in the trash for 30 days and still count toward the vault\'s size.')
+    expect(describeTooLarge(12 * 1024 * 1024, 0, true)).toMatch(/^This vault is 12 MB, which is more than the space this Sync server gives it\./)
+    expect(describeTooLarge(0, 0, false)).toMatch(/^This vault is too large for Sesame Sync\. Remove large attachments from documents to make it smaller, then try again\./)
+  })
+
+  it('turns coded Sync errors into sentences and leaves other messages alone', () => {
+    expect(syncErrorText('sync_busy:5:Sesame Sync is busy right now. Try again in a few seconds.', 'x')).toBe('Sesame Sync is busy right now. Try again in a few seconds.')
+    expect(syncErrorText('sync_busy:5', 'x')).toBe('Sesame Sync is busy right now. Try again in a few seconds.')
+    expect(syncErrorText('sync_too_large:12582912:10485760:This vault is too large to sync.', 'x')).toBe(describeTooLarge(12582912, 10485760, false))
+    expect(syncErrorText('sync_too_large:junk', 'x')).toBe(describeTooLarge(0, 0, false))
+    expect(syncErrorText('sync_not_entitled:Your subscription does not include Sync.', 'x')).toBe('Your subscription does not include Sync.')
+    expect(syncErrorText('That master password is not correct.', 'x')).toBe('That master password is not correct.')
+    expect(syncErrorText(undefined, 'Sesame could not add that device.')).toBe('Sesame could not add that device.')
+    for (const text of [describeTooLarge(1, 2, true), describeTooLarge(0, 0, false)]) {
+      expect(text).not.toMatch(/[—–()]/)
+    }
+  })
+
+  it('tells an unlinked desktop to link again instead of saying it was removed', () => {
+    const text = describeCoordinatorState({ phase: 'halted', halt: 'link_ended', consecutiveFailures: 0, lastSuccessRevision: 3 })
+    expect(text).toContain('Link it again in Settings')
+    expect(text).not.toContain('removed')
+  })
+
+  it('shows a busy answer from a button press as a sentence', async () => {
+    answer({ sync_upload_vault: new Error('sync_busy:5:Sesame Sync is busy right now. Try again in a few seconds.'), sync_status: status(), sync_coordinator_status: idle })
+    const sync = createSyncController()
+    await sync.push()
+    expect(get(sync).error).toBe('Sesame Sync is busy right now. Try again in a few seconds.')
+  })
+})
+
 describe('syncing without being asked', () => {
   const approved = () => {
     localStorage.setItem('sesame-sync-cache-v1', JSON.stringify({ enrolled: true, state: 'approved' }))
@@ -334,6 +369,142 @@ describe('syncing without being asked', () => {
     void sync.autoSync()
     await sync.autoSync()
     expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(1)
+  })
+
+  it('waits as long as a busy server asks, then tries again without counting a failure', async () => {
+    vi.useFakeTimers()
+    const busy = { ...idle, phase: 'busy', retryAfterSeconds: 5, consecutiveFailures: 0 }
+    let runs = 0
+    answer({ sync_now: () => (++runs === 1 ? busy : idle) })
+    const sync = approved()
+    await sync.autoSync()
+    expect(get(sync).activity).toBe('waiting')
+    expect(describeSyncForChrome(get(sync))).toEqual({ label: 'Synced vault · Server busy, will retry', tone: 'busy' })
+    expect(describeCoordinatorState(get(sync).coordinator)).toBe('Sesame Sync is busy right now. Sesame will try again shortly.')
+    await sync.autoSync()
+    expect(runs).toBe(1)
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(runs).toBe(1)
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(runs).toBe(2)
+    expect(get(sync).activity).toBe('synced')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(runs).toBe(2)
+  })
+
+  it('treats a busy answer without a usable wait as one second at least', async () => {
+    vi.useFakeTimers()
+    let runs = 0
+    answer({ sync_now: () => (++runs === 1 ? { ...idle, phase: 'busy', retryAfterSeconds: 0 } : idle) })
+    const sync = approved()
+    await sync.autoSync()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(runs).toBe(1)
+    await vi.advanceTimersByTimeAsync(700)
+    expect(runs).toBe(2)
+  })
+
+  it('holds a busy wait from the moment the answer arrives against focus, the network and the timer', async () => {
+    vi.useFakeTimers()
+    const busy = { ...idle, phase: 'busy', retryAfterSeconds: 5, consecutiveFailures: 0 }
+    let runs = 0
+    core.invoke.mockImplementation(async (command: string) => {
+      if (command === 'sync_local_status') return { state: 'approved', revision: 2, unsynced: false }
+      if (command !== 'sync_now') return {}
+      runs += 1
+      if (runs > 1) return idle
+      await new Promise((resolve) => setTimeout(resolve, 3_000))
+      return busy
+    })
+    const sync = approved()
+    const stop = sync.startBackground()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(runs).toBe(1)
+    expect(get(sync).activity).toBe('waiting')
+
+    await vi.advanceTimersByTimeAsync(2_500)
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(runs).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(600)
+    expect(runs).toBe(2)
+    expect(get(sync).activity).toBe('synced')
+    stop()
+  })
+
+  it('lets a person press Sync now during a busy wait', async () => {
+    vi.useFakeTimers()
+    const busy = { ...idle, phase: 'busy', retryAfterSeconds: 30, consecutiveFailures: 0 }
+    answer({ sync_now: busy, sync_status: status(), sync_coordinator_status: idle })
+    const sync = approved()
+    await sync.autoSync()
+    answer({ sync_now: idle, sync_status: status(), sync_coordinator_status: idle })
+    await sync.syncNow()
+    expect(core.invoke).toHaveBeenCalledWith('sync_now', { manual: true })
+    expect(get(sync).coordinator.phase).toBe('idle')
+  })
+
+  it('starts no retry after the background work was stopped, even when a run still answers busy', async () => {
+    vi.useFakeTimers()
+    let finish: (value: unknown) => void = () => {}
+    let runs = 0
+    core.invoke.mockImplementation((command: string) => {
+      if (command === 'sync_local_status') return Promise.resolve({ state: 'approved', revision: 2, unsynced: false })
+      if (command !== 'sync_now') return Promise.resolve({})
+      runs += 1
+      return new Promise((resolve) => { finish = resolve })
+    })
+    const sync = approved()
+    const stop = sync.startBackground()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(runs).toBe(1)
+    void sync.autoSync()
+    stop()
+    finish({ ...idle, phase: 'busy', retryAfterSeconds: 5 })
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    expect(runs).toBe(1)
+  })
+
+  it('tries again after a size stop when the vault goes back to what was last synced', async () => {
+    vi.useFakeTimers()
+    const tooLarge = { ...idle, phase: 'halted', halt: 'too_large', vaultBytes: 12 * 1024 * 1024, limitBytes: 10 * 1024 * 1024 }
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: tooLarge })
+    const sync = approved()
+    await sync.autoSync()
+    expect(get(sync).coordinator.halt).toBe('too_large')
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: false }, sync_now: idle })
+    core.invoke.mockClear()
+
+    sync.vaultChanged()
+    await vi.advanceTimersByTimeAsync(700)
+
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(1)
+    expect(get(sync).activity).toBe('synced')
+  })
+
+  it('asks again after a change only when the stop was about the vault size', async () => {
+    vi.useFakeTimers()
+    const tooLarge = { ...idle, phase: 'halted', halt: 'too_large', vaultBytes: 12 * 1024 * 1024, limitBytes: 10 * 1024 * 1024 }
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: tooLarge })
+    const sync = approved()
+    await sync.autoSync()
+    expect(get(sync).activity).toBe('attention')
+    core.invoke.mockClear()
+    await sync.autoSync()
+    expect(core.invoke).not.toHaveBeenCalled()
+    sync.vaultChanged()
+    await vi.advanceTimersByTimeAsync(700)
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(1)
+
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: { ...idle, phase: 'halted', halt: 'fork' } })
+    const forked = approved()
+    await forked.autoSync()
+    core.invoke.mockClear()
+    forked.vaultChanged()
+    await vi.advanceTimersByTimeAsync(700)
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(0)
   })
 
   it('shows offline when the run cannot finish, and halted states as needing attention', async () => {
@@ -488,7 +659,7 @@ describe('syncing without being asked', () => {
 
   it('syncs once, a moment after the last change, and only on a synced device', async () => {
     vi.useFakeTimers()
-    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: false }, sync_now: idle })
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: idle })
     const sync = approved()
     sync.vaultChanged()
     sync.vaultChanged()
@@ -505,6 +676,25 @@ describe('syncing without being asked', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(core.invoke).not.toHaveBeenCalled()
     expect(get(local).enrolled).toBe(true)
+  })
+
+  it('starts no run when the change left nothing to upload, such as a copied password', async () => {
+    vi.useFakeTimers()
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: false }, sync_now: idle })
+    const sync = approved()
+    sync.vaultChanged()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(0)
+    expect(get(sync).activity).not.toBe('pending')
+  })
+
+  it('still syncs after a change when Sesame could not tell whether anything is left to upload', async () => {
+    vi.useFakeTimers()
+    answer({ sync_local_status: new Error('Sesame could not read the unlocked vault.'), sync_now: idle })
+    const sync = approved()
+    sync.vaultChanged()
+    await vi.advanceTimersByTimeAsync(700)
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(1)
   })
 
   it('shows that changes are not synced the moment the vault changes, then up to date after the sync', async () => {
