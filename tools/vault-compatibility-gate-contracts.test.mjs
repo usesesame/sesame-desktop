@@ -110,7 +110,7 @@ function fictionalRun({ matrix, matrixDigest, platform, fixtureId, overrides = {
 test('the repository matrix covers every published release and both platforms', async () => {
   const { matrix, matrixDigest } = await assertRepositoryCompatibility(repository)
   assert.equal(matrix.schema, 'sesame.vault-compatibility-matrix/1')
-  assert.deepEqual(matrix.publishedVersions.map((entry) => entry.tag), ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.2.1', 'v0.2.2'])
+  assert.deepEqual(matrix.publishedVersions.map((entry) => entry.tag), ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.2.1', 'v0.2.2', 'v0.5.3'])
   assert.deepEqual(matrix.platforms, ['linux', 'windows'])
   assert.equal(matrix.minimumSupportedFormat, 2)
   assert.equal(matrix.currentFormat, 11)

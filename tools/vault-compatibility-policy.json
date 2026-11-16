@@ -10,6 +10,6 @@
     "status": "recorded",
     "recordedBy": "owner",
     "date": "2026-09-05",
-    "note": "The compatibility promise covers the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 stay outside the promise as unproven recovery attempts with their exact labels retained. Raising the minimum supported format requires a new recorded decision in this file, and removing a fixture requires a replacement fixture or a new recovery decision."
+    "note": "The compatibility promise covers the six fixture-backed public releases v0.1.0 through v0.2.2 and v0.5.3, all format 10 with setup complete. Formats 2 through 9 stay outside the promise as unproven recovery attempts with their exact labels retained. Raising the minimum supported format requires a new recorded decision in this file, and removing a fixture requires a replacement fixture or a new recovery decision."
   }
 }
