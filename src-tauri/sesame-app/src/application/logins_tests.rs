@@ -1177,6 +1177,58 @@ fn removing_a_field_removes_it_from_the_vault() {
     assert!(!current.contains(HIDDEN_VALUE));
 }
 
+fn numbered_fields(count: usize) -> Vec<CustomFieldEntry> {
+    (0..count)
+        .map(|index| field(&format!("Field {index}"), "fictional", "text"))
+        .collect()
+}
+
+#[test]
+fn a_login_over_the_field_limit_still_saves_but_cannot_grow() {
+    let stored = sesame_core::custom_fields::LOGIN_FIELDS.max_fields + 3;
+    let vault = TestVault::with_login("login-a", "https://northwind.example");
+    vault.seed(|payload| payload.entries[0].custom_fields = numbered_fields(stored));
+
+    save_login_in_state(&vault.state, edited_fields(numbered_fields(stored), &[]))
+        .expect("saved unchanged");
+    assert_eq!(vault.stored_login("login-a").custom_fields.len(), stored);
+
+    assert!(save_login_in_state(
+        &vault.state,
+        edited_fields(numbered_fields(stored + 1), &[])
+    )
+    .is_err());
+    assert_eq!(vault.stored_login("login-a").custom_fields.len(), stored);
+}
+
+#[test]
+fn a_new_login_cannot_start_over_the_field_limit() {
+    let vault = TestVault::with_login("login-a", "https://northwind.example");
+    let mut input = login_input(None, "https://tailspin.example", "fictional-new-secret");
+    input.custom_fields = Some(numbered_fields(
+        sesame_core::custom_fields::LOGIN_FIELDS.max_fields + 1,
+    ));
+
+    assert!(save_login_in_state(&vault.state, input).is_err());
+    assert_eq!(stored_payload(&vault).entries.len(), 1);
+}
+
+#[test]
+fn a_hidden_value_keeps_the_spaces_that_were_typed() {
+    let vault = vault_with_custom_fields();
+    let input = edited_fields(
+        vec![field("Security answer", " fictional answer ", "secret")],
+        &[],
+    );
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    assert_eq!(
+        vault.stored_login("login-a").custom_fields[0].value,
+        " fictional answer "
+    );
+}
+
 #[test]
 fn a_save_without_a_field_list_keeps_the_stored_fields() {
     let vault = vault_with_custom_fields();

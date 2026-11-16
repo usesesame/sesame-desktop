@@ -2039,7 +2039,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
             urls.push(url);
         }
     }
-    let custom_fields = crate::custom_fields::normalised_fields(
+    let custom_fields = crate::custom_fields::normalised_each(
         input.custom_fields.unwrap_or_default(),
         &crate::custom_fields::LOGIN_FIELDS,
     )?;

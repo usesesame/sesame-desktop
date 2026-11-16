@@ -494,6 +494,34 @@ describe('secrets other than the password', () => {
     expect(controller.state.value().revealedFields).toEqual({})
   })
 
+  it('drops a reveal that finishes after another login is selected', async () => {
+    const { controller } = harness()
+    let finish: (value: string) => void = () => {}
+    vaultApi.releaseItemField.mockReturnValue(new Promise<string>((resolve) => { finish = resolve }))
+
+    const revealing = controller.revealField('field:0')
+    const selecting = controller.selectEntry('login-b')
+    finish('fictional-hidden-answer')
+    await revealing
+    await selecting
+
+    expect(controller.state.value().revealedFields).toEqual({})
+  })
+
+  it('does not ask for the master password for a login that is no longer shown', async () => {
+    const { controller, presence } = harness()
+    let fail: (error: Error) => void = () => {}
+    vaultApi.releaseItemField.mockReturnValue(new Promise<string>((_, reject) => { fail = reject }))
+
+    const revealing = controller.revealField('field:0')
+    const selecting = controller.selectEntry('login-b')
+    fail(new Error('presenceRequired'))
+    await revealing
+    await selecting
+
+    expect(presence.state.value().open).toBe(false)
+  })
+
   it('opens the editor with hidden values kept and sends only their slots back', async () => {
     const { controller, stores } = harness()
     stores.vault.patch({

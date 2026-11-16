@@ -5,18 +5,21 @@ pub struct FieldRules {
     pub kinds: &'static [&'static str],
     pub max_fields: usize,
     pub max_value_chars: usize,
+    pub keeps_secret_whitespace: bool,
 }
 
 pub const RECORD_FIELDS: FieldRules = FieldRules {
     kinds: &["text", "secret", "date"],
     max_fields: 50,
     max_value_chars: 4_000,
+    keeps_secret_whitespace: false,
 };
 
 pub const LOGIN_FIELDS: FieldRules = FieldRules {
     kinds: &["text", "secret"],
     max_fields: 200,
     max_value_chars: 20_000,
+    keeps_secret_whitespace: true,
 };
 
 fn normalised_field(field: CustomFieldEntry, rules: &FieldRules) -> VaultResult<CustomFieldEntry> {
@@ -35,9 +38,15 @@ fn normalised_field(field: CustomFieldEntry, rules: &FieldRules) -> VaultResult<
     } else {
         "text".to_string()
     };
+    let trimmed = field.value.trim();
+    let value = if kind == "secret" && rules.keeps_secret_whitespace && !trimmed.is_empty() {
+        field.value.clone()
+    } else {
+        trimmed.to_string()
+    };
     Ok(CustomFieldEntry {
         label: label.to_string(),
-        value: field.value.trim().to_string(),
+        value,
         kind,
     })
 }
@@ -47,12 +56,25 @@ pub fn normalised_fields(
     rules: &FieldRules,
 ) -> VaultResult<Vec<CustomFieldEntry>> {
     if fields.len() > rules.max_fields {
-        return Err("There are too many custom fields.".into());
+        return Err(TOO_MANY_FIELDS.into());
     }
+    normalised_each(fields, rules)
+}
+
+pub const TOO_MANY_FIELDS: &str = "There are too many custom fields.";
+
+pub fn normalised_each(
+    fields: Vec<CustomFieldEntry>,
+    rules: &FieldRules,
+) -> VaultResult<Vec<CustomFieldEntry>> {
     fields
         .into_iter()
         .map(|field| normalised_field(field, rules))
         .collect()
+}
+
+pub fn login_field_count_allowed(count: usize, stored: usize) -> bool {
+    count <= LOGIN_FIELDS.max_fields.max(stored)
 }
 
 pub fn from_legacy(fields: &[LegacyField]) -> Vec<CustomFieldEntry> {
@@ -139,6 +161,39 @@ mod tests {
                 ("Other", "fictional-3", "text"),
             ]
         );
+    }
+
+    #[test]
+    fn a_login_keeps_the_spaces_of_a_hidden_value_and_a_record_trims_them() {
+        let typed = vec![
+            field("Answer", " fictional answer ", "secret"),
+            field("Blank", "   ", "secret"),
+            field("Member", " fictional-1 ", "text"),
+        ];
+        let values = |rules: &FieldRules| {
+            normalised_each(typed.clone(), rules)
+                .expect("normalised")
+                .into_iter()
+                .map(|field| field.value.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            values(&LOGIN_FIELDS),
+            [" fictional answer ", "", "fictional-1"]
+        );
+        assert_eq!(
+            values(&RECORD_FIELDS),
+            ["fictional answer", "", "fictional-1"]
+        );
+    }
+
+    #[test]
+    fn a_login_may_keep_more_fields_than_the_limit_but_not_add_to_them() {
+        let limit = LOGIN_FIELDS.max_fields;
+        assert!(login_field_count_allowed(limit, 0));
+        assert!(!login_field_count_allowed(limit + 1, 0));
+        assert!(login_field_count_allowed(limit + 5, limit + 5));
+        assert!(!login_field_count_allowed(limit + 6, limit + 5));
     }
 
     #[test]

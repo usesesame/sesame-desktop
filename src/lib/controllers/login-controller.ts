@@ -122,15 +122,18 @@ export function createLoginController({ stores, feedback, modal, presence, refre
   async function revealField(key: string): Promise<void> {
     const card = vault.value().loginCard
     if (!card) return
+    const requestToken = selectionRequestToken
+    const stillShown = () => requestToken === selectionRequestToken && selection.value().activeItemId === card.id && vault.value().loginCard?.id === card.id
     try {
       const value = await releaseItemField('login', card.id, key)
-      if (vault.value().loginCard?.id !== card.id || !vault.value().status.unlocked) return
+      if (!stillShown() || !vault.value().status.unlocked) return
       state.patch({ revealedFields: { ...state.value().revealedFields, [key]: value } })
       const previous = fieldHideTimers.get(key)
       if (previous) clearTimeout(previous)
       fieldHideTimers.set(key, setTimeout(() => hideField(key), PASSWORD_REVEAL_TIMEOUT_MS))
     } catch (error) {
-      if (presence.required(error)) presence.ask('reveal-field', () => revealField(key))
+      if (!stillShown()) return
+      if (presence.required(error)) presence.ask('reveal-field', () => { if (stillShown()) void revealField(key) })
       else feedback.setError(error)
     }
   }

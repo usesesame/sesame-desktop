@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use sesame_core::custom_fields::keep_field_secrets;
+use sesame_core::custom_fields::{keep_field_secrets, login_field_count_allowed, TOO_MANY_FIELDS};
 use zeroize::Zeroizing;
 
 use crate::application::release::require_release_presence;
@@ -61,6 +61,10 @@ pub fn save_login_in_state(
         updated.import_source = previous.import_source.clone();
         updated.legacy_fields = previous.legacy_fields.clone();
         if replaces_custom_fields {
+            if !login_field_count_allowed(updated.custom_fields.len(), previous.custom_fields.len())
+            {
+                return Err(TOO_MANY_FIELDS.into());
+            }
             keep_field_secrets(
                 &mut updated.custom_fields,
                 &previous.custom_fields,
@@ -80,6 +84,9 @@ pub fn save_login_in_state(
         next_payload =
             payload_with_saved_login(&next_payload, updated, password, unix_timestamp())?;
     } else {
+        if !login_field_count_allowed(entry.custom_fields.len(), 0) {
+            return Err(TOO_MANY_FIELDS.into());
+        }
         next_payload.entries.push(entry);
     }
     commit_payload_change(session, next_payload)?;
