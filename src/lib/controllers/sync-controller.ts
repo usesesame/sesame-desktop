@@ -418,6 +418,8 @@ export function createSyncController() {
   let vaultChangedSinceRun = false
   let rerun = false
   let lastAutoAttemptAt = 0
+  let busyUntil = 0
+  let generation = 0
 
   function activityFor(status: SyncCoordinatorView): SyncActivity {
     switch (status.phase) {
@@ -445,14 +447,18 @@ export function createSyncController() {
     }
   }
 
-  function scheduleAfterBusy(status: SyncCoordinatorView) {
+  function scheduleAfterBusy(status: SyncCoordinatorView, runGeneration: number) {
+    const wait = status.phase === 'busy' ? Math.max(1, status.retryAfterSeconds ?? 0) * 1000 : 0
+    busyUntil = wait > 0 ? Date.now() + wait : 0
+    if (runGeneration !== generation) return
     if (busyTimer !== undefined) clearTimeout(busyTimer)
     busyTimer = undefined
-    if (status.phase !== 'busy') return
+    if (wait === 0) return
     busyTimer = setTimeout(() => {
       busyTimer = undefined
+      busyUntil = 0
       void api.autoSync()
-    }, Math.max(1, status.retryAfterSeconds ?? 0) * 1000)
+    }, wait)
   }
 
   const api = {
@@ -648,6 +654,7 @@ export function createSyncController() {
     },
     loadLocal,
     async autoSync() {
+      const runGeneration = generation
       const current = store.value()
       const sizeMayHaveChanged = vaultChangedSinceRun && current.coordinator.halt === 'too_large'
       const halted = current.coordinator.phase === 'halted' && !sizeMayHaveChanged
@@ -658,9 +665,8 @@ export function createSyncController() {
       if (current.working || current.state !== 'approved' || current.needsNewKey || halted || current.alarm) {
         return
       }
-      const wait = current.coordinator.phase === 'busy'
-        ? Math.max(1, current.coordinator.retryAfterSeconds ?? 0) * 1000
-        : autoSyncBackoffMs(current.coordinator.consecutiveFailures)
+      if (Date.now() < busyUntil) return
+      const wait = current.coordinator.phase === 'busy' ? 0 : autoSyncBackoffMs(current.coordinator.consecutiveFailures)
       if (wait > 0 && Date.now() - lastAutoAttemptAt < wait) return
       lastAutoAttemptAt = Date.now()
       vaultChangedSinceRun = false
@@ -669,7 +675,7 @@ export function createSyncController() {
         const status = await invoke<SyncCoordinatorView>('sync_now')
         store.patch({ coordinator: status, activity: activityFor(status), lastSyncedAt: status.phase === 'idle' ? Date.now() : store.value().lastSyncedAt })
         noteCoordinator(status)
-        scheduleAfterBusy(status)
+        scheduleAfterBusy(status, runGeneration)
         if (status.halt === 'needs_new_key') store.patch({ needsNewKey: true })
         if (status.halt === 'conflict') {
           store.patch({
@@ -689,12 +695,15 @@ export function createSyncController() {
       } finally {
         if (rerun) {
           rerun = false
-          void api.autoSync()
+          if (runGeneration === generation) void api.autoSync()
         }
       }
     },
     startBackground() {
-      void loadLocal().then(() => api.autoSync())
+      const backgroundGeneration = ++generation
+      void loadLocal().then(() => {
+        if (backgroundGeneration === generation) void api.autoSync()
+      })
       const timer = setInterval(() => void api.autoSync(), BACKGROUND_INTERVAL_MS)
       const onFocus = () => void api.autoSync()
       const onOnline = () => {
@@ -704,6 +713,7 @@ export function createSyncController() {
       window.addEventListener('focus', onFocus)
       window.addEventListener('online', onOnline)
       return () => {
+        generation += 1
         clearInterval(timer)
         window.removeEventListener('focus', onFocus)
         window.removeEventListener('online', onOnline)
@@ -717,21 +727,25 @@ export function createSyncController() {
       if (store.value().state !== 'approved') return
       void loadLocal()
       if (changeTimer !== undefined) clearTimeout(changeTimer)
+      const changeGeneration = generation
       changeTimer = setTimeout(() => {
         changeTimer = undefined
         void loadLocal().then((unsynced) => {
-          if (unsynced === false) return
+          if (changeGeneration !== generation) return
+          if (unsynced === false && store.value().coordinator.halt !== 'too_large') return
           vaultChangedSinceRun = true
           void api.autoSync()
         })
       }, CHANGE_DELAY_MS)
     },
     async syncNow() {
+      const runGeneration = generation
       store.patch({ working: true, error: '' })
       try {
         const status = await invoke<SyncCoordinatorView>('sync_now', { manual: true })
         store.patch({ working: false, coordinator: status })
         noteCoordinator(status)
+        scheduleAfterBusy(status, runGeneration)
         if (status.halt === 'conflict') {
           store.patch({
             conflictOpen: true,

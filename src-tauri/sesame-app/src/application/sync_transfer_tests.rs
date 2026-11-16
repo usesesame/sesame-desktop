@@ -2890,13 +2890,6 @@ mod coordinator_classification_tests {
             })
         );
         assert_eq!(
-            classify_transfer_failure(&present(SyncError::StorageFull)),
-            Outcome::Halt(Halt::TooLarge {
-                vault_bytes: 0,
-                limit_bytes: 0
-            })
-        );
-        assert_eq!(
             classify_transfer_failure(&present(SyncError::TooLarge)),
             Outcome::Halt(Halt::TooLarge {
                 vault_bytes: 0,
@@ -2914,6 +2907,17 @@ mod coordinator_classification_tests {
                 "{malformed}"
             );
         }
+    }
+
+    #[test]
+    fn a_full_sync_server_gets_its_own_message_and_never_a_size_of_zero() {
+        let message = present(SyncError::StorageFull);
+        assert_eq!(message, crate::application::sync::STORAGE_FULL);
+        assert!(!message.starts_with(crate::application::sync::TOO_LARGE_PREFIX));
+        assert!(!matches!(
+            classify_transfer_failure(&message),
+            Outcome::Halt(Halt::TooLarge { .. })
+        ));
     }
 
     #[test]

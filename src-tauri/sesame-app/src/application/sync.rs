@@ -120,6 +120,9 @@ pub const BUSY_PREFIX: &str = "sync_busy:";
 pub const TOO_LARGE_PREFIX: &str = "sync_too_large:";
 pub const SEAL_OVERHEAD_BYTES: u64 = 16;
 
+pub const STORAGE_FULL: &str =
+    "The Sync server has no more space for this vault. Remove large attachments to make it smaller, then try again.";
+
 pub fn too_large_message(vault_bytes: u64, limit_bytes: u64) -> String {
     format!("{TOO_LARGE_PREFIX}{vault_bytes}:{limit_bytes}:This vault is too large to sync. Remove large attachments to make it smaller, then try again.")
 }
@@ -133,7 +136,7 @@ pub fn present(error: SyncError) -> String {
             format!("{BUSY_PREFIX}{retry_after_secs}:{text}")
         }
         SyncError::TooLarge => too_large_message(0, crate::sync::canonical::MAX_CIPHERTEXT_BYTES),
-        SyncError::StorageFull => too_large_message(0, 0),
+        SyncError::StorageFull => STORAGE_FULL.to_string(),
         _ => text,
     }
 }
@@ -199,6 +202,23 @@ pub fn local_payload_bytes(vault: &UnlockedVault) -> Result<(Vec<u8>, usize), St
 pub fn vault_has_local_changes(local: &SyncState, vault: &UnlockedVault) -> Result<bool, String> {
     let payload = vault.open_payload()?;
     local.has_local_changes(&payload)
+}
+
+pub fn upgrade_legacy_digest(store: &SyncStore, vault: &UnlockedVault) -> VaultResult<bool> {
+    let Some(local) = store.load_state()? else {
+        return Ok(false);
+    };
+    let upgraded = {
+        let payload = vault.open_payload()?;
+        local.upgraded_digest(&payload)?
+    };
+    let Some(digest) = upgraded else {
+        return Ok(false);
+    };
+    let mut next = local;
+    next.payload_digest = digest;
+    store.save_state(&next)?;
+    Ok(true)
 }
 
 pub fn verify_master_password(vault: &UnlockedVault, master_password: &str) -> Result<(), String> {

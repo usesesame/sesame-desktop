@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use zeroize::Zeroizing;
 
+use crate::sync::coordinator::ManualRun;
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
@@ -80,6 +81,7 @@ pub trait DesktopEffects: Sync {
     fn vault_path(&self) -> VaultResult<PathBuf>;
     fn report_key_page_fallback(&self, unlocked: &UnlockedVault);
     fn observe_unlock(&self, snapshot: &VaultSnapshot);
+    fn claim_idle_sync_store(&self) -> Option<(sync::SyncStore, ManualRun)>;
     fn observe_lock(&self, state: &VaultState);
     fn clear_armed_clipboard(&self) -> VaultResult<()>;
     fn copy_secret(

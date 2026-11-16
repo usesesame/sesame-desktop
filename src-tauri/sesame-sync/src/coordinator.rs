@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Halt {
@@ -80,6 +81,7 @@ pub struct Coordinator {
 struct State {
     status: Status,
     running: bool,
+    wait_until: Option<Instant>,
     /// One flag, not a queue: one agreement covers every request that arrived while running.
     follow_up: bool,
 }
@@ -96,6 +98,7 @@ impl Coordinator {
             inner: Arc::new(Mutex::new(State {
                 status: Status::default(),
                 running: false,
+                wait_until: None,
                 follow_up: false,
             })),
         }
@@ -113,12 +116,20 @@ impl Coordinator {
     }
 
     pub fn begin(&self) -> bool {
+        self.begin_at(Instant::now())
+    }
+
+    pub fn begin_at(&self, now: Instant) -> bool {
         let Ok(mut state) = self.inner.lock() else {
             return false;
         };
         if state.running || matches!(state.status.phase, Phase::Halted(_)) {
             return false;
         }
+        if state.wait_until.is_some_and(|until| now < until) {
+            return false;
+        }
+        state.wait_until = None;
         state.running = true;
         state.status.phase = Phase::Working;
         true
@@ -176,6 +187,7 @@ impl Coordinator {
             state.status.phase = Phase::Idle;
             state.status.pending = false;
         }
+        state.wait_until = None;
     }
 
     pub fn halted_size(&self) -> Option<u64> {
@@ -200,10 +212,15 @@ impl Coordinator {
     }
 
     pub fn finish(&self, outcome: Outcome) -> bool {
+        self.finish_at(outcome, Instant::now())
+    }
+
+    pub fn finish_at(&self, outcome: Outcome, now: Instant) -> bool {
         let Ok(mut state) = self.inner.lock() else {
             return false;
         };
         state.running = false;
+        state.wait_until = None;
         if matches!(outcome, Outcome::Downloaded { .. }) {
             state.status.downloads_applied = state.status.downloads_applied.saturating_add(1);
         }
@@ -239,6 +256,7 @@ impl Coordinator {
                 false
             }
             Outcome::Busy { retry_after_secs } => {
+                state.wait_until = now.checked_add(Duration::from_secs(retry_after_secs));
                 state.status.phase = Phase::Waiting { retry_after_secs };
                 state.status.pending = true;
                 state.follow_up = false;
@@ -421,11 +439,16 @@ mod tests {
         let coordinator = Coordinator::new();
         assert!(coordinator.begin());
         coordinator.finish(Outcome::Transient);
+        let mut now = Instant::now();
         for _ in 0..(MAX_ATTEMPTS * 3) {
-            assert!(coordinator.begin());
-            coordinator.finish(Outcome::Busy {
-                retry_after_secs: 5,
-            });
+            assert!(coordinator.begin_at(now));
+            coordinator.finish_at(
+                Outcome::Busy {
+                    retry_after_secs: 5,
+                },
+                now,
+            );
+            now += Duration::from_secs(5);
             let status = coordinator.status();
             assert_eq!(
                 status.phase,
@@ -436,10 +459,48 @@ mod tests {
             assert_eq!(status.consecutive_failures, 1);
             assert!(status.pending);
         }
-        assert!(coordinator.begin());
+        assert!(coordinator.begin_at(now));
         coordinator.finish(Outcome::AlreadyCurrent);
         assert_eq!(coordinator.status().phase, Phase::Idle);
         assert_eq!(coordinator.status().consecutive_failures, 0);
+    }
+
+    #[test]
+    fn a_busy_wait_holds_from_the_answer_until_it_ends_for_every_scheduled_run() {
+        let coordinator = Coordinator::new();
+        let started = Instant::now();
+        let answered = started + Duration::from_secs(20);
+        assert!(coordinator.begin_at(started));
+        coordinator.finish_at(
+            Outcome::Busy {
+                retry_after_secs: 30,
+            },
+            answered,
+        );
+
+        assert!(!coordinator.begin_at(started + Duration::from_secs(31)));
+        assert!(!coordinator.begin_at(answered + Duration::from_secs(29)));
+        assert!(coordinator.begin_at(answered + Duration::from_secs(30)));
+        coordinator.finish(Outcome::AlreadyCurrent);
+        assert!(coordinator.begin());
+    }
+
+    #[test]
+    fn pressing_sync_now_ends_a_busy_wait() {
+        let coordinator = Coordinator::new();
+        let now = Instant::now();
+        assert!(coordinator.begin_at(now));
+        coordinator.finish_at(
+            Outcome::Busy {
+                retry_after_secs: 60,
+            },
+            now,
+        );
+        assert!(!coordinator.begin_at(now + Duration::from_secs(1)));
+
+        coordinator.retry_after_user_action();
+
+        assert!(coordinator.begin_at(now + Duration::from_secs(1)));
     }
 
     #[test]

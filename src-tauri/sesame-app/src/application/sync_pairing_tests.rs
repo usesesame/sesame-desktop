@@ -377,6 +377,8 @@ fn a_failed_vault_replacement_preserves_the_pending_join() {
 
 #[test]
 fn lost_pairing_responses_keep_the_authenticated_context_and_resume_without_pairing_again() {
+    let _pairing = pairing_state_guard();
+    reset_cancellation();
     for lost in ["confirmation", "package", "device-list"] {
         let (identity, approved, package) = pending();
         let mut unfinished = approved.clone();

@@ -404,6 +404,86 @@ describe('syncing without being asked', () => {
     expect(runs).toBe(2)
   })
 
+  it('holds a busy wait from the moment the answer arrives against focus, the network and the timer', async () => {
+    vi.useFakeTimers()
+    const busy = { ...idle, phase: 'busy', retryAfterSeconds: 5, consecutiveFailures: 0 }
+    let runs = 0
+    core.invoke.mockImplementation(async (command: string) => {
+      if (command === 'sync_local_status') return { state: 'approved', revision: 2, unsynced: false }
+      if (command !== 'sync_now') return {}
+      runs += 1
+      if (runs > 1) return idle
+      await new Promise((resolve) => setTimeout(resolve, 3_000))
+      return busy
+    })
+    const sync = approved()
+    const stop = sync.startBackground()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(runs).toBe(1)
+    expect(get(sync).activity).toBe('waiting')
+
+    await vi.advanceTimersByTimeAsync(2_500)
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(runs).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(600)
+    expect(runs).toBe(2)
+    expect(get(sync).activity).toBe('synced')
+    stop()
+  })
+
+  it('lets a person press Sync now during a busy wait', async () => {
+    vi.useFakeTimers()
+    const busy = { ...idle, phase: 'busy', retryAfterSeconds: 30, consecutiveFailures: 0 }
+    answer({ sync_now: busy, sync_status: status(), sync_coordinator_status: idle })
+    const sync = approved()
+    await sync.autoSync()
+    answer({ sync_now: idle, sync_status: status(), sync_coordinator_status: idle })
+    await sync.syncNow()
+    expect(core.invoke).toHaveBeenCalledWith('sync_now', { manual: true })
+    expect(get(sync).coordinator.phase).toBe('idle')
+  })
+
+  it('starts no retry after the background work was stopped, even when a run still answers busy', async () => {
+    vi.useFakeTimers()
+    let finish: (value: unknown) => void = () => {}
+    let runs = 0
+    core.invoke.mockImplementation((command: string) => {
+      if (command === 'sync_local_status') return Promise.resolve({ state: 'approved', revision: 2, unsynced: false })
+      if (command !== 'sync_now') return Promise.resolve({})
+      runs += 1
+      return new Promise((resolve) => { finish = resolve })
+    })
+    const sync = approved()
+    const stop = sync.startBackground()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(runs).toBe(1)
+    void sync.autoSync()
+    stop()
+    finish({ ...idle, phase: 'busy', retryAfterSeconds: 5 })
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+    expect(runs).toBe(1)
+  })
+
+  it('tries again after a size stop when the vault goes back to what was last synced', async () => {
+    vi.useFakeTimers()
+    const tooLarge = { ...idle, phase: 'halted', halt: 'too_large', vaultBytes: 12 * 1024 * 1024, limitBytes: 10 * 1024 * 1024 }
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: tooLarge })
+    const sync = approved()
+    await sync.autoSync()
+    expect(get(sync).coordinator.halt).toBe('too_large')
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: false }, sync_now: idle })
+    core.invoke.mockClear()
+
+    sync.vaultChanged()
+    await vi.advanceTimersByTimeAsync(700)
+
+    expect(core.invoke.mock.calls.filter((call) => call[0] === 'sync_now')).toHaveLength(1)
+    expect(get(sync).activity).toBe('synced')
+  })
+
   it('asks again after a change only when the stop was about the vault size', async () => {
     vi.useFakeTimers()
     const tooLarge = { ...idle, phase: 'halted', halt: 'too_large', vaultBytes: 12 * 1024 * 1024, limitBytes: 10 * 1024 * 1024 }
