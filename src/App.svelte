@@ -5,6 +5,7 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
+  import { clearReleaseRecord, onReleaseRecordChanged } from './lib/release-record-api'
   import { startActivityReports } from './lib/activity'
   import { loadPlatformCapabilities } from './lib/platform'
   import type { ImportSource, NavigationGroup, View } from './lib/types'
@@ -42,6 +43,8 @@
   import ModalHost from './lib/ui/ModalHost.svelte'
   import PasswordPresenceModal from './lib/ui/PasswordPresenceModal.svelte'
   import WorkspaceShell from './lib/ui/WorkspaceShell.svelte'
+  import ReleaseRecordView from './lib/ui/ReleaseRecordView.svelte'
+  import { activityItemFilter } from './lib/release-record'
   import Toast from './lib/ui/Toast.svelte'
   import UnlockScreen from './lib/ui/UnlockScreen.svelte'
   import WelcomeScreen from './lib/ui/WelcomeScreen.svelte'
@@ -345,6 +348,30 @@
     return vaultItems($vault.snapshot).find((item) => item.id === itemId)?.title ?? null
   }
 
+  async function clearActivity(done: () => void): Promise<void> {
+    try {
+      await clearReleaseRecord()
+    } catch (error) {
+      if (presenceController.required(error)) presenceController.ask('clear-activity', () => clearActivity(done))
+      else feedbackController.setError(error)
+      return
+    }
+    done()
+    feedbackController.showNotice('Activity cleared', 'Sesame kept one entry that says the record was cleared.')
+  }
+
+  function showItemActivity(itemId: string, itemKind: string) {
+    activityItemFilter.set({ itemId, itemKind })
+    selection.patch({ activeView: 'activity' })
+  }
+
+  function openActivityItem(itemId: string) {
+    const item = vaultItems($vault.snapshot).find((candidate) => candidate.id === itemId)
+    if (!item) return
+    selection.patch({ activeView: 'vault' })
+    void itemController.select(item.id, item.kind)
+  }
+
   function clearSessionState() {
     loginController.clearSecrets()
     importController.clearSecrets()
@@ -444,6 +471,7 @@
     { label: 'Manage', items: [
       { id: 'tools', label: 'Tools', icon: 'key' },
       { id: 'backups', label: 'Backups', icon: 'archive' },
+      { id: 'activity', label: 'Activity', icon: 'eye' },
       { id: 'history', label: 'History', icon: 'refresh' },
       { id: 'trash', label: 'Trash', icon: 'trash' },
     ] },
@@ -492,6 +520,17 @@
 
   onMount(() => {
     let stopQuickAccessOpen = () => {}
+    let stopReleaseRecord = () => {}
+    let releaseRecordDisposed = false
+    let unwrittenShown = 0
+    void onReleaseRecordChanged((status) => {
+      if (status.unwritten > unwrittenShown) {
+        feedbackController.showNotice('Activity is incomplete', 'Sesame could not write to the activity record. It will keep trying, and the Activity view shows what is missing.', { label: 'Open Activity', run: () => selection.patch({ activeView: 'activity' }) })
+      }
+      unwrittenShown = status.unwritten
+    })
+      .then((stop) => { if (releaseRecordDisposed) stop(); else stopReleaseRecord = stop })
+      .catch(() => void recordDiagnostic('renderer', 'release_record_listener_failed'))
     let quickAccessListenerDisposed = false
     void onQuickAccessOpenItem((id) => {
       if (quickAccessListenerDisposed) return
@@ -537,6 +576,8 @@
       idleListenersDisposed = true
       quickAccessListenerDisposed = true
       stopQuickAccessOpen()
+      releaseRecordDisposed = true
+      stopReleaseRecord()
       stopIdleWarning()
       stopIdleCleared()
       stopActivityReports()
@@ -686,6 +727,7 @@
         onItemCopyField={(key, label) => void itemController.copyField(key, label)}
         onItemReveal={(key) => void itemController.revealField(key)}
         onSetNoteLock={(locked) => void itemController.setNoteLock(locked)}
+        onShowItemActivity={showItemActivity}
         onItemHide={itemController.hideField}
         onOpenRecoveryNotApplicable={loginController.markRecoveryNotApplicable}
         recoveryActionWorking={$loginState.recoveryActionWorking}
@@ -754,6 +796,8 @@
         onCancelPreview={trashController.cancelPreview}
         onRestore={(id) => void trashController.restore(id)}
       />
+    {:else if $selection.activeView === 'activity'}
+      <ReleaseRecordView titleFor={historyItemTitle} onOpenItem={openActivityItem} />
     {:else if $selection.activeView === 'history'}
       <HistoryView
         items={$vault.snapshot?.history ?? []}
@@ -770,6 +814,7 @@
       <BackupsView backupBusy={$backupState.backupBusy} health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
+        onClearActivity={clearActivity}
         theme={$settings.theme}
         siteIconsEnabled={$settings.siteIconsEnabled}
         autoLockMinutes={$settings.autoLockMinutes}

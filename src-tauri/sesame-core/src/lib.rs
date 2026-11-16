@@ -15,6 +15,7 @@ pub mod password_analysis;
 pub mod pending_import;
 pub mod platform;
 pub mod record_store;
+pub mod release_record;
 pub mod secret_fields;
 pub mod snapshot;
 pub mod storage;
@@ -136,6 +137,7 @@ pub struct VaultState {
     hello_unlock_available: AtomicBool,
     auto_lock_minutes: AtomicU64,
     session_epoch: AtomicU64,
+    pub release_record: release_record::RecordState,
 }
 
 impl Default for VaultState {
@@ -151,6 +153,7 @@ impl Default for VaultState {
             hello_unlock_available: AtomicBool::new(false),
             auto_lock_minutes: AtomicU64::new(5),
             session_epoch: AtomicU64::new(1),
+            release_record: release_record::RecordState::default(),
         }
     }
 }
@@ -216,6 +219,7 @@ impl VaultState {
         &self,
     ) -> VaultResult<std::sync::MutexGuard<'_, Option<UnlockedVault>>> {
         let mut session = self.begin_lifecycle_change()?;
+        self.release_record.close(None);
         *session = None;
         self.discard_pending_import();
         self.advance_session_epoch();
@@ -237,6 +241,7 @@ impl VaultState {
         let mut session = self.begin_lifecycle_change()?;
         let result = replace();
         if result.is_ok() {
+            self.release_record.close(None);
             *session = None;
             self.discard_pending_import();
             self.advance_session_epoch();
@@ -249,6 +254,7 @@ impl VaultState {
             .session
             .lock()
             .map_err(|_| "Sesame could not lock the vault session.".to_string())?;
+        self.release_record.close(session.as_ref());
         *session = None;
         drop(session);
         // Parsed import entries are secrets; they never outlive an unlocked vault.
@@ -322,6 +328,10 @@ impl UnlockedVault {
 
     pub fn snapshot(&self) -> VaultSnapshot {
         self.records.snapshot()
+    }
+
+    pub fn vault_id(&self) -> Option<&str> {
+        self.records.vault_id()
     }
 
     pub fn trash_item_preview(&self, id: &str) -> VaultResult<ItemPreview> {

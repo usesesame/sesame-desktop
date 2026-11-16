@@ -2,19 +2,25 @@ use tauri::{AppHandle, State};
 
 use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::adapters::network::breach;
-use crate::application::reveal::{copy_item_field_in_state, item_field_in_state};
+use crate::application::reveal::{
+    copy_item_field_in_state, item_field_in_state, reveal_item_field_in_state,
+};
 use crate::release::ReleasePresence;
 use crate::vault::{VaultResult, VaultState};
 
 #[tauri::command]
 pub fn release_item_field(
+    app: AppHandle,
     id: String,
     kind: String,
     field: String,
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    item_field_in_state(&state, &presence, &id, &kind, &field).map(|value| value.to_string())
+    let released = reveal_item_field_in_state(&state, &presence, &id, &kind, &field)
+        .map(|value| value.to_string());
+    crate::commands::announce_release_record(&app);
+    released
 }
 
 #[tauri::command]
@@ -27,7 +33,7 @@ pub fn copy_item_field(
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<u64> {
-    copy_item_field_in_state(
+    let copied = copy_item_field_in_state(
         &state,
         &presence,
         &DesktopHostEffects::new(&app),
@@ -35,7 +41,9 @@ pub fn copy_item_field(
         &kind,
         &field,
         clear_after_ms,
-    )
+    );
+    crate::commands::announce_release_record(&app);
+    copied
 }
 
 #[tauri::command]

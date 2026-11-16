@@ -152,6 +152,15 @@ pub async fn save_document_attachment(
         .map(str::to_string)
         .ok_or("Sesame could not name the saved attachment.")?;
     crate::vault::storage::write_export_file(&destination, &saved.bytes)?;
+    crate::application::release_record::record(
+        &state,
+        crate::vault::release_record::ReleaseDraft::new(
+            crate::vault::release_record::EntryKind::AttachmentSaved,
+            crate::vault::release_record::Outcome::Released,
+        )
+        .item(&document_id, "document"),
+    );
+    crate::commands::announce_release_record(&app);
     Ok(Some(file_name))
 }
 

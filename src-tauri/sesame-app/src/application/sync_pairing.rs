@@ -291,7 +291,7 @@ where
         if vault_id_of(unlocked)? != state.vault_id {
             return Err("The unlocked vault is not the Sync vault.".into());
         }
-        unlocked.expose_vault_key(|key| {
+        let sealed = unlocked.expose_vault_key(|key| {
             let label = seal_label(key, &state.vault_id, &newcomer.device_id, &newcomer.label)
                 .map_err(present_proof)?;
             let package = crate::sync::keys::seal_for_recipient(
@@ -301,7 +301,15 @@ where
                 list.epoch(),
             )?;
             Ok((label, package))
-        })?
+        })?;
+        vault.release_record.append(
+            unlocked,
+            crate::vault::release_record::ReleaseDraft::new(
+                crate::vault::release_record::EntryKind::DevicePaired,
+                crate::vault::release_record::Outcome::Released,
+            ),
+        );
+        sealed
     };
     let entry = add_entry(
         identity,

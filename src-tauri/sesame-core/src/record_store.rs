@@ -172,6 +172,10 @@ impl VaultRecordStore {
         self.index.clone()
     }
 
+    pub fn vault_id(&self) -> Option<&str> {
+        self.index.vault_id.as_deref()
+    }
+
     fn open_payload_with_key(&self, key: &[u8; 32]) -> VaultResult<OpenedPayload> {
         let header = Zeroizing::new(open::<VaultHeader>(
             key,

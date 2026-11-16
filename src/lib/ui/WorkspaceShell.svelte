@@ -82,6 +82,7 @@
     authenticator: 'Authenticator',
     security: 'Checkup',
     tools: 'Password tools',
+    activity: 'Activity',
     trash: 'Trash',
     history: 'History',
     backups: 'Backups',

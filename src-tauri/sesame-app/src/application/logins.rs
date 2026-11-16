@@ -7,6 +7,7 @@ use crate::application::release::require_release_presence;
 use crate::release::ReleasePresence;
 use crate::vault::backup::snapshot_vault_revision;
 use crate::vault::imports::{entry_from_input, resolved_totp};
+use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::snapshot::{
     current_totp, duplicate_groups_from_summaries, login_summary_for, merge_comparison_for,
 };
@@ -141,7 +142,14 @@ pub fn reveal_login_secret_in_state(
     let TaggedItem::Login(entry) = &*item else {
         return Err("That saved login no longer exists.".into());
     };
-    Ok(Zeroizing::new(entry.password.clone()))
+    let secret = Zeroizing::new(entry.password.clone());
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::Reveal, Outcome::Released)
+            .item(&entry.id, "login")
+            .field("password"),
+    );
+    Ok(secret)
 }
 
 /// Folder names resolve to a stable ID before the payload is committed.

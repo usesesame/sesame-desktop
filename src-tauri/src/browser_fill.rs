@@ -24,7 +24,9 @@ pub(crate) use crate::application::browser_fill_broker::BrowserFillState;
 
 use crate::application::browser_fill::{ApprovalDecision, ApprovalKind, NormalizedOrigin};
 use crate::application::browser_fill_broker::ApprovalEvent;
+use crate::application::release_record::{browser_draft, record};
 use crate::application::DesktopEffects;
+use crate::vault::release_record::Outcome;
 
 use crate::browser_host::HOST_FILE_NAME;
 
@@ -57,32 +59,72 @@ fn wait_for_decision(
 ) -> Result<ApprovalDecision, &'static str> {
     loop {
         match receiver.try_recv() {
-            Ok(decision) => return Ok(decision),
-            Err(TryRecvError::Disconnected) => return Err("approvalUnavailable"),
+            Ok(decision) => {
+                browser_replies::record_decision(
+                    vault,
+                    fill_state,
+                    approval_id,
+                    kind,
+                    origin,
+                    &decision,
+                );
+                return Ok(decision);
+            }
+            Err(TryRecvError::Disconnected) => {
+                record(
+                    vault,
+                    browser_draft(kind, Outcome::Withdrawn, &origin.hostname),
+                );
+                return Err("approvalUnavailable");
+            }
             Err(TryRecvError::Empty) => {}
         }
         if !peer.is_connected() {
             fill_state.revoke(approval_id);
+            record(
+                vault,
+                browser_draft(kind, Outcome::ConnectionClosed, &origin.hostname),
+            );
             emit_approval_cancelled(app, kind, approval_id, "connectionClosed");
             diagnostics::record_browser_host_registration(app, kind.connection_closed_code());
             return Err("staleRequest");
         }
         if Instant::now() >= deadline {
             fill_state.revoke(approval_id);
+            record(
+                vault,
+                browser_draft(kind, Outcome::TimedOut, &origin.hostname),
+            );
             emit_approval_cancelled(app, kind, approval_id, "expired");
             diagnostics::record_browser_host_registration(app, kind.timeout_code());
             return Err("approvalTimeout");
         }
         if !fill_state.is_bound(approval_id, request_id, origin, epoch) {
             if let Ok(decision) = receiver.try_recv() {
+                browser_replies::record_decision(
+                    vault,
+                    fill_state,
+                    approval_id,
+                    kind,
+                    origin,
+                    &decision,
+                );
                 return Ok(decision);
             }
             fill_state.revoke(approval_id);
+            record(
+                vault,
+                browser_draft(kind, Outcome::Withdrawn, &origin.hostname),
+            );
             emit_approval_cancelled(app, kind, approval_id, "expired");
             return Err("approvalUnavailable");
         }
         if vault.session_epoch() != epoch {
             fill_state.revoke(approval_id);
+            record(
+                vault,
+                browser_draft(kind, Outcome::VaultChanged, &origin.hostname),
+            );
             emit_approval_cancelled(app, kind, approval_id, "vaultChanged");
             diagnostics::record_browser_host_registration(app, kind.vault_changed_code());
             return Err("staleRequest");
@@ -185,6 +227,7 @@ fn handle_pipe_payload(
         "totp" => totp_response(app, &vault, &fill_state, &effects, &request, peer),
         _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
+    crate::commands::announce_release_record(app);
     response_bytes(response)
 }
 

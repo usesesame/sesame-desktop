@@ -41,6 +41,7 @@ pub fn finish_adoption_in_state(
         crate::application::sync_recovery::prune_and_report(effects, &directory, &[written]);
         let _ = vault_id;
         let recovery_kit = adopt(vault, key, payload, master_password)?;
+        crate::application::release_record::open_release_record(state, vault);
         effects.report_key_page_fallback(vault);
         state.advance_session_epoch();
         recovery_kit

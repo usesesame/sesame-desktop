@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ItemReleaseSection from './ItemReleaseSection.svelte'
   import { fly } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import { beforeUpdate, onMount, tick } from 'svelte'
@@ -80,6 +81,7 @@
   export let passwordPresenceError = ''
   export let passwordPresenceIntent: 'reveal' | 'copy' | 'autotype' = 'reveal'
   export let onSetNoteLock: (locked: boolean) => void = () => {}
+  export let onShowItemActivity: (itemId: string, itemKind: string) => void = () => {}
   export let onRevealPassword: () => Promise<void>
   export let onCopyPassword: () => void
   export let onConfirmPasswordPresence: () => void
@@ -584,6 +586,7 @@
             onShowTag={(tag) => onShowCollection(tagFilter(tag))}
             onSetLock={onSetNoteLock}
           />
+          {#if $selection.activeItemId}<ItemReleaseSection itemId={$selection.activeItemId} itemKind={$selection.activeItemKind} onShowAll={onShowItemActivity} />{/if}
         {:else}
           <div class="select-entry state-panel" aria-busy={itemLoading}><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>{itemLoading ? 'Opening…' : 'Select an item'}</h2><p>Its details will appear here.</p></div>
         {/if}
@@ -691,6 +694,7 @@
           onReveal={onRevealLoginField}
           onHide={onHideLoginField}
         />
+        <ItemReleaseSection itemId={loginCard.id} itemKind="login" onShowAll={onShowItemActivity} />
       {:else}
         <div class="select-entry state-panel"><img class="empty-brand size-lg" src="/favicon.svg" alt="" width="512" height="512" /><h2>Select an item</h2><p>Its details will appear here.</p></div>
       {/if}

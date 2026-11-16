@@ -8,6 +8,7 @@ import {
   resolveBrowserFill as resolveBrowserFillRequest,
   subscribeBrowserFill,
 } from '../vault'
+import { previewBrowserFillRequest } from '../release-record-api'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 
@@ -96,7 +97,14 @@ export function createBrowserFillController({ stores, feedback, onVaultLocked: h
     },
     start() {
       disposed = false
-      if (previewMode) return () => {}
+      if (previewMode) {
+        const preview = previewBrowserFillRequest()
+        if (!preview) return () => {}
+        const timer = window.setInterval(() => {
+          if (!browserFill.value().request && stores.vault.value().status.unlocked) receive(preview)
+        }, 500)
+        return () => window.clearInterval(timer)
+      }
       void subscribeBrowserFill({
         request: (payload) => disposed ? void resolveBrowserFillRequest(payload.approvalId, null) : receive(payload),
         cancelled: (payload) => {

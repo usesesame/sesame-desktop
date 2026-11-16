@@ -168,6 +168,17 @@ export type { BrowserIntegrationStatus } from './generated/BrowserIntegrationSta
 // same shape (the frontend types are a derived/flattened view of a
 // differently-named, differently-shaped Rust event type) and stay hand-written.
 export type { BrowserFillCandidate } from './generated/BrowserFillCandidate'
+export type { EntryKind } from './generated/EntryKind'
+export type { FieldKind } from './generated/FieldKind'
+export type { MatchKind } from './generated/MatchKind'
+export type { Outcome } from './generated/Outcome'
+export type { ReleaseEntryView } from './generated/ReleaseEntryView'
+export type { ReleaseRecordNotice } from './generated/ReleaseRecordNotice'
+export type { ReleaseRecordPage } from './generated/ReleaseRecordPage'
+export type { ReleaseRecordQuery } from './generated/ReleaseRecordQuery'
+export type { ReleaseRecordStatus } from './generated/ReleaseRecordStatus'
+export type { ReleaseRecordHint } from './generated/ReleaseRecordHint'
+export type { ReleaseItemHint } from './generated/ReleaseItemHint'
 
 export interface BrowserFillRequest {
   approvalId: string
@@ -299,7 +310,7 @@ export type ImportSource =
   | 'aegis-json'
   | '2fas-json'
 
-export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'trash' | 'history' | 'backups' | 'settings'
+export type View = 'vault' | 'authenticator' | 'security' | 'tools' | 'activity' | 'trash' | 'history' | 'backups' | 'settings'
 
 export type VaultPane = 'list' | 'detail'
 

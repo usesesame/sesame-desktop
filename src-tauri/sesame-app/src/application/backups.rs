@@ -14,6 +14,7 @@ use crate::vault::backup::{
 };
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health::RecoveryHealth;
+use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::storage::write_export_file;
 use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
 use crate::vault::{
@@ -38,6 +39,10 @@ pub fn create_backup_in_state(state: &VaultState) -> VaultResult<String> {
     let backup_name = format!("sesame-backup-{}-{}.sesame", unix_timestamp(), random_id());
     copy_private_file(&session.path, &backup_dir.join(&backup_name))
         .map_err(|_| "Sesame could not create the encrypted backup.".to_string())?;
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::BackupCreated, Outcome::Released),
+    );
     Ok(backup_name)
 }
 
@@ -82,6 +87,10 @@ pub fn export_backup_in_state(
     }
     copy_private_file(&session.path, &destination)
         .map_err(|_| "Sesame could not write the encrypted backup to that location.".to_string())?;
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::BackupExport, Outcome::Released),
+    );
     let snapshot = session.snapshot();
     if let (Some(vault_id), revision) = (snapshot.vault_id.as_deref(), snapshot.revision) {
         effects.record_recovery_export(vault_id, revision);
@@ -154,6 +163,13 @@ pub fn export_vault_csv_in_state(
         }
         written.push(backup_file_name(path)?);
     }
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::CsvExport, Outcome::Released).count(item_count(&[
+            payload.entries.len(),
+            payload.identities.len(),
+        ])),
+    );
 
     Ok(written)
 }
@@ -195,6 +211,20 @@ pub fn export_vault_json_in_state(
     let payload = session.open_payload()?;
     let bytes = json_export_bytes(&payload)?;
     write_export_file(&destination, &bytes)?;
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::JsonExport, Outcome::Released).count(item_count(&[
+            payload.entries.len(),
+            payload.identities.len(),
+            payload.secure_notes.len(),
+            payload.cards.len(),
+            payload.wifi_networks.len(),
+            payload.ssh_keys.len(),
+            payload.software_licenses.len(),
+            payload.documents.len(),
+            payload.custom_records.len(),
+        ])),
+    );
     backup_file_name(&destination)
 }
 
@@ -248,7 +278,22 @@ pub fn export_recovery_kit_in_state(
          have access to. Anyone who has this kit and your device can open your vault.\n"
     );
     write_export_file(&destination, body.as_bytes())?;
+    if let Some(session) = session.as_ref() {
+        state.release_record.append(
+            session,
+            ReleaseDraft::new(EntryKind::RecoveryKitSaved, Outcome::Released),
+        );
+    }
     backup_file_name(&destination)
+}
+
+fn item_count(counts: &[usize]) -> u32 {
+    u32::try_from(
+        counts
+            .iter()
+            .fold(0_usize, |total, count| total.saturating_add(*count)),
+    )
+    .unwrap_or(u32::MAX)
 }
 
 pub fn delete_local_vault_in_state(

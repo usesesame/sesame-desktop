@@ -5,6 +5,7 @@
   import { useAppStores } from '../stores/app-stores'
   import type { BrowserIdentityFillRequest, IdentityFieldKey } from '../types'
   import ModalShell from './ModalShell.svelte'
+  import ReleaseRecordHintLine from './ReleaseRecordHintLine.svelte'
 
   export let request: BrowserIdentityFillRequest
   export let working = false
@@ -60,6 +61,8 @@
     <span>Requesting page</span>
     <code>{request.origin}</code>
   </div>
+
+  <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserIdentityFill.selectedId} noun="identity" />
 
   <div class="browser-fill-origin identity-fields-requested">
     <Icon name="check" size={15} />

@@ -99,6 +99,8 @@ pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
         parent.join(crate::storage::PIN_THROTTLE_FILE),
         parent.join(RECOVERY_HEALTH_FILE),
         parent.join(RECOVERY_REPLACEMENT_FILE),
+        parent.join(crate::release_record::RECORD_FILE),
+        parent.join(crate::release_record::DAMAGED_FILE),
         parent.join("backups"),
     ];
     if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {
