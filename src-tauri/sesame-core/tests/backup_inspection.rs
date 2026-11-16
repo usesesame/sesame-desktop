@@ -155,10 +155,18 @@ fn inspection_still_rejects_unreadable_and_unsafe_recognized_files() {
 fn verification_reports_whether_a_restore_upgrades_the_backup() {
     let directory = TestDirectory::new();
 
-    let current = directory.write("current.sesame", FIXTURE);
+    let current = directory.write(
+        "current.sesame",
+        &authenticated_old_format(VAULT_FORMAT_VERSION),
+    );
     let verified = verify_backup_file(&current, PASSWORD).expect("current verification");
     assert_eq!(verified.format_version, VAULT_FORMAT_VERSION);
     assert_eq!(verified.compatibility, BackupCompatibility::Current);
+
+    let format_10 = directory.write("format-10.sesame", FIXTURE);
+    let verified = verify_backup_file(&format_10, PASSWORD).expect("format 10 verification");
+    assert_eq!(verified.format_version, 10);
+    assert_eq!(verified.compatibility, BackupCompatibility::Upgrade);
 
     let old = directory.write("format-9.sesame", &authenticated_old_format(9));
     let verified = verify_backup_file(&old, PASSWORD).expect("older verification");

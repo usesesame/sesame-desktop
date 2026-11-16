@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::ItemMetadata;
 use crate::util::{random_id, unix_timestamp};
-use crate::{Folder, VaultFile, VaultPayload, VaultResult, VAULT_FORMAT_VERSION};
+use crate::{
+    Folder, VaultFile, VaultPayload, VaultResult, SETUP_STATE_FORMAT, VAULT_FORMAT_VERSION,
+};
 
 pub fn fresh_vault_id() -> String {
     random_id()
@@ -27,8 +29,10 @@ pub(crate) fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
         changed = true;
     }
     if file.format_version < VAULT_FORMAT_VERSION {
+        if file.format_version < SETUP_STATE_FORMAT {
+            file.setup_complete = true;
+        }
         file.format_version = VAULT_FORMAT_VERSION;
-        file.setup_complete = true;
         changed = true;
     }
     Ok(changed)
@@ -223,6 +227,7 @@ mod tests {
     use crate::types::{
         Card, Folder, HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry,
     };
+    use crate::CipherBlob;
 
     fn login(id: &str) -> VaultEntry {
         let mut entry = VaultEntry::default();
@@ -311,5 +316,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn envelope(format_version: u8, setup_complete: bool) -> VaultFile {
+        let blob = CipherBlob {
+            nonce: String::new(),
+            ciphertext: String::new(),
+        };
+        VaultFile {
+            format_version,
+            kdf: crate::crypto::default_kdf_params(),
+            key_wrap: blob.clone(),
+            legacy_device_wrap: None,
+            recovery_kdf: None,
+            recovery_wrap: None,
+            pin_wrap: None,
+            hello_wrap: None,
+            setup_complete,
+            payload: blob,
+        }
+    }
+
+    #[test]
+    fn only_formats_without_a_setup_state_are_marked_complete() {
+        for (format, setup_complete, expected) in [
+            (9, true, true),
+            (10, true, true),
+            (10, false, false),
+            (VAULT_FORMAT_VERSION, false, false),
+        ] {
+            let mut file = envelope(format, setup_complete);
+            let changed = migrate_vault_file(&mut file).expect("supported format");
+            assert_eq!(changed, format < VAULT_FORMAT_VERSION, "format {format}");
+            assert_eq!(file.format_version, VAULT_FORMAT_VERSION);
+            assert_eq!(file.setup_complete, expected, "format {format}");
+        }
+        assert!(migrate_vault_file(&mut envelope(VAULT_FORMAT_VERSION + 1, true)).is_err());
     }
 }

@@ -18,15 +18,20 @@ const candidate = {
   workflowIdentity: 'https://github.com/example-org/example-repo/.github/workflows/release.yml@refs/tags/v9.9.9',
   workflowRunId: '1234567890',
 }
-const coreSourceTemplate = `pub const VAULT_FORMAT_VERSION: u8 = 10;
+const coreSourceTemplate = `pub const VAULT_FORMAT_VERSION: u8 = 11;
 pub const LEGACY_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:v1";
 pub const FORMAT_9_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:9";
-pub const PENDING_SETUP_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:pending";
-pub const PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:complete";
+pub const FORMAT_10_PENDING_SETUP_PAYLOAD_AAD: &[u8] =
+    b"sesame:vault-payload:format:10:setup:pending";
+pub const FORMAT_10_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:10:setup:complete";
+pub const PENDING_SETUP_PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:11:setup:pending";
+pub const PAYLOAD_AAD: &[u8] = b"sesame:vault-payload:format:11:setup:complete";
 pub fn payload_aad_for_file(format_version: u8, setup_complete: bool) -> Result<&'static [u8], String> {
     match (format_version, setup_complete) {
         (2..=8, true) => Ok(LEGACY_PAYLOAD_AAD),
         (9, true) => Ok(FORMAT_9_PAYLOAD_AAD),
+        (10, false) => Ok(FORMAT_10_PENDING_SETUP_PAYLOAD_AAD),
+        (10, true) => Ok(FORMAT_10_PAYLOAD_AAD),
         (VAULT_FORMAT_VERSION, false) => Ok(PENDING_SETUP_PAYLOAD_AAD),
         (VAULT_FORMAT_VERSION, true) => Ok(PAYLOAD_AAD),
         _ => Err("unsupported".into()),
@@ -108,7 +113,7 @@ test('the repository matrix covers every published release and both platforms', 
   assert.deepEqual(matrix.publishedVersions.map((entry) => entry.tag), ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.2.1', 'v0.2.2'])
   assert.deepEqual(matrix.platforms, ['linux', 'windows'])
   assert.equal(matrix.minimumSupportedFormat, 2)
-  assert.equal(matrix.currentFormat, 10)
+  assert.equal(matrix.currentFormat, 11)
   assert.match(matrix.rollback, /binary rollback/)
   assert.match(matrix.fixtureManifestSha256, /^[0-9a-f]{64}$/)
   const manifestBytes = await readFile(path.join(repository, 'src-tauri', 'sesame-core', 'tests', 'fixtures', 'compatibility', 'manifest.json'))
@@ -139,6 +144,52 @@ test('a format inside the supported range needs a fixture or a recorded recovery
   try {
     await assert.rejects(buildCompatibilityMatrix(root), /Format 2 is inside the supported range/)
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a release may introduce the format after the newest published one when that format is proven', async () => {
+  const root = await fictionalRepository()
+  try {
+    const { matrix } = await buildCompatibilityMatrix(root)
+    assert.equal(matrix.currentFormat, 11)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a release cannot skip a format past the newest published one', async () => {
+  const root = await fictionalRepository({ coreSource: coreSourceTemplate.replace('VAULT_FORMAT_VERSION: u8 = 11', 'VAULT_FORMAT_VERSION: u8 = 12') })
+  try {
+    await assert.rejects(buildCompatibilityMatrix(root), /skips past format 11/)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('a new format needs the newest published format to be proven by a fixture', async () => {
+  const manifest = fictionalManifest()
+  manifest.provenFormats = []
+  manifest.unprovenFormats[0].formats = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+  const root = await fictionalRepository({ manifest })
+  try {
+    await assert.rejects(buildCompatibilityMatrix(root), /newest published format 10 has no genuine writer fixture/)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('the current format still needs a fixture once a release has published it', async () => {
+  const manifest = fictionalManifest()
+  manifest.provenFormats = []
+  manifest.unprovenFormats[0].formats = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+  const root = await fictionalRepository({ manifest, coreSource: coreSourceTemplate.replace('VAULT_FORMAT_VERSION: u8 = 11', 'VAULT_FORMAT_VERSION: u8 = 10') })
+  try {
+    await assert.rejects(buildCompatibilityMatrix(root), /current format 10 has no genuine writer fixture/)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('removing a format 10 reader label fails the gate once format 11 is current', async () => {
+  const { matrix } = await assertRepositoryCompatibility(repository)
+  for (const removed of ['        (10, true) => Ok(FORMAT_10_PAYLOAD_AAD),\n', '        (10, false) => Ok(FORMAT_10_PENDING_SETUP_PAYLOAD_AAD),\n']) {
+    const coreSource = coreSourceTemplate.replace(removed, '')
+    assert.notEqual(coreSource, coreSourceTemplate)
+    assert.throws(() => assertRetainedReaderLabels({ coreSource, matrix }), /Format 10 stays inside the supported range/)
+  }
+  const relabelled = coreSourceTemplate.replace('format:10:setup:complete', 'format:10:setup:done')
+  assert.throws(() => assertRetainedReaderLabels({ coreSource: relabelled, matrix }), /Format 10 stays inside the supported range/)
 })
 
 test('removing a retained reader label fails the gate while the format stays supported', async () => {

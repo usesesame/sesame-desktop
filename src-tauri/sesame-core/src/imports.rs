@@ -1896,6 +1896,8 @@ pub fn imported_entry(
         // parse_import_entries stamps the importer that produced this entry.
         import_source: None,
         legacy_fields: Vec::new(),
+        custom_fields: Vec::new(),
+        match_rule: MatchRule::Exact,
     })
 }
 
@@ -2061,5 +2063,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         revision: 1,
         import_source: None,
         legacy_fields: Vec::new(),
+        custom_fields: Vec::new(),
+        match_rule: MatchRule::Exact,
     })
 }

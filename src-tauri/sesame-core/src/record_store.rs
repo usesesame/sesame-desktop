@@ -29,6 +29,7 @@ struct VaultHeader {
     folders: Vec<Folder>,
     vault_id: Option<String>,
     revision: u64,
+    never_save_sites: Vec<String>,
 }
 
 impl Zeroize for VaultHeader {
@@ -37,6 +38,7 @@ impl Zeroize for VaultHeader {
         self.folders.zeroize();
         self.vault_id.zeroize();
         self.revision.zeroize();
+        self.never_save_sites.zeroize();
     }
 }
 
@@ -119,6 +121,7 @@ impl VaultRecordStore {
             folders: payload.folders.clone(),
             vault_id: payload.vault_id.clone(),
             revision: payload.revision,
+            never_save_sites: payload.never_save_sites.clone(),
         });
         let header = seal(&key, "header", "vault", "metadata", &*header_value)?;
         let mut active = Vec::new();
@@ -182,6 +185,7 @@ impl VaultRecordStore {
         opened.folders = header.folders.clone();
         opened.vault_id = header.vault_id.clone();
         opened.revision = header.revision;
+        opened.never_save_sites = header.never_save_sites.clone();
         let mut payload = OpenedPayload(opened);
         let mut active_ids = HashSet::new();
         for record in &self.active {
@@ -582,6 +586,7 @@ mod tests {
             }],
             vault_id: Some("fictional-vault-id".to_string()),
             revision: 7,
+            never_save_sites: vec!["https://fictional.example".to_string()],
         };
         let pointer = header.vault_name.as_ptr();
         let length = header.vault_name.len();

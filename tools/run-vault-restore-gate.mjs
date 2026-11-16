@@ -31,7 +31,7 @@ function refused(result, message) {
   return { ok: result.ok === false, value: result.value, error: result.ok === false ? undefined : message }
 }
 
-async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
+async function runRestorePhase(bridge, { root, fixture, manifestEntry, currentFormat }) {
   const steps = []
   const password = manifestEntry.secrets.masterPassword
   const createdPassword = 'fictional validation password'
@@ -126,7 +126,7 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
     const fields = verification.value ?? {}
     recordStep(steps, 'verify.restored_backup.fields', {
       ok: fields.entryCount === manifestEntry.counts.entries
-        && fields.formatVersion === manifestEntry.formatVersion
+        && fields.formatVersion === currentFormat
         && fields.vaultName === manifestEntry.vault.name,
       value: { entryCount: fields.entryCount, formatVersion: fields.formatVersion, vaultName: fields.vaultName },
     })
@@ -144,7 +144,7 @@ async function runRestorePhase(bridge, { root, fixture, manifestEntry }) {
   return steps
 }
 
-async function runRestartPhase(bridge, { root, manifestEntry }) {
+async function runRestartPhase(bridge, { root, manifestEntry, currentFormat }) {
   const steps = []
   const password = manifestEntry.secrets.masterPassword
   const kit = manifestEntry.secrets.recoveryKit
@@ -160,7 +160,7 @@ async function runRestartPhase(bridge, { root, manifestEntry }) {
 
   const header = JSON.parse(await readFile(path.join(root, 'vault.sesame'), 'utf8'))
   recordStep(steps, 'active_vault.header', {
-    ok: header.formatVersion === manifestEntry.formatVersion
+    ok: header.formatVersion === currentFormat
       && header.setupComplete === true
       && header.recoveryWrap !== null
       && header.recoveryKdf !== null,
@@ -174,7 +174,7 @@ async function runRestartPhase(bridge, { root, manifestEntry }) {
   return steps
 }
 
-async function runPhases({ binary, root, phase, fixture, manifestEntry, logPath }) {
+async function runPhases({ binary, root, phase, fixture, manifestEntry, currentFormat, logPath }) {
   const log = []
   const bridge = await openBridge(`vault-gate-${randomBytes(16).toString('hex')}`)
   const child = launchApp({ binary, root, bridge, log })
@@ -183,8 +183,8 @@ async function runPhases({ binary, root, phase, fixture, manifestEntry, logPath 
       throw new Error('The app never connected to the installed-app bridge. It is missing the test bridge or failed to start.')
     }
     return phase === 'restore'
-      ? await runRestorePhase(bridge, { root, fixture, manifestEntry })
-      : await runRestartPhase(bridge, { root, manifestEntry })
+      ? await runRestorePhase(bridge, { root, fixture, manifestEntry, currentFormat })
+      : await runRestartPhase(bridge, { root, manifestEntry, currentFormat })
   } finally {
     await stopApp(child)
     bridge.close()
@@ -229,11 +229,11 @@ export async function runVaultRestoreGate(options) {
     let phases
     try {
       const restoreSteps = await runPhases({
-        binary, root, phase: 'restore', fixture, manifestEntry,
+        binary, root, phase: 'restore', fixture, manifestEntry, currentFormat: matrix.currentFormat,
         logPath: path.join(out, `${platform}-${fixtureId}-restore.log`),
       })
       const restartSteps = await runPhases({
-        binary, root, phase: 'restart', fixture, manifestEntry,
+        binary, root, phase: 'restart', fixture, manifestEntry, currentFormat: matrix.currentFormat,
         logPath: path.join(out, `${platform}-${fixtureId}-restart.log`),
       })
       phases = { restore: await summarize(restoreSteps), restart: await summarize(restartSteps) }

@@ -238,13 +238,24 @@ export function assertCompatibilityPolicy(matrix, policy) {
   for (const [format, ids] of proven) {
     for (const id of ids) requireCondition(fixtureIds.has(id), `Format ${format} names fixture ${id}, which is not a published release fixture.`)
   }
-  for (let format = matrix.minimumSupportedFormat; format <= matrix.currentFormat; format += 1) {
+  const newestPublishedFormat = Math.max(...matrix.publishedVersions.map((version) => version.formatVersion))
+  requireCondition(
+    matrix.currentFormat <= newestPublishedFormat + 1,
+    `The current format ${matrix.currentFormat} skips past format ${newestPublishedFormat + 1}. A release may introduce only the format after the newest published one.`,
+  )
+  const newestReadFormat = Math.min(matrix.currentFormat, newestPublishedFormat)
+  for (let format = matrix.minimumSupportedFormat; format <= newestReadFormat; format += 1) {
     requireCondition(
       proven.has(format) || unproven.has(format),
       `Format ${format} is inside the supported range but has no genuine writer fixture and no recorded recovery path.`,
     )
   }
-  requireCondition(proven.has(matrix.currentFormat), `The current format ${matrix.currentFormat} has no genuine writer fixture.`)
+  requireCondition(
+    proven.has(newestReadFormat),
+    matrix.currentFormat > newestPublishedFormat
+      ? `The newest published format ${newestPublishedFormat} has no genuine writer fixture, so the upgrade to format ${matrix.currentFormat} is unproven.`
+      : `The current format ${matrix.currentFormat} has no genuine writer fixture.`,
+  )
   return matrix
 }
 
@@ -258,6 +269,13 @@ export function assertRetainedReaderLabels({ coreSource, matrix }) {
   }
   if (matrix.minimumSupportedFormat <= 9) {
     requireCondition(hasFormat9Label && hasFormat9Arm, 'Format 9 stays inside the supported range, but its exact authentication label is gone from payload_aad_for_file.')
+  }
+  if (matrix.minimumSupportedFormat <= 10 && matrix.currentFormat > 10) {
+    const hasFormat10Labels = /pub const FORMAT_10_PAYLOAD_AAD: &\[u8\] =\s*b"sesame:vault-payload:format:10:setup:complete";/.test(coreSource)
+      && /pub const FORMAT_10_PENDING_SETUP_PAYLOAD_AAD: &\[u8\] =\s*b"sesame:vault-payload:format:10:setup:pending";/.test(coreSource)
+    const hasFormat10Arms = /\(10, true\)\s*=>\s*Ok\(FORMAT_10_PAYLOAD_AAD\)/.test(coreSource)
+      && /\(10, false\)\s*=>\s*Ok\(FORMAT_10_PENDING_SETUP_PAYLOAD_AAD\)/.test(coreSource)
+    requireCondition(hasFormat10Labels && hasFormat10Arms, 'Format 10 stays inside the supported range, but its exact authentication labels are gone from payload_aad_for_file.')
   }
   return coreSource
 }

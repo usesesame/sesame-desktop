@@ -837,6 +837,7 @@ pub struct VaultPayload {
     pub history: Vec<HistoryEntry>,
     pub vault_id: Option<String>,
     pub revision: u64,
+    pub never_save_sites: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1836,6 +1837,25 @@ pub struct VaultEntry {
     pub import_source: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub legacy_fields: Vec<LegacyField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_fields: Vec<CustomFieldEntry>,
+    #[serde(default, skip_serializing_if = "MatchRule::is_exact")]
+    pub match_rule: MatchRule,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchRule {
+    #[default]
+    Exact,
+    Site,
+    Never,
+}
+
+impl MatchRule {
+    pub fn is_exact(&self) -> bool {
+        *self == Self::Exact
+    }
 }
 
 /// Unknown import values default to `secret`, so the UI never reveals them unprompted.
@@ -1860,6 +1880,8 @@ struct PersistedVaultPayloadV8<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     vault_id: &'a Option<String>,
     revision: u64,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    never_save_sites: &'a [String],
 }
 
 impl Drop for PersistedVaultPayloadV8<'_> {
@@ -1903,6 +1925,8 @@ struct StoredVaultPayload {
     vault_id: Option<String>,
     #[serde(default)]
     revision: u64,
+    #[serde(default)]
+    never_save_sites: Vec<String>,
 }
 
 impl VaultPayload {
@@ -2094,6 +2118,7 @@ impl VaultPayload {
             history: stored.history,
             vault_id: stored.vault_id,
             revision: stored.revision,
+            never_save_sites: stored.never_save_sites,
         };
         let Some(items) = stored.items else {
             return Ok(payload);
@@ -2197,6 +2222,7 @@ impl Serialize for VaultPayload {
             history: &self.history,
             vault_id: &self.vault_id,
             revision: self.revision,
+            never_save_sites: &self.never_save_sites,
         }
         .serialize(serializer)
     }
@@ -2484,6 +2510,7 @@ impl Zeroize for VaultPayload {
         self.history.zeroize();
         self.vault_id.zeroize();
         self.revision.zeroize();
+        self.never_save_sites.zeroize();
     }
 }
 
@@ -2785,6 +2812,7 @@ impl Zeroize for VaultEntry {
         self.recovery_phone.zeroize();
         self.notes.zeroize();
         self.legacy_fields.zeroize();
+        self.custom_fields.zeroize();
     }
 }
 

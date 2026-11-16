@@ -23,7 +23,7 @@ pub fn install_unlocked_session(
     // `OpenedVault` zeroizes on drop, so build the session without moving its fields out.
     let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
     effects.report_key_page_fallback(&unlocked);
-    if opened.migrated {
+    if opened.migrated && unlocked.setup_complete {
         if let Err(error) = persist_session(&mut unlocked) {
             return Err(format!(
                 "Sesame upgraded your vault but could not save the upgrade: {error}"

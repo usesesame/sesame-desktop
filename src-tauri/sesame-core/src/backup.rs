@@ -16,7 +16,7 @@ use crate::{
     types::*,
     util::{random_id, unix_timestamp},
 };
-use crate::{VaultFile, VaultPayload, VaultResult};
+use crate::{VaultFile, VaultPayload, VaultResult, VAULT_FORMAT_VERSION};
 
 pub fn unwrap_vault_key(file: &VaultFile, secret: &str) -> VaultResult<Zeroizing<[u8; 32]>> {
     VaultLoader::unwrap_key(file, Credential::PasswordOrRecoveryKit(secret)).map_err(Into::into)
@@ -330,6 +330,50 @@ pub fn snapshot_vault_revision(vault: &Path, label: &str) -> VaultResult<Option<
     copy_private_file(vault, &backup_dir.join(&name))
         .map_err(|_| "Sesame could not create a revision before this change.".to_string())?;
     Ok(Some(name))
+}
+
+const UPGRADE_BACKUP_PREFIX: &str = "sesame-before-upgrade-";
+const UPGRADE_BACKUP_FAILED: &str =
+    "Sesame could not save a copy of your vault before upgrading it. Your saved vault has not changed.";
+
+pub fn preserve_vault_before_upgrade(vault: &Path) -> VaultResult<Option<String>> {
+    if !vault.exists() {
+        return Ok(None);
+    }
+    let original = VaultLoader::read_bytes(vault).map_err(|_| UPGRADE_BACKUP_FAILED.to_string())?;
+    let format =
+        VaultLoader::probe_format(&original).map_err(|_| UPGRADE_BACKUP_FAILED.to_string())?;
+    if format >= VAULT_FORMAT_VERSION {
+        return Ok(None);
+    }
+    let backup_dir = vault.parent().ok_or(UPGRADE_BACKUP_FAILED)?.join("backups");
+    if let Some(existing) = matching_upgrade_backup(&backup_dir, &original) {
+        return Ok(Some(existing));
+    }
+    let name = snapshot_vault_revision(vault, "upgrade")
+        .map_err(|_| UPGRADE_BACKUP_FAILED.to_string())?
+        .ok_or(UPGRADE_BACKUP_FAILED)?;
+    let copy = backup_dir.join(&name);
+    let verified =
+        VaultLoader::read_bytes(&copy).is_ok_and(|copied| copied.as_slice() == original.as_slice());
+    if !verified {
+        let _ = fs::remove_file(&copy);
+        return Err(UPGRADE_BACKUP_FAILED.into());
+    }
+    Ok(Some(name))
+}
+
+fn matching_upgrade_backup(backup_dir: &Path, original: &[u8]) -> Option<String> {
+    fs::read_dir(backup_dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(UPGRADE_BACKUP_PREFIX) && name.ends_with(".sesame"))
+        .find(|name| {
+            VaultLoader::read_bytes(&backup_dir.join(name))
+                .is_ok_and(|bytes| bytes.as_slice() == original)
+        })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

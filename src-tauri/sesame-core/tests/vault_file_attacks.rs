@@ -76,7 +76,7 @@ fn remove_backup(path: &PathBuf) {
 #[test]
 fn a_vault_file_cannot_be_relabelled_into_another_format() {
     let (file, key, _) = complete_vault(PASSWORD_A, "Vault A");
-    for version in [0_u8, 2, 8, 9, 11, 255] {
+    for version in [0_u8, 2, 8, 9, 10, 12, 255] {
         let mut relabelled = file.clone();
         relabelled.format_version = version;
         assert!(

@@ -1,10 +1,10 @@
 use zeroize::Zeroizing;
 
 use crate::types::{
-    Card, CardInput, CustomRecord, CustomRecordInput, DocumentMetadata, DocumentMetadataInput,
-    Identity, IdentityInput, LegacyField, SecureNote, SecureNoteInput, SoftwareLicense,
-    SoftwareLicenseInput, SshKey, SshKeyInput, TaggedItem, VaultEntry, WifiNetwork,
-    WifiNetworkInput,
+    Card, CardInput, CustomFieldEntry, CustomRecord, CustomRecordInput, DocumentMetadata,
+    DocumentMetadataInput, Identity, IdentityInput, LegacyField, SecureNote, SecureNoteInput,
+    SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TaggedItem, VaultEntry,
+    WifiNetwork, WifiNetworkInput,
 };
 
 pub trait SecretSlots {
@@ -58,6 +58,14 @@ fn visit_legacy(fields: &mut [LegacyField], visit: &mut dyn FnMut(&str, &mut Str
     }
 }
 
+fn visit_custom_fields(fields: &mut [CustomFieldEntry], visit: &mut dyn FnMut(&str, &mut String)) {
+    for (index, field) in fields.iter_mut().enumerate() {
+        if field.kind == "secret" {
+            visit(&format!("field:{index}"), &mut field.value);
+        }
+    }
+}
+
 macro_rules! kept_secrets_from_field {
     ($($input:ty),* $(,)?) => {
         $(impl KeptSecrets for $input {
@@ -84,6 +92,7 @@ impl SecretSlots for VaultEntry {
     fn visit_secrets(&mut self, visit: &mut dyn FnMut(&str, &mut String)) {
         visit("password", &mut self.password);
         visit_legacy(&mut self.legacy_fields, visit);
+        visit_custom_fields(&mut self.custom_fields, visit);
     }
 }
 
@@ -137,11 +146,7 @@ impl SecretSlots for DocumentMetadata {
 
 impl SecretSlots for CustomRecord {
     fn visit_secrets(&mut self, visit: &mut dyn FnMut(&str, &mut String)) {
-        for (index, field) in self.fields.iter_mut().enumerate() {
-            if field.kind == "secret" {
-                visit(&format!("field:{index}"), &mut field.value);
-            }
-        }
+        visit_custom_fields(&mut self.fields, visit);
     }
 
     fn keep_secrets(&mut self, existing: &Self, kept: &[String]) {

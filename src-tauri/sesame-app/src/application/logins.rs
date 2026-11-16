@@ -53,6 +53,8 @@ pub fn save_login_in_state(state: &VaultState, input: LoginInput) -> VaultResult
         };
         updated.import_source = previous.import_source.clone();
         updated.legacy_fields = previous.legacy_fields.clone();
+        updated.custom_fields = previous.custom_fields.clone();
+        updated.match_rule = previous.match_rule;
         updated.favourite = previous.favourite;
         updated.last_used_at = previous.last_used_at;
         updated.totp = resolved_totp(totp_input, previous.totp.clone());
