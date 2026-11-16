@@ -41,7 +41,7 @@ export type PasswordIntent = 'reveal' | 'copy' | 'autotype'
 function emptyLoginDraft(password = ''): LoginInput {
   return {
     title: '', url: '', urls: [], tags: [], username: '', email: '', password, folder: '', totp: undefined, backupCodes: [],
-    recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '', keepBackupCodes: false,
+    recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '', keepBackupCodes: false, matchRule: 'exact',
   }
 }
 
@@ -321,7 +321,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
         id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
         folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], keepBackupCodes: (card.backupCodeCount ?? 0) > 0,
         recoveryEmail: card.recoveryEmail || '', recoveryPhone: card.recoveryPhone || '',
-        recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '',
+        recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '', matchRule: card.matchRule,
       },
       editorBackupCodeCount: card.backupCodeCount ?? 0,
       editorHasTotp: card.hasTotp,
@@ -561,7 +561,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
         const result = await saveLogin({
           id: card.id, title: card.title, url: card.url, urls: card.urls?.slice(1) ?? [], tags: card.tags ?? [], username: card.username, email: card.email, password: '',
           folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], keepBackupCodes: false, recoveryEmail: '', recoveryPhone: '',
-          recoveryNotApplicable: true, notes: card.notes || '',
+          recoveryNotApplicable: true, notes: card.notes || '', matchRule: card.matchRule,
         })
         vault.patch({ snapshot: result.snapshot, loginCard: { ...card, backupCodeCount: 0, recoveryEmail: undefined, recoveryPhone: undefined, recoveryNotApplicable: true } })
         feedback.showNotice('Recovery checked', `${card.title} is marked as having no separate recovery options.`)

@@ -5,23 +5,22 @@ use std::{
 };
 
 use unicode_security::mixed_script::AugmentedScriptSet;
-use url::Host;
 
 use crate::application::DesktopEffects;
 use crate::browser_protocol::{
-    fill_carries_match_kind, parse_card_fields, parse_identity_fields, BrowserRequest,
-    BrowserResponse, IdentityFillFields, LOOKALIKE_PROTOCOL_VERSION, MAX_CREDENTIAL_FIELD_BYTES,
-    MAX_LOOKALIKE_HOST_CHARS,
+    fill_carries_lookalike, fill_carries_match_kind, fill_carries_site_match, parse_card_fields,
+    parse_identity_fields, BrowserRequest, BrowserResponse, IdentityFillFields,
+    MAX_CREDENTIAL_FIELD_BYTES, MAX_LOOKALIKE_HOST_CHARS,
 };
 use crate::vault::snapshot::{current_totp, totp_from_value};
 use crate::vault::{Identity, TaggedItem, VaultEntry, VaultState};
 
 use super::browser_fill::{
-    bounded_display, card_candidate, card_supports_fields, origin_match_kind, selected_card_fields,
-    ApprovalDecision, ApprovalKind, BrowserCardRequestEvent, BrowserFillCandidate,
-    BrowserFillRequestEvent, BrowserIdentityRequestEvent, BrowserSaveRequestEvent,
-    BrowserTotpRequestEvent, IdentityFillCandidate, NormalizedOrigin, OriginMatchKind, SaveKind,
-    TotpFillCandidate,
+    bounded_display, card_candidate, card_supports_fields, login_match, never_saves,
+    registrable_domain, selected_card_fields, ApprovalDecision, ApprovalKind,
+    BrowserCardRequestEvent, BrowserFillCandidate, BrowserFillRequestEvent,
+    BrowserIdentityRequestEvent, BrowserSaveRequestEvent, BrowserTotpRequestEvent,
+    IdentityFillCandidate, NormalizedOrigin, OriginMatchKind, SaveKind, TotpFillCandidate,
 };
 use super::browser_fill_broker::{
     ApprovalEvent, ApprovalRequest, BrowserFillState, APPROVAL_TIMEOUT,
@@ -140,18 +139,25 @@ pub fn fill_response_in_state(
                 return BrowserResponse::unavailable(request, "approvalUnavailable").into();
             }
         };
-        let candidates = matching_entries(&payload.entries, &origin);
-        let lookalike = if candidates.is_empty() && request.version == LOOKALIKE_PROTOCOL_VERSION {
+        let candidates = matching_entries(
+            &payload.entries,
+            &origin,
+            fill_carries_site_match(request.version),
+        );
+        let only_site_candidates = candidates
+            .iter()
+            .all(|candidate| candidate.match_kind == OriginMatchKind::Site.as_str());
+        let lookalike = if only_site_candidates && fill_carries_lookalike(request.version) {
             lookalike_host(&payload.entries, &origin)
         } else {
             None
         };
         (vault.session_epoch(), candidates, lookalike)
     };
+    if let Some(lookalike) = lookalike {
+        return BrowserResponse::lookalike_unavailable(request, lookalike).into();
+    }
     if candidates.is_empty() {
-        if let Some(lookalike) = lookalike {
-            return BrowserResponse::lookalike_unavailable(request, lookalike).into();
-        }
         effects.record_browser_host_registration("fill_no_match");
         return BrowserResponse::unavailable(request, "noMatch").into();
     }
@@ -266,10 +272,11 @@ pub fn complete_fill_in_state(
         );
         return BrowserResponse::unavailable(request, "staleRequest");
     };
-    let Some(match_kind) = NormalizedOrigin::from_saved_url(&entry.url)
-        .as_ref()
-        .and_then(|saved| origin_match_kind(saved, &approval.origin))
-    else {
+    let Some((match_kind, _)) = login_match(
+        entry,
+        &approval.origin,
+        fill_carries_site_match(request.version),
+    ) else {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -349,9 +356,14 @@ pub fn save_response_in_state(
                 .into()
             }
         };
+        if never_saves(&payload.never_save_sites, &origin) {
+            effects.record_browser_host_registration("save_never_site");
+            return BrowserResponse::save_unavailable(&request.request_id, "approvalDeclined")
+                .into();
+        }
         let candidates = match kind {
             SaveKind::New => Vec::new(),
-            SaveKind::Update => matching_entries(&payload.entries, &origin),
+            SaveKind::Update => matching_entries(&payload.entries, &origin, true),
         };
         (vault.session_epoch(), candidates)
     };
@@ -981,15 +993,7 @@ pub fn complete_totp_in_state(
         );
         return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
     };
-    let Some(saved_origin) = NormalizedOrigin::from_saved_url(&entry.url) else {
-        effects.emit_browser_approval_cancelled(
-            ApprovalKind::Totp,
-            &approval.approval_id,
-            "vaultChanged",
-        );
-        return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
-    };
-    if origin_match_kind(&saved_origin, &approval.origin).is_none() {
+    if login_match(entry, &approval.origin, true).is_none() {
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -1021,20 +1025,27 @@ pub(super) fn totp_response_for_secret(
     response.validate_for(request).then_some(response)
 }
 
+const MATCH_KIND_ORDER: [OriginMatchKind; 3] = [
+    OriginMatchKind::Exact,
+    OriginMatchKind::WwwAlias,
+    OriginMatchKind::Site,
+];
+
 pub(super) fn matching_entries(
     entries: &[VaultEntry],
     origin: &NormalizedOrigin,
+    allow_site: bool,
 ) -> Vec<BrowserFillCandidate> {
     let mut candidates = Vec::new();
-    for requested_kind in [OriginMatchKind::Exact, OriginMatchKind::WwwAlias] {
+    for requested_kind in MATCH_KIND_ORDER {
         for entry in entries {
             if !credential_fields_valid(entry) {
                 continue;
             }
-            let Some(saved_origin) = NormalizedOrigin::from_saved_url(&entry.url) else {
+            let Some((kind, saved_origin)) = login_match(entry, origin, allow_site) else {
                 continue;
             };
-            if origin_match_kind(&saved_origin, origin) != Some(requested_kind) {
+            if kind != requested_kind {
                 continue;
             }
             candidates.push(BrowserFillCandidate {
@@ -1071,21 +1082,23 @@ pub(super) fn matching_totp_entries(
     origin: &NormalizedOrigin,
 ) -> Vec<TotpFillCandidate> {
     let mut candidates = Vec::new();
-    for requested_kind in [OriginMatchKind::Exact, OriginMatchKind::WwwAlias] {
+    for requested_kind in MATCH_KIND_ORDER {
         for entry in entries {
             if !totp_fields_valid(entry) {
                 continue;
             }
-            let Some(saved_origin) = NormalizedOrigin::from_saved_url(&entry.url) else {
+            let Some((kind, saved_origin)) = login_match(entry, origin, true) else {
                 continue;
             };
-            if origin_match_kind(&saved_origin, origin) != Some(requested_kind) {
+            if kind != requested_kind {
                 continue;
             }
             candidates.push(TotpFillCandidate {
                 id: entry.id.clone(),
                 title: bounded_display(&entry.title, 128),
                 username: bounded_display(&entry.username, 256),
+                saved_origin: saved_origin.canonical(),
+                match_kind: kind.as_str(),
             });
             if candidates.len() >= MAX_MATCHING_CANDIDATES {
                 return candidates;
@@ -1144,16 +1157,6 @@ pub(super) fn lookalike_host(
         }
     }
     None
-}
-
-fn registrable_domain(hostname: &str) -> Option<&str> {
-    if !hostname.contains('.') || hostname.contains(':') {
-        return None;
-    }
-    match Host::parse(hostname) {
-        Ok(Host::Domain(domain)) if domain == hostname => psl::domain_str(hostname),
-        _ => None,
-    }
 }
 
 fn decode_domain(domain: &str) -> Option<String> {

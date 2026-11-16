@@ -1,0 +1,77 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v7",
+  "protocolVersion": 7,
+  "compatibility": {
+    "minimumHostProtocolVersion": 7,
+    "currentHostProtocolVersion": 7,
+    "minimumExtensionProtocolVersion": 7,
+    "currentExtensionProtocolVersion": 7
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "credentialFieldBytes": 4096,
+    "lookalikeHostChars": 128,
+    "approvalSeconds": 30
+  },
+  "requestTypes": [
+    "fill"
+  ],
+  "responseTypes": [
+    "fill",
+    "fill-unavailable",
+    "error"
+  ],
+  "matchKinds": [
+    "exact",
+    "wwwAlias",
+    "site"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches",
+    "lookalike"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
+    "origin": "The fill request carries one normalized page origin. The desktop matches it against saved login URLs under each login's rule and rechecks the same relationship under the vault lock before release.",
+    "matchKind": "Names the rule the desktop enforced when it released the credential: exact, wwwAlias for the single www form of a bare hostname, or site when the login's rule is site and the page has the same scheme, port and registrable domain as a saved address. Registrable domains come from the public suffix list including its private section, so two tenants of a shared suffix never match. A public suffix, an IP address, localhost or a single-label host never matches by site. The desktop recomputes the rule before release; the extension reads it to explain the match.",
+    "loginRules": "A login whose rule is never is never offered. A login whose rule is site is offered by site only to a version 7 request. A version 5 request receives exact and wwwAlias matches only, and the desktop accepts fill at both versions.",
+    "lookalike": "Present exactly when reason is lookalike: the stored host the requested page resembles, normalized to a lowercase origin host and bounded to 128 characters. No path, query, credentials, or control character ever crosses in this field, and no credential is released on this path. A page that matches only by site still gets this warning when it resembles another stored host.",
+    "expiry": "Not transmitted as caller-controlled data. The desktop owns the 30-second deadline and rechecks the pending request, connection, vault session epoch, and deadline before release."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json",
+  "messageVersions": {
+    "capabilities": 6,
+    "activate": 1,
+    "identity": 1,
+    "save": 1,
+    "card": 2,
+    "totp": 4,
+    "fill": 7
+  },
+  "acceptedFillVersions": [
+    5,
+    7
+  ]
+}

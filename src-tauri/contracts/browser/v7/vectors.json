@@ -1,0 +1,116 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 7,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "fill request defaults to both fields",
+      "valid": true,
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-1", "origin": "https://login.example.test" }
+    },
+    {
+      "name": "fill request names only the password field",
+      "valid": true,
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-2", "origin": "https://login.example.test", "fields": "password" }
+    },
+    {
+      "name": "protocol seven rejects a non-fill request",
+      "valid": false,
+      "message": { "version": 7, "type": "totp", "requestId": "totp-7-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill request rejects an unknown property",
+      "valid": false,
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-3", "origin": "https://example.test", "matchRule": "site" }
+    },
+    {
+      "name": "protocol six rejects a fill request",
+      "valid": false,
+      "message": { "version": 6, "type": "fill", "requestId": "fill-6-1", "origin": "https://example.test" }
+    },
+    {
+      "name": "fill request rejects a future protocol version",
+      "valid": false,
+      "message": { "version": 8, "type": "fill", "requestId": "fill-8-1", "origin": "https://example.test" }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "exact origin fill reports the exact rule",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-1", "origin": "https://example.test" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-1", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "fictional-example-value" }, "matchKind": "exact" }
+    },
+    {
+      "name": "www alias fill reports the wwwAlias rule",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-2", "origin": "https://www.example.test", "fields": "password" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-2", "password": "fictional-example-value", "matchKind": "wwwAlias" },
+      "extensionResult": { "ok": true, "credential": { "username": "", "password": "fictional-example-value" }, "matchKind": "wwwAlias" }
+    },
+    {
+      "name": "a site rule login on another host of the same site reports the site rule",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-4", "origin": "https://login.example.test" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-4", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "site" },
+      "extensionResult": { "ok": true, "credential": { "username": "person@example.test", "password": "fictional-example-value" }, "matchKind": "site" }
+    },
+    {
+      "name": "a sibling tenant of a private suffix is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-5", "origin": "https://bob.github.io" },
+      "message": { "version": 7, "type": "fill-unavailable", "requestId": "fill-7-5", "reason": "noMatch" },
+      "extensionResult": { "ok": false, "code": "no-match" }
+    },
+    {
+      "name": "a lookalike host answers with the stored host and no credential",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-6", "origin": "https://login.xn--pple-43d.com" },
+      "message": { "version": 7, "type": "fill-unavailable", "requestId": "fill-7-6", "reason": "lookalike", "lookalike": "apple.com" },
+      "extensionResult": { "ok": false, "code": "lookalike-domain", "lookalike": "apple.com" }
+    },
+    {
+      "name": "locked vault is a safe negative result",
+      "hostValid": true,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-7", "origin": "https://example.test" },
+      "message": { "version": 7, "type": "fill-unavailable", "requestId": "fill-7-7", "reason": "locked" },
+      "extensionResult": { "ok": false, "code": "vault-locked" }
+    },
+    {
+      "name": "version five cannot answer with the site rule",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-20", "origin": "https://login.example.test" },
+      "message": { "version": 5, "type": "fill", "requestId": "fill-5-20", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "site" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "an unknown rule is rejected",
+      "hostValid": false,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-8", "origin": "https://login.example.test" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-8", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "parentDomain" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "version seven fill without matchKind is rejected",
+      "hostValid": false,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-9", "origin": "https://example.test" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-7-9", "username": "person@example.test", "password": "fictional-example-value" },
+      "extensionResult": { "ok": false, "code": "unsafe-response" }
+    },
+    {
+      "name": "a version seven answer to a version five request is rejected",
+      "hostValid": false,
+      "request": { "version": 5, "type": "fill", "requestId": "fill-5-21", "origin": "https://example.test" },
+      "message": { "version": 7, "type": "fill", "requestId": "fill-5-21", "username": "person@example.test", "password": "fictional-example-value", "matchKind": "exact" },
+      "extensionResult": { "ok": false, "code": "protocol-mismatch" }
+    },
+    {
+      "name": "response request id mismatch",
+      "hostValid": false,
+      "request": { "version": 7, "type": "fill", "requestId": "fill-7-10", "origin": "https://example.test", "fields": "password" },
+      "message": { "version": 7, "type": "fill", "requestId": "other-request", "password": "fictional-example-value", "matchKind": "site" },
+      "extensionResult": { "ok": false, "code": "request-mismatch" }
+    }
+  ]
+}

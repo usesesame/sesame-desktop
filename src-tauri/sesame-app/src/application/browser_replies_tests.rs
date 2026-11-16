@@ -655,8 +655,11 @@ mod origin_attacks {
             entry("login-exact", "https://example.test", CANARY_PASSWORD),
             entry("login-www", "https://www.example.test", CANARY_PASSWORD),
         ];
-        let candidates =
-            matching_entries(&entries, &request("https://example.test").expect("origin"));
+        let candidates = matching_entries(
+            &entries,
+            &request("https://example.test").expect("origin"),
+            false,
+        );
 
         assert_eq!(
             candidates
@@ -700,7 +703,7 @@ mod origin_attacks {
         ];
         let requested = request("https://bank.test").expect("request origin");
 
-        let candidates = matching_entries(&entries, &requested);
+        let candidates = matching_entries(&entries, &requested, false);
 
         assert_eq!(
             candidates
@@ -728,8 +731,11 @@ mod origin_attacks {
             oversized_username,
         ];
 
-        let candidates =
-            matching_entries(&entries, &request("https://example.test").expect("origin"));
+        let candidates = matching_entries(
+            &entries,
+            &request("https://example.test").expect("origin"),
+            false,
+        );
 
         assert!(candidates.is_empty());
     }
@@ -738,8 +744,11 @@ mod origin_attacks {
     fn a_candidate_carries_no_secret() {
         let entries = vec![entry("login-a", "https://example.test", CANARY_PASSWORD)];
 
-        let candidates =
-            matching_entries(&entries, &request("https://example.test").expect("origin"));
+        let candidates = matching_entries(
+            &entries,
+            &request("https://example.test").expect("origin"),
+            false,
+        );
 
         let wire = serde_json::to_string(&candidates).expect("serialized candidates");
         assert!(!wire.contains(CANARY_PASSWORD));
@@ -758,8 +767,11 @@ mod origin_attacks {
             })
             .collect();
 
-        let candidates =
-            matching_entries(&entries, &request("https://example.test").expect("origin"));
+        let candidates = matching_entries(
+            &entries,
+            &request("https://example.test").expect("origin"),
+            false,
+        );
 
         assert_eq!(candidates.len(), MAX_MATCHING_CANDIDATES);
     }
@@ -1302,6 +1314,8 @@ mod totp_flow_tests {
             id: "login-a".to_string(),
             title: "Northwind".to_string(),
             username: "casey".to_string(),
+            saved_origin: "https://example.test".to_string(),
+            match_kind: "exact",
         };
         let event = BrowserTotpRequestEvent {
             approval_id: "approval-a".to_string(),

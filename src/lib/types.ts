@@ -52,6 +52,7 @@ export type { VaultSetup } from './generated/VaultSetup'
 export type { ChangeMasterPasswordResult } from './generated/ChangeMasterPasswordResult'
 export type { LoginCard } from './generated/LoginCard'
 export type { LoginInput } from './generated/LoginInput'
+export type { MatchRule } from './generated/MatchRule'
 export type { LoginSummary } from './generated/LoginSummary'
 export type { TotpRefresh } from './generated/TotpRefresh'
 export type { SaveLoginResult } from './generated/SaveLoginResult'
@@ -241,6 +242,8 @@ export interface BrowserTotpFillCandidate {
   id: string
   title: string
   username: string
+  savedOrigin: string
+  matchKind: BrowserFillCandidate['matchKind']
 }
 
 export interface BrowserTotpFillRequest {

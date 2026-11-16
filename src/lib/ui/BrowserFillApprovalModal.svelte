@@ -50,7 +50,12 @@
     <code>{request.origin}</code>
   </div>
 
-  {#if selectedCandidate?.matchKind === 'wwwAlias'}
+  {#if selectedCandidate?.matchKind === 'site'}
+    <div class="browser-fill-alias">
+      <Icon name="alert" size={16} />
+      <p><strong>Matched by site</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code> and set to fill on the whole site, so Sesame offers it on <code>{request.origin}</code>.</span></p>
+    </div>
+  {:else if selectedCandidate?.matchKind === 'wwwAlias'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
       <p><strong>Saved without "www"</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code>. The <code>www</code> address is treated as the same site.</span></p>
@@ -63,7 +68,7 @@
         <input type="radio" name="browser-fill-login" value={candidate.id} checked={$browserFill.selectedId === candidate.id} on:change={() => browserFill.patch({ selectedId: candidate.id })} disabled={working} />
         <span class="entry-avatar">{candidate.title.slice(0, 1).toUpperCase() || '?'}</span>
         <span><strong>{candidate.title}</strong><small>{candidate.username || candidate.email || 'No username saved'}</small><small class="candidate-origin">{candidate.savedOrigin}</small></span>
-        {#if candidate.matchKind === 'wwwAlias'}<span class="candidate-match">www match</span>{/if}
+        {#if candidate.matchKind === 'wwwAlias'}<span class="candidate-match">www match</span>{:else if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
       </label>
     {/each}
   </div>

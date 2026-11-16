@@ -1,6 +1,6 @@
 use sesame_core::{
     json_export_bytes, Attachment, Card, CustomFieldEntry, CustomRecord, DocumentMetadata, Folder,
-    Identity, LegacyField, SecureNote, SoftwareLicense, SshKey, TaggedItem, TrashedItem,
+    Identity, LegacyField, MatchRule, SecureNote, SoftwareLicense, SshKey, TaggedItem, TrashedItem,
     VaultEntry, VaultPayload, WifiNetwork, READABLE_EXPORT_FORMAT, READABLE_EXPORT_VERSION,
 };
 
@@ -253,4 +253,25 @@ fn the_format_document_names_every_field_the_export_writes() {
         "EXPORT-FORMAT.md does not name {missing:?}"
     );
     assert!(FORMAT_DOCUMENT.contains("This page\ndescribes version 1."));
+}
+
+#[test]
+fn a_login_rule_is_exported_and_the_default_is_left_out() {
+    let mut payload = fictional_payload();
+    let mut never = payload.entries[0].clone();
+    never.id = "login-2".to_string();
+    never.match_rule = MatchRule::Never;
+    payload.entries[0].match_rule = MatchRule::Site;
+    let mut exact = payload.entries[0].clone();
+    exact.id = "login-3".to_string();
+    exact.match_rule = MatchRule::Exact;
+    payload.entries.push(never);
+    payload.entries.push(exact);
+
+    let bytes = json_export_bytes(&payload).expect("export");
+    let document: serde_json::Value = serde_json::from_slice(&bytes).expect("valid json");
+    let logins = document["logins"].as_array().expect("logins");
+    assert_eq!(logins[0]["matchRule"], "site");
+    assert_eq!(logins[1]["matchRule"], "never");
+    assert!(logins[2].get("matchRule").is_none());
 }

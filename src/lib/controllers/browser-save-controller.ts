@@ -1,7 +1,9 @@
 import type { AppStores } from '../stores/app-stores'
 import type { BrowserSaveRequest } from '../types'
+import { clearNeverSaveSites, neverSaveSites } from '../never-save-sites'
 import {
   getPendingBrowserSave,
+  neverSaveBrowserSite,
   onVaultLocked,
   previewMode,
   recordDiagnostic,
@@ -102,11 +104,29 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
     }
   }
 
+  async function neverForSite() {
+    const current = browserSave.value()
+    const request = current.request
+    if (!request || current.working) return
+    browserSave.patch({ working: true })
+    try {
+      neverSaveSites.set(await neverSaveBrowserSite(request.approvalId))
+      feedback.showNotice('Site skipped', `Sesame will not offer to save logins for ${request.hostname}. You can change this in Settings.`)
+    } catch (error) {
+      feedback.setError(error)
+    } finally {
+      if (browserSave.value().request?.approvalId === request.approvalId) browserSave.patch({ request: null, selectedId: '' })
+      browserSave.patch({ working: false })
+    }
+  }
+
   return {
     receive,
     syncPending,
     resolve,
+    neverForSite,
     clearSecrets() {
+      clearNeverSaveSites()
       const pending = browserSave.value().request
       if (pending) void resolveBrowserSaveRequest(pending.approvalId, false)
       browserSave.patch({ request: null, selectedId: '', working: false, syncWorking: false })

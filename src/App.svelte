@@ -883,7 +883,7 @@
   {:else if $browserTotpFill.request}
     <BrowserTotpFillApprovalModal request={$browserTotpFill.request} working={$browserTotpFill.working} onCancel={() => void totpFillController.resolve(null)} onConfirm={() => void totpFillController.resolve($browserTotpFill.selectedId)} />
   {:else if $browserSave.request}
-    <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} />
+    <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} onNeverForSite={() => void browserSaveController.neverForSite()} />
   {/if}
 
   {#if $presenceState.open}

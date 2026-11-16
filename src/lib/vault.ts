@@ -587,11 +587,13 @@ const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>(
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodeCount: 3, recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [],
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodeCount: 3, recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [], matchRule: 'site',
   },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [] },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, legacyFields: [] },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [], matchRule: 'exact' },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, legacyFields: [], matchRule: 'exact' },
 }
+
+let previewNeverSaveSites: string[] = ['https://forum.example.test', 'https://checkout.example.test:8443']
 
 const previewCapabilities: PlatformCapabilities = { os: 'windows', pinUnlock: true, biometricUnlock: true, autoType: true, browserIntegration: true, sessionAutoLock: true, systemIdle: true, screenLockMonitoring: true, quickAccessShortcut: true, accountLinking: true, desktopUpdates: true, windowControls: true }
 
@@ -994,6 +996,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       recoveryNotApplicable: input.recoveryNotApplicable,
       notes: input.notes.trim() || undefined,
       legacyFields: previewCards[id]?.legacyFields ?? [],
+      matchRule: input.matchRule ?? previewCards[id]?.matchRule ?? 'exact',
     }
     if (input.id && previewCards[id]) captureHistoryPreview('login', id, previewCards[id].title, previewCards[id])
     previewCards[id] = card
@@ -1621,6 +1624,24 @@ export async function resolveBrowserSave(
 ): Promise<SaveLoginResult | null> {
   if (previewMode) return null
   return invoke<SaveLoginResult | null>('resolve_browser_save', { approvalId, approved, selectedId })
+}
+
+export async function neverSaveBrowserSite(approvalId: string): Promise<string[]> {
+  if (previewMode) return [...previewNeverSaveSites]
+  return invoke<string[]>('never_save_browser_site', { approvalId })
+}
+
+export async function listNeverSaveSites(): Promise<string[]> {
+  if (previewMode) return [...previewNeverSaveSites]
+  return invoke<string[]>('list_never_save_sites')
+}
+
+export async function removeNeverSaveSite(origin: string): Promise<string[]> {
+  if (previewMode) {
+    previewNeverSaveSites = previewNeverSaveSites.filter((site) => site !== origin)
+    return [...previewNeverSaveSites]
+  }
+  return invoke<string[]>('remove_never_save_site', { origin })
 }
 
 export async function getPendingBrowserSave(): Promise<BrowserSaveRequest | null> {
