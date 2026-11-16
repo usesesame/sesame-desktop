@@ -766,6 +766,33 @@ fn never_for_this_site_stores_the_brokers_origin_and_declines_the_save() {
 }
 
 #[test]
+fn never_for_this_site_refuses_an_approval_from_an_earlier_session() {
+    let vault = TestVault::with_login("login-a", "https://northwind.test");
+    let (state, clock) = state_with_clock();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    let mut request = save_request("https://signup.northwind.test", "new");
+    let approval = offer(save_response_in_state(
+        &vault.state,
+        &state,
+        &effects,
+        &mut request,
+    ));
+    let_delay_pass(&state, &clock);
+    vault.state.advance_session_epoch();
+
+    assert!(never_save_browser_site_in_state(
+        &state,
+        &vault.state,
+        &effects,
+        approval.approval.approval_id()
+    )
+    .is_err());
+    assert!(never_save_sites_in_state(&vault.state)
+        .expect("list")
+        .is_empty());
+}
+
+#[test]
 fn never_for_this_site_refuses_an_approval_that_is_not_a_save() {
     let vault = TestVault::with_login("login-a", "https://northwind.test");
     let (state, clock) = state_with_clock();

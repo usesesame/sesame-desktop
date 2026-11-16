@@ -461,10 +461,10 @@ pub fn never_save_browser_site_in_state(
         return Err(APPROVAL_GONE.into());
     }
     ensure_save_approval_ready(state, approval_id)?;
-    let origin = state
+    let (origin, epoch) = state
         .save_origin_if_bound(approval_id)
         .ok_or(APPROVAL_EXPIRED)?;
-    let sites = add_never_save_site_in_state(vault, &origin.canonical());
+    let sites = add_never_save_site(vault, &origin.canonical(), Some(epoch));
     let _ = resolve_save(state, effects, approval_id, false);
     sites
 }
@@ -479,9 +479,17 @@ pub fn never_save_sites_in_state(vault: &VaultState) -> VaultResult<Vec<String>>
 }
 
 pub fn add_never_save_site_in_state(vault: &VaultState, origin: &str) -> VaultResult<Vec<String>> {
+    add_never_save_site(vault, origin, None)
+}
+
+fn add_never_save_site(
+    vault: &VaultState,
+    origin: &str,
+    approval_epoch: Option<u64>,
+) -> VaultResult<Vec<String>> {
     let origin =
         never_save_origin(origin).ok_or("Sesame can only skip saving for a website address.")?;
-    change_never_save_sites(vault, |sites| {
+    change_never_save_sites(vault, approval_epoch, |sites| {
         if !sites.contains(&origin) {
             if sites.len() >= MAX_NEVER_SAVE_SITES {
                 return Err("The list of sites Sesame never saves is full.".to_string());
@@ -497,7 +505,7 @@ pub fn remove_never_save_site_in_state(
     origin: &str,
 ) -> VaultResult<Vec<String>> {
     let origin = origin.trim().to_string();
-    change_never_save_sites(vault, |sites| {
+    change_never_save_sites(vault, None, |sites| {
         sites.retain(|site| *site != origin);
         Ok(())
     })
@@ -505,6 +513,7 @@ pub fn remove_never_save_site_in_state(
 
 fn change_never_save_sites(
     vault: &VaultState,
+    approval_epoch: Option<u64>,
     change: impl FnOnce(&mut Vec<String>) -> VaultResult<()>,
 ) -> VaultResult<Vec<String>> {
     let mut session = vault
@@ -514,6 +523,9 @@ fn change_never_save_sites(
     let session = session
         .as_mut()
         .ok_or("Unlock your vault before changing this list.")?;
+    if approval_epoch.is_some_and(|epoch| epoch != vault.session_epoch()) {
+        return Err(APPROVAL_EXPIRED.into());
+    }
     let current = session.open_payload()?;
     let mut next_payload = current.clone();
     change(&mut next_payload.never_save_sites)?;

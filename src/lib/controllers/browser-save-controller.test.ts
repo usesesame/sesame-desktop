@@ -137,6 +137,21 @@ describe('never for this site', () => {
     expect(feedback.state.value().errorMessage).toBeTruthy()
   })
 
+  it('drops a result that arrives after the vault locks', async () => {
+    let finish: (sites: string[]) => void = () => {}
+    vaultApi.neverSaveBrowserSite.mockReturnValue(new Promise<string[]>((resolve) => { finish = resolve }))
+    const { feedback, controller } = harness('login-a')
+    controller.receive(request('new'))
+
+    const pending = controller.neverForSite()
+    controller.clearSecrets()
+    finish(['https://example.test'])
+    await pending
+
+    expect(get(neverSaveSites)).toBeNull()
+    expect(feedback.state.value().notice).toBeNull()
+  })
+
   it('forgets the list when the vault locks', () => {
     neverSaveSites.set(['https://example.test'])
     const { controller } = harness('login-a')

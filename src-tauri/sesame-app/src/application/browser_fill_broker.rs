@@ -347,7 +347,7 @@ impl BrowserFillState {
         })
     }
 
-    pub fn save_origin_if_bound(&self, approval_id: &str) -> Option<NormalizedOrigin> {
+    pub fn save_origin_if_bound(&self, approval_id: &str) -> Option<(NormalizedOrigin, u64)> {
         let inner = self.inner.lock().ok()?;
         let pending = inner.pending.as_ref()?;
         if pending.approval_id != approval_id
@@ -356,7 +356,7 @@ impl BrowserFillState {
         {
             return None;
         }
-        Some(pending.origin.clone())
+        Some((pending.origin.clone(), pending.session_epoch))
     }
 
     pub fn publish(
