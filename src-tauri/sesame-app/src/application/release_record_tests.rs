@@ -51,6 +51,10 @@ fn request(message_type: &str, version: u8, origin: &str, id: &str) -> BrowserRe
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 

@@ -55,6 +55,8 @@ export interface ModalController {
   cardFillMayShow(): boolean
   totpFillMayShow(): boolean
   browserSaveMayShow(): boolean
+  browserChangeMayShow(): boolean
+  browserCreateMayShow(): boolean
 }
 
 export function createModalController({ stores, feedback }: ModalControllerOptions): ModalController {
@@ -62,7 +64,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
 
   function open(modal: ActiveModal): boolean {
     if (modal === null) return true
-    if (stores.browserFill.value().request || stores.browserIdentityFill.value().request || stores.browserCardFill.value().request || stores.browserTotpFill.value().request || stores.browserSave.value().request) return false
+    if (otherBrowserRequestOpen()) return false
     const current = state.value().active
     if (current !== null && modalKindsConflict(current.kind, modal.kind)) {
       return false
@@ -91,33 +93,42 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
     closeAll()
   }
 
+  function otherBrowserRequestOpen(own?: string): boolean {
+    return (own !== 'browserFill' && stores.browserFill.value().request !== null)
+      || (own !== 'browserIdentityFill' && stores.browserIdentityFill.value().request !== null)
+      || (own !== 'browserCardFill' && stores.browserCardFill.value().request !== null)
+      || (own !== 'browserTotpFill' && stores.browserTotpFill.value().request !== null)
+      || (own !== 'browserSave' && stores.browserSave.value().request !== null)
+      || (own !== 'browserChange' && stores.browserChange.value().request !== null)
+      || (own !== 'browserCreate' && stores.browserCreate.value().request !== null)
+  }
+
   function browserFillMayShow(): boolean {
-    const current = state.value().active
-    if (current === null && !stores.browserIdentityFill.value().request && !stores.browserCardFill.value().request && !stores.browserTotpFill.value().request && !stores.browserSave.value().request) return true
-    // Only one browser-originated prompt at a time, matching Rust.
-    return false
+    return state.value().active === null && !otherBrowserRequestOpen('browserFill')
   }
 
   function identityFillMayShow(): boolean {
-    const current = state.value().active
-    if (current === null && !stores.browserFill.value().request && !stores.browserCardFill.value().request && !stores.browserTotpFill.value().request && !stores.browserSave.value().request) return true
-    return false
+    return state.value().active === null && !otherBrowserRequestOpen('browserIdentityFill')
   }
 
   function cardFillMayShow(): boolean {
-    const current = state.value().active
-    return current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request && !stores.browserTotpFill.value().request && !stores.browserSave.value().request
+    return state.value().active === null && !otherBrowserRequestOpen('browserCardFill')
   }
 
   function totpFillMayShow(): boolean {
-    const current = state.value().active
-    return current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request && !stores.browserCardFill.value().request && !stores.browserSave.value().request
+    return state.value().active === null && !otherBrowserRequestOpen('browserTotpFill')
   }
 
   function browserSaveMayShow(): boolean {
-    const current = state.value().active
-    if (current === null && !stores.browserFill.value().request && !stores.browserIdentityFill.value().request && !stores.browserCardFill.value().request && !stores.browserTotpFill.value().request) return true
-    return false
+    return state.value().active === null && !otherBrowserRequestOpen('browserSave')
+  }
+
+  function browserChangeMayShow(): boolean {
+    return state.value().active === null && !otherBrowserRequestOpen('browserChange')
+  }
+
+  function browserCreateMayShow(): boolean {
+    return state.value().active === null && !otherBrowserRequestOpen('browserCreate')
   }
 
   return {
@@ -131,6 +142,8 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
     cardFillMayShow,
     totpFillMayShow,
     browserSaveMayShow,
+    browserChangeMayShow,
+    browserCreateMayShow,
   }
 }
 

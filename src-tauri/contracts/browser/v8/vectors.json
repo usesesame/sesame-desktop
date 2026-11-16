@@ -1,0 +1,843 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 8,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "change request names a generator style and size",
+      "valid": true,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      }
+    },
+    {
+      "name": "create request asks for a six word passphrase",
+      "valid": true,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      }
+    },
+    {
+      "name": "pending request reports a fill",
+      "valid": true,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      }
+    },
+    {
+      "name": "pending request reports acceptance with a username",
+      "valid": true,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-2",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "accepted",
+        "username": "person@example.com"
+      }
+    },
+    {
+      "name": "pending request reports a failed fill",
+      "valid": true,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-3",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "notFilled"
+      }
+    },
+    {
+      "name": "change request never carries a password",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-2",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20,
+        "password": "fictional-example-value"
+      }
+    },
+    {
+      "name": "create request never carries a password",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-2",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6,
+        "password": "fictional-example-value"
+      }
+    },
+    {
+      "name": "pending request never carries a password",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-4",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled",
+        "password": "fictional-example-value"
+      }
+    },
+    {
+      "name": "change request without a size",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-3",
+        "origin": "https://login.example.com",
+        "style": "characters"
+      }
+    },
+    {
+      "name": "change request with a short password size",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-4",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 15
+      }
+    },
+    {
+      "name": "create request with too many words",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-3",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 11
+      }
+    },
+    {
+      "name": "create request with an unknown style",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-4",
+        "origin": "https://login.example.com",
+        "style": "pin",
+        "size": 6
+      }
+    },
+    {
+      "name": "change request at version 7",
+      "valid": false,
+      "message": {
+        "version": 7,
+        "type": "change",
+        "requestId": "change-8-5",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      }
+    },
+    {
+      "name": "pending request with a short handle",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-5",
+        "origin": "https://login.example.com",
+        "handle": "short",
+        "action": "filled"
+      }
+    },
+    {
+      "name": "pending request with an unknown action",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-6",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "returned"
+      }
+    },
+    {
+      "name": "pending fill report with a username",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-7",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled",
+        "username": "person@example.com"
+      }
+    },
+    {
+      "name": "pending request without a handle",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-8",
+        "origin": "https://login.example.com",
+        "action": "filled"
+      }
+    },
+    {
+      "name": "change request with fields",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-6",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20,
+        "fields": "password"
+      }
+    },
+    {
+      "name": "change request with an extra field",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-7",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20,
+        "note": "extra"
+      }
+    },
+    {
+      "name": "pending request with a control character in the origin",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-9",
+        "origin": "https://login.example.com\u0007",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      }
+    }
+  ],
+  "responseCases": [
+    {
+      "name": "change answers with both passwords and a handle",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "changed",
+        "requestId": "change-8-1",
+        "currentPassword": "fictional-current-value",
+        "newPassword": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "matchKind": "exact"
+      },
+      "extensionResult": {
+        "ok": true,
+        "changed": {
+          "currentPassword": "fictional-current-value",
+          "newPassword": "fictional-new-value-20",
+          "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+          "matchKind": "exact"
+        }
+      }
+    },
+    {
+      "name": "change by site rule names the site rule",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "changed",
+        "requestId": "change-8-1",
+        "currentPassword": "fictional-current-value",
+        "newPassword": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "matchKind": "site"
+      },
+      "extensionResult": {
+        "ok": true,
+        "changed": {
+          "currentPassword": "fictional-current-value",
+          "newPassword": "fictional-new-value-20",
+          "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+          "matchKind": "site"
+        }
+      }
+    },
+    {
+      "name": "change refused because the vault is locked",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "change-unavailable",
+        "requestId": "change-8-1",
+        "reason": "locked"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "vault-locked"
+      }
+    },
+    {
+      "name": "change refused on a lookalike page",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "change-unavailable",
+        "requestId": "change-8-1",
+        "reason": "lookalike",
+        "lookalike": "example.com"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "lookalike-domain",
+        "lookalike": "example.com"
+      }
+    },
+    {
+      "name": "change declined in the desktop",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "change-unavailable",
+        "requestId": "change-8-1",
+        "reason": "approvalDeclined"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "approval-declined"
+      }
+    },
+    {
+      "name": "change answer without a handle",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "changed",
+        "requestId": "change-8-1",
+        "currentPassword": "fictional-current-value",
+        "newPassword": "fictional-new-value-20",
+        "matchKind": "exact"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "change answer with an extra username",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "changed",
+        "requestId": "change-8-1",
+        "currentPassword": "fictional-current-value",
+        "newPassword": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "matchKind": "exact",
+        "username": "person@example.com"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "change answer with an empty new password",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "changed",
+        "requestId": "change-8-1",
+        "currentPassword": "fictional-current-value",
+        "newPassword": "",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "matchKind": "exact"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "change answer with a lookalike host on another reason",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "change-unavailable",
+        "requestId": "change-8-1",
+        "reason": "noMatch",
+        "lookalike": "example.com"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "create answers with the password and a handle",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      },
+      "message": {
+        "version": 8,
+        "type": "created",
+        "requestId": "create-8-1",
+        "password": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA"
+      },
+      "extensionResult": {
+        "ok": true,
+        "created": {
+          "password": "fictional-new-value-20",
+          "handle": "fictional-handle-for-examples-only-AAAAAAAA"
+        }
+      }
+    },
+    {
+      "name": "create refused on a never save site",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      },
+      "message": {
+        "version": 8,
+        "type": "create-unavailable",
+        "requestId": "create-8-1",
+        "reason": "approvalDeclined"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "approval-declined"
+      }
+    },
+    {
+      "name": "create answer with a current password",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      },
+      "message": {
+        "version": 8,
+        "type": "created",
+        "requestId": "create-8-1",
+        "password": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "currentPassword": "fictional-current-value"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "create answer with a match kind",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      },
+      "message": {
+        "version": 8,
+        "type": "created",
+        "requestId": "create-8-1",
+        "password": "fictional-new-value-20",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "matchKind": "exact"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "pending report answers the waiting state",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "unconfirmed"
+      },
+      "extensionResult": {
+        "ok": true,
+        "pendingState": "unconfirmed"
+      }
+    },
+    {
+      "name": "pending acceptance answers confirmed",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-2",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "accepted",
+        "username": "person@example.com"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-2",
+        "state": "confirmed"
+      },
+      "extensionResult": {
+        "ok": true,
+        "pendingState": "confirmed"
+      }
+    },
+    {
+      "name": "pending report for an unknown handle",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "unknown"
+      },
+      "extensionResult": {
+        "ok": true,
+        "pendingState": "unknown"
+      }
+    },
+    {
+      "name": "pending report for a change the person undid",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "returned"
+      },
+      "extensionResult": {
+        "ok": true,
+        "pendingState": "returned"
+      }
+    },
+    {
+      "name": "pending report while locked",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-unavailable",
+        "requestId": "pending-8-1",
+        "reason": "locked"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "vault-locked"
+      }
+    },
+    {
+      "name": "pending answer with an unknown state",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "saved"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "invalid-response"
+      }
+    },
+    {
+      "name": "pending answer that carries a password",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "confirmed",
+        "password": "fictional-example-value"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "pending answer that echoes the handle",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-1",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "filled"
+      },
+      "message": {
+        "version": 8,
+        "type": "pending-state",
+        "requestId": "pending-8-1",
+        "state": "confirmed",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "unsafe-response"
+      }
+    },
+    {
+      "name": "older host refuses version 8",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "error",
+        "requestId": "change-8-1",
+        "message": "Unsupported protocol version."
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "pending-version-unsupported"
+      }
+    },
+    {
+      "name": "error for a create request",
+      "hostValid": true,
+      "request": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-1",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 6
+      },
+      "message": {
+        "version": 8,
+        "type": "error",
+        "requestId": "create-8-1",
+        "message": "Invalid browser request."
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "host-rejected-request"
+      }
+    },
+    {
+      "name": "answer for another request",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 8,
+        "type": "change-unavailable",
+        "requestId": "change-8-other",
+        "reason": "locked"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "request-mismatch"
+      }
+    },
+    {
+      "name": "answer at another version",
+      "hostValid": false,
+      "request": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-1",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 20
+      },
+      "message": {
+        "version": 7,
+        "type": "change-unavailable",
+        "requestId": "change-8-1",
+        "reason": "locked"
+      },
+      "extensionResult": {
+        "ok": false,
+        "code": "protocol-mismatch"
+      }
+    }
+  ]
+}

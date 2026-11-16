@@ -52,6 +52,8 @@ pub enum EntryKind {
     BrowserTotp,
     BrowserCard,
     BrowserIdentity,
+    BrowserChange,
+    BrowserCreate,
     Reveal,
     Copy,
     AutoType,
@@ -81,6 +83,8 @@ impl EntryKind {
                 | Self::BrowserTotp
                 | Self::BrowserCard
                 | Self::BrowserIdentity
+                | Self::BrowserChange
+                | Self::BrowserCreate
         )
     }
 

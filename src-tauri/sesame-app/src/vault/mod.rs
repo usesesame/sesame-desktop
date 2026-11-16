@@ -8,6 +8,8 @@ pub use sesame_core::backup;
 #[allow(unused_imports)]
 pub use sesame_core::crypto;
 #[allow(unused_imports)]
+pub use sesame_core::generator;
+#[allow(unused_imports)]
 pub use sesame_core::history;
 #[allow(unused_imports)]
 pub use sesame_core::imports;
@@ -15,6 +17,8 @@ pub use sesame_core::imports;
 pub use sesame_core::migration;
 #[allow(unused_imports)]
 pub use sesame_core::password_analysis;
+#[allow(unused_imports)]
+pub use sesame_core::pending_change;
 #[allow(unused_imports)]
 pub use sesame_core::pending_import;
 #[allow(unused_imports)]

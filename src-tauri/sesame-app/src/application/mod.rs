@@ -19,6 +19,7 @@ pub mod history;
 pub mod imports;
 pub mod lifecycle;
 pub mod logins;
+pub mod pending_changes;
 pub mod quick_access;
 pub mod record_writes;
 pub mod records;
@@ -56,6 +57,8 @@ pub mod imports_tests;
 
 #[cfg(test)]
 pub mod logins_tests;
+#[cfg(test)]
+pub mod pending_changes_tests;
 
 #[cfg(test)]
 pub mod quick_access_tests;

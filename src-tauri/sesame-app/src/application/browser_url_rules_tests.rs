@@ -79,6 +79,10 @@ fn fill_request(version: u8, origin: &str) -> BrowserRequest {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 
@@ -93,6 +97,10 @@ fn totp_request(origin: &str) -> BrowserRequest {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 
@@ -107,6 +115,10 @@ fn save_request(origin: &str, kind: &str) -> BrowserRequest {
         password: Some(CAPTURED_PASSWORD.to_string()),
         title: Some("Northwind".to_string()),
         kind: Some(kind.to_string()),
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 

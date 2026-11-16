@@ -13,9 +13,10 @@ use crate::vault::random_id;
 use crate::vault::release_record::Outcome;
 
 use super::browser_fill::{
-    ApprovalDecision, ApprovalKind, BrowserCardRequestEvent, BrowserFillCandidate,
-    BrowserFillRequestEvent, BrowserIdentityRequestEvent, BrowserSaveRequestEvent,
-    BrowserTotpRequestEvent, NormalizedOrigin, SaveKind, SavePayload, APPROVAL_TOO_SOON,
+    ApprovalDecision, ApprovalKind, BrowserCardRequestEvent, BrowserChangeRequestEvent,
+    BrowserCreateRequestEvent, BrowserFillCandidate, BrowserFillRequestEvent,
+    BrowserIdentityRequestEvent, BrowserSaveRequestEvent, BrowserTotpRequestEvent,
+    NormalizedOrigin, SaveKind, SavePayload, APPROVAL_TOO_SOON,
 };
 
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -104,6 +105,10 @@ pub enum ApprovalRequest {
     Totp {
         candidate_ids: HashSet<String>,
     },
+    Change {
+        candidate_ids: HashSet<String>,
+    },
+    Create,
 }
 
 impl ApprovalRequest {
@@ -112,18 +117,22 @@ impl ApprovalRequest {
             Self::Fill { candidate_ids }
             | Self::Identity { candidate_ids }
             | Self::Card { candidate_ids }
-            | Self::Totp { candidate_ids } => candidate_ids.contains(id),
-            Self::Save { .. } => false,
+            | Self::Totp { candidate_ids }
+            | Self::Change { candidate_ids } => candidate_ids.contains(id),
+            Self::Save { .. } | Self::Create => false,
         }
     }
 }
 
+#[derive(Clone)]
 pub enum ApprovalEvent {
     Fill(BrowserFillRequestEvent),
     Save(BrowserSaveRequestEvent),
     Identity(BrowserIdentityRequestEvent),
     Card(BrowserCardRequestEvent),
     Totp(BrowserTotpRequestEvent),
+    Change(BrowserChangeRequestEvent),
+    Create(BrowserCreateRequestEvent),
 }
 
 struct PendingApproval {
@@ -234,6 +243,11 @@ impl BrowserFillState {
             ApprovalRequest::Totp { candidate_ids } => {
                 (ApprovalKind::Totp, candidate_ids.iter().cloned().collect())
             }
+            ApprovalRequest::Change { candidate_ids } => (
+                ApprovalKind::Change,
+                candidate_ids.iter().cloned().collect(),
+            ),
+            ApprovalRequest::Create => (ApprovalKind::Create, Vec::new()),
             ApprovalRequest::Save { candidates, .. } => (
                 ApprovalKind::Save,
                 candidates
@@ -374,6 +388,20 @@ impl BrowserFillState {
         })
     }
 
+    pub fn pending_change_request(&self) -> Option<BrowserChangeRequestEvent> {
+        self.pending_event(|event| match event {
+            ApprovalEvent::Change(event) => Some(event.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn pending_create_request(&self) -> Option<BrowserCreateRequestEvent> {
+        self.pending_event(|event| match event {
+            ApprovalEvent::Create(event) => Some(event.clone()),
+            _ => None,
+        })
+    }
+
     /// Credential only while bound; `decide` still releases the broker.
     pub fn save_payload_if_bound(&self, approval_id: &str) -> Option<SavePayload> {
         let inner = self.inner.lock().ok()?;
@@ -437,6 +465,9 @@ impl BrowserFillState {
         let pending = inner.pending.as_ref().ok_or("approvalExpired")?;
         if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
             return Err("approvalExpired");
+        }
+        if matches!(decision, ApprovalDecision::Approved) && !inner.focus.is_ready() {
+            return Err(APPROVAL_TOO_SOON);
         }
         if let ApprovalDecision::Selected(id) = &decision {
             if !inner.focus.is_ready() {

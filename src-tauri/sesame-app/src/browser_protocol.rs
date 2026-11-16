@@ -8,6 +8,7 @@ pub const FILL_MATCH_PROTOCOL_VERSION: u8 = 3;
 pub const TOTP_PROTOCOL_VERSION: u8 = 4;
 pub const LOOKALIKE_PROTOCOL_VERSION: u8 = 5;
 pub const SITE_MATCH_PROTOCOL_VERSION: u8 = 7;
+pub const PENDING_PASSWORD_PROTOCOL_VERSION: u8 = 8;
 pub const MAX_NATIVE_MESSAGE_BYTES: usize = 16 * 1024;
 pub const MAX_CREDENTIAL_FIELD_BYTES: usize = 4096;
 pub const MAX_LOOKALIKE_HOST_CHARS: usize = 128;
@@ -68,6 +69,7 @@ pub fn supported_protocol_version(message_type: &str, version: u8) -> bool {
         "card" => version == CARD_PROTOCOL_VERSION,
         "capabilities" => version == CAPABILITIES_PROTOCOL_VERSION,
         "save" | "identity" | "activate" => version == PROTOCOL_VERSION,
+        "change" | "create" | "pending" => version == PENDING_PASSWORD_PROTOCOL_VERSION,
         _ => false,
     }
 }
@@ -111,6 +113,14 @@ pub struct BrowserRequest {
     /// Decided by the extension from the page's form structure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 impl Drop for BrowserRequest {
@@ -118,7 +128,18 @@ impl Drop for BrowserRequest {
         self.username.zeroize();
         self.password.zeroize();
         self.title.zeroize();
+        self.handle.zeroize();
     }
+}
+
+fn valid_request_origin(origin: Option<&str>) -> bool {
+    origin.is_some_and(|origin| {
+        !origin.is_empty() && origin.len() <= 2048 && !origin.chars().any(char::is_control)
+    })
+}
+
+pub fn valid_handle(handle: &str) -> bool {
+    sesame_core::pending_change::valid_handle(handle)
 }
 
 impl BrowserRequest {
@@ -128,10 +149,15 @@ impl BrowserRequest {
         {
             return false;
         }
+        let no_pending_payload = self.style.is_none()
+            && self.size.is_none()
+            && self.handle.is_none()
+            && self.action.is_none();
         let no_save_payload = self.username.is_none()
             && self.password.is_none()
             && self.title.is_none()
-            && self.kind.is_none();
+            && self.kind.is_none()
+            && no_pending_payload;
         match self.message_type.as_str() {
             "capabilities" | "activate" => {
                 self.origin.is_none() && self.fields.is_none() && no_save_payload
@@ -204,6 +230,43 @@ impl BrowserRequest {
                     && title_ok
                     && kind_ok
                     && self.fields.is_none()
+                    && no_pending_payload
+            }
+            "change" | "create" => {
+                valid_request_origin(self.origin.as_deref())
+                    && self
+                        .style
+                        .as_deref()
+                        .zip(self.size)
+                        .is_some_and(|(style, size)| {
+                            sesame_core::generator::PasswordStyle::parse(style, size).is_some()
+                        })
+                    && self.fields.is_none()
+                    && self.username.is_none()
+                    && self.password.is_none()
+                    && self.title.is_none()
+                    && self.kind.is_none()
+                    && self.handle.is_none()
+                    && self.action.is_none()
+            }
+            "pending" => {
+                let action = self.action.as_deref();
+                let username_ok = match self.username.as_deref() {
+                    None => true,
+                    Some(username) => {
+                        action == Some("accepted") && username.len() <= MAX_CREDENTIAL_FIELD_BYTES
+                    }
+                };
+                valid_request_origin(self.origin.as_deref())
+                    && self.handle.as_deref().is_some_and(valid_handle)
+                    && matches!(action, Some("filled" | "notFilled" | "accepted"))
+                    && username_ok
+                    && self.fields.is_none()
+                    && self.password.is_none()
+                    && self.title.is_none()
+                    && self.kind.is_none()
+                    && self.style.is_none()
+                    && self.size.is_none()
             }
             _ => false,
         }
@@ -347,6 +410,14 @@ pub struct BrowserResponse {
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 impl BrowserResponse {
@@ -371,6 +442,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -395,6 +470,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -420,6 +499,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -450,6 +533,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -474,6 +561,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -498,6 +589,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -526,6 +621,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -554,6 +653,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -578,6 +681,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -603,6 +710,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -627,6 +738,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -651,6 +766,10 @@ impl BrowserResponse {
             card: Some(fields),
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -675,6 +794,10 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -699,6 +822,10 @@ impl BrowserResponse {
             card: None,
             code: Some(code),
             remaining_seconds: Some(remaining_seconds),
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
     }
 
@@ -723,7 +850,64 @@ impl BrowserResponse {
             card: None,
             code: None,
             remaining_seconds: None,
+            current_password: None,
+            new_password: None,
+            handle: None,
+            state: None,
         }
+    }
+
+    fn bare(version: u8, message_type: &str, request_id: &str) -> Self {
+        let mut response = Self::error_with_version(version, request_id, "");
+        response.message_type = message_type.into();
+        response.message = None;
+        response
+    }
+
+    pub fn changed(
+        request: &BrowserRequest,
+        current_password: String,
+        new_password: String,
+        handle: String,
+        match_kind: &'static str,
+    ) -> Self {
+        let mut response = Self::bare(request.version, "changed", &request.request_id);
+        response.current_password = Some(current_password);
+        response.new_password = Some(new_password);
+        response.handle = Some(handle);
+        response.match_kind = Some(match_kind.into());
+        response
+    }
+
+    pub fn created(request: &BrowserRequest, password: String, handle: String) -> Self {
+        let mut response = Self::bare(request.version, "created", &request.request_id);
+        response.password = Some(password);
+        response.handle = Some(handle);
+        response
+    }
+
+    pub fn pending_state(request: &BrowserRequest, state: &'static str) -> Self {
+        let mut response = Self::bare(request.version, "pending-state", &request.request_id);
+        response.state = Some(state.into());
+        response
+    }
+
+    pub fn operation_unavailable(request: &BrowserRequest, reason: &'static str) -> Self {
+        let message_type = match request.message_type.as_str() {
+            "change" => "change-unavailable",
+            "create" => "create-unavailable",
+            "pending" => "pending-unavailable",
+            _ => "fill-unavailable",
+        };
+        let mut response = Self::bare(request.version, message_type, &request.request_id);
+        response.reason = Some(reason.into());
+        response
+    }
+
+    pub fn change_lookalike_unavailable(request: &BrowserRequest, lookalike: String) -> Self {
+        let mut response = Self::operation_unavailable(request, "lookalike");
+        response.lookalike = Some(lookalike);
+        response
     }
 
     pub fn validate_for(&self, request: &BrowserRequest) -> bool {
@@ -748,6 +932,20 @@ impl BrowserResponse {
         }
         if self.message_type != "totp" && !no_code {
             return false;
+        }
+        let no_pending = self.current_password.is_none()
+            && self.new_password.is_none()
+            && self.handle.is_none()
+            && self.state.is_none();
+        let pending_operation = matches!(
+            request.message_type.as_str(),
+            "change" | "create" | "pending"
+        );
+        if !pending_operation && !no_pending {
+            return false;
+        }
+        if pending_operation {
+            return self.validate_pending_for(request) && self.within_message_budget();
         }
         let match_kind_allowed = fill_carries_match_kind(request.version)
             && request.message_type == "fill"
@@ -942,6 +1140,96 @@ impl BrowserResponse {
         allowed && self.within_message_budget()
     }
 
+    fn validate_pending_for(&self, request: &BrowserRequest) -> bool {
+        let no_secret = self.password.is_none()
+            && self.current_password.is_none()
+            && self.new_password.is_none()
+            && self.handle.is_none()
+            && self.state.is_none()
+            && self.match_kind.is_none()
+            && self.reason.is_none()
+            && self.lookalike.is_none();
+        let quiet = self.installed.is_none()
+            && self.desktop_available.is_none()
+            && self.locked.is_none()
+            && self.fill_available.is_none()
+            && self.opened.is_none()
+            && self.username.is_none()
+            && self.saved.is_none()
+            && self.identity.is_none()
+            && self.card.is_none()
+            && self.code.is_none()
+            && self.remaining_seconds.is_none();
+        if self.message_type == "error" {
+            return quiet && no_secret && self.message.as_deref().is_some_and(valid_error_message);
+        }
+        if !quiet || self.message.is_some() {
+            return false;
+        }
+        let bounded_secret = |value: Option<&str>| {
+            value
+                .is_some_and(|value| !value.is_empty() && value.len() <= MAX_CREDENTIAL_FIELD_BYTES)
+        };
+        let unavailable = |expected: &str| {
+            self.message_type == expected
+                && self.password.is_none()
+                && self.current_password.is_none()
+                && self.new_password.is_none()
+                && self.handle.is_none()
+                && self.state.is_none()
+                && self.match_kind.is_none()
+                && match self.reason.as_deref() {
+                    Some("lookalike") => {
+                        expected == "change-unavailable"
+                            && self.lookalike.as_deref().is_some_and(valid_lookalike_host)
+                    }
+                    Some(reason) => valid_reason(reason) && self.lookalike.is_none(),
+                    None => false,
+                }
+        };
+        match (request.message_type.as_str(), self.message_type.as_str()) {
+            ("change", "changed") => {
+                self.password.is_none()
+                    && bounded_secret(self.current_password.as_deref())
+                    && bounded_secret(self.new_password.as_deref())
+                    && self.handle.as_deref().is_some_and(valid_handle)
+                    && self.state.is_none()
+                    && self
+                        .match_kind
+                        .as_deref()
+                        .is_some_and(|kind| matches!(kind, "exact" | "wwwAlias" | "site"))
+                    && self.reason.is_none()
+                    && self.lookalike.is_none()
+            }
+            ("create", "created") => {
+                bounded_secret(self.password.as_deref())
+                    && self.current_password.is_none()
+                    && self.new_password.is_none()
+                    && self.handle.as_deref().is_some_and(valid_handle)
+                    && self.state.is_none()
+                    && self.match_kind.is_none()
+                    && self.reason.is_none()
+                    && self.lookalike.is_none()
+            }
+            ("pending", "pending-state") => {
+                self.password.is_none()
+                    && self.current_password.is_none()
+                    && self.new_password.is_none()
+                    && self.handle.is_none()
+                    && self.state.as_deref().is_some_and(|state| {
+                        matches!(state, "unconfirmed" | "confirmed" | "returned" | "unknown")
+                    })
+                    && self.match_kind.is_none()
+                    && self.reason.is_none()
+                    && self.lookalike.is_none()
+            }
+            ("change", "change-unavailable") => unavailable("change-unavailable"),
+            ("create", "create-unavailable") => unavailable("create-unavailable"),
+            ("pending", "pending-unavailable") => unavailable("pending-unavailable"),
+            _ => false,
+        }
+    }
+
     /// Every accepted response must fit the frame the host can write.
     fn within_message_budget(&self) -> bool {
         self.to_zeroizing_bytes()
@@ -966,6 +1254,10 @@ impl Drop for BrowserResponse {
         self.identity.zeroize();
         self.card.zeroize();
         self.code.zeroize();
+        self.current_password.zeroize();
+        self.new_password.zeroize();
+        self.handle.zeroize();
+        self.state.zeroize();
     }
 }
 
@@ -1037,6 +1329,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -1051,6 +1347,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -1074,6 +1374,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         };
         assert!(capability.validate());
         let mut legacy_capability = capability.clone();
@@ -1201,6 +1505,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -1452,6 +1760,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         };
         assert!(card.validate());
         assert!(
@@ -1608,6 +1920,142 @@ mod tests {
         assert!(typical.validate_for(&small_request));
     }
 
+    fn pending_password_request(message_type: &str) -> BrowserRequest {
+        BrowserRequest {
+            version: PENDING_PASSWORD_PROTOCOL_VERSION,
+            message_type: message_type.to_string(),
+            request_id: format!("{message_type}-1"),
+            origin: Some("https://example.com".to_string()),
+            fields: None,
+            username: None,
+            password: None,
+            title: None,
+            kind: None,
+            style: Some("characters".to_string()),
+            size: Some(20),
+            handle: None,
+            action: None,
+        }
+    }
+
+    const HANDLE: &str = "fictional-handle-for-examples-only-AAAAAAAA";
+
+    #[test]
+    fn the_version_eight_vectors_replay_against_the_host_rules() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../../contracts/browser/v8/vectors.json"))
+                .expect("vectors");
+        assert_eq!(
+            vectors["protocolVersion"],
+            PENDING_PASSWORD_PROTOCOL_VERSION
+        );
+        for case in vectors["requestCases"].as_array().expect("request cases") {
+            let valid = serde_json::from_value::<BrowserRequest>(case["message"].clone())
+                .is_ok_and(|request| request.validate());
+            assert_eq!(valid, case["valid"] == true, "{}", case["name"]);
+        }
+        for case in vectors["responseCases"].as_array().expect("response cases") {
+            let request: BrowserRequest =
+                serde_json::from_value(case["request"].clone()).expect("request");
+            let accepted = serde_json::from_value::<BrowserResponse>(case["message"].clone())
+                .is_ok_and(|response| response.validate_for(&request));
+            assert_eq!(accepted, case["hostValid"] == true, "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn version_eight_types_are_refused_at_every_other_version_and_older_types_at_eight() {
+        for message_type in ["change", "create", "pending"] {
+            for version in 1..=7 {
+                assert!(!supported_protocol_version(message_type, version));
+            }
+            assert!(supported_protocol_version(
+                message_type,
+                PENDING_PASSWORD_PROTOCOL_VERSION
+            ));
+        }
+        for message_type in [
+            "fill",
+            "save",
+            "identity",
+            "card",
+            "totp",
+            "capabilities",
+            "activate",
+        ] {
+            assert!(!supported_protocol_version(
+                message_type,
+                PENDING_PASSWORD_PROTOCOL_VERSION
+            ));
+        }
+    }
+
+    #[test]
+    fn no_version_eight_request_carries_a_password_or_a_handle_it_does_not_need() {
+        for message_type in ["change", "create"] {
+            assert!(pending_password_request(message_type).validate());
+            let mut with_password = pending_password_request(message_type);
+            with_password.password = Some("fictional-example-value".to_string());
+            assert!(!with_password.validate());
+            let mut with_handle = pending_password_request(message_type);
+            with_handle.handle = Some(HANDLE.to_string());
+            assert!(!with_handle.validate());
+            let mut with_username = pending_password_request(message_type);
+            with_username.username = Some("person@example.com".to_string());
+            assert!(!with_username.validate());
+        }
+        let mut pending = pending_password_request("pending");
+        pending.style = None;
+        pending.size = None;
+        pending.handle = Some(HANDLE.to_string());
+        pending.action = Some("accepted".to_string());
+        assert!(pending.validate());
+        let mut with_password = pending_password_request("pending");
+        with_password.style = None;
+        with_password.size = None;
+        with_password.handle = Some(HANDLE.to_string());
+        with_password.action = Some("accepted".to_string());
+        with_password.password = Some("fictional-example-value".to_string());
+        assert!(!with_password.validate());
+    }
+
+    #[test]
+    fn a_fill_or_save_request_with_version_eight_fields_is_refused() {
+        let mut fill = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        fill.handle = Some(HANDLE.to_string());
+        assert!(!fill.validate());
+        let mut fill = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        fill.style = Some("characters".to_string());
+        fill.size = Some(20);
+        assert!(!fill.validate());
+    }
+
+    #[test]
+    fn the_largest_change_answer_fits_the_frame_budget() {
+        let request = pending_password_request("change");
+        let response = BrowserResponse::changed(
+            &request,
+            "c".repeat(MAX_CREDENTIAL_FIELD_BYTES),
+            "n".repeat(MAX_CREDENTIAL_FIELD_BYTES),
+            HANDLE.to_string(),
+            "exact",
+        );
+        assert!(response.validate_for(&request));
+        let bytes = response.to_zeroizing_bytes().expect("encodes");
+        assert!(bytes.len() <= MAX_NATIVE_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn a_version_eight_answer_cannot_reach_an_older_request() {
+        let request = fill_request(SITE_MATCH_PROTOCOL_VERSION);
+        let mut response = BrowserResponse::unavailable(&request, "noMatch");
+        response.handle = Some(HANDLE.to_string());
+        assert!(!response.validate_for(&request));
+        let mut response = BrowserResponse::unavailable(&request, "noMatch");
+        response.new_password = Some("fictional-example-value".to_string());
+        assert!(!response.validate_for(&request));
+    }
+
     #[test]
     fn the_largest_save_request_fits_the_frame_budget() {
         let save = BrowserRequest {
@@ -1620,6 +2068,10 @@ mod tests {
             password: Some("p".repeat(MAX_CREDENTIAL_FIELD_BYTES)),
             title: Some("t".repeat(512)),
             kind: Some("new".to_string()),
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         };
         assert!(save.validate());
         let bytes = save.to_zeroizing_bytes().expect("the request encodes");
@@ -1637,6 +2089,10 @@ mod tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 

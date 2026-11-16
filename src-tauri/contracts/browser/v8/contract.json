@@ -1,0 +1,109 @@
+{
+  "contractSchemaVersion": 1,
+  "name": "Sesame browser native messaging protocol",
+  "tag": "browser-protocol-v8",
+  "protocolVersion": 8,
+  "compatibility": {
+    "minimumHostProtocolVersion": 8,
+    "currentHostProtocolVersion": 8,
+    "minimumExtensionProtocolVersion": 8,
+    "currentExtensionProtocolVersion": 8
+  },
+  "limits": {
+    "nativeMessageBytes": 16384,
+    "requestIdBytes": 64,
+    "originBytes": 2048,
+    "credentialFieldBytes": 4096,
+    "lookalikeHostChars": 128,
+    "handleChars": 43,
+    "approvalSeconds": 30,
+    "handleLifetimeSeconds": 86400,
+    "characters": {
+      "minimum": 16,
+      "maximum": 64
+    },
+    "passphraseWords": {
+      "minimum": 5,
+      "maximum": 10
+    }
+  },
+  "requestTypes": [
+    "change",
+    "create",
+    "pending"
+  ],
+  "responseTypes": [
+    "changed",
+    "change-unavailable",
+    "created",
+    "create-unavailable",
+    "pending-state",
+    "pending-unavailable",
+    "error"
+  ],
+  "matchKinds": [
+    "exact",
+    "wwwAlias",
+    "site"
+  ],
+  "pendingActions": [
+    "filled",
+    "notFilled",
+    "accepted"
+  ],
+  "pendingStates": [
+    "unconfirmed",
+    "confirmed",
+    "returned",
+    "unknown"
+  ],
+  "unavailableReasons": [
+    "desktopUnavailable",
+    "locked",
+    "noMatch",
+    "approvalUnavailable",
+    "approvalDeclined",
+    "approvalTimeout",
+    "staleRequest",
+    "invalidSelection",
+    "multipleMatches",
+    "lookalike"
+  ],
+  "errorMessages": [
+    "Unsupported protocol version.",
+    "Invalid browser request.",
+    "Unsupported browser request.",
+    "Browser response unavailable."
+  ],
+  "bindings": {
+    "requestId": "Every response carries the initiating requestId; both peers reject a mismatch.",
+    "noInboundPassword": "No version 8 request carries a password. The desktop generates every new password after the person approves the request in the desktop app.",
+    "change": "The desktop offers only logins that match the origin under their rule, refuses a lookalike page, and rechecks the login, the origin rule, the vault session epoch and the connection under the vault lock. It then generates the new password, saves it to the approved login and keeps the old login in item history in the same commit, before it answers with the current password, the new password and a handle.",
+    "create": "The desktop refuses a site on the never save list before and after approval. After approval it generates a password and saves a new login for the origin with an empty username in the same commit, before it answers with the password and a handle.",
+    "handle": "43 base64url characters from 32 random bytes. The desktop stores only its SHA-256 digest. A handle is bound to the origin it was issued for and is honoured for 24 hours. It never releases a secret and never changes which password a login holds.",
+    "pending": "filled and notFilled record the first fill result only. accepted marks the site's acceptance. For a new login that is still waiting, has an empty username and has not changed since it was created, accepted may carry the username to attach. A foreign, stale, expired or misplaced handle answers unknown and changes nothing.",
+    "lookalike": "Present exactly when a change-unavailable reason is lookalike, with the same bounds as version 7. No credential is released on that path.",
+    "expiry": "The desktop owns the 30-second approval deadline. A change that waits for the person never expires on its own."
+  },
+  "schemas": {
+    "request": "request.schema.json",
+    "response": "response.schema.json"
+  },
+  "vectors": "vectors.json",
+  "messageVersions": {
+    "capabilities": 6,
+    "activate": 1,
+    "identity": 1,
+    "save": 1,
+    "card": 2,
+    "totp": 4,
+    "fill": 7,
+    "change": 8,
+    "create": 8,
+    "pending": 8
+  },
+  "acceptedFillVersions": [
+    5,
+    7
+  ]
+}

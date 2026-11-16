@@ -236,6 +236,28 @@ pub struct BrowserSaveRequestEvent {
     pub expires_at_unix_ms: u64,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserChangeRequestEvent {
+    pub approval_id: String,
+    pub origin: String,
+    pub hostname: String,
+    pub candidates: Vec<BrowserFillCandidate>,
+    pub unconfirmed: Vec<String>,
+    pub expires_in_seconds: u64,
+    pub expires_at_unix_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserCreateRequestEvent {
+    pub approval_id: String,
+    pub origin: String,
+    pub hostname: String,
+    pub expires_in_seconds: u64,
+    pub expires_at_unix_ms: u64,
+}
+
 /// Names only; identity values are read from the vault after the user picks.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -319,6 +341,7 @@ pub enum ApprovalDecision {
     InvalidSelection,
     Selected(String),
     Saved,
+    Approved,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,6 +351,8 @@ pub enum ApprovalKind {
     Identity,
     Card,
     Totp,
+    Change,
+    Create,
 }
 
 impl ApprovalKind {
@@ -338,6 +363,8 @@ impl ApprovalKind {
             Self::Identity => "browser-identity-cancelled",
             Self::Card => "browser-card-cancelled",
             Self::Totp => "browser-totp-cancelled",
+            Self::Change => "browser-change-cancelled",
+            Self::Create => "browser-create-cancelled",
         }
     }
 
@@ -348,6 +375,8 @@ impl ApprovalKind {
             Self::Identity => "identity_timeout",
             Self::Card => "card_timeout",
             Self::Totp => "totp_timeout",
+            Self::Change => "change_timeout",
+            Self::Create => "create_timeout",
         }
     }
 
@@ -358,6 +387,8 @@ impl ApprovalKind {
             Self::Identity => "identity_connection_closed",
             Self::Card => "card_connection_closed",
             Self::Totp => "totp_connection_closed",
+            Self::Change => "change_connection_closed",
+            Self::Create => "create_connection_closed",
         }
     }
 
@@ -368,6 +399,8 @@ impl ApprovalKind {
             Self::Identity => "identity_vault_changed",
             Self::Card => "card_vault_changed",
             Self::Totp => "totp_vault_changed",
+            Self::Change => "change_vault_changed",
+            Self::Create => "create_vault_changed",
         }
     }
 }
@@ -411,6 +444,83 @@ pub fn resolve_browser_fill_in_state(
         Err(error) => Err(rejected_decision(
             effects,
             ApprovalKind::Fill,
+            approval_id,
+            error,
+        )),
+    }
+}
+
+pub fn resolve_browser_change_in_state(
+    state: &BrowserFillState,
+    effects: &dyn DesktopEffects,
+    approval_id: &str,
+    login_id: Option<String>,
+) -> VaultResult<()> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err(APPROVAL_GONE.into());
+    }
+    let denied = login_id.is_none();
+    let decision = login_id
+        .map(ApprovalDecision::Selected)
+        .unwrap_or(ApprovalDecision::Denied);
+    match state.decide(approval_id, decision) {
+        Ok(()) => {
+            effects.record_browser_host_registration(if denied {
+                "change_denied"
+            } else {
+                "change_approved"
+            });
+            if denied {
+                effects.emit_browser_approval_cancelled(
+                    ApprovalKind::Change,
+                    approval_id,
+                    "denied",
+                );
+            }
+            Ok(())
+        }
+        Err(error) => Err(rejected_decision(
+            effects,
+            ApprovalKind::Change,
+            approval_id,
+            error,
+        )),
+    }
+}
+
+pub fn resolve_browser_create_in_state(
+    state: &BrowserFillState,
+    effects: &dyn DesktopEffects,
+    approval_id: &str,
+    approved: bool,
+) -> VaultResult<()> {
+    if approval_id.is_empty() || approval_id.len() > 64 {
+        return Err(APPROVAL_GONE.into());
+    }
+    let decision = if approved {
+        ApprovalDecision::Approved
+    } else {
+        ApprovalDecision::Denied
+    };
+    match state.decide(approval_id, decision) {
+        Ok(()) => {
+            effects.record_browser_host_registration(if approved {
+                "create_approved"
+            } else {
+                "create_denied"
+            });
+            if !approved {
+                effects.emit_browser_approval_cancelled(
+                    ApprovalKind::Create,
+                    approval_id,
+                    "denied",
+                );
+            }
+            Ok(())
+        }
+        Err(error) => Err(rejected_decision(
+            effects,
+            ApprovalKind::Create,
             approval_id,
             error,
         )),
