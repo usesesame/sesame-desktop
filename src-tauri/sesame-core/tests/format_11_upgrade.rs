@@ -134,33 +134,33 @@ fn unlock(path: &Path) -> (UnlockedVault, bool) {
     (session, opened.migrated)
 }
 
-fn assert_moved_to_custom_fields(entry: &VaultEntry) {
-    assert!(entry.legacy_fields.is_empty());
-    assert_eq!(entry.custom_fields.len(), 2);
-    assert_eq!(entry.custom_fields[0].label, "Member number");
-    assert_eq!(entry.custom_fields[0].value, VISIBLE_VALUE);
-    assert_eq!(entry.custom_fields[0].kind, "text");
-    assert_eq!(entry.custom_fields[1].label, "Security answer");
-    assert_eq!(entry.custom_fields[1].value, SECRET_VALUE);
-    assert_eq!(entry.custom_fields[1].kind, "secret");
+fn assert_legacy_fields_kept(entry: &VaultEntry) {
+    assert!(entry.custom_fields.is_empty());
+    assert_eq!(entry.legacy_fields.len(), 2);
+    assert_eq!(entry.legacy_fields[0].label, "Member number");
+    assert_eq!(entry.legacy_fields[0].value, VISIBLE_VALUE);
+    assert!(!entry.legacy_fields[0].secret);
+    assert_eq!(entry.legacy_fields[1].label, "Security answer");
+    assert_eq!(entry.legacy_fields[1].value, SECRET_VALUE);
+    assert!(entry.legacy_fields[1].secret);
     assert_eq!(entry.match_rule, MatchRule::Exact);
 }
 
 fn assert_payload_migrated(payload: &VaultPayload) {
-    assert_moved_to_custom_fields(&payload.entries[0]);
+    assert_legacy_fields_kept(&payload.entries[0]);
     let TaggedItem::Login(trashed) = &payload.trash[0].item else {
         panic!("trashed login");
     };
-    assert_moved_to_custom_fields(trashed);
+    assert_legacy_fields_kept(trashed);
     let TaggedItem::Login(previous) = &payload.history[0].item else {
         panic!("history login");
     };
-    assert_moved_to_custom_fields(previous);
+    assert_legacy_fields_kept(previous);
     assert!(payload.never_save_sites.is_empty());
 }
 
 #[test]
-fn a_format_10_vault_moves_login_legacy_fields_into_custom_fields() {
+fn a_format_10_vault_opens_as_format_11_with_its_login_fields_intact() {
     let (file, _) = format_10_vault(true);
     let opened = open_vault_with_password(&file, PASSWORD).expect("format 10 opens");
 

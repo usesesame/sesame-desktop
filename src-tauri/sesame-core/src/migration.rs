@@ -3,11 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::types::{CustomFieldEntry, ItemMetadata, LegacyField, VaultEntry};
+use crate::types::ItemMetadata;
 use crate::util::{random_id, unix_timestamp};
 use crate::{
-    Folder, TaggedItem, VaultFile, VaultPayload, VaultResult, SETUP_STATE_FORMAT,
-    VAULT_FORMAT_VERSION,
+    Folder, VaultFile, VaultPayload, VaultResult, SETUP_STATE_FORMAT, VAULT_FORMAT_VERSION,
 };
 
 pub fn fresh_vault_id() -> String {
@@ -37,28 +36,6 @@ pub(crate) fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
         changed = true;
     }
     Ok(changed)
-}
-
-fn custom_field_from_legacy(field: &LegacyField) -> CustomFieldEntry {
-    CustomFieldEntry {
-        label: field.label.clone(),
-        value: field.value.clone(),
-        kind: if field.secret { "secret" } else { "text" }.to_string(),
-    }
-}
-
-fn move_login_legacy_fields(entry: &mut VaultEntry) -> bool {
-    if entry.legacy_fields.is_empty() {
-        return false;
-    }
-    let moved = entry
-        .legacy_fields
-        .iter()
-        .map(custom_field_from_legacy)
-        .collect::<Vec<_>>();
-    entry.custom_fields.extend(moved);
-    zeroize::Zeroize::zeroize(&mut entry.legacy_fields);
-    true
 }
 
 /// Pre-metadata creation times are stamped at migration, never invented.
@@ -154,17 +131,6 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
             entry.revision = 1;
             changed = true;
         }
-        changed |= move_login_legacy_fields(entry);
-    }
-    for trashed in &mut payload.trash {
-        if let TaggedItem::Login(entry) = &mut trashed.item {
-            changed |= move_login_legacy_fields(entry);
-        }
-    }
-    for entry in &mut payload.history {
-        if let TaggedItem::Login(login) = &mut entry.item {
-            changed |= move_login_legacy_fields(login);
-        }
     }
 
     // Heal each active item directly: duplicate ids are still unrepaired here,
@@ -259,8 +225,7 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
 mod tests {
     use super::*;
     use crate::types::{
-        Card, Folder, HistoryEntry, HistoryOperation, LegacyField, TaggedItem, TrashedItem,
-        VaultEntry,
+        Card, Folder, HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry,
     };
     use crate::CipherBlob;
 
@@ -351,49 +316,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn login_legacy_fields_move_once_and_keep_their_secret_flag() {
-        let mut entry = login("login");
-        entry.legacy_fields = vec![
-            LegacyField {
-                label: "Visible".to_string(),
-                value: "fictional visible".to_string(),
-                secret: false,
-            },
-            LegacyField {
-                label: "Hidden".to_string(),
-                value: "fictional-secret-canary".to_string(),
-                secret: true,
-            },
-        ];
-        let mut payload = VaultPayload::default();
-        payload.entries.push(entry);
-
-        assert!(migrate_payload(&mut payload));
-        let migrated = &payload.entries[0];
-        assert!(migrated.legacy_fields.is_empty());
-        let kinds = migrated
-            .custom_fields
-            .iter()
-            .map(|field| {
-                (
-                    field.label.as_str(),
-                    field.value.as_str(),
-                    field.kind.as_str(),
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            kinds,
-            [
-                ("Visible", "fictional visible", "text"),
-                ("Hidden", "fictional-secret-canary", "secret"),
-            ]
-        );
-        assert!(!migrate_payload(&mut payload));
-        assert_eq!(payload.entries[0].custom_fields.len(), 2);
     }
 
     fn envelope(format_version: u8, setup_complete: bool) -> VaultFile {

@@ -57,8 +57,7 @@ from and is present only for an imported login. `locked` is present, and true,
 only for a secure note that was locked with the master password. The export
 still holds the text of a locked note. `fields` in a custom record is a list of
 `{ "label", "value", "kind" }`, and a `kind` of `secret` marks a value that Sesame
-hides on screen. `customFields` on a login has the same shape, and Sesame moves
-a login's `legacyFields` there when it upgrades a vault to format 11.
+hides on screen. `customFields` on a login has the same shape.
 `matchRule` is `site` or `never` when a login has one, and it is left out for
 the default `exact`.
 
