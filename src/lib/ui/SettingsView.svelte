@@ -1,6 +1,7 @@
 <script lang="ts">
   import { describeFreshness } from '../update-freshness-text'
   import { slidingSelection } from './sliding-selection'
+  import ReleaseRecordSetting from './ReleaseRecordSetting.svelte'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import SyncPanel from './SyncPanel.svelte'
@@ -67,6 +68,7 @@
   export let siteIconsPresenceRequired = false
   export let siteIconsPresencePassword = ''
   export let errorMessage = ''
+  export let onClearActivity: (done: () => void) => Promise<void> = async () => {}
   export let onConfirmSiteIconsPresence: () => void
   export let onCancelSiteIconsPresence: () => void
   export let websiteIconCacheWorking = false
@@ -339,6 +341,7 @@
             </article>
           </div>
         </section>
+        <ReleaseRecordSetting onClear={onClearActivity} />
       </div>
     {:else if tab === 'connections'}
       <div class="settings-groups">

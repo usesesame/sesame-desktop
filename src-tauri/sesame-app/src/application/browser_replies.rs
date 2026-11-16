@@ -12,8 +12,9 @@ use crate::browser_protocol::{
     parse_identity_fields, BrowserRequest, BrowserResponse, IdentityFillFields,
     MAX_CREDENTIAL_FIELD_BYTES, MAX_LOOKALIKE_HOST_CHARS,
 };
+use crate::vault::release_record::{MatchKind, Outcome, ReleaseDraft};
 use crate::vault::snapshot::{current_totp, totp_from_value};
-use crate::vault::{Identity, TaggedItem, VaultEntry, VaultState};
+use crate::vault::{Identity, TaggedItem, UnlockedVault, VaultEntry, VaultState};
 
 use super::browser_fill::{
     bounded_display, card_candidate, card_supports_fields, login_match, never_saves,
@@ -25,6 +26,7 @@ use super::browser_fill::{
 use super::browser_fill_broker::{
     ApprovalEvent, ApprovalRequest, BrowserFillState, APPROVAL_TIMEOUT,
 };
+use super::release_record::{browser_draft, record, record_in};
 
 pub(super) const MAX_MATCHING_CANDIDATES: usize = 32;
 
@@ -57,6 +59,45 @@ impl BrowserApproval {
     pub fn event(&self) -> &ApprovalEvent {
         &self.event
     }
+
+    pub fn draft(&self, outcome: Outcome) -> ReleaseDraft {
+        browser_draft(self.kind, outcome, &self.origin.hostname)
+    }
+}
+
+fn refused(vault: &VaultState, kind: ApprovalKind, origin: &NormalizedOrigin, outcome: Outcome) {
+    record(vault, browser_draft(kind, outcome, &origin.hostname));
+}
+
+fn begin_refusal(reason: &str) -> Outcome {
+    if reason == "staleRequest" {
+        Outcome::Replayed
+    } else {
+        Outcome::Busy
+    }
+}
+
+pub fn record_decision(
+    vault: &VaultState,
+    fill_state: &BrowserFillState,
+    approval_id: &str,
+    kind: ApprovalKind,
+    origin: &NormalizedOrigin,
+    decision: &ApprovalDecision,
+) {
+    let outcome = match decision {
+        ApprovalDecision::Selected(_) => return,
+        ApprovalDecision::Saved if kind == ApprovalKind::Save => return,
+        ApprovalDecision::Saved | ApprovalDecision::InvalidSelection => Outcome::Mismatch,
+        ApprovalDecision::Denied => fill_state
+            .take_marked_outcome(approval_id)
+            .unwrap_or(Outcome::Denied),
+    };
+    record(vault, browser_draft(kind, outcome, &origin.hostname));
+}
+
+fn note(vault: &VaultState, session: Option<&UnlockedVault>, draft: ReleaseDraft) {
+    record_in(vault, session, draft);
 }
 
 pub struct BrowserApprovalOffer {
@@ -131,6 +172,11 @@ pub fn fill_response_in_state(
         };
         let Some(session) = session.as_ref() else {
             effects.record_browser_host_registration("fill_locked");
+            vault.release_record.append_locked(browser_draft(
+                ApprovalKind::Fill,
+                Outcome::Locked,
+                &origin.hostname,
+            ));
             return BrowserResponse::unavailable(request, "noMatch").into();
         };
         let payload = match session.open_payload() {
@@ -155,13 +201,20 @@ pub fn fill_response_in_state(
         (vault.session_epoch(), candidates, lookalike)
     };
     if let Some(lookalike) = lookalike {
+        record(
+            vault,
+            browser_draft(ApprovalKind::Fill, Outcome::Lookalike, &origin.hostname)
+                .similar_to(&lookalike),
+        );
         return BrowserResponse::lookalike_unavailable(request, lookalike).into();
     }
     if candidates.is_empty() {
         effects.record_browser_host_registration("fill_no_match");
+        refused(vault, ApprovalKind::Fill, &origin, Outcome::NoMatch);
         return BrowserResponse::unavailable(request, "noMatch").into();
     }
     if candidates.len() > MAX_MATCHING_CANDIDATES {
+        refused(vault, ApprovalKind::Fill, &origin, Outcome::NoMatch);
         return BrowserResponse::unavailable(request, "noMatch").into();
     }
 
@@ -176,7 +229,10 @@ pub fn fill_response_in_state(
         ApprovalRequest::Fill { candidate_ids },
     ) {
         Ok(value) => value,
-        Err(reason) => return BrowserResponse::unavailable(request, reason).into(),
+        Err(reason) => {
+            refused(vault, ApprovalKind::Fill, &origin, begin_refusal(reason));
+            return BrowserResponse::unavailable(request, reason).into();
+        }
     };
 
     let event = BrowserFillRequestEvent {
@@ -227,6 +283,12 @@ pub fn complete_fill_in_state(
         }
     };
     if !peer_connected() {
+        record(
+            vault,
+            approval
+                .draft(Outcome::ConnectionClosed)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -241,6 +303,13 @@ pub fn complete_fill_in_state(
         Err(_) => return BrowserResponse::unavailable(request, "approvalUnavailable"),
     };
     if vault.session_epoch() != approval.epoch {
+        note(
+            vault,
+            session.as_ref(),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -249,6 +318,13 @@ pub fn complete_fill_in_state(
         return BrowserResponse::unavailable(request, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
+        note(
+            vault,
+            None,
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -257,6 +333,13 @@ pub fn complete_fill_in_state(
         return BrowserResponse::unavailable(request, "locked");
     };
     let Ok(item) = session.open_item(&login_id) else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -265,6 +348,13 @@ pub fn complete_fill_in_state(
         return BrowserResponse::unavailable(request, "staleRequest");
     };
     let TaggedItem::Login(entry) = &*item else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -277,6 +367,13 @@ pub fn complete_fill_in_state(
         &approval.origin,
         fill_carries_site_match(request.version),
     ) else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -285,6 +382,13 @@ pub fn complete_fill_in_state(
         return BrowserResponse::unavailable(request, "staleRequest");
     };
     if !credential_fields_valid(entry) {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Fill,
             &approval.approval_id,
@@ -292,6 +396,15 @@ pub fn complete_fill_in_state(
         );
         return BrowserResponse::unavailable(request, "staleRequest");
     }
+    note(
+        vault,
+        Some(session),
+        approval
+            .draft(Outcome::Released)
+            .item(&login_id, "login")
+            .fields(["username", "password"])
+            .match_kind(MatchKind::parse(match_kind.as_str())),
+    );
     if fill_carries_match_kind(request.version) {
         BrowserResponse::fill_with_match_kind(
             request,
@@ -343,6 +456,11 @@ pub fn save_response_in_state(
         };
         let Some(session) = session.as_ref() else {
             effects.record_browser_host_registration("save_locked");
+            vault.release_record.append_locked(browser_draft(
+                ApprovalKind::Save,
+                Outcome::Locked,
+                &origin.hostname,
+            ));
             return BrowserResponse::save_unavailable(&request.request_id, "noMatch").into();
         };
         // `update` candidates come from the vault, never from the extension.
@@ -358,6 +476,11 @@ pub fn save_response_in_state(
         };
         if never_saves(&payload.never_save_sites, &origin) {
             effects.record_browser_host_registration("save_never_site");
+            record_in(
+                vault,
+                Some(session),
+                browser_draft(ApprovalKind::Save, Outcome::NeverSave, &origin.hostname),
+            );
             return BrowserResponse::save_unavailable(&request.request_id, "approvalDeclined")
                 .into();
         }
@@ -369,9 +492,11 @@ pub fn save_response_in_state(
     };
     if kind == SaveKind::Update && candidates.is_empty() {
         effects.record_browser_host_registration("save_update_no_match");
+        refused(vault, ApprovalKind::Save, &origin, Outcome::NoMatch);
         return BrowserResponse::save_unavailable(&request.request_id, "noMatch").into();
     }
     if candidates.len() > MAX_MATCHING_CANDIDATES {
+        refused(vault, ApprovalKind::Save, &origin, Outcome::NoMatch);
         return BrowserResponse::save_unavailable(&request.request_id, "noMatch").into();
     }
 
@@ -401,7 +526,8 @@ pub fn save_response_in_state(
     ) {
         Ok(value) => value,
         Err(reason) => {
-            return BrowserResponse::save_unavailable(&request.request_id, reason).into()
+            refused(vault, ApprovalKind::Save, &origin, begin_refusal(reason));
+            return BrowserResponse::save_unavailable(&request.request_id, reason).into();
         }
     };
 
@@ -482,6 +608,11 @@ pub fn card_response_in_state(
         };
         let Some(session) = session.as_ref() else {
             effects.record_browser_host_registration("card_locked");
+            vault.release_record.append_locked(browser_draft(
+                ApprovalKind::Card,
+                Outcome::Locked,
+                &origin.hostname,
+            ));
             return BrowserResponse::card_unavailable(&request.request_id, "noMatch").into();
         };
         let payload = match session.open_payload() {
@@ -505,6 +636,7 @@ pub fn card_response_in_state(
     };
     if candidates.is_empty() {
         effects.record_browser_host_registration("card_no_match");
+        refused(vault, ApprovalKind::Card, &origin, Outcome::NoMatch);
         return BrowserResponse::card_unavailable(&request.request_id, "noMatch").into();
     }
     let candidate_ids = candidates
@@ -519,7 +651,8 @@ pub fn card_response_in_state(
     ) {
         Ok(value) => value,
         Err(reason) => {
-            return BrowserResponse::card_unavailable(&request.request_id, reason).into()
+            refused(vault, ApprovalKind::Card, &origin, begin_refusal(reason));
+            return BrowserResponse::card_unavailable(&request.request_id, reason).into();
         }
     };
     let event = BrowserCardRequestEvent {
@@ -573,6 +706,12 @@ pub fn complete_card_in_state(
         }
     };
     if !peer_connected() {
+        record(
+            vault,
+            approval
+                .draft(Outcome::ConnectionClosed)
+                .item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -587,6 +726,11 @@ pub fn complete_card_in_state(
         }
     };
     if vault.session_epoch() != approval.epoch {
+        note(
+            vault,
+            session.as_ref(),
+            approval.draft(Outcome::VaultChanged).item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -595,6 +739,11 @@ pub fn complete_card_in_state(
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
+        note(
+            vault,
+            None,
+            approval.draft(Outcome::VaultChanged).item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -603,6 +752,11 @@ pub fn complete_card_in_state(
         return BrowserResponse::card_unavailable(&request.request_id, "locked");
     };
     let Ok(item) = session.open_item(&card_id) else {
+        note(
+            vault,
+            Some(session),
+            approval.draft(Outcome::VaultChanged).item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -611,6 +765,11 @@ pub fn complete_card_in_state(
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     };
     let TaggedItem::Card(card) = &*item else {
+        note(
+            vault,
+            Some(session),
+            approval.draft(Outcome::VaultChanged).item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -619,6 +778,11 @@ pub fn complete_card_in_state(
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     };
     if !card_supports_fields(card, requested_fields) {
+        note(
+            vault,
+            Some(session),
+            approval.draft(Outcome::VaultChanged).item(&card_id, "card"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Card,
             &approval.approval_id,
@@ -626,6 +790,14 @@ pub fn complete_card_in_state(
         );
         return BrowserResponse::card_unavailable(&request.request_id, "staleRequest");
     }
+    note(
+        vault,
+        Some(session),
+        approval
+            .draft(Outcome::Released)
+            .item(&card_id, "card")
+            .fields(requested_fields.iter().map(String::as_str)),
+    );
     BrowserResponse::card_for(request, selected_card_fields(card, requested_fields))
 }
 
@@ -660,6 +832,11 @@ pub fn identity_response_in_state(
         };
         let Some(session) = session.as_ref() else {
             effects.record_browser_host_registration("identity_locked");
+            vault.release_record.append_locked(browser_draft(
+                ApprovalKind::Identity,
+                Outcome::Locked,
+                &origin.hostname,
+            ));
             return BrowserResponse::identity_unavailable(&request.request_id, "noMatch").into();
         };
         let payload = match session.open_payload() {
@@ -685,6 +862,7 @@ pub fn identity_response_in_state(
     };
     if candidates.is_empty() {
         effects.record_browser_host_registration("identity_no_match");
+        refused(vault, ApprovalKind::Identity, &origin, Outcome::NoMatch);
         return BrowserResponse::identity_unavailable(&request.request_id, "noMatch").into();
     }
 
@@ -700,7 +878,13 @@ pub fn identity_response_in_state(
     ) {
         Ok(value) => value,
         Err(reason) => {
-            return BrowserResponse::identity_unavailable(&request.request_id, reason).into()
+            refused(
+                vault,
+                ApprovalKind::Identity,
+                &origin,
+                begin_refusal(reason),
+            );
+            return BrowserResponse::identity_unavailable(&request.request_id, reason).into();
         }
     };
 
@@ -755,6 +939,12 @@ pub fn complete_identity_in_state(
         }
     };
     if !peer_connected() {
+        record(
+            vault,
+            approval
+                .draft(Outcome::ConnectionClosed)
+                .item(&identity_id, "identity"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -774,6 +964,13 @@ pub fn complete_identity_in_state(
         }
     };
     if vault.session_epoch() != approval.epoch {
+        note(
+            vault,
+            session.as_ref(),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&identity_id, "identity"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -782,6 +979,13 @@ pub fn complete_identity_in_state(
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
+        note(
+            vault,
+            None,
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&identity_id, "identity"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -790,6 +994,13 @@ pub fn complete_identity_in_state(
         return BrowserResponse::identity_unavailable(&request.request_id, "locked");
     };
     let Ok(item) = session.open_item(&identity_id) else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&identity_id, "identity"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -798,6 +1009,13 @@ pub fn complete_identity_in_state(
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     };
     let TaggedItem::Identity(identity) = &*item else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&identity_id, "identity"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Identity,
             &approval.approval_id,
@@ -805,6 +1023,14 @@ pub fn complete_identity_in_state(
         );
         return BrowserResponse::identity_unavailable(&request.request_id, "staleRequest");
     };
+    note(
+        vault,
+        Some(session),
+        approval
+            .draft(Outcome::Released)
+            .item(&identity_id, "identity")
+            .fields(requested_fields.iter().map(String::as_str)),
+    );
     BrowserResponse::identity_for(
         request,
         selected_identity_fields(identity, requested_fields),
@@ -861,6 +1087,11 @@ pub fn totp_response_in_state(
         };
         let Some(session) = session.as_ref() else {
             effects.record_browser_host_registration("totp_locked");
+            vault.release_record.append_locked(browser_draft(
+                ApprovalKind::Totp,
+                Outcome::Locked,
+                &origin.hostname,
+            ));
             return BrowserResponse::totp_unavailable(&request.request_id, "noMatch").into();
         };
         let payload = match session.open_payload() {
@@ -880,6 +1111,7 @@ pub fn totp_response_in_state(
     };
     if candidates.is_empty() {
         effects.record_browser_host_registration("totp_no_match");
+        refused(vault, ApprovalKind::Totp, &origin, Outcome::NoMatch);
         return BrowserResponse::totp_unavailable(&request.request_id, "noMatch").into();
     }
 
@@ -895,7 +1127,8 @@ pub fn totp_response_in_state(
     ) {
         Ok(value) => value,
         Err(reason) => {
-            return BrowserResponse::totp_unavailable(&request.request_id, reason).into()
+            refused(vault, ApprovalKind::Totp, &origin, begin_refusal(reason));
+            return BrowserResponse::totp_unavailable(&request.request_id, reason).into();
         }
     };
     let event = BrowserTotpRequestEvent {
@@ -947,6 +1180,12 @@ pub fn complete_totp_in_state(
         }
     };
     if !peer_connected() {
+        record(
+            vault,
+            approval
+                .draft(Outcome::ConnectionClosed)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -962,6 +1201,13 @@ pub fn complete_totp_in_state(
         }
     };
     if vault.session_epoch() != approval.epoch {
+        note(
+            vault,
+            session.as_ref(),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -970,6 +1216,13 @@ pub fn complete_totp_in_state(
         return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
     }
     let Some(session) = session.as_ref() else {
+        note(
+            vault,
+            None,
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -978,6 +1231,13 @@ pub fn complete_totp_in_state(
         return BrowserResponse::totp_unavailable(&request.request_id, "locked");
     };
     let Ok(item) = session.open_item(&login_id) else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -986,6 +1246,13 @@ pub fn complete_totp_in_state(
         return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
     };
     let TaggedItem::Login(entry) = &*item else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -994,6 +1261,13 @@ pub fn complete_totp_in_state(
         return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
     };
     if login_match(entry, &approval.origin, true).is_none() {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -1006,6 +1280,13 @@ pub fn complete_totp_in_state(
         .as_deref()
         .and_then(|secret| totp_response_for_secret(request, secret))
     else {
+        note(
+            vault,
+            Some(session),
+            approval
+                .draft(Outcome::VaultChanged)
+                .item(&login_id, "login"),
+        );
         effects.emit_browser_approval_cancelled(
             ApprovalKind::Totp,
             &approval.approval_id,
@@ -1013,6 +1294,18 @@ pub fn complete_totp_in_state(
         );
         return BrowserResponse::totp_unavailable(&request.request_id, "staleRequest");
     };
+    note(
+        vault,
+        Some(session),
+        approval
+            .draft(Outcome::Released)
+            .item(&login_id, "login")
+            .field("totp")
+            .match_kind(
+                login_match(entry, &approval.origin, true)
+                    .and_then(|(kind, _)| MatchKind::parse(kind.as_str())),
+            ),
+    );
     response
 }
 

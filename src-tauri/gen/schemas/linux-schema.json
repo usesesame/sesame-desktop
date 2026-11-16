@@ -405,6 +405,12 @@
           "markdownDescription": "The quick-access window's redacted status and search, the guarded native copy of one field, and opening an item in Sesame."
         },
         {
+          "description": "The Activity record of secret releases and browser decisions, for the main window only.",
+          "type": "string",
+          "const": "release-record",
+          "markdownDescription": "The Activity record of secret releases and browser decisions, for the main window only."
+        },
+        {
           "description": "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on.",
           "type": "string",
           "const": "sync",

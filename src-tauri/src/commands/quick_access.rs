@@ -41,7 +41,7 @@ pub fn copy_quick_access_field(
     clear_after_ms: Option<u64>,
 ) -> VaultResult<()> {
     require_quick_access(window.label())?;
-    copy_quick_access_field_in_state(
+    let copied = copy_quick_access_field_in_state(
         &state,
         &presence,
         &DesktopHostEffects::new(&app),
@@ -49,7 +49,9 @@ pub fn copy_quick_access_field(
         &field,
         clear_after_ms,
     )
-    .map(|_| ())
+    .map(|_| ());
+    crate::commands::announce_release_record(&app);
+    copied
 }
 
 /// A note, document, or custom record opens in Sesame rather than exposing its

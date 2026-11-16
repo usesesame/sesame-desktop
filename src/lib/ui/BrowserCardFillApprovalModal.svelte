@@ -5,6 +5,7 @@
   import { useAppStores } from '../stores/app-stores'
   import type { BrowserCardFillRequest, CardFieldKey } from '../types'
   import ModalShell from './ModalShell.svelte'
+  import ReleaseRecordHintLine from './ReleaseRecordHintLine.svelte'
 
   export let request: BrowserCardFillRequest
   export let working = false
@@ -31,6 +32,7 @@
   <h2 id="browser-card-heading">Fill {request.hostname}?</h2>
   <p id="browser-card-description">Choose a saved card. Every card fill needs this confirmation, and Sesame does not submit the form.</p>
   <div class="browser-fill-origin"><Icon name="shield" size={15} /><span>Requesting page</span><code>{request.origin}</code></div>
+  <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserCardFill.selectedId} noun="card" />
   <div class="browser-fill-origin"><Icon name="check" size={15} /><span>Fields requested</span><code>{request.requestedFields.map((field) => FIELD_LABELS[field] ?? field).join(', ')}</code></div>
   <div class="browser-fill-candidates" role="radiogroup" aria-label="Cards for {request.hostname}">
     {#each request.candidates as candidate (candidate.id)}

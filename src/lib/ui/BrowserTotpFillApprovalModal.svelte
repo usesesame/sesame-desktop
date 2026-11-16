@@ -5,6 +5,7 @@
   import { useAppStores } from '../stores/app-stores'
   import type { BrowserTotpFillRequest } from '../types'
   import ModalShell from './ModalShell.svelte'
+  import ReleaseRecordHintLine from './ReleaseRecordHintLine.svelte'
 
   export let request: BrowserTotpFillRequest
   export let working = false
@@ -49,6 +50,8 @@
     <span>Requesting page</span>
     <code>{request.origin}</code>
   </div>
+
+  <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserTotpFill.selectedId} noun="login's code" />
 
   {#if selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">

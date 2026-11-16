@@ -281,11 +281,15 @@ pub fn get_merge_comparison(
 
 #[tauri::command]
 pub fn reveal_login_secret(
+    app: tauri::AppHandle,
     id: String,
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    reveal_login_secret_in_state(&state, &presence, &id).map(|secret| secret.to_string())
+    let revealed =
+        reveal_login_secret_in_state(&state, &presence, &id).map(|secret| secret.to_string());
+    crate::commands::announce_release_record(&app);
+    revealed
 }
 
 #[cfg(test)]

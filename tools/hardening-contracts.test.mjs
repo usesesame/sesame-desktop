@@ -249,6 +249,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'diagnostics',
     'external-navigation',
     'browser-approval',
+    'release-record',
     'desktop-settings',
     'website-icons',
     'clipboard-guard',
@@ -1745,4 +1746,52 @@ test('a browser approval can only be built where the broker registers it', () =>
   const begins = [...replies.matchAll(/fill_state\.begin\(/g)].length
   assert.ok(builds > 0)
   assert.equal(builds, begins, 'an approval is built without being registered with the broker')
+})
+
+test('the Activity record is reachable only from the main window', () => {
+  const permissions = applicationPermissions()
+  const recordCommands = permissions.get('release-record')
+  assert.ok(recordCommands, 'the release-record permission is missing')
+  assert.ok(recordCommands.length > 0, 'the release-record permission names no command')
+  for (const command of recordCommands) assert.match(command, /release_record/, `${command} is not a record command`)
+  for (const [identifier, commands] of permissions) {
+    if (identifier === 'release-record') continue
+    const leaked = commands.filter((command) => command.includes('release_record'))
+    assert.deepEqual(leaked, [], `${identifier} also grants a record command`)
+  }
+  const holders = [...capabilityFiles()]
+    .filter(([, capability]) => capability.permissions.includes('release-record'))
+    .map(([identifier, capability]) => [identifier, capability.windows])
+  assert.deepEqual(holders, [['main-capability', ['main']]])
+  const emit = read('src-tauri', 'src', 'commands', 'release_record.rs')
+  assert.match(emit, /emit_to\("main", RELEASE_RECORD_CHANGED/, 'the record status is not sent to the main window only')
+  assert.doesNotMatch(emit, /\.emit\(/, 'the record status is broadcast to every window')
+})
+
+test('no native messaging message type can reach the Activity record', () => {
+  const pipe = read('src-tauri', 'src', 'browser_fill.rs')
+  const dispatch = pipe.match(/match request\.message_type\.as_str\(\) \{([\s\S]*?)\n {4}\};/)
+  assert.ok(dispatch, 'the browser message dispatch moved')
+  assert.deepEqual(
+    [...dispatch[1].matchAll(/"([a-z]+)" =>/g)].map((match) => match[1]),
+    ['capabilities', 'activate', 'fill', 'save', 'identity', 'card', 'totp'],
+  )
+  const protocol = read('src-tauri', 'sesame-app', 'src', 'browser_protocol.rs')
+  const response = protocol.match(/pub struct BrowserResponse \{([\s\S]*?)\n\}/)
+  assert.ok(response, 'the browser response type moved')
+  assert.deepEqual(
+    [...response[1].matchAll(/pub ([a-z_]+):/g)].map((match) => match[1]),
+    ['version', 'message_type', 'request_id', 'installed', 'desktop_available', 'locked', 'fill_available', 'opened', 'username', 'password', 'match_kind', 'reason', 'message', 'lookalike', 'saved', 'identity', 'card', 'code', 'remaining_seconds'],
+  )
+  const browserSide = [
+    protocol,
+    ...readdirSync(join(root, 'src-tauri', 'src', 'adapters', 'platform', 'browser_host')).map((name) => read('src-tauri', 'src', 'adapters', 'platform', 'browser_host', name)),
+    ...readdirSync(join(root, 'src-tauri', 'src', 'adapters', 'platform', 'browser_pipe')).map((name) => read('src-tauri', 'src', 'adapters', 'platform', 'browser_pipe', name)),
+    read('src-tauri', 'src', 'bin', 'sesame-browser-host.rs'),
+  ]
+  for (const source of browserSide) assert.doesNotMatch(source, /release_record|ReleaseRecord/, 'the browser side of the pipe names the record')
+  const replies = read('src-tauri', 'sesame-app', 'src', 'application', 'browser_replies.rs')
+  for (const source of [pipe, replies]) {
+    assert.doesNotMatch(source, /release_record_page_in_state|\.entries\(&|\.clear\(&|set_retention_days/, 'a browser request reads or changes the record')
+  }
 })

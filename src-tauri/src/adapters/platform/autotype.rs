@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::commands::require_release_presence;
 use crate::release::ReleasePresence;
+use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::{TaggedItem, VaultResult, VaultState};
 
 #[cfg(any(windows, test))]
@@ -26,11 +27,14 @@ const SEND_FAILED_MESSAGE: &str =
 
 #[tauri::command]
 pub fn auto_type(
+    app: tauri::AppHandle,
     id: String,
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<()> {
-    let (username, password) = login_credentials(&state, &presence, &id)?;
+    let credentials = login_credentials(&state, &presence, &id);
+    crate::commands::announce_release_record(&app);
+    let (username, password) = credentials?;
     send_credentials(&username, &password)
 }
 
@@ -52,6 +56,19 @@ fn login_credentials(
     if entry.username.is_empty() && entry.password.is_empty() {
         return Err("This login has nothing saved to type.".to_string());
     }
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::AutoType, Outcome::Released)
+            .item(&entry.id, "login")
+            .fields(
+                [
+                    (!entry.username.is_empty()).then_some("username"),
+                    (!entry.password.is_empty()).then_some("password"),
+                ]
+                .into_iter()
+                .flatten(),
+            ),
+    );
     Ok((
         Zeroizing::new(entry.username.clone()),
         Zeroizing::new(entry.password.clone()),

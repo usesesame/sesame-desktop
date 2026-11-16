@@ -2,8 +2,10 @@ use sesame_core::secret_fields::secret_value;
 use zeroize::Zeroizing;
 
 use crate::application::release::require_release_presence;
+use crate::application::release_record::record;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
+use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::{TaggedItem, VaultResult, VaultState};
 
 const BACKUP_CODES: &str = "backupCodes";
@@ -42,6 +44,27 @@ pub fn item_field_in_state(
         .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())
 }
 
+fn record_field(state: &VaultState, entry: EntryKind, id: &str, kind: &str, field: &str) {
+    record(
+        state,
+        ReleaseDraft::new(entry, Outcome::Released)
+            .item(id.trim(), kind)
+            .field(field),
+    );
+}
+
+pub fn reveal_item_field_in_state(
+    state: &VaultState,
+    presence: &ReleasePresence,
+    id: &str,
+    kind: &str,
+    field: &str,
+) -> VaultResult<Zeroizing<String>> {
+    let value = item_field_in_state(state, presence, id, kind, field)?;
+    record_field(state, EntryKind::Reveal, id, kind, field);
+    Ok(value)
+}
+
 pub fn copy_item_field_in_state(
     state: &VaultState,
     presence: &ReleasePresence,
@@ -52,5 +75,6 @@ pub fn copy_item_field_in_state(
     clear_after_ms: Option<u64>,
 ) -> VaultResult<u64> {
     let value = item_field_in_state(state, presence, id, kind, field)?;
+    record_field(state, EntryKind::Copy, id, kind, field);
     effects.copy_secret(value, clear_after_ms)
 }

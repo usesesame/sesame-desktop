@@ -24,6 +24,8 @@ pub use sesame_core::pending_import;
 #[allow(unused_imports)]
 pub use sesame_core::platform;
 #[allow(unused_imports)]
+pub use sesame_core::release_record;
+#[allow(unused_imports)]
 pub use sesame_core::snapshot;
 #[allow(unused_imports)]
 pub use sesame_core::throttle;

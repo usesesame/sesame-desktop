@@ -11,6 +11,8 @@ use crate::vault::{
 };
 
 use super::browser_fill_broker::BrowserFillState;
+use super::release_record::{browser_draft, record_in};
+use crate::vault::release_record::Outcome;
 
 const APPROVAL_GONE: &str = "That browser approval is no longer available.";
 const APPROVAL_EXPIRED: &str = "That browser approval expired or is no longer available.";
@@ -445,6 +447,7 @@ pub fn resolve_browser_save_in_state(
         }
         Err(error) => {
             // Release the broker so the extension is not left waiting.
+            state.mark_outcome(approval_id, Outcome::Withdrawn);
             let _ = resolve_save(state, effects, approval_id, false);
             Err(error)
         }
@@ -465,6 +468,7 @@ pub fn never_save_browser_site_in_state(
         .save_origin_if_bound(approval_id)
         .ok_or(APPROVAL_EXPIRED)?;
     let sites = add_never_save_site(vault, &origin.canonical(), Some(epoch));
+    state.mark_outcome(approval_id, Outcome::NeverSave);
     let _ = resolve_save(state, effects, approval_id, false);
     sites
 }
@@ -772,6 +776,13 @@ fn save_new_login(vault: &VaultState, payload: SavePayload) -> VaultResult<SaveL
     next_payload.entries.push(entry);
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
+    record_in(
+        vault,
+        Some(session),
+        browser_draft(ApprovalKind::Save, Outcome::Saved, &origin.hostname)
+            .item(&entry_id, "login")
+            .fields(["username", "password"]),
+    );
     Ok(SaveLoginResult {
         id: entry_id,
         snapshot: session.snapshot(),
@@ -833,6 +844,15 @@ fn save_login_update(
     )?;
     commit_payload_change(session, next_payload)?;
     vault.advance_session_epoch();
+    if let Some(origin) = NormalizedOrigin::from_request(&payload.origin) {
+        record_in(
+            vault,
+            Some(session),
+            browser_draft(ApprovalKind::Save, Outcome::Updated, &origin.hostname)
+                .item(&target_id, "login")
+                .field("password"),
+        );
+    }
     Ok(SaveLoginResult {
         id: target_id,
         snapshot: session.snapshot(),
