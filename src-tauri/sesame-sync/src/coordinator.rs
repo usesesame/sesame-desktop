@@ -183,6 +183,7 @@ impl Coordinator {
                 | Phase::Halted(Halt::Incompatible)
                 | Phase::Halted(Halt::FloorDamaged)
                 | Phase::Halted(Halt::LinkEnded)
+                | Phase::Halted(Halt::TooLarge { .. })
         ) {
             state.status.phase = Phase::Idle;
             state.status.pending = false;
@@ -515,13 +516,26 @@ mod tests {
         assert_eq!(coordinator.halted_size(), Some(12_000_000));
         assert!(!coordinator.begin());
 
-        coordinator.retry_after_user_action();
         coordinator.vault_resized(12_000_000);
         assert_eq!(coordinator.status().phase, Phase::Halted(halt));
         assert!(!coordinator.begin());
 
         coordinator.vault_resized(9_000_000);
         assert_eq!(coordinator.status().phase, Phase::Idle);
+        assert_eq!(coordinator.halted_size(), None);
+        assert!(coordinator.begin());
+    }
+
+    #[test]
+    fn a_person_can_try_again_after_a_size_stop() {
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+        coordinator.finish(Outcome::Halt(Halt::TooLarge {
+            vault_bytes: 2_000_000,
+            limit_bytes: 10_485_760,
+        }));
+        assert!(!coordinator.begin());
+        coordinator.retry_after_user_action();
         assert_eq!(coordinator.halted_size(), None);
         assert!(coordinator.begin());
     }
