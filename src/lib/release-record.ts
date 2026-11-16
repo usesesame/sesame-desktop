@@ -51,6 +51,8 @@ const requestNouns: Partial<Record<EntryKind, string>> = {
   browserTotp: 'one-time code fill',
   browserCard: 'card fill',
   browserIdentity: 'identity fill',
+  browserChange: 'password change',
+  browserCreate: 'new login',
 }
 
 function article(noun: string): string {

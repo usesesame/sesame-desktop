@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserApprovalCancelled, BrowserChangeRequest, BrowserCreateRequest, PendingChangeList, PendingChangeView, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -1671,6 +1671,148 @@ export async function removeNeverSaveSite(origin: string): Promise<string[]> {
     return [...previewNeverSaveSites]
   }
   return invoke<string[]>('remove_never_save_site', { origin })
+}
+
+function previewQuery(name: string): string | null {
+  return typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(name)
+}
+
+const PREVIEW_CHANGE_APPROVAL_ID = 'preview-change-approval'
+const PREVIEW_CREATE_APPROVAL_ID = 'preview-create-approval'
+
+export function previewBrowserChangeRequest(): BrowserChangeRequest | null {
+  if (!previewMode || previewQuery('previewApproval') !== 'change') return null
+  return {
+    approvalId: PREVIEW_CHANGE_APPROVAL_ID,
+    origin: 'https://accounts.example.com',
+    hostname: 'accounts.example.com',
+    candidates: [
+      { id: 'gmail', title: 'Gmail', username: 'hello@example.test', email: '', savedOrigin: 'https://accounts.example.com', matchKind: 'exact' },
+      { id: 'github', title: 'GitHub', username: 'sesame-preview', email: '', savedOrigin: 'https://accounts.example.com', matchKind: 'exact' },
+    ],
+    unconfirmed: previewQuery('previewWaiting') === '1' ? ['gmail'] : [],
+    expiresInSeconds: 600,
+    expiresAtUnixMs: Date.now() + 600_000,
+  }
+}
+
+export function previewBrowserCreateRequest(): BrowserCreateRequest | null {
+  if (!previewMode || previewQuery('previewApproval') !== 'create') return null
+  return {
+    approvalId: PREVIEW_CREATE_APPROVAL_ID,
+    origin: 'https://signup.example.com',
+    hostname: 'signup.example.com',
+    expiresInSeconds: 600,
+    expiresAtUnixMs: Date.now() + 600_000,
+  }
+}
+
+function previewPendingChanges(): PendingChangeView[] {
+  const wanted = (previewQuery('previewPending') ?? '').split(',').filter(Boolean)
+  const now = Math.floor(Date.now() / 1_000)
+  const views: Record<string, PendingChangeView> = {
+    change: { id: 'preview-change', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 180, fill: 'filled', accepted: false, canGoBack: true, daysLeft: 30, urgent: false },
+    new: { id: 'preview-new', itemId: 'notion', kind: 'new', host: 'signup.example.com', title: 'signup.example.com', username: 'alice@example.com', createdAt: now - 600, fill: 'filled', accepted: true, canGoBack: false, urgent: false },
+    notFilled: { id: 'preview-not-filled', itemId: 'github', kind: 'change', host: 'github.com', title: 'GitHub', username: 'sesame-preview', createdAt: now - 60, fill: 'notFilled', accepted: false, canGoBack: true, daysLeft: 30, urgent: false },
+    urgent: { id: 'preview-urgent', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 24 * 86_400, fill: 'filled', accepted: false, canGoBack: true, daysLeft: 6, urgent: true },
+  }
+  return wanted.flatMap((key) => (views[key] ? [views[key]] : []))
+}
+
+let previewPendingList: PendingChangeView[] | null = null
+
+function previewPending(): PendingChangeList {
+  previewPendingList ??= previewPendingChanges()
+  return { changes: previewPendingList, snapshot: previewSnapshot }
+}
+
+function previewResolve(id: string): PendingChangeList {
+  previewPendingList = previewPending().changes.filter((change) => change.id !== id)
+  return previewPending()
+}
+
+async function onBrowserChangeRequest(handler: (payload: BrowserChangeRequest) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserChangeRequest>('browser-change-request', ({ payload }) => handler(payload))
+}
+
+async function onBrowserCreateRequest(handler: (payload: BrowserCreateRequest) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserCreateRequest>('browser-create-request', ({ payload }) => handler(payload))
+}
+
+async function onBrowserApprovalCancelled(event: string, handler: (payload: BrowserApprovalCancelled) => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<BrowserApprovalCancelled>(event, ({ payload }) => handler(payload))
+}
+
+export async function subscribeBrowserChange(handlers: {
+  request: (payload: BrowserChangeRequest) => void
+  cancelled: (payload: BrowserApprovalCancelled) => void
+}): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  const [stopRequests, stopCancellations] = await Promise.all([
+    onBrowserChangeRequest(handlers.request),
+    onBrowserApprovalCancelled('browser-change-cancelled', handlers.cancelled),
+  ])
+  return () => { stopRequests(); stopCancellations() }
+}
+
+export async function subscribeBrowserCreate(handlers: {
+  request: (payload: BrowserCreateRequest) => void
+  cancelled: (payload: BrowserApprovalCancelled) => void
+}): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  const [stopRequests, stopCancellations] = await Promise.all([
+    onBrowserCreateRequest(handlers.request),
+    onBrowserApprovalCancelled('browser-create-cancelled', handlers.cancelled),
+  ])
+  return () => { stopRequests(); stopCancellations() }
+}
+
+export async function getPendingBrowserChange(): Promise<BrowserChangeRequest | null> {
+  if (previewMode) return null
+  return invoke<BrowserChangeRequest | null>('get_pending_browser_change')
+}
+
+export async function getPendingBrowserCreate(): Promise<BrowserCreateRequest | null> {
+  if (previewMode) return null
+  return invoke<BrowserCreateRequest | null>('get_pending_browser_create')
+}
+
+export async function resolveBrowserChange(approvalId: string, loginId: string | null): Promise<void> {
+  if (previewMode) return
+  await invoke<void>('resolve_browser_change', { approvalId, loginId })
+}
+
+export async function resolveBrowserCreate(approvalId: string, approved: boolean): Promise<void> {
+  if (previewMode) return
+  await invoke<void>('resolve_browser_create', { approvalId, approved })
+}
+
+export async function listPendingChanges(): Promise<PendingChangeList> {
+  if (previewMode) return previewPending()
+  return invoke<PendingChangeList>('list_pending_changes')
+}
+
+export async function keepPendingChange(id: string): Promise<PendingChangeList> {
+  if (previewMode) return previewResolve(id)
+  return invoke<PendingChangeList>('keep_pending_change', { id })
+}
+
+export async function goBackPendingChange(id: string): Promise<PendingChangeList> {
+  if (previewMode) return previewResolve(id)
+  return invoke<PendingChangeList>('go_back_pending_change', { id })
+}
+
+export async function discardPendingLogin(id: string): Promise<PendingChangeList> {
+  if (previewMode) return previewResolve(id)
+  return invoke<PendingChangeList>('discard_pending_login', { id })
+}
+
+export async function onPendingChangesChanged(handler: () => void): Promise<UnlistenFn> {
+  if (previewMode) return () => {}
+  return listen<null>('pending-changes-changed', () => handler())
 }
 
 export async function getPendingBrowserSave(): Promise<BrowserSaveRequest | null> {

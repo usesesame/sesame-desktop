@@ -3,7 +3,7 @@ import { get, writable } from 'svelte/store'
 import { generatorEntropy, makePassword, strengthLabel } from '../generator'
 import { makePassphrase, passphraseEntropy } from '../passphrase'
 import { DEFAULT_SORT_MODE, type SortMode } from '../vault-collections'
-import type { BrowserCardFillRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, BrowserTotpFillRequest, GeneratorOption, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
+import type { BrowserCardFillRequest, BrowserChangeRequest, BrowserCreateRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, BrowserTotpFillRequest, GeneratorOption, PendingChangeView, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
 import { refreshTotp } from '../vault'
 
 export interface VaultStoreState {
@@ -66,6 +66,27 @@ export interface BrowserTotpFillStoreState {
   working: boolean
   syncWorking: boolean
   syncFailed: boolean
+}
+
+export interface BrowserChangeStoreState {
+  request: BrowserChangeRequest | null
+  selectedId: string
+  working: boolean
+  syncWorking: boolean
+  syncFailed: boolean
+}
+
+export interface BrowserCreateStoreState {
+  request: BrowserCreateRequest | null
+  selectedId: string
+  working: boolean
+  syncWorking: boolean
+  syncFailed: boolean
+}
+
+export interface PendingChangesStoreState {
+  changes: PendingChangeView[]
+  working: string | null
 }
 
 export interface BrowserSaveStoreState {
@@ -351,6 +372,9 @@ export function createAppStores() {
     browserCardFill: patchable<BrowserCardFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserTotpFill: patchable<BrowserTotpFillStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserSave: patchable<BrowserSaveStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    browserChange: patchable<BrowserChangeStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    browserCreate: patchable<BrowserCreateStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    pendingChanges: patchable<PendingChangesStoreState>({ changes: [], working: null }),
     settings: patchable<SettingsStoreState>({ theme: 'auto', siteIconsEnabled: false, autoLockMinutes: 5, clipboardClearSeconds: 30, keepInTray: true, quickAccessShortcut: 'Ctrl+Alt+S' }),
   }
 }

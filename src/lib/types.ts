@@ -179,6 +179,10 @@ export type { ReleaseRecordQuery } from './generated/ReleaseRecordQuery'
 export type { ReleaseRecordStatus } from './generated/ReleaseRecordStatus'
 export type { ReleaseRecordHint } from './generated/ReleaseRecordHint'
 export type { ReleaseItemHint } from './generated/ReleaseItemHint'
+export type { PendingChangeView } from './generated/PendingChangeView'
+export type { PendingChangeList } from './generated/PendingChangeList'
+export type { PendingKind } from './generated/PendingKind'
+export type { FillState } from './generated/FillState'
 
 export interface BrowserFillRequest {
   approvalId: string
@@ -283,6 +287,29 @@ export interface BrowserSaveRequest {
   candidates: BrowserFillCandidate[]
   expiresInSeconds: number
   expiresAtUnixMs: number
+}
+
+export interface BrowserChangeRequest {
+  approvalId: string
+  origin: string
+  hostname: string
+  candidates: BrowserFillCandidate[]
+  unconfirmed: string[]
+  expiresInSeconds: number
+  expiresAtUnixMs: number
+}
+
+export interface BrowserCreateRequest {
+  approvalId: string
+  origin: string
+  hostname: string
+  expiresInSeconds: number
+  expiresAtUnixMs: number
+}
+
+export interface BrowserApprovalCancelled {
+  approvalId: string
+  reason: 'denied' | 'expired' | 'connectionClosed' | 'vaultChanged'
 }
 
 export interface BrowserSaveCancelled {

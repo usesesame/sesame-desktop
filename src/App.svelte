@@ -18,6 +18,8 @@
   import { createCardFillController } from './lib/controllers/card-fill-controller'
   import { createTotpFillController } from './lib/controllers/totp-fill-controller'
   import { createBrowserSaveController } from './lib/controllers/browser-save-controller'
+  import { createBrowserChangeController, createBrowserCreateController } from './lib/controllers/browser-change-controller'
+  import { createPendingChangesController } from './lib/controllers/pending-changes-controller'
   import { createSettingsController } from './lib/controllers/settings-controller'
   import { recoveryRequestPending } from './lib/recovery-replacement'
   import { createBackupController } from './lib/controllers/backup-controller'
@@ -83,6 +85,8 @@
   import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
   import BrowserTotpFillApprovalModal from './lib/ui/BrowserTotpFillApprovalModal.svelte'
   import BrowserSaveApprovalModal from './lib/ui/BrowserSaveApprovalModal.svelte'
+  import BrowserChangeApprovalModal from './lib/ui/BrowserChangeApprovalModal.svelte'
+  import BrowserCreateApprovalModal from './lib/ui/BrowserCreateApprovalModal.svelte'
   import PinSetupModal from './lib/ui/PinSetupModal.svelte'
   import ChangeMasterPasswordModal from './lib/ui/ChangeMasterPasswordModal.svelte'
   import EntryContextMenu from './lib/ui/EntryContextMenu.svelte'
@@ -91,7 +95,7 @@
 
   const appStores = provideAppStores(createAppStores())
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the import flow reads the store through the controller.
-  const { browserFill, browserIdentityFill, browserCardFill, browserTotpFill, browserSave, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
+  const { browserFill, browserIdentityFill, browserCardFill, browserTotpFill, browserSave, browserChange, browserCreate, pendingChanges, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
   vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 } })
 
   const feedbackController = createFeedbackController()
@@ -222,6 +226,27 @@
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
     blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const browserChangeController = createBrowserChangeController({
+    stores: appStores,
+    feedback: feedbackController,
+    modal: modalController,
+    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const browserCreateController = createBrowserCreateController({
+    stores: appStores,
+    feedback: feedbackController,
+    modal: modalController,
+    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const pendingChangesController = createPendingChangesController({
+    stores: appStores,
+    feedback: feedbackController,
+    editLogin: (id) => void loginController.editContext(id),
+    copyPassword: (id) => loginController.copyContextField(id, 'password'),
   })
 
   const backupController = createBackupController({
@@ -383,6 +408,9 @@
     cardFillController.clearSecrets()
     totpFillController.clearSecrets()
     browserSaveController.clearSecrets()
+    browserChangeController.clearSecrets()
+    browserCreateController.clearSecrets()
+    pendingChangesController.clearSecrets()
     identityController.clearSecrets()
     secureNoteController.clearSecrets()
     cardController.clearSecrets()
@@ -433,6 +461,8 @@
       if (browserCardFill.value().request) await cardFillController.resolve(null)
       if (browserTotpFill.value().request) await totpFillController.resolve(null)
       if (browserSave.value().request) await browserSaveController.resolve(false)
+      if (browserChange.value().request) await browserChangeController.resolve(null)
+      if (browserCreate.value().request) await browserCreateController.resolve(false)
     },
     refreshActiveView,
     openPinSetup: settingsController.openPinSetup,
@@ -548,6 +578,9 @@
     const stopCardFill = cardFillController.start()
     const stopTotpFill = totpFillController.start()
     const stopBrowserSave = browserSaveController.start()
+    const stopBrowserChange = browserChangeController.start()
+    const stopBrowserCreate = browserCreateController.start()
+    const stopPendingChanges = pendingChangesController.start()
     const stopActivityReports = startActivityReports()
     void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
     void unlockController.loadStatus()
@@ -573,6 +606,9 @@
       stopCardFill()
       stopTotpFill()
       stopBrowserSave()
+      stopBrowserChange()
+      stopBrowserCreate()
+      stopPendingChanges()
       idleListenersDisposed = true
       quickAccessListenerDisposed = true
       stopQuickAccessOpen()
@@ -672,6 +708,13 @@
   >
     {#if $selection.activeView === 'vault'}
       <VaultView
+        pendingChanges={$pendingChanges.changes}
+        pendingWorking={$pendingChanges.working}
+        onKeepPending={(change) => void pendingChangesController.keep(change)}
+        onGoBackPending={(change) => void pendingChangesController.goBack(change)}
+        onDiscardPending={(change) => void pendingChangesController.discard(change)}
+        onCopyPending={(change) => void pendingChangesController.copy(change)}
+        onEditPending={(change) => pendingChangesController.edit(change)}
         allItems={$allItems}
         visibleItems={$visibleItems}
         recentItems={$recentItems}
@@ -932,6 +975,10 @@
     <BrowserTotpFillApprovalModal request={$browserTotpFill.request} working={$browserTotpFill.working} onCancel={() => void totpFillController.resolve(null)} onConfirm={() => void totpFillController.resolve($browserTotpFill.selectedId)} />
   {:else if $browserSave.request}
     <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} onNeverForSite={() => void browserSaveController.neverForSite()} />
+  {:else if $browserChange.request}
+    <BrowserChangeApprovalModal request={$browserChange.request} working={$browserChange.working} onCancel={() => void browserChangeController.resolve(null)} onConfirm={() => void browserChangeController.resolve($browserChange.selectedId)} />
+  {:else if $browserCreate.request}
+    <BrowserCreateApprovalModal request={$browserCreate.request} working={$browserCreate.working} onCancel={() => void browserCreateController.resolve(false)} onConfirm={() => void browserCreateController.resolve(true)} />
   {/if}
 
   {#if $presenceState.open}

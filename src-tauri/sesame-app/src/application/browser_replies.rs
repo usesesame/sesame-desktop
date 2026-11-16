@@ -39,6 +39,41 @@ pub struct BrowserApproval {
     requested_fields: Vec<String>,
 }
 
+pub(super) enum RegisterError {
+    Begin(&'static str),
+    Publish,
+}
+
+pub(super) fn register_approval(
+    fill_state: &BrowserFillState,
+    request_id: &str,
+    origin: NormalizedOrigin,
+    epoch: u64,
+    kind: ApprovalKind,
+    request: ApprovalRequest,
+    event: impl FnOnce(&str) -> ApprovalEvent,
+) -> Result<BrowserApprovalOffer, RegisterError> {
+    let begun = fill_state.begin(request_id, origin.clone(), epoch, request);
+    let (approval_id, deadline, receiver) = begun.map_err(RegisterError::Begin)?;
+    let event = event(&approval_id);
+    if fill_state.publish(&approval_id, event.clone()).is_err() {
+        fill_state.revoke(&approval_id);
+        return Err(RegisterError::Publish);
+    }
+    Ok(BrowserApprovalOffer {
+        approval: BrowserApproval {
+            approval_id,
+            origin,
+            epoch,
+            kind,
+            event,
+            requested_fields: Vec::new(),
+        },
+        deadline,
+        receiver,
+    })
+}
+
 impl BrowserApproval {
     pub fn approval_id(&self) -> &str {
         &self.approval_id
@@ -65,11 +100,16 @@ impl BrowserApproval {
     }
 }
 
-fn refused(vault: &VaultState, kind: ApprovalKind, origin: &NormalizedOrigin, outcome: Outcome) {
+pub(super) fn refused(
+    vault: &VaultState,
+    kind: ApprovalKind,
+    origin: &NormalizedOrigin,
+    outcome: Outcome,
+) {
     record(vault, browser_draft(kind, outcome, &origin.hostname));
 }
 
-fn begin_refusal(reason: &str) -> Outcome {
+pub(super) fn begin_refusal(reason: &str) -> Outcome {
     if reason == "staleRequest" {
         Outcome::Replayed
     } else {
@@ -88,7 +128,10 @@ pub fn record_decision(
     let outcome = match decision {
         ApprovalDecision::Selected(_) => return,
         ApprovalDecision::Saved if kind == ApprovalKind::Save => return,
-        ApprovalDecision::Saved | ApprovalDecision::InvalidSelection => Outcome::Mismatch,
+        ApprovalDecision::Approved if kind == ApprovalKind::Create => return,
+        ApprovalDecision::Saved
+        | ApprovalDecision::Approved
+        | ApprovalDecision::InvalidSelection => Outcome::Mismatch,
         ApprovalDecision::Denied => fill_state
             .take_marked_outcome(approval_id)
             .unwrap_or(Outcome::Denied),
@@ -96,7 +139,7 @@ pub fn record_decision(
     record(vault, browser_draft(kind, outcome, &origin.hostname));
 }
 
-fn note(vault: &VaultState, session: Option<&UnlockedVault>, draft: ReleaseDraft) {
+pub(super) fn note(vault: &VaultState, session: Option<&UnlockedVault>, draft: ReleaseDraft) {
     record_in(vault, session, draft);
 }
 
@@ -278,7 +321,9 @@ pub fn complete_fill_in_state(
         ApprovalDecision::Denied => {
             return BrowserResponse::unavailable(request, "approvalDeclined")
         }
-        ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
+        ApprovalDecision::InvalidSelection
+        | ApprovalDecision::Saved
+        | ApprovalDecision::Approved => {
             return BrowserResponse::unavailable(request, "invalidSelection")
         }
     };
@@ -701,7 +746,9 @@ pub fn complete_card_in_state(
         ApprovalDecision::Denied => {
             return BrowserResponse::card_unavailable(&request.request_id, "approvalDeclined")
         }
-        ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
+        ApprovalDecision::InvalidSelection
+        | ApprovalDecision::Saved
+        | ApprovalDecision::Approved => {
             return BrowserResponse::card_unavailable(&request.request_id, "invalidSelection")
         }
     };
@@ -934,7 +981,9 @@ pub fn complete_identity_in_state(
         ApprovalDecision::Denied => {
             return BrowserResponse::identity_unavailable(&request.request_id, "approvalDeclined")
         }
-        ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
+        ApprovalDecision::InvalidSelection
+        | ApprovalDecision::Saved
+        | ApprovalDecision::Approved => {
             return BrowserResponse::identity_unavailable(&request.request_id, "invalidSelection")
         }
     };
@@ -1175,7 +1224,9 @@ pub fn complete_totp_in_state(
         ApprovalDecision::Denied => {
             return BrowserResponse::totp_unavailable(&request.request_id, "approvalDeclined")
         }
-        ApprovalDecision::InvalidSelection | ApprovalDecision::Saved => {
+        ApprovalDecision::InvalidSelection
+        | ApprovalDecision::Saved
+        | ApprovalDecision::Approved => {
             return BrowserResponse::totp_unavailable(&request.request_id, "invalidSelection")
         }
     };
@@ -1357,7 +1408,7 @@ pub(super) fn matching_entries(
     candidates
 }
 
-fn credential_fields_valid(entry: &VaultEntry) -> bool {
+pub(super) fn credential_fields_valid(entry: &VaultEntry) -> bool {
     entry.username.len() <= MAX_CREDENTIAL_FIELD_BYTES
         && !entry.password.is_empty()
         && entry.password.len() <= MAX_CREDENTIAL_FIELD_BYTES
@@ -1556,7 +1607,7 @@ fn within_edit_distance(left: &str, right: &str, max: usize) -> bool {
     previous[columns] <= max
 }
 
-fn approval_expires_at_unix_ms() -> u64 {
+pub(super) fn approval_expires_at_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

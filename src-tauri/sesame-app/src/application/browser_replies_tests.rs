@@ -39,6 +39,10 @@ fn fill_request(origin: &str) -> BrowserRequest {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 
@@ -53,6 +57,10 @@ fn save_request(origin: &str) -> BrowserRequest {
         password: Some(CANARY_NEW_PASSWORD.to_string()),
         title: Some("Northwind".to_string()),
         kind: Some("update".to_string()),
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 
@@ -67,6 +75,10 @@ fn card_request(origin: &str, fields: &str) -> BrowserRequest {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     }
 }
 
@@ -86,6 +98,10 @@ fn capabilities_answer_desktop_availability_for_its_own_version() {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     };
     assert!(request.validate());
 
@@ -111,6 +127,10 @@ fn activation_asks_for_the_window_once_within_the_activation_interval() {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     };
     assert!(request.validate());
     let now = Instant::now();
@@ -363,6 +383,10 @@ fn an_identity_approval_releases_only_the_requested_fields() {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     };
     assert!(request.validate());
     let offer = match identity_response_in_state(&vault.state, &state, &effects, &request) {
@@ -418,6 +442,10 @@ fn a_totp_approval_releases_a_code_only_for_the_approved_origin() {
         password: None,
         title: None,
         kind: None,
+        style: None,
+        size: None,
+        handle: None,
+        action: None,
     };
     assert!(request.validate());
     let offer = match totp_response_in_state(&vault.state, &state, &effects, &request) {
@@ -632,6 +660,10 @@ mod origin_attacks {
                 password: None,
                 title: None,
                 kind: None,
+                style: None,
+                size: None,
+                handle: None,
+                action: None,
             };
             assert!(fill.validate());
 
@@ -809,6 +841,10 @@ mod lookalike_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
@@ -1066,6 +1102,10 @@ mod totp_flow_tests {
             password: None,
             title: None,
             kind: None,
+            style: None,
+            size: None,
+            handle: None,
+            action: None,
         }
     }
 
