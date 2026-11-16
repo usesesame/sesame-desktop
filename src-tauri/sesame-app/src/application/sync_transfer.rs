@@ -402,6 +402,7 @@ pub async fn take_new_key_in_state(
         journal.save(&store.journal_path())?;
         adopt_with(unlocked, *key, payload, &master_password, Some(recovery))?;
         state.advance_session_epoch();
+        crate::application::release_record::open_release_record(state, unlocked);
         if journal.prospective_payload_digest.is_some() {
             journal.adopted_payload_digest = journal.prospective_payload_digest.take();
             journal.save(&store.journal_path())?;
@@ -499,6 +500,7 @@ pub async fn adopt_journal_key_in_state(
                 journal.recovery.clone(),
             )?;
             state.advance_session_epoch();
+            crate::application::release_record::open_release_record(state, unlocked);
             Ok((kit, kept))
         })
     };
@@ -714,6 +716,7 @@ pub async fn rekey_without_in_state(
             }
             adopt_with(unlocked, new_key, payload, master_password, recovery)?;
             state.advance_session_epoch();
+            crate::application::release_record::open_release_record(state, unlocked);
             kept.apply(&mut next);
             if clean {
                 if let Some(journal) = journal.as_mut() {

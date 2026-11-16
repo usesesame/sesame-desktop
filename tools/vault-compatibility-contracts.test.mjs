@@ -11,7 +11,7 @@ const read = (...parts) => readFileSync(join(...parts), 'utf8')
 
 const loadManifest = () => JSON.parse(read(corpus, 'manifest.json'))
 
-const publishedTags = ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.2.1', 'v0.2.2']
+const publishedTags = ['v0.1.0', 'v0.1.1', 'v0.2.0', 'v0.2.1', 'v0.2.2', 'v0.5.3']
 const countKeys = [
   'entries',
   'identities',
@@ -97,8 +97,19 @@ test('each fixture entry is complete and inside recorded limits', () => {
   }
 })
 
+test('the newest release fixture carries legacy login fields for the format 11 move', () => {
+  const fixture = loadManifest().fixtures.find((entry) => entry.id === 'v0.5.3')
+  const recorded = Object.entries(fixture.legacyFields)
+  assert.deepEqual(recorded.map(([id]) => id).sort(), ['history-alpha', 'login-alpha', 'login-trashed'])
+  const fields = recorded.flatMap(([, entries]) => entries)
+  assert.ok(fields.some((field) => field.secret === true))
+  assert.ok(fields.some((field) => field.secret === false))
+  for (const field of fields) assert.ok(field.label.length > 0)
+})
+
 test('every fixture matches its recorded digest and is a genuine sealed envelope', () => {
-  for (const fixture of loadManifest().fixtures) {
+  const manifest = loadManifest()
+  for (const fixture of manifest.fixtures) {
     const raw = readFileSync(join(corpus, fixture.fileName))
     assert.equal(
       createHash('sha256').update(raw).digest('hex'),
@@ -111,10 +122,15 @@ test('every fixture matches its recorded digest and is a genuine sealed envelope
     }
     assert.equal(envelope.formatVersion, fixture.formatVersion, fixture.fileName)
     assert.equal(envelope.setupComplete, fixture.setupComplete, fixture.fileName)
-    for (const params of [envelope.kdf, envelope.recoveryKdf]) {
+    const generation = manifest.writerGenerations.find((entry) => entry.id === fixture.writerGeneration)
+    const inventory = manifest.writerInventory.passwordAndRecoveryKdf
+    for (const [params, recorded, written] of [
+      [envelope.kdf, fixture.kdf, generation.kdf?.password ?? inventory],
+      [envelope.recoveryKdf, fixture.recoveryKdf ?? fixture.kdf, generation.kdf?.recovery ?? inventory],
+    ]) {
       for (const key of ['algorithm', 'memoryKib', 'iterations', 'parallelism']) {
-        assert.equal(params[key], fixture.kdf[key], `${fixture.fileName} ${key}`)
-        assert.equal(params[key], loadManifest().writerInventory.passwordAndRecoveryKdf[key])
+        assert.equal(params[key], recorded[key], `${fixture.fileName} ${key}`)
+        assert.equal(params[key], written[key], `${fixture.fileName} ${key}`)
       }
       assert.equal(Buffer.from(params.salt, 'base64url').length, 32, fixture.fileName)
     }
@@ -193,8 +209,8 @@ test('the corpus holds no secret outside the recorded fictional ones', () => {
       }
     }
   }
-  const driverText = ['generate_fixtures_legacy.rs', 'generate_fixtures_current.rs']
-    .map((name) => read(corpus, 'generator', name))
+  const driverText = recorded.writerGenerations
+    .map((generation) => read(corpus, generation.generator))
     .join('\n')
   for (const kit of recorded.fixtures.map((fixture) => fixture.secrets.recoveryKit)) {
     assert.ok(!driverText.includes(kit), 'a generator driver hardcodes a recorded recovery kit')

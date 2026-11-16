@@ -9,6 +9,7 @@ use zeroize::Zeroizing;
 use crate::application::release::require_release_presence;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
+use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::snapshot::current_totp;
 use crate::vault::util::initials_for;
 use crate::vault::{Identity, TaggedItem, VaultResult, VaultState};
@@ -135,9 +136,16 @@ pub fn quick_access_field_in_state(
     if action.guarded {
         require_release_presence(state, presence)?;
     }
-    quick_access_value(&item, action.field)
+    let value = quick_access_value(&item, action.field)
         .map(Zeroizing::new)
-        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())
+        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())?;
+    state.release_record.append(
+        session,
+        ReleaseDraft::new(EntryKind::QuickAccess, Outcome::Released)
+            .item(item.id(), item.kind())
+            .field(action.field),
+    );
+    Ok(value)
 }
 
 pub fn open_quick_access_item_in_state(state: &VaultState, id: &str) -> VaultResult<String> {

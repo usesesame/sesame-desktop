@@ -173,6 +173,11 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_browser_card_fill,
             commands::get_pending_browser_totp_fill,
             commands::resolve_browser_totp_fill,
+            commands::get_release_record,
+            commands::get_release_record_status,
+            commands::get_release_record_hint,
+            commands::set_release_record_retention,
+            commands::clear_release_record,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
@@ -317,6 +322,7 @@ pub fn run() {
                 )?;
             }
             diagnostics::install_panic_hook(app.handle().clone());
+            commands::load_release_record_settings(app.handle());
             desktop_shell::setup(app)?;
             if desktop_shell::global_shortcut_available() {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;

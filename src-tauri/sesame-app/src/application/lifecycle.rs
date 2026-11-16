@@ -36,6 +36,9 @@ pub fn install_unlocked_session(
     let snapshot = unlocked.snapshot();
     effects.observe_unlock(&snapshot);
     *session = Some(unlocked);
+    if let Some(unlocked) = session.as_ref() {
+        crate::application::release_record::open_release_record(state, unlocked);
+    }
     // Fresh session epoch invalidates approvals bound to the previous one.
     let epoch = state.advance_session_epoch();
     state.cache_pin_unlock(pin_unlock_available);

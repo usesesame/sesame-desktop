@@ -16,8 +16,10 @@ use crate::vault::{
 };
 
 #[tauri::command]
-pub fn create_backup(state: State<'_, VaultState>) -> VaultResult<String> {
-    create_backup_in_state(&state)
+pub fn create_backup(app: AppHandle, state: State<'_, VaultState>) -> VaultResult<String> {
+    let created = create_backup_in_state(&state);
+    crate::commands::announce_release_record(&app);
+    created
 }
 
 #[tauri::command]
@@ -29,52 +31,61 @@ pub fn export_backup(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    export_backup_in_state(
+    let result = export_backup_in_state(
         &state,
         &presence,
         &DesktopHostEffects::new(&app),
         &selection,
         token.as_deref(),
         destination.as_deref(),
-    )
+    );
+    crate::commands::announce_release_record(&app);
+    result
 }
 
 #[tauri::command]
 pub fn export_vault_csv(
+    app: AppHandle,
     token: Option<String>,
     destination: Option<String>,
     state: State<'_, VaultState>,
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<Vec<String>> {
-    export_vault_csv_in_state(
+    let result = export_vault_csv_in_state(
         &state,
         &presence,
         &selection,
         token.as_deref(),
         destination.as_deref(),
-    )
+    );
+    crate::commands::announce_release_record(&app);
+    result
 }
 
 #[tauri::command]
 pub fn export_vault_json(
+    app: AppHandle,
     token: Option<String>,
     destination: Option<String>,
     state: State<'_, VaultState>,
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    export_vault_json_in_state(
+    let result = export_vault_json_in_state(
         &state,
         &presence,
         &selection,
         token.as_deref(),
         destination.as_deref(),
-    )
+    );
+    crate::commands::announce_release_record(&app);
+    result
 }
 
 #[tauri::command]
 pub fn export_recovery_kit(
+    app: AppHandle,
     token: Option<String>,
     destination: Option<String>,
     kit: String,
@@ -82,14 +93,16 @@ pub fn export_recovery_kit(
     selection: State<'_, FileSelectionState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<String> {
-    export_recovery_kit_in_state(
+    let result = export_recovery_kit_in_state(
         &state,
         &presence,
         &selection,
         kit,
         token.as_deref(),
         destination.as_deref(),
-    )
+    );
+    crate::commands::announce_release_record(&app);
+    result
 }
 
 #[tauri::command]

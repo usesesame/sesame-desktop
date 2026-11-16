@@ -436,6 +436,7 @@ pub fn change_master_password_in_state(
             &new_password,
         )?;
         retire_unlock_methods_after_key_rotation(state, effects);
+        crate::application::release_record::open_release_record(state, session);
         effects.report_key_page_fallback(session);
         Ok(ChangeMasterPasswordResult {
             recovery_kit: rotation.recovery_kit,

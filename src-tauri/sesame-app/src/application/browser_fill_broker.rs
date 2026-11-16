@@ -10,11 +10,12 @@ use std::{
 use zeroize::Zeroize;
 
 use crate::vault::random_id;
+use crate::vault::release_record::Outcome;
 
 use super::browser_fill::{
-    ApprovalDecision, BrowserCardRequestEvent, BrowserFillCandidate, BrowserFillRequestEvent,
-    BrowserIdentityRequestEvent, BrowserSaveRequestEvent, BrowserTotpRequestEvent,
-    NormalizedOrigin, SaveKind, SavePayload, APPROVAL_TOO_SOON,
+    ApprovalDecision, ApprovalKind, BrowserCardRequestEvent, BrowserFillCandidate,
+    BrowserFillRequestEvent, BrowserIdentityRequestEvent, BrowserSaveRequestEvent,
+    BrowserTotpRequestEvent, NormalizedOrigin, SaveKind, SavePayload, APPROVAL_TOO_SOON,
 };
 
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -158,6 +159,7 @@ struct FillInner {
     recent_request_ids: VecDeque<String>,
     last_activation: Option<Instant>,
     focus: FocusDelay,
+    marked: Option<(String, Outcome)>,
 }
 
 #[derive(Default)]
@@ -203,7 +205,60 @@ impl BrowserFillState {
     pub fn cancel_pending(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(pending) = inner.pending.take() {
+                inner.marked = Some((pending.approval_id.clone(), Outcome::Withdrawn));
                 let _ = pending.sender.send(ApprovalDecision::Denied);
+            }
+        }
+    }
+
+    pub fn pending_subject(
+        &self,
+        approval_id: &str,
+    ) -> Option<(NormalizedOrigin, ApprovalKind, Vec<String>)> {
+        let inner = self.inner.lock().ok()?;
+        let pending = inner.pending.as_ref()?;
+        if pending.approval_id != approval_id || pending.deadline <= Instant::now() {
+            return None;
+        }
+        let (kind, mut ids): (ApprovalKind, Vec<String>) = match &pending.request {
+            ApprovalRequest::Fill { candidate_ids } => {
+                (ApprovalKind::Fill, candidate_ids.iter().cloned().collect())
+            }
+            ApprovalRequest::Identity { candidate_ids } => (
+                ApprovalKind::Identity,
+                candidate_ids.iter().cloned().collect(),
+            ),
+            ApprovalRequest::Card { candidate_ids } => {
+                (ApprovalKind::Card, candidate_ids.iter().cloned().collect())
+            }
+            ApprovalRequest::Totp { candidate_ids } => {
+                (ApprovalKind::Totp, candidate_ids.iter().cloned().collect())
+            }
+            ApprovalRequest::Save { candidates, .. } => (
+                ApprovalKind::Save,
+                candidates
+                    .iter()
+                    .map(|candidate| candidate.id.clone())
+                    .collect(),
+            ),
+        };
+        ids.sort();
+        Some((pending.origin.clone(), kind, ids))
+    }
+
+    pub fn mark_outcome(&self, approval_id: &str, outcome: Outcome) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.marked = Some((approval_id.to_string(), outcome));
+        }
+    }
+
+    pub fn take_marked_outcome(&self, approval_id: &str) -> Option<Outcome> {
+        let mut inner = self.inner.lock().ok()?;
+        match inner.marked.take() {
+            Some((marked, outcome)) if marked == approval_id => Some(outcome),
+            other => {
+                inner.marked = other;
+                None
             }
         }
     }

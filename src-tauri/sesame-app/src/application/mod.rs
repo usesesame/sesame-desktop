@@ -24,6 +24,7 @@ pub mod record_writes;
 pub mod records;
 pub mod recovery_replacement;
 pub mod release;
+pub mod release_record;
 pub mod reveal;
 pub mod search;
 pub mod sync;
@@ -58,6 +59,9 @@ pub mod logins_tests;
 
 #[cfg(test)]
 pub mod quick_access_tests;
+
+#[cfg(test)]
+pub mod release_record_tests;
 
 #[cfg(test)]
 pub mod sync_pairing_tests;

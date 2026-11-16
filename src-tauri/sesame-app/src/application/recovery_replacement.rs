@@ -214,13 +214,15 @@ pub fn complete_recovery_replacement_in_state(
             .map_err(|_| "Sesame could not read the vault session.".to_string())?;
         let session = session.as_mut().ok_or("Unlock your vault first.")?;
         presence.grant_with_password(session, epoch, &master_password)?;
-        complete_request(
+        let rotation = complete_request(
             &effects.recovery_replacement_path()?,
             session,
             &master_password,
             now,
             prune_backups,
-        )?
+        )?;
+        crate::application::release_record::open_release_record(state, session);
+        rotation
     };
     retire_unlock_methods_after_key_rotation(state, effects);
     Ok(RecoveryReplacementResult {
