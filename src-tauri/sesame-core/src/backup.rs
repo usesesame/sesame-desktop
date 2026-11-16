@@ -340,7 +340,45 @@ pub fn snapshot_vault_revision(vault: &Path, label: &str) -> VaultResult<Option<
     );
     copy_private_file(vault, &backup_dir.join(&name))
         .map_err(|_| "Sesame could not create a revision before this change.".to_string())?;
+    if PRUNED_REVISION_LABELS.contains(&label) {
+        prune_revision_backups(&backup_dir, label, &name, KEPT_REVISIONS_PER_LABEL);
+    }
     Ok(Some(name))
+}
+
+pub const KEPT_REVISIONS_PER_LABEL: usize = 5;
+const PRUNED_REVISION_LABELS: &[&str] = &["import", "merge"];
+
+fn revision_stamp(name: &str, label: &str) -> Option<u64> {
+    let rest = name
+        .strip_prefix("sesame-before-")?
+        .strip_prefix(label)?
+        .strip_prefix('-')?
+        .strip_suffix(".sesame")?;
+    let (stamp, id) = rest.split_once('-')?;
+    if id.is_empty() || stamp.is_empty() || !stamp.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    stamp.parse().ok()
+}
+
+pub fn prune_revision_backups(backup_dir: &Path, label: &str, written: &str, keep: usize) -> usize {
+    let Ok(entries) = fs::read_dir(backup_dir) else {
+        return 0;
+    };
+    let mut revisions: Vec<(u64, String)> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name != written)
+        .filter_map(|name| revision_stamp(&name, label).map(|stamp| (stamp, name)))
+        .collect();
+    revisions.sort_by(|left, right| right.cmp(left));
+    revisions
+        .into_iter()
+        .skip(keep.saturating_sub(1))
+        .filter(|(_, name)| fs::remove_file(backup_dir.join(name)).is_ok())
+        .count()
 }
 
 const UPGRADE_BACKUP_PREFIX: &str = "sesame-before-upgrade-";
@@ -1360,6 +1398,120 @@ mod tests {
             restore_revision_delta(&prepared, prepared.vault_id(), 9).expect("same vault");
         assert_eq!(restored, opened.payload.revision);
         assert_eq!(replaced, 9);
+    }
+
+    fn revision_names(directory: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .expect("backup folder")
+            .flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn automatic_revisions_keep_only_the_newest_few_per_label() {
+        let directory = TestDirectory::new("revision-pruning");
+        let vault = directory.0.join("vault.sesame");
+        fs::write(&vault, b"fictional vault bytes").expect("vault");
+        let backup_dir = directory.0.join("backups");
+        fs::create_dir_all(&backup_dir).expect("backup folder");
+        for stamp in 1_000..1_008 {
+            fs::write(
+                backup_dir.join(format!("sesame-before-import-{stamp}-fictionalid.sesame")),
+                b"old import",
+            )
+            .expect("old import");
+        }
+        let kept_by_hand = [
+            "sesame-backup-fictional.sesame",
+            "sesame-before-import-manual-copy.sesame",
+            "sesame-before-import-1000-.sesame",
+            "sesame-before-import-12x4-fictionalid.sesame",
+            "sesame-before-merge-1000-fictionalid.sesame",
+            "sesame-before-upgrade-1000-fictionalid.sesame",
+            "notes.txt",
+        ];
+        for name in kept_by_hand {
+            fs::write(backup_dir.join(name), b"kept").expect("kept file");
+        }
+        fs::create_dir_all(backup_dir.join("sesame-before-import-999-folder.sesame"))
+            .expect("a folder that looks like a revision");
+
+        let written = snapshot_vault_revision(&vault, "import")
+            .expect("snapshot")
+            .expect("snapshot name");
+
+        let names = revision_names(&backup_dir);
+        assert!(names.contains(&written), "the copy just written is kept");
+        for kept in kept_by_hand {
+            assert!(names.iter().any(|name| name == kept), "{kept}");
+        }
+        assert!(names
+            .iter()
+            .any(|name| name == "sesame-before-import-999-folder.sesame"));
+        let imports: Vec<&String> = names
+            .iter()
+            .filter(|name| revision_stamp(name, "import").is_some())
+            .filter(|name| backup_dir.join(name).is_file())
+            .collect();
+        assert_eq!(imports.len(), KEPT_REVISIONS_PER_LABEL);
+        for stamp in 1_004..1_008 {
+            assert!(
+                names.contains(&format!("sesame-before-import-{stamp}-fictionalid.sesame")),
+                "{stamp}"
+            );
+        }
+        for stamp in 1_000..1_004 {
+            assert!(
+                !names.contains(&format!("sesame-before-import-{stamp}-fictionalid.sesame")),
+                "{stamp}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_copy_just_written_survives_even_when_older_copies_claim_a_later_time() {
+        let directory = TestDirectory::new("revision-pruning-clock");
+        let backup_dir = directory.0.join("backups");
+        fs::create_dir_all(&backup_dir).expect("backup folder");
+        for stamp in 9_000_000_000_u64..9_000_000_010 {
+            fs::write(
+                backup_dir.join(format!("sesame-before-merge-{stamp}-fictionalid.sesame")),
+                b"future merge",
+            )
+            .expect("future merge");
+        }
+        let written = "sesame-before-merge-1000-justwritten.sesame";
+        fs::write(backup_dir.join(written), b"current").expect("current");
+
+        let removed = prune_revision_backups(&backup_dir, "merge", written, 3);
+
+        assert_eq!(removed, 8);
+        let names = revision_names(&backup_dir);
+        assert!(names.iter().any(|name| name == written));
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn upgrade_copies_are_never_pruned_and_a_missing_folder_is_not_an_error() {
+        let directory = TestDirectory::new("revision-pruning-upgrade");
+        assert_eq!(
+            prune_revision_backups(&directory.0.join("backups"), "import", "x", 1),
+            0
+        );
+        let vault = directory.0.join("vault.sesame");
+        fs::write(&vault, b"fictional vault bytes").expect("vault");
+        for _ in 0..(KEPT_REVISIONS_PER_LABEL + 3) {
+            snapshot_vault_revision(&vault, "upgrade")
+                .expect("snapshot")
+                .expect("name");
+        }
+        assert_eq!(
+            revision_names(&directory.0.join("backups")).len(),
+            KEPT_REVISIONS_PER_LABEL + 3
+        );
     }
 
     #[cfg(unix)]
