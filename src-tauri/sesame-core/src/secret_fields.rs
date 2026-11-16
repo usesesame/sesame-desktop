@@ -35,19 +35,16 @@ pub trait KeptSecrets {
     }
 }
 
-pub fn redacted_legacy(fields: &[LegacyField]) -> Vec<LegacyField> {
-    fields
-        .iter()
-        .map(|field| LegacyField {
-            label: field.label.clone(),
-            value: if field.secret {
-                String::new()
-            } else {
-                field.value.clone()
-            },
-            secret: field.secret,
-        })
-        .collect()
+pub fn redacted_custom_fields(fields: &[CustomFieldEntry]) -> (Vec<CustomFieldEntry>, Vec<String>) {
+    let mut redacted = fields.to_vec();
+    let mut present = Vec::new();
+    visit_custom_fields(&mut redacted, &mut |key, value| {
+        if !value.trim().is_empty() {
+            present.push(key.to_string());
+        }
+        zeroize::Zeroize::zeroize(value);
+    });
+    (redacted, present)
 }
 
 fn visit_legacy(fields: &mut [LegacyField], visit: &mut dyn FnMut(&str, &mut String)) {
@@ -150,31 +147,7 @@ impl SecretSlots for CustomRecord {
     }
 
     fn keep_secrets(&mut self, existing: &Self, kept: &[String]) {
-        for entry in kept {
-            let Some(rest) = entry.strip_prefix("field:") else {
-                continue;
-            };
-            let (new_index, old_index) = rest.split_once("<-").unwrap_or((rest, rest));
-            let (Ok(new_index), Ok(old_index)) =
-                (new_index.parse::<usize>(), old_index.parse::<usize>())
-            else {
-                continue;
-            };
-            let Some(previous) = existing
-                .fields
-                .get(old_index)
-                .filter(|field| field.kind == "secret")
-            else {
-                continue;
-            };
-            if let Some(field) = self
-                .fields
-                .get_mut(new_index)
-                .filter(|field| field.kind == "secret" && field.value.is_empty())
-            {
-                field.value = previous.value.clone();
-            }
-        }
+        crate::custom_fields::keep_field_secrets(&mut self.fields, &existing.fields, kept);
     }
 }
 

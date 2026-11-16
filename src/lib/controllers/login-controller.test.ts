@@ -23,6 +23,7 @@ const vaultApi = vi.hoisted(() => ({
   recordDiagnostic: vi.fn(),
   recordItemUse: vi.fn(),
   refreshTotp: vi.fn(),
+  releaseItemField: vi.fn(),
   renameFolder: vi.fn(),
   revealLoginSecret: vi.fn(),
   saveLogin: vi.fn(),
@@ -452,11 +453,83 @@ describe('secrets other than the password', () => {
     expect(vaultApi.copyItemField).toHaveBeenCalledTimes(2)
   })
 
-  it('copies a secret legacy value by its position', async () => {
+  it('copies a hidden custom field in the host by its slot', async () => {
     const { controller } = harness()
 
-    controller.copyLegacySecret(1, 'Old PIN')
-    await vi.waitFor(() => expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-a', 'legacy:1'))
+    controller.copyField('field:1', 'Security answer')
+    await vi.waitFor(() => expect(vaultApi.copyItemField).toHaveBeenCalledWith('login', 'login-a', 'field:1'))
+  })
+
+  it('reveals a hidden custom field only after the master password check', async () => {
+    const { controller, presence } = harness()
+    let granted = false
+    vaultApi.grantPresence.mockImplementation(async () => { granted = true })
+    vaultApi.releaseItemField.mockImplementation(async () => {
+      if (!granted) throw new Error('presenceRequired')
+      return 'fictional-hidden-answer'
+    })
+
+    await controller.revealField('field:1')
+    expect(controller.state.value().revealedFields).toEqual({})
+    expect(presence.state.value().open).toBe(true)
+    presence.state.patch({ secret: 'fictional master password' })
+    await presence.confirm()
+
+    await vi.waitFor(() => expect(controller.state.value().revealedFields).toEqual({ 'field:1': 'fictional-hidden-answer' }))
+    expect(vaultApi.releaseItemField).toHaveBeenLastCalledWith('login', 'login-a', 'field:1')
+  })
+
+  it('drops revealed custom fields when another login is selected or the vault locks', async () => {
+    const { controller } = harness()
+    vaultApi.releaseItemField.mockResolvedValue('fictional-hidden-answer')
+
+    await controller.revealField('field:0')
+    expect(controller.state.value().revealedFields['field:0']).toBe('fictional-hidden-answer')
+    const selecting = controller.selectEntry('login-b')
+    expect(controller.state.value().revealedFields).toEqual({})
+    await selecting
+
+    await controller.revealField('field:0')
+    controller.clearSecrets()
+    expect(controller.state.value().revealedFields).toEqual({})
+  })
+
+  it('opens the editor with hidden values kept and sends only their slots back', async () => {
+    const { controller, stores } = harness()
+    stores.vault.patch({
+      loginCard: {
+        ...card('login-a'),
+        customFields: [
+          { label: 'Member number', value: 'fictional-42', kind: 'text' },
+          { label: 'Security answer', value: '', kind: 'secret' },
+        ],
+        secretFields: ['field:1'],
+      },
+    })
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: { entries: [], folders: [] } })
+
+    controller.openEditor()
+    const draft = controller.state.value().loginDraft
+    expect(draft.customFields).toEqual([
+      { label: 'Member number', value: 'fictional-42', kind: 'text' },
+      { label: 'Security answer', value: '', kind: 'secret', keptFrom: 1 },
+    ])
+    controller.state.patch({ loginDraft: { ...draft, customFields: [draft.customFields![1], { label: '', value: '', kind: 'text' }] } })
+    await controller.submit(false)
+
+    expect(vaultApi.saveLogin).toHaveBeenCalledWith(expect.objectContaining({
+      customFields: [{ label: 'Security answer', value: '', kind: 'secret' }],
+      keptSecrets: ['field:0<-1'],
+    }))
+  })
+
+  it('leaves the custom fields alone when it marks recovery as not applicable', async () => {
+    const { controller } = harness()
+    vaultApi.saveLogin.mockResolvedValue({ id: 'login-a', snapshot: { entries: [], folders: [] } })
+
+    await controller.markRecoveryNotApplicable()
+
+    expect(vaultApi.saveLogin.mock.calls[0][0]).not.toHaveProperty('customFields')
   })
 
   it('checks the password for breaches in the host without revealing it', async () => {

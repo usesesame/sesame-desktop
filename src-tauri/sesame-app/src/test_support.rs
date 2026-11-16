@@ -106,6 +106,8 @@ pub fn login_input(id: Option<&str>, url: &str, password: &str) -> LoginInput {
         recovery_not_applicable: false,
         notes: String::new(),
         match_rule: None,
+        custom_fields: None,
+        kept_secrets: None,
     }
 }
 

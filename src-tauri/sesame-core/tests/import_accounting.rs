@@ -180,7 +180,9 @@ fn a_login_export_reports_unsupported_items_and_extra_fields_as_item_counts() {
         { "type": 1, "name": "Plain", "notes": "",
           "login": { "username": "person", "password": "secret", "uris": [ { "uri": "https://plain.test" } ] } },
         { "type": 1, "name": "Extra", "notes": "",
-          "fields": [ { "name": "pet", "value": "cat", "type": 0 } ],
+          "fields": [ { "name": "pet", "value": "cat", "type": 0 },
+            { "name": "pin", "value": "fictional-1234", "type": 1 },
+            { "name": "odd", "value": "fictional-odd", "type": 7 } ],
           "login": { "username": "person", "password": "secret", "uris": [ { "uri": "https://extra.test" } ] } },
         { "type": 9, "name": "Future kind", "notes": "" }
       ]
@@ -206,6 +208,10 @@ Work,1,login,Example,,pet: cat,0,\"https://one.test\nhttps://two.test\r\nhttps:/
     assert_eq!(entry.url, "https://one.test");
     assert_eq!(entry.urls, ["https://one.test", "https://two.test"]);
     assert!(entry.legacy_fields.is_empty());
+    assert_eq!(entry.custom_fields.len(), 1);
+    assert_eq!(entry.custom_fields[0].label, "pet");
+    assert_eq!(entry.custom_fields[0].value, "cat");
+    assert_eq!(entry.custom_fields[0].kind, "secret");
     assert!(!entry.favourite);
 }
 
@@ -222,12 +228,33 @@ Work,0,login,Example,,,0,https://one.test,person,secret,\n";
 fn bitwarden_json_keeps_custom_fields_and_secondary_addresses() {
     let export = r#"{ "items": [
         { "type": 1, "name": "Example", "notes": "", "favorite": true,
-          "fields": [ { "name": "pet", "value": "cat", "type": 0 } ],
+          "fields": [ { "name": "pet", "value": "cat", "type": 0 },
+            { "name": "pin", "value": "fictional-1234", "type": 1 },
+            { "name": "odd", "value": "fictional-odd", "type": 7 } ],
           "login": { "username": "person", "password": "secret",
             "uris": [ { "uri": "https://one.test" }, { "uri": "https://two.test" } ] } } ] }"#;
     let parsed = parse_import_entries(export, "bitwarden-json").expect("Bitwarden JSON import");
     let entry = &parsed.entries[0];
-    assert_eq!(entry.legacy_fields.len(), 1);
+    assert!(entry.legacy_fields.is_empty());
+    let fields = entry
+        .custom_fields
+        .iter()
+        .map(|field| {
+            (
+                field.label.as_str(),
+                field.value.as_str(),
+                field.kind.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        [
+            ("pet", "cat", "text"),
+            ("pin", "fictional-1234", "secret"),
+            ("odd", "fictional-odd", "secret"),
+        ]
+    );
     assert_eq!(entry.urls.len(), 2);
     assert!(!entry.favourite);
 }
@@ -374,4 +401,16 @@ fn a_broken_otpauth_link_is_unreadable_and_not_unsupported() {
         reason_count(&parsed.accounting, ImportItemReason::UnsupportedCodeType),
         0
     );
+}
+
+#[test]
+fn onepassword_csv_keeps_extra_columns_as_hidden_custom_fields() {
+    let csv = "Title,Website,Username,Password,Notes,Member number\nExample,https://one.test,person,fictional-password,,fictional-member-42\n";
+    let parsed = parse_import_entries(csv, "onepassword-csv").expect("1Password CSV import");
+    let entry = &parsed.entries[0];
+    assert!(entry.legacy_fields.is_empty());
+    assert_eq!(entry.custom_fields.len(), 1);
+    assert_eq!(entry.custom_fields[0].value, "fictional-member-42");
+    assert_eq!(entry.custom_fields[0].kind, "secret");
+    assert_eq!(entry.password, "fictional-password");
 }

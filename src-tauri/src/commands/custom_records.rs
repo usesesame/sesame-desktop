@@ -1,38 +1,13 @@
 //! Saved Custom Records: a free list of labelled fields for anything that does not fit a typed item.
 
 use crate::commands::record_commands::impl_record_commands;
+use sesame_core::custom_fields::{normalised_fields, RECORD_FIELDS};
+
 use crate::vault::types::{
-    CustomFieldEntry, CustomRecord, CustomRecordInput, DeleteCustomRecordResult,
-    SaveCustomRecordResult,
+    CustomRecord, CustomRecordInput, DeleteCustomRecordResult, SaveCustomRecordResult,
 };
 use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::VaultResult;
-
-const FIELD_KINDS: [&str; 3] = ["text", "secret", "date"];
-const MAX_FIELDS: usize = 50;
-
-fn normalised_field(field: CustomFieldEntry) -> VaultResult<CustomFieldEntry> {
-    let label = field.label.trim();
-    if label.is_empty() {
-        return Err("Give every field a label.".into());
-    }
-    if label.chars().count() > 160 {
-        return Err("A field label is too long.".into());
-    }
-    if field.value.chars().count() > 4_000 {
-        return Err("A field value is too long.".into());
-    }
-    let kind = if FIELD_KINDS.contains(&field.kind.as_str()) {
-        field.kind.clone()
-    } else {
-        "text".to_string()
-    };
-    Ok(CustomFieldEntry {
-        label: label.to_string(),
-        value: field.value.trim().to_string(),
-        kind,
-    })
-}
 
 fn custom_record_from_input(input: CustomRecordInput) -> VaultResult<CustomRecord> {
     let title = input.title.trim();
@@ -42,7 +17,7 @@ fn custom_record_from_input(input: CustomRecordInput) -> VaultResult<CustomRecor
     if title.chars().count() > 160 {
         return Err("That record name is too long.".into());
     }
-    if input.fields.len() > MAX_FIELDS {
+    if input.fields.len() > RECORD_FIELDS.max_fields {
         return Err("That record has too many fields.".into());
     }
     if input.notes.chars().count() > 4_000 {
@@ -53,11 +28,7 @@ fn custom_record_from_input(input: CustomRecordInput) -> VaultResult<CustomRecor
             return Err("A tag is too long.".into());
         }
     }
-    let fields = input
-        .fields
-        .into_iter()
-        .map(normalised_field)
-        .collect::<VaultResult<Vec<_>>>()?;
+    let fields = normalised_fields(input.fields, &RECORD_FIELDS)?;
     let now = unix_timestamp();
     Ok(CustomRecord {
         id: input

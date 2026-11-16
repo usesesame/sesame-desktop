@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use sesame_core::custom_fields::keep_field_secrets;
 use zeroize::Zeroizing;
 
 use crate::application::release::require_release_presence;
@@ -24,10 +25,15 @@ use crate::vault::{
     VaultPayload, VaultResult, VaultSnapshot, VaultState,
 };
 
-pub fn save_login_in_state(state: &VaultState, input: LoginInput) -> VaultResult<SaveLoginResult> {
+pub fn save_login_in_state(
+    state: &VaultState,
+    mut input: LoginInput,
+) -> VaultResult<SaveLoginResult> {
     let totp_input = input.totp.clone();
     let keep_backup_codes = input.keep_backup_codes;
     let match_rule = input.match_rule;
+    let replaces_custom_fields = input.custom_fields.is_some();
+    let kept_secrets = input.kept_secrets.take().unwrap_or_default();
     let mut entry = entry_from_input(input)?;
     let entry_id = entry.id.clone();
     let mut session = state
@@ -54,7 +60,15 @@ pub fn save_login_in_state(state: &VaultState, input: LoginInput) -> VaultResult
         };
         updated.import_source = previous.import_source.clone();
         updated.legacy_fields = previous.legacy_fields.clone();
-        updated.custom_fields = previous.custom_fields.clone();
+        if replaces_custom_fields {
+            keep_field_secrets(
+                &mut updated.custom_fields,
+                &previous.custom_fields,
+                &kept_secrets,
+            );
+        } else {
+            updated.custom_fields = previous.custom_fields.clone();
+        }
         updated.match_rule = match_rule.unwrap_or(previous.match_rule);
         updated.favourite = previous.favourite;
         updated.last_used_at = previous.last_used_at;

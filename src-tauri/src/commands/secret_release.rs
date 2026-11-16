@@ -57,8 +57,8 @@ mod tests {
     use crate::commands::test_support::TestVault;
     use crate::release::PRESENCE_REQUIRED;
     use crate::vault::{
-        Card, CardInput, CustomFieldEntry, CustomRecord, CustomRecordInput, LegacyField,
-        SoftwareLicense, SshKey, SshKeyInput, TaggedItem, WifiNetwork,
+        Card, CardInput, CustomFieldEntry, CustomRecord, CustomRecordInput, SoftwareLicense,
+        SshKey, SshKeyInput, TaggedItem, WifiNetwork,
     };
     use std::time::{Duration, Instant};
 
@@ -71,11 +71,18 @@ mod tests {
                 "fictional-code-1".to_string(),
                 "fictional-code-2".to_string(),
             ];
-            payload.entries[0].legacy_fields = vec![LegacyField {
-                label: "Old PIN".to_string(),
-                value: format!("{CANARY}-legacy"),
-                secret: true,
-            }];
+            payload.entries[0].custom_fields = vec![
+                CustomFieldEntry {
+                    label: "Member number".to_string(),
+                    value: "fictional visible".to_string(),
+                    kind: "text".to_string(),
+                },
+                CustomFieldEntry {
+                    label: "Security answer".to_string(),
+                    value: format!("{CANARY}-login-field"),
+                    kind: "secret".to_string(),
+                },
+            ];
             let mut card = Card::default();
             card.id = "fictional-card".to_string();
             card.title = "Fictional card".to_string();
@@ -149,7 +156,7 @@ mod tests {
         ("fictional-custom", "custom_record", "field:1"),
         ("fictional-login", "login", "password"),
         ("fictional-login", "login", "backupCodes"),
-        ("fictional-login", "login", "legacy:0"),
+        ("fictional-login", "login", "field:1"),
     ];
 
     #[test]
@@ -187,6 +194,39 @@ mod tests {
         .expect("released");
 
         assert_eq!(value.as_str(), "fictional-code-1\nfictional-code-2");
+    }
+
+    #[test]
+    fn a_login_releases_its_hidden_field_and_never_a_visible_one() {
+        let vault = seeded_vault();
+        let presence = ReleasePresence::default();
+        grant(&vault, &presence);
+
+        let hidden = item_field_in_state(
+            &vault.state,
+            &presence,
+            "fictional-login",
+            "login",
+            "field:1",
+        )
+        .expect("released");
+        assert_eq!(hidden.as_str(), format!("{CANARY}-login-field"));
+        assert!(item_field_in_state(
+            &vault.state,
+            &presence,
+            "fictional-login",
+            "login",
+            "field:0"
+        )
+        .is_err());
+        assert!(item_field_in_state(
+            &vault.state,
+            &presence,
+            "fictional-login",
+            "card",
+            "field:1"
+        )
+        .is_err());
     }
 
     #[test]

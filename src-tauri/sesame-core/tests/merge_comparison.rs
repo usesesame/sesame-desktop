@@ -1,5 +1,5 @@
 use sesame_core::snapshot::merge_comparison_for;
-use sesame_core::types::{MergeComparison, VaultEntry};
+use sesame_core::types::{CustomFieldEntry, MergeComparison, VaultEntry};
 
 const SECRETS: [&str; 8] = [
     "fictional-bank-password",
@@ -138,4 +138,53 @@ fn only_plain_options_carry_a_value_key_in_the_json() {
             assert_eq!(option.get("value").is_some(), !secret);
         }
     }
+}
+
+fn with_fields(mut entry: VaultEntry, hidden: &str) -> VaultEntry {
+    entry.custom_fields = vec![
+        CustomFieldEntry {
+            label: "Member number".into(),
+            value: "fictional-visible-member".into(),
+            kind: "text".into(),
+        },
+        CustomFieldEntry {
+            label: "Security answer".into(),
+            value: hidden.into(),
+            kind: "secret".into(),
+        },
+    ];
+    entry
+}
+
+#[test]
+fn custom_fields_are_compared_by_label_without_their_values() {
+    let (bank, mail) = differing_pair();
+    let bank = with_fields(bank, "fictional-hidden-bank");
+    let mail = with_fields(mail, "fictional-hidden-mail");
+    let comparison = merge_comparison_for(&[&bank, &mail]);
+
+    let json = serde_json::to_string(&comparison).expect("serialized comparison");
+    for value in [
+        "fictional-hidden-bank",
+        "fictional-hidden-mail",
+        "fictional-visible-member",
+    ] {
+        assert!(!json.contains(value), "the comparison leaked {value}");
+    }
+    let compared = field(&comparison, "customFields");
+    assert!(compared.differs);
+    assert!(compared
+        .options
+        .iter()
+        .all(|option| option.value.as_deref() == Some("Member number, Security answer")));
+}
+
+#[test]
+fn identical_custom_fields_do_not_differ() {
+    let (bank, mail) = differing_pair();
+    let bank = with_fields(bank, "fictional-hidden-same");
+    let mail = with_fields(mail, "fictional-hidden-same");
+    let comparison = merge_comparison_for(&[&bank, &mail]);
+
+    assert!(!field(&comparison, "customFields").differs);
 }

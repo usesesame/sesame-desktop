@@ -1,4 +1,5 @@
-import type { CustomFieldEntry, CustomRecord, CustomRecordInput, SecretView } from '../types'
+import type { CustomRecord, CustomRecordInput, SecretView } from '../types'
+import { draftFields, fieldsInput, type DraftField } from '../kept-secrets'
 import { deleteCustomRecord, getCustomRecord, saveCustomRecord } from '../vault'
 import { createRecordController, type RecordControllerOptions } from './record-controller'
 
@@ -6,22 +7,15 @@ function emptyRecordDraft(): CustomRecordInput {
   return { title: '', fields: [], notes: '', tags: [], keptSecrets: [] }
 }
 
-export type DraftField = CustomFieldEntry & { keptFrom?: number }
+export type { DraftField }
 
 function draftFrom(record: SecretView<CustomRecord>): CustomRecordInput {
   const { id, title, fields, notes, tags } = record
-  const rows: DraftField[] = fields.map((field, index) => record.secretFields.includes(`field:${index}`) ? { ...field, value: '', keptFrom: index } : field)
-  return { id, title, fields: rows, notes, tags: tags ?? [], keptSecrets: [] }
+  return { id, title, fields: draftFields(fields, record.secretFields), notes, tags: tags ?? [], keptSecrets: [] }
 }
 
 function inputFrom(draft: CustomRecordInput): CustomRecordInput {
-  const keptSecrets: string[] = []
-  const fields = (draft.fields as DraftField[]).map((row, index) => {
-    const { keptFrom, ...field } = row
-    if (keptFrom !== undefined && field.kind === 'secret' && !field.value) keptSecrets.push(`field:${index}<-${keptFrom}`)
-    return field
-  })
-  return { ...draft, fields, keptSecrets }
+  return { ...draft, ...fieldsInput(draft.fields as DraftField[]) }
 }
 
 export function createCustomRecordController(options: RecordControllerOptions) {

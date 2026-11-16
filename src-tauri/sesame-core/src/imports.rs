@@ -241,7 +241,7 @@ fn record_stored_items(accounting: &mut ImportAccounting, parsed: &ParsedImport)
     let with_legacy = parsed
         .entries
         .iter()
-        .filter(|entry| !entry.legacy_fields.is_empty())
+        .filter(|entry| !entry.custom_fields.is_empty() || !entry.legacy_fields.is_empty())
         .count()
         + parsed
             .secure_notes
@@ -350,6 +350,21 @@ pub fn import_bitwarden_csv_entries(
         if addresses.len() > 1 {
             entry.urls = usable_unique_urls(addresses.into_iter())?;
         }
+        let mut legacy_fields = Vec::new();
+        for line in row.fields.lines() {
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            let value = value.trim();
+            if value.is_empty() {
+                continue;
+            }
+            if let Some(field) = legacy_field(name, value.to_string(), None)? {
+                fidelity.record(FieldDisposition::Legacy);
+                legacy_fields.push(field);
+            }
+        }
+        entry.custom_fields = crate::custom_fields::from_legacy(&legacy_fields);
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
@@ -520,7 +535,7 @@ pub fn import_bitwarden_json_entries(content: &str) -> VaultResult<ParsedImport>
         )?;
         entry.folder = folder;
         entry.urls = urls;
-        entry.legacy_fields = legacy_fields;
+        entry.custom_fields = crate::custom_fields::from_legacy(&legacy_fields);
         imported.push(entry);
         imported_count += 1;
         check_import_item_count(imported_count)?;
@@ -1118,7 +1133,9 @@ pub fn import_proton_pass_csv_entries(
         for _ in &legacy_columns {
             fidelity.record(FieldDisposition::Legacy);
         }
-        entry.legacy_fields.append(&mut legacy_columns);
+        entry
+            .custom_fields
+            .extend(crate::custom_fields::from_legacy(&legacy_columns));
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
@@ -1209,7 +1226,7 @@ pub fn import_keeper_csv_entries(
             &mut fidelity,
         )?;
         entry.folder = normalise_folder(&folder)?;
-        entry.legacy_fields = legacy_fields;
+        entry.custom_fields = crate::custom_fields::from_legacy(&legacy_fields);
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
@@ -1388,7 +1405,7 @@ pub fn import_nordpass_csv_entries(
             fidelity.record(FieldDisposition::Legacy);
         }
         legacy_fields.append(&mut stray_columns);
-        entry.legacy_fields = legacy_fields;
+        entry.custom_fields = crate::custom_fields::from_legacy(&legacy_fields);
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
@@ -1490,7 +1507,9 @@ pub fn import_flexible_csv_entries(
         for _ in &legacy_columns {
             fidelity.record(FieldDisposition::Legacy);
         }
-        entry.legacy_fields.append(&mut legacy_columns);
+        entry
+            .custom_fields
+            .extend(crate::custom_fields::from_legacy(&legacy_columns));
         imported.push(entry);
         check_import_item_count(imported.len())?;
     }
@@ -2020,6 +2039,10 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
             urls.push(url);
         }
     }
+    let custom_fields = crate::custom_fields::normalised_fields(
+        input.custom_fields.unwrap_or_default(),
+        &crate::custom_fields::LOGIN_FIELDS,
+    )?;
     let recovery_not_applicable = input.recovery_not_applicable;
     let now = unix_timestamp();
     Ok(VaultEntry {
@@ -2063,7 +2086,7 @@ pub fn entry_from_input(input: LoginInput) -> VaultResult<VaultEntry> {
         revision: 1,
         import_source: None,
         legacy_fields: Vec::new(),
-        custom_fields: Vec::new(),
+        custom_fields,
         match_rule: input.match_rule.unwrap_or_default(),
     })
 }

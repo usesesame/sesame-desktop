@@ -228,6 +228,7 @@ pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
             "recovery_phone",
             "recovery_not_applicable",
             "notes",
+            "custom_fields",
         ])
         .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     for entry in &payload.entries {
@@ -236,6 +237,15 @@ pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
         let folder_name = crate::snapshot::folder_name_for(payload, entry);
         let folder = safe_csv_cell(&folder_name);
         let joined_backup_codes = entry.backup_codes.join("\n");
+        let joined_custom_fields = Zeroizing::new(
+            entry
+                .custom_fields
+                .iter()
+                .map(|field| format!("{}: {}", field.label, field.value))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let custom_fields = safe_csv_cell(&joined_custom_fields);
         writer
             .write_record([
                 title.as_ref(),
@@ -254,6 +264,7 @@ pub fn csv_export_bytes(payload: &VaultPayload) -> VaultResult<Vec<u8>> {
                     "false"
                 },
                 entry.notes.as_deref().unwrap_or_default(),
+                custom_fields.as_ref(),
             ])
             .map_err(|_| "Sesame could not prepare the readable export.".to_string())?;
     }

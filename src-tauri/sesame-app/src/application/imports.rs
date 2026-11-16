@@ -78,7 +78,7 @@ pub fn preview_import_in_state(
     let preserved_legacy_fields: usize = parsed
         .entries
         .iter()
-        .map(|entry| entry.legacy_fields.len())
+        .map(|entry| entry.custom_fields.len() + entry.legacy_fields.len())
         .sum::<usize>()
         + parsed
             .secure_notes

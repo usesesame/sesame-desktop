@@ -14,11 +14,13 @@ use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::test_support::{login_input, TestVault};
 use crate::vault::storage::{commit_payload_change, payload_with_saved_login};
 use crate::vault::{
-    MergeChoices, MergeDuplicateLoginsRequest, TaggedItem, VaultEntry, VaultFile, VaultPayload,
-    VaultState,
+    CustomFieldEntry, MergeChoices, MergeDuplicateLoginsRequest, TaggedItem, VaultEntry, VaultFile,
+    VaultPayload, VaultState,
 };
 
 const MASTER_PASSWORD: &str = "fictional master password";
+const HIDDEN_VALUE: &str = "fictional-hidden-canary";
+const VISIBLE_VALUE: &str = "fictional member 42";
 const TOTP_SEED: &str = "JBSWY3DPEHPK3PXP";
 const LOCKED_SAVE: &str = "Unlock your vault before saving a login.";
 const LOCKED_DELETE: &str = "Unlock your vault before deleting a login.";
@@ -69,6 +71,35 @@ fn vault_with_duplicates() -> TestVault {
         second.password = "fictional-other-secret".to_string();
         payload.entries.push(second);
     });
+    vault
+}
+
+fn field(label: &str, value: &str, kind: &str) -> CustomFieldEntry {
+    CustomFieldEntry {
+        label: label.to_string(),
+        value: value.to_string(),
+        kind: kind.to_string(),
+    }
+}
+
+fn custom_fields() -> Vec<CustomFieldEntry> {
+    vec![
+        field("Member number", VISIBLE_VALUE, "text"),
+        field("Security answer", HIDDEN_VALUE, "secret"),
+    ]
+}
+
+fn field_rows(entry: &VaultEntry) -> Vec<(String, String, String)> {
+    entry
+        .custom_fields
+        .iter()
+        .map(|field| (field.label.clone(), field.value.clone(), field.kind.clone()))
+        .collect()
+}
+
+fn vault_with_custom_fields() -> TestVault {
+    let vault = TestVault::with_login("login-a", "https://northwind.example");
+    vault.seed(|payload| payload.entries[0].custom_fields = custom_fields());
     vault
 }
 
@@ -306,32 +337,25 @@ fn an_edit_for_a_missing_login_leaves_the_payload_untouched() {
 }
 
 #[test]
-fn the_login_card_counts_backup_codes_and_blanks_secret_legacy_values() {
+fn the_login_card_counts_backup_codes_and_blanks_hidden_custom_fields() {
     let mut entry = VaultEntry::default();
     entry.backup_codes = vec![
         "fictional-code-1".to_string(),
         "fictional-code-2".to_string(),
     ];
-    entry.legacy_fields = vec![
-        crate::vault::LegacyField {
-            label: "Old PIN".to_string(),
-            value: "fictional-legacy-secret".to_string(),
-            secret: true,
-        },
-        crate::vault::LegacyField {
-            label: "Old note".to_string(),
-            value: "fictional visible".to_string(),
-            secret: false,
-        },
-    ];
+    entry.custom_fields = custom_fields();
 
     let card = crate::vault::snapshot::login_card_for(&[], &entry);
     let json = serde_json::to_string(&card).expect("serialized card");
 
     assert_eq!(card.backup_code_count, 2);
     assert!(!json.contains("fictional-code"));
-    assert!(!json.contains("fictional-legacy-secret"));
-    assert!(json.contains("fictional visible"));
+    assert!(!json.contains(HIDDEN_VALUE));
+    assert!(json.contains(VISIBLE_VALUE));
+    assert_eq!(card.secret_fields, ["field:1"]);
+    assert_eq!(card.custom_fields[1].label, "Security answer");
+    assert_eq!(card.custom_fields[1].kind, "secret");
+    assert!(card.custom_fields[1].value.is_empty());
 }
 
 #[test]
@@ -1066,4 +1090,294 @@ fn merging_on_a_locked_vault_fails_and_writes_nothing() {
     assert_eq!(error, LOCKED_MERGE);
     assert_eq!(bytes(&vault), before);
     assert_eq!(vault.state.session_epoch(), epoch);
+}
+
+fn edited_fields(fields: Vec<CustomFieldEntry>, kept: &[&str]) -> crate::vault::LoginInput {
+    let mut input = login_input(Some("login-a"), "https://northwind.example", "");
+    input.custom_fields = Some(fields);
+    input.kept_secrets = Some(kept.iter().map(|key| key.to_string()).collect());
+    input
+}
+
+#[test]
+fn a_hidden_value_survives_an_edit_that_did_not_retype_it() {
+    let vault = vault_with_custom_fields();
+    let input = edited_fields(
+        vec![
+            field("Member number", "fictional member 43", "text"),
+            field("Security answer", "", "secret"),
+        ],
+        &["field:1<-1"],
+    );
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    let stored = vault.stored_login("login-a");
+    assert_eq!(stored.custom_fields[0].value, "fictional member 43");
+    assert_eq!(stored.custom_fields[1].value, HIDDEN_VALUE);
+    assert_eq!(stored.password, "fictional-stored-secret");
+}
+
+#[test]
+fn a_kept_hidden_value_follows_its_row_when_rows_move() {
+    let vault = vault_with_custom_fields();
+    let input = edited_fields(
+        vec![
+            field("Security answer", "", "secret"),
+            field("Member number", VISIBLE_VALUE, "text"),
+        ],
+        &["field:0<-1"],
+    );
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    let stored = vault.stored_login("login-a");
+    assert_eq!(stored.custom_fields[0].value, HIDDEN_VALUE);
+    assert_eq!(stored.custom_fields[1].value, VISIBLE_VALUE);
+}
+
+#[test]
+fn a_hidden_value_is_cleared_when_it_is_not_kept_or_the_row_becomes_visible() {
+    let vault = vault_with_custom_fields();
+    let input = edited_fields(
+        vec![
+            field("Security answer", "", "secret"),
+            field("Now visible", "", "text"),
+        ],
+        &["field:1<-1"],
+    );
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    let stored = vault.stored_login("login-a");
+    assert!(stored
+        .custom_fields
+        .iter()
+        .all(|field| field.value.is_empty()));
+}
+
+#[test]
+fn removing_a_field_removes_it_from_the_vault() {
+    let vault = vault_with_custom_fields();
+    let input = edited_fields(vec![field("Member number", VISIBLE_VALUE, "text")], &[]);
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    let stored = vault.stored_login("login-a");
+    assert_eq!(
+        field_rows(&stored),
+        [(
+            "Member number".to_string(),
+            VISIBLE_VALUE.to_string(),
+            "text".to_string()
+        )]
+    );
+    let payload = stored_payload(&vault);
+    let current = serde_json::to_string(&payload.entries).expect("entries");
+    assert!(!current.contains(HIDDEN_VALUE));
+}
+
+#[test]
+fn a_save_without_a_field_list_keeps_the_stored_fields() {
+    let vault = vault_with_custom_fields();
+    let mut input = login_input(Some("login-a"), "https://northwind.example", "");
+    input.recovery_not_applicable = true;
+
+    save_login_in_state(&vault.state, input).expect("saved login");
+
+    let stored = vault.stored_login("login-a");
+    assert_eq!(
+        field_rows(&stored),
+        field_rows(&{
+            let mut entry = VaultEntry::default();
+            entry.custom_fields = custom_fields();
+            entry
+        })
+    );
+}
+
+#[test]
+fn a_kept_secret_on_a_new_login_takes_nothing_from_another_login() {
+    let vault = vault_with_custom_fields();
+    let mut input = login_input(None, "https://northwind.example", "fictional-new");
+    input.custom_fields = Some(vec![field("Security answer", "", "secret")]);
+    input.kept_secrets = Some(vec!["field:0<-1".to_string()]);
+
+    let saved = save_login_in_state(&vault.state, input).expect("saved login");
+
+    assert!(vault.stored_login(&saved.id).custom_fields[0]
+        .value
+        .is_empty());
+}
+
+#[test]
+fn a_field_without_a_label_is_refused_without_writing() {
+    let vault = vault_with_custom_fields();
+    let before = bytes(&vault);
+    let input = edited_fields(vec![field(" ", "fictional", "text")], &[]);
+
+    let Err(error) = save_login_in_state(&vault.state, input) else {
+        panic!("a field without a label was saved");
+    };
+
+    assert_eq!(error, "Give every field a label.");
+    assert_eq!(bytes(&vault), before);
+}
+
+#[test]
+fn history_and_trash_previews_never_carry_a_hidden_value() {
+    let vault = vault_with_custom_fields();
+    save_login_in_state(
+        &vault.state,
+        edited_fields(vec![field("Member number", VISIBLE_VALUE, "text")], &[]),
+    )
+    .expect("saved login");
+    let history_id = stored_payload(&vault).history[0].id.clone();
+    vault.seed(|payload| payload.entries[0].custom_fields = custom_fields());
+    delete_login_in_state(&vault.state, "login-a").expect("deleted login");
+
+    let history =
+        crate::application::history::preview_history_version_in_state(&vault.state, &history_id)
+            .expect("history preview");
+    let trash = crate::application::history::preview_trashed_item_in_state(&vault.state, "login-a")
+        .expect("trash preview");
+    let snapshot =
+        crate::application::records::vault_snapshot_in_state(&vault.state).expect("snapshot");
+
+    for json in [
+        serde_json::to_string(&history).expect("history json"),
+        serde_json::to_string(&trash).expect("trash json"),
+        serde_json::to_string(&snapshot).expect("snapshot json"),
+    ] {
+        assert!(!json.contains(HIDDEN_VALUE), "{json}");
+    }
+}
+
+#[test]
+fn restoring_from_history_and_trash_brings_the_fields_back() {
+    let vault = vault_with_custom_fields();
+    save_login_in_state(&vault.state, edited_fields(Vec::new(), &[])).expect("saved login");
+    assert!(vault.stored_login("login-a").custom_fields.is_empty());
+    let history_id = stored_payload(&vault).history[0].id.clone();
+
+    crate::application::history::restore_history_version_in_state(&vault.state, &history_id)
+        .expect("restored version");
+    assert_eq!(
+        field_rows(&vault.stored_login("login-a")),
+        field_rows(&{
+            let mut entry = VaultEntry::default();
+            entry.custom_fields = custom_fields();
+            entry
+        })
+    );
+
+    delete_login_in_state(&vault.state, "login-a").expect("deleted login");
+    crate::application::history::restore_trashed_item_in_state(&vault.state, "login-a")
+        .expect("restored item");
+    assert_eq!(
+        vault.stored_login("login-a").custom_fields[1].value,
+        HIDDEN_VALUE
+    );
+}
+
+#[test]
+fn the_merge_comparison_names_custom_fields_without_hidden_values() {
+    let vault = vault_with_duplicates();
+    vault.seed(|payload| payload.entries[0].custom_fields = custom_fields());
+
+    let comparison = merge_comparison_in_state(
+        &vault.state,
+        vec!["login-a".to_string(), "login-b".to_string()],
+    )
+    .expect("comparison");
+    let json = serde_json::to_string(&comparison).expect("comparison json");
+
+    assert!(!json.contains(HIDDEN_VALUE));
+    assert!(!json.contains(VISIBLE_VALUE));
+    let compared = comparison
+        .fields
+        .iter()
+        .find(|field| field.field == "customFields")
+        .expect("custom fields row");
+    assert!(compared.differs);
+    assert_eq!(
+        compared.options[0].value.as_deref(),
+        Some("Member number, Security answer")
+    );
+    assert!(!compared.options[1].present);
+}
+
+#[test]
+fn merging_keeps_the_custom_fields_of_every_merged_login() {
+    let vault = vault_with_duplicates();
+    vault.seed(|payload| {
+        payload.entries[0].custom_fields = vec![field("Member number", VISIBLE_VALUE, "text")];
+        payload.entries[1].custom_fields = custom_fields();
+    });
+
+    merge_duplicate_logins_in_state(&vault.state, merge_request("login-a", &["login-b"]))
+        .expect("merged");
+
+    let merged = vault.stored_login("login-a");
+    assert_eq!(merged.custom_fields.len(), 2);
+    assert_eq!(merged.custom_fields[1].value, HIDDEN_VALUE);
+}
+
+#[test]
+fn a_merge_can_take_the_custom_fields_of_one_login() {
+    let vault = vault_with_duplicates();
+    vault.seed(|payload| {
+        payload.entries[0].custom_fields = vec![field("Old", "fictional old", "text")];
+        payload.entries[1].custom_fields = custom_fields();
+    });
+    let mut request = merge_request("login-a", &["login-b"]);
+    request.choices.custom_fields = Some("login-b".to_string());
+
+    merge_duplicate_logins_in_state(&vault.state, request).expect("merged");
+
+    let merged = vault.stored_login("login-a");
+    assert_eq!(merged.custom_fields.len(), 2);
+    assert_eq!(merged.custom_fields[0].label, "Member number");
+}
+
+#[test]
+fn the_checkup_ignores_custom_fields_when_it_rates_passwords() {
+    let vault = vault_with_duplicates();
+    vault.seed(|payload| {
+        payload.entries[0].password = "fictional-first-login-secret".to_string();
+        payload.entries[1].password = "fictional-second-login-secret".to_string();
+    });
+    let rating = |vault: &TestVault| {
+        let snapshot =
+            crate::application::records::vault_snapshot_in_state(&vault.state).expect("snapshot");
+        let issues = snapshot
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.id.clone(),
+                    entry.password_score,
+                    entry
+                        .password_issues
+                        .iter()
+                        .map(|issue| issue.kind.to_string())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        (issues, snapshot.security.weak_or_reused)
+    };
+    let before = rating(&vault);
+
+    vault.seed(|payload| {
+        for entry in &mut payload.entries {
+            entry.custom_fields = vec![field("PIN", "123456", "secret")];
+        }
+    });
+
+    assert_eq!(rating(&vault), before);
+    assert!(before.0.iter().all(
+        |(_, _, issues)| !issues.contains(&"weak-password".to_string())
+            && !issues.contains(&"reused-password".to_string())
+    ));
 }

@@ -313,9 +313,9 @@ pub struct LoginCard {
     pub recovery_not_applicable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub legacy_fields: Vec<LegacyField>,
     pub match_rule: MatchRule,
+    pub custom_fields: Vec<CustomFieldEntry>,
+    pub secret_fields: Vec<String>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -417,6 +417,9 @@ pub struct LoginInput {
     pub notes: String,
     #[serde(default)]
     pub match_rule: Option<MatchRule>,
+    pub custom_fields: Option<Vec<CustomFieldEntry>>,
+    #[serde(default)]
+    pub kept_secrets: Option<Vec<String>>,
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -463,6 +466,7 @@ pub struct MergeChoices {
     pub backup_codes: Option<String>,
     #[serde(default)]
     pub match_rule: Option<String>,
+    pub custom_fields: Option<String>,
 }
 
 #[derive(Deserialize)]

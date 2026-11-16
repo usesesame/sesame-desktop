@@ -3,10 +3,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::types::ItemMetadata;
+use crate::types::{ItemMetadata, VaultEntry};
 use crate::util::{random_id, unix_timestamp};
 use crate::{
-    Folder, VaultFile, VaultPayload, VaultResult, SETUP_STATE_FORMAT, VAULT_FORMAT_VERSION,
+    Folder, TaggedItem, VaultFile, VaultPayload, VaultResult, SETUP_STATE_FORMAT,
+    VAULT_FORMAT_VERSION,
 };
 
 pub fn fresh_vault_id() -> String {
@@ -36,6 +37,16 @@ pub(crate) fn migrate_vault_file(file: &mut VaultFile) -> VaultResult<bool> {
         changed = true;
     }
     Ok(changed)
+}
+
+fn move_login_legacy_fields(entry: &mut VaultEntry) -> bool {
+    if entry.legacy_fields.is_empty() {
+        return false;
+    }
+    let moved = crate::custom_fields::from_legacy(&entry.legacy_fields);
+    entry.custom_fields.extend(moved);
+    zeroize::Zeroize::zeroize(&mut entry.legacy_fields);
+    true
 }
 
 /// Pre-metadata creation times are stamped at migration, never invented.
@@ -131,6 +142,17 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
             entry.revision = 1;
             changed = true;
         }
+        changed |= move_login_legacy_fields(entry);
+    }
+    for trashed in &mut payload.trash {
+        if let TaggedItem::Login(entry) = &mut trashed.item {
+            changed |= move_login_legacy_fields(entry);
+        }
+    }
+    for entry in &mut payload.history {
+        if let TaggedItem::Login(login) = &mut entry.item {
+            changed |= move_login_legacy_fields(login);
+        }
     }
 
     // Heal each active item directly: duplicate ids are still unrepaired here,
@@ -225,7 +247,8 @@ pub(crate) fn migrate_payload(payload: &mut VaultPayload) -> bool {
 mod tests {
     use super::*;
     use crate::types::{
-        Card, Folder, HistoryEntry, HistoryOperation, TaggedItem, TrashedItem, VaultEntry,
+        Card, CustomFieldEntry, Folder, HistoryEntry, HistoryOperation, LegacyField, TaggedItem,
+        TrashedItem, VaultEntry,
     };
     use crate::CipherBlob;
 
@@ -352,5 +375,92 @@ mod tests {
             assert_eq!(file.setup_complete, expected, "format {format}");
         }
         assert!(migrate_vault_file(&mut envelope(VAULT_FORMAT_VERSION + 1, true)).is_err());
+    }
+
+    fn login_with_legacy_fields(id: &str) -> VaultEntry {
+        let mut entry = login(id);
+        entry.legacy_fields = vec![
+            LegacyField {
+                label: "Visible".to_string(),
+                value: "fictional visible".to_string(),
+                secret: false,
+            },
+            LegacyField {
+                label: "Hidden".to_string(),
+                value: "fictional-secret-canary".to_string(),
+                secret: true,
+            },
+        ];
+        entry
+    }
+
+    fn moved_fields(entry: &VaultEntry) -> Vec<(String, String, String)> {
+        assert!(entry.legacy_fields.is_empty());
+        entry
+            .custom_fields
+            .iter()
+            .map(|field| (field.label.clone(), field.value.clone(), field.kind.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn login_legacy_fields_move_once_in_the_vault_trash_and_history() {
+        let mut payload = VaultPayload::default();
+        payload.entries.push(login_with_legacy_fields("login"));
+        payload.trash.push(TrashedItem {
+            item: TaggedItem::Login(login_with_legacy_fields("trashed")),
+            deleted_at: 1,
+        });
+        payload.history.push(HistoryEntry {
+            id: "history".to_string(),
+            item: TaggedItem::Login(login_with_legacy_fields("login")),
+            captured_at: 1,
+            operation: HistoryOperation::Edit,
+        });
+        let expected = vec![
+            (
+                "Visible".to_string(),
+                "fictional visible".to_string(),
+                "text".to_string(),
+            ),
+            (
+                "Hidden".to_string(),
+                "fictional-secret-canary".to_string(),
+                "secret".to_string(),
+            ),
+        ];
+
+        assert!(migrate_payload(&mut payload));
+        assert!(!migrate_payload(&mut payload));
+
+        assert_eq!(moved_fields(&payload.entries[0]), expected);
+        let TaggedItem::Login(trashed) = &payload.trash[0].item else {
+            panic!("trashed login");
+        };
+        assert_eq!(moved_fields(trashed), expected);
+        let TaggedItem::Login(previous) = &payload.history[0].item else {
+            panic!("history login");
+        };
+        assert_eq!(moved_fields(previous), expected);
+    }
+
+    #[test]
+    fn moved_legacy_fields_follow_existing_custom_fields() {
+        let mut entry = login_with_legacy_fields("login");
+        entry.custom_fields.push(CustomFieldEntry {
+            label: "Existing".to_string(),
+            value: "fictional existing".to_string(),
+            kind: "text".to_string(),
+        });
+        let mut payload = VaultPayload::default();
+        payload.entries.push(entry);
+
+        assert!(migrate_payload(&mut payload));
+        let labels = payload.entries[0]
+            .custom_fields
+            .iter()
+            .map(|field| field.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, ["Existing", "Visible", "Hidden"]);
     }
 }

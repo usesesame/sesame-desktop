@@ -216,6 +216,8 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
         .map_or((None, None), |(code, remaining)| {
             (Some(code), Some(remaining))
         });
+    let (custom_fields, secret_fields) =
+        crate::secret_fields::redacted_custom_fields(&entry.custom_fields);
     LoginCard {
         id: entry.id.clone(),
         title: entry.title.clone(),
@@ -239,8 +241,9 @@ pub fn login_card_for(folders: &[Folder], entry: &VaultEntry) -> LoginCard {
         recovery_phone: entry.recovery_phone.clone(),
         recovery_not_applicable: entry.recovery_not_applicable,
         notes: entry.notes.clone(),
-        legacy_fields: crate::secret_fields::redacted_legacy(&entry.legacy_fields),
         match_rule: entry.match_rule,
+        custom_fields,
+        secret_fields,
     }
 }
 
@@ -315,6 +318,7 @@ pub fn merge_comparison_for(group: &[&VaultEntry]) -> MergeComparison {
             field("matchRule", "Browser filling", false, &|entry| {
                 match_rule_label(entry.match_rule).to_string()
             }),
+            custom_fields_comparison(group),
         ],
     }
 }
@@ -324,6 +328,49 @@ fn match_rule_label(rule: MatchRule) -> &'static str {
         MatchRule::Exact => "This address only",
         MatchRule::Site => "Whole site",
         MatchRule::Never => "Never fill",
+    }
+}
+
+fn custom_fields_comparison(group: &[&VaultEntry]) -> MergeField {
+    let contents: Vec<zeroize::Zeroizing<String>> = group
+        .iter()
+        .map(|entry| {
+            let mut content = zeroize::Zeroizing::new(String::new());
+            for field in &entry.custom_fields {
+                for part in [&field.label, &field.kind, &field.value] {
+                    content.push_str(&part.len().to_string());
+                    content.push(':');
+                    content.push_str(part);
+                }
+            }
+            content
+        })
+        .collect();
+    let differs = contents
+        .iter()
+        .any(|content| Some(content) != contents.first());
+    let options = group
+        .iter()
+        .map(|entry| {
+            let labels = entry
+                .custom_fields
+                .iter()
+                .map(|field| field.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            MergeFieldOption {
+                entry_id: entry.id.clone(),
+                present: !entry.custom_fields.is_empty(),
+                value: Some(labels),
+            }
+        })
+        .collect();
+    MergeField {
+        field: "customFields".to_string(),
+        label: "Custom fields".to_string(),
+        secret: false,
+        differs,
+        options,
     }
 }
 

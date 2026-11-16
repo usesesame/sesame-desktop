@@ -18,10 +18,12 @@ import {
   recordDiagnostic,
   renameFolder,
   recordItemUse,
+  releaseItemField,
   revealLoginSecret,
   saveLogin,
   setItemFavourite,
 } from '../vault'
+import { draftFields, fieldsInput, type DraftField } from '../kept-secrets'
 import { FAVOURITES_FILTER, RECENT_FILTER, rememberRecent } from '../vault-collections'
 import { uniqueTags, vaultItems } from '../vault-items'
 import { controllerStore } from './controller-store'
@@ -42,7 +44,14 @@ function emptyLoginDraft(password = ''): LoginInput {
   return {
     title: '', url: '', urls: [], tags: [], username: '', email: '', password, folder: '', totp: undefined, backupCodes: [],
     recoveryEmail: '', recoveryPhone: '', recoveryNotApplicable: false, notes: '', keepBackupCodes: false, matchRule: 'exact',
+    customFields: [],
   }
+}
+
+function loginInputFrom(draft: LoginInput): LoginInput {
+  const rows = ((draft.customFields ?? []) as DraftField[]).filter((row) => row.label.trim() || row.value || row.keptFrom !== undefined)
+  const { fields, keptSecrets } = fieldsInput(rows)
+  return { ...draft, customFields: fields, keptSecrets }
 }
 
 interface LoginControllerOptions {
@@ -61,6 +70,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
   const state = controllerStore({
     passwordVisible: false,
     revealedPassword: '',
+    revealedFields: {} as Record<string, string>,
     passwordPresenceRequired: false,
     passwordPresenceFor: '',
     passwordPresenceIntent: 'reveal' as PasswordIntent,
@@ -93,6 +103,37 @@ export function createLoginController({ stores, feedback, modal, presence, refre
   let revealGeneration = 0
   let autoTypeTimer: ReturnType<typeof setTimeout> | null = null
   let passwordHideTimer: ReturnType<typeof setTimeout> | null = null
+  const fieldHideTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function hideField(key: string) {
+    const timer = fieldHideTimers.get(key)
+    if (timer) clearTimeout(timer)
+    fieldHideTimers.delete(key)
+    const { [key]: _hidden, ...rest } = state.value().revealedFields
+    state.patch({ revealedFields: rest })
+  }
+
+  function hideAllFields() {
+    for (const timer of fieldHideTimers.values()) clearTimeout(timer)
+    fieldHideTimers.clear()
+    state.patch({ revealedFields: {} })
+  }
+
+  async function revealField(key: string): Promise<void> {
+    const card = vault.value().loginCard
+    if (!card) return
+    try {
+      const value = await releaseItemField('login', card.id, key)
+      if (vault.value().loginCard?.id !== card.id || !vault.value().status.unlocked) return
+      state.patch({ revealedFields: { ...state.value().revealedFields, [key]: value } })
+      const previous = fieldHideTimers.get(key)
+      if (previous) clearTimeout(previous)
+      fieldHideTimers.set(key, setTimeout(() => hideField(key), PASSWORD_REVEAL_TIMEOUT_MS))
+    } catch (error) {
+      if (presence.required(error)) presence.ask('reveal-field', () => revealField(key))
+      else feedback.setError(error)
+    }
+  }
 
   function clearPasswordHideTimer() {
     if (passwordHideTimer) clearTimeout(passwordHideTimer)
@@ -230,6 +271,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     selectionRequestToken += 1
     const requestToken = selectionRequestToken
     totp.stop()
+    hideAllFields()
     selection.patch({ activeItemId: id, activeItemKind: 'login' })
     feedback.clearError()
     if (state.value().breachCheckEntryId !== id) {
@@ -322,6 +364,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
         folder: card.folder, folderId: card.folderId, totp: undefined, backupCodes: [], keepBackupCodes: (card.backupCodeCount ?? 0) > 0,
         recoveryEmail: card.recoveryEmail || '', recoveryPhone: card.recoveryPhone || '',
         recoveryNotApplicable: card.recoveryNotApplicable, notes: card.notes || '', matchRule: card.matchRule,
+        customFields: draftFields(card.customFields ?? [], card.secretFields ?? []),
       },
       editorBackupCodeCount: card.backupCodeCount ?? 0,
       editorHasTotp: card.hasTotp,
@@ -523,10 +566,12 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       const card = vault.value().loginCard
       if (card?.backupCodeCount) void copyLoginSecret(card.id, 'backupCodes', 'Backup codes')
     },
-    copyLegacySecret(index: number, label: string) {
+    copyField(key: string, label: string) {
       const card = vault.value().loginCard
-      if (card) void copyLoginSecret(card.id, `legacy:${index}`, label)
+      if (card) void copyLoginSecret(card.id, key, label)
     },
+    revealField,
+    hideField,
     async startAutoType() {
       const card = vault.value().loginCard
       if (!card || state.value().autoTypeCountdown > 0) return
@@ -576,7 +621,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       state.patch({ savingLogin: true })
       feedback.clearError()
       try {
-        const result = await saveLogin({ ...draft, totp: totpEntered ? draft.totp : undefined, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
+        const result = await saveLogin({ ...loginInputFrom(draft), totp: totpEntered ? draft.totp : undefined, backupCodes: draft.backupCodes.flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean) })
         const folderBefore = draft.id ? vault.value().snapshot?.entries.find((entry) => entry.id === draft.id)?.folderId : undefined
         vault.patch({ snapshot: result.snapshot })
         const savedEntry = result.snapshot.entries.find((entry) => entry.id === result.id)
@@ -755,18 +800,21 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       selectionRequestToken += 1
       totp.stop()
       vault.patch({ loginCard: null })
+      hideAllFields()
       state.patch({ passwordVisible: false, revealedPassword: '' })
     },
     clearSecrets() {
       selectionRequestToken += 1
       revealGeneration += 1
       clearPasswordHideTimer()
+      for (const timer of fieldHideTimers.values()) clearTimeout(timer)
+      fieldHideTimers.clear()
       totp.stop()
       modal.closeAll()
       // A countdown in flight must not fire after the lock it was racing against.
       stopAutoTypeCountdown()
       state.set({
-        passwordVisible: false, revealedPassword: '', passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
+        passwordVisible: false, revealedPassword: '', revealedFields: {}, passwordPresenceRequired: false, passwordPresenceFor: '', passwordPresenceIntent: 'reveal', passwordPresenceSecret: '', passwordPresenceError: '',
         savingLogin: false, editorTitle: 'Add a login',
         editorFocusUrl: false, editorHasTotp: false, editorBackupCodeCount: 0, loginDraft: emptyLoginDraft(),
         entryMenu: null, folderWorking: false, folderAction: null, recoveryActionWorking: false,

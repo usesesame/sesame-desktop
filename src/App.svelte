@@ -649,7 +649,10 @@
         onRevealPassword={() => loginController.togglePasswordReveal()}
         onCopyPassword={() => void loginController.copySelectedField('password')}
         onCopyBackupCodes={loginController.copyBackupCodes}
-        onCopyLegacySecret={loginController.copyLegacySecret}
+        loginFieldsRevealed={$loginState.revealedFields}
+        onCopyLoginField={loginController.copyField}
+        onRevealLoginField={(key) => void loginController.revealField(key)}
+        onHideLoginField={loginController.hideField}
         onConfirmPasswordPresence={() => void loginController.confirmPasswordPresence()}
         onCancelPasswordPresence={loginController.cancelPasswordPresence}
         siteIconsEnabled={$settings.siteIconsEnabled}

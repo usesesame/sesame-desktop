@@ -309,6 +309,9 @@ function previewSecretValue(kind: string, id: string, field: string): string {
   if (kind === 'login') {
     if (field === 'password' && previewCards[id]?.hasPassword) return 'preview-only-not-a-real-password'
     if (field === 'backupCodes' && previewCards[id]?.backupCodeCount) return 'J8CJ-5TKJ\nKD8Q-3NZP\nHF9M-7QNR'
+    const index = /^field:(\d+)$/.exec(field)?.[1]
+    const value = index === undefined ? undefined : previewLoginFieldValues[id]?.[Number(index)]
+    if (value) return value
     throw new Error('Nothing is saved in that field for this item.')
   }
   const record = previewRecordStores[kind]?.[id] as Record<string, unknown> | undefined
@@ -587,10 +590,36 @@ const customRecordApi = createPreviewRecordApi<CustomRecord, CustomRecordInput>(
 
 const previewCards: Record<string, LoginCard> = {
   gmail: {
-    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodeCount: 3, recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', legacyFields: [], matchRule: 'site',
+    id: 'gmail', title: 'Gmail', site: 'mail.google.com', initials: 'G', url: 'https://mail.google.com', urls: [], tags: ['email'], username: 'hello@example.test', email: '', hasPassword: true, folderId: 'personal', folder: 'Personal', favourite: true, lastUsedAt: 1_784_025_600, hasTotp: true, totpCode: '482 914', totpRemaining: 19, backupCodeCount: 3, recoveryEmail: 'recovery@example.test', recoveryPhone: '+370 •••• 1298', recoveryNotApplicable: false, notes: 'Personal email. Keep backup codes current.', customFields: [], secretFields: [], matchRule: 'site',
   },
-  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.', legacyFields: [], matchRule: 'exact' },
-  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, legacyFields: [], matchRule: 'exact' },
+  github: { id: 'github', title: 'GitHub', site: 'github.com', initials: 'GH', url: 'https://github.com', urls: [], tags: ['dev'], username: 'sesame-preview', email: '', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: false, notes: 'Add a TOTP code and recovery details.',
+    customFields: [{ label: 'Account ID', value: 'preview-4471', kind: 'text' }, { label: 'Security answer', value: '', kind: 'secret' }, { label: 'Support PIN', value: '', kind: 'secret' }],
+    secretFields: ['field:1', 'field:2'], matchRule: 'exact',
+  },
+  notion: { id: 'notion', title: 'Notion', site: 'notion.so', initials: 'N', url: 'https://notion.so', urls: [], tags: [], username: 'hello@example.test', email: 'hello@example.test', hasPassword: true, folderId: 'work', folder: 'Work', favourite: false, hasTotp: false, backupCodeCount: 0, recoveryNotApplicable: true, customFields: [], secretFields: [], matchRule: 'exact' },
+}
+
+const previewLoginFieldValues: Record<string, Record<number, string>> = {
+  github: { 1: 'preview-only-blue-heron', 2: 'preview-only-6021' },
+}
+
+function savePreviewLoginFields(id: string, input: LoginInput): Pick<LoginCard, 'customFields' | 'secretFields'> {
+  const previous = previewCards[id]
+  if (!input.customFields) return { customFields: previous?.customFields ?? [], secretFields: previous?.secretFields ?? [] }
+  const previousValues = previewLoginFieldValues[id] ?? {}
+  const values: Record<number, string> = {}
+  const customFields = input.customFields.map((field, index) => {
+    const kind = field.kind === 'secret' ? 'secret' : 'text'
+    const label = field.label.trim()
+    const value = field.value.trim()
+    if (kind === 'text') return { label, value, kind }
+    const kept = (input.keptSecrets ?? []).map((key) => /^field:(\d+)<-(\d+)$/.exec(key)).find((match) => match && Number(match[1]) === index)
+    const carried = kept && previous?.customFields?.[Number(kept[2])]?.kind === 'secret' ? previousValues[Number(kept[2])] : undefined
+    if (value || carried) values[index] = value || carried || ''
+    return { label, value: '', kind }
+  })
+  previewLoginFieldValues[id] = values
+  return { customFields, secretFields: Object.keys(values).map((index) => `field:${index}`) }
 }
 
 let previewNeverSaveSites: string[] = ['https://forum.example.test', 'https://checkout.example.test:8443']
@@ -995,7 +1024,7 @@ export async function saveLogin(input: LoginInput): Promise<SaveLoginResult> {
       recoveryPhone: input.recoveryPhone.trim() || undefined,
       recoveryNotApplicable: input.recoveryNotApplicable,
       notes: input.notes.trim() || undefined,
-      legacyFields: previewCards[id]?.legacyFields ?? [],
+      ...savePreviewLoginFields(id, input),
       matchRule: input.matchRule ?? previewCards[id]?.matchRule ?? 'exact',
     }
     if (input.id && previewCards[id]) captureHistoryPreview('login', id, previewCards[id].title, previewCards[id])

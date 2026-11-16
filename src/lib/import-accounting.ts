@@ -45,7 +45,7 @@ function reasonRows(accounting: ImportAccounting, order: ImportItemReason[]): Ac
 export function accountingGroups(accounting: ImportAccounting): AccountingGroup[] {
   const groups: AccountingGroup[] = [
     { key: 'accepted', label: 'Added to your vault', count: accounting.accepted, reasons: [] },
-    { key: 'retained', label: 'Added, with extra fields kept in Legacy data', count: accounting.retained, reasons: [] },
+    { key: 'retained', label: 'Added, with extra fields kept', count: accounting.retained, reasons: [] },
     { key: 'unsupported', label: 'Not supported by Sesame yet', count: accounting.unsupported, reasons: reasonRows(accounting, unsupportedReasons) },
     { key: 'malformed', label: 'Could not be read', count: accounting.malformed, reasons: reasonRows(accounting, malformedReasons) },
   ]
