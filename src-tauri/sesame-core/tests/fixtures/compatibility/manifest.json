@@ -73,6 +73,20 @@
           "size": 6239692
         }
       ]
+    },
+    {
+      "tag": "v0.5.3",
+      "commit": "1e96fa7dcca44f9e352b390841798b4b873ee2cf",
+      "writerGeneration": "padded",
+      "publishedAt": "2026-11-16T12:03:01Z",
+      "releaseUrl": "https://github.com/usesesame/sesame-desktop/releases/tag/v0.5.3",
+      "packages": [
+        {
+          "digest": "sha256:da92772e6efdda1cd06fd1df7c2d088380e97916f59480b0f48a4b89ba771804",
+          "name": "Sesame_0.5.3_x64-setup.exe",
+          "size": 7774505
+        }
+      ]
     }
   ],
   "writerGenerations": [
@@ -94,6 +108,28 @@
       ],
       "generator": "generator/generate_fixtures_current.rs",
       "note": "sesame-core is byte-identical from v0.2.0 through v0.2.2 and to the current HEAD writer path."
+    },
+    {
+      "id": "padded",
+      "versions": [
+        "v0.5.3"
+      ],
+      "generator": "generator/generate_fixtures_v0_5.rs",
+      "note": "sesame-core is byte-identical between v0.5.2 and v0.5.3. The payload is padded before encryption, the master password key uses 128 MiB of Argon2id memory while the recovery kit key keeps 64 MiB, and logins can carry legacy fields from imports.",
+      "kdf": {
+        "password": {
+          "algorithm": "argon2id",
+          "iterations": 3,
+          "memoryKib": 131072,
+          "parallelism": 4
+        },
+        "recovery": {
+          "algorithm": "argon2id",
+          "iterations": 3,
+          "memoryKib": 65536,
+          "parallelism": 4
+        }
+      }
     }
   ],
   "provenFormats": [
@@ -107,7 +143,8 @@
         "v0.1.1",
         "v0.2.0",
         "v0.2.1",
-        "v0.2.2"
+        "v0.2.2",
+        "v0.5.3"
       ]
     }
   ],
@@ -130,7 +167,7 @@
         "recordedBy": "owner",
         "date": "2026-09-05",
         "readersRetained": true,
-        "note": "The compatibility promise covers the five fixture-backed public releases v0.1.0 through v0.2.2, all format 10 with setup complete. Formats 2 through 9 remain available as unproven recovery attempts, without a promise that historical files authenticate or migrate."
+        "note": "The compatibility promise covers the six fixture-backed public releases v0.1.0 through v0.2.2 and v0.5.3, all format 10 with setup complete. Formats 2 through 9 remain available as unproven recovery attempts, without a promise that historical files authenticate or migrate."
       },
       "recoveryPath": {
         "status": "approvedUnprovenRecovery",
@@ -610,15 +647,138 @@
           ]
         }
       }
+    },
+    {
+      "id": "v0.5.3",
+      "writerTag": "v0.5.3",
+      "writerCommit": "1e96fa7dcca44f9e352b390841798b4b873ee2cf",
+      "writerGeneration": "padded",
+      "fileName": "v0.5.3.sesame",
+      "digestSha256": "6a731417516b3eabac8ceb0d3a405668dd2a547772c70b52d06634a89dfab9ab",
+      "formatVersion": 10,
+      "setupComplete": true,
+      "kdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 131072,
+        "parallelism": 4
+      },
+      "recoveryKdf": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memoryKib": 65536,
+        "parallelism": 4
+      },
+      "secrets": {
+        "masterPassword": "fictional master password 01",
+        "recoveryKit": "8HXEV-Q435Q-5RLGX-D57GN-UH6XU"
+      },
+      "vault": {
+        "name": "Fictional Story Vault",
+        "vaultId": "BZF1Ft1TGFeWdcwF",
+        "revision": 3
+      },
+      "counts": {
+        "cards": 1,
+        "customRecords": 1,
+        "documents": 1,
+        "entries": 2,
+        "folders": 2,
+        "history": 1,
+        "identities": 1,
+        "secureNotes": 1,
+        "softwareLicenses": 1,
+        "sshKeys": 1,
+        "trash": 1,
+        "wifiNetworks": 1
+      },
+      "stableIds": [
+        "login-alpha",
+        "login-empty",
+        "login-trashed",
+        "identity-alpha",
+        "note-alpha",
+        "card-alpha",
+        "wifi-alpha",
+        "ssh-alpha",
+        "license-alpha",
+        "document-alpha",
+        "custom-alpha",
+        "folder-arcs",
+        "folder-drafts",
+        "history-alpha"
+      ],
+      "payloadShape": {
+        "taggedItems": true,
+        "identityHasFavourite": true,
+        "identityHasTags": true
+      },
+      "legacyFields": {
+        "history-alpha": [
+          {
+            "label": "Membership number",
+            "secret": false
+          }
+        ],
+        "login-alpha": [
+          {
+            "label": "Membership number",
+            "secret": false
+          },
+          {
+            "label": "Door code",
+            "secret": true
+          }
+        ],
+        "login-trashed": [
+          {
+            "label": "Old pin",
+            "secret": true
+          }
+        ]
+      },
+      "expectedMigration": {
+        "fileChanged": false,
+        "payloadChanged": true,
+        "afterOpenCounts": {
+          "cards": 1,
+          "customRecords": 1,
+          "documents": 1,
+          "entries": 2,
+          "folders": 2,
+          "history": 1,
+          "identities": 1,
+          "secureNotes": 1,
+          "softwareLicenses": 1,
+          "sshKeys": 1,
+          "trash": 1,
+          "wifiNetworks": 1
+        },
+        "preservedTimestamps": {
+          "login-alpha": {
+            "createdAt": 1700000000,
+            "updatedAt": 1700000100,
+            "passwordUpdatedAt": 1700000090
+          }
+        },
+        "backfilled": {
+          "login-empty": [
+            "createdAt",
+            "updatedAt",
+            "passwordUpdatedAt",
+            "revision"
+          ]
+        }
+      }
     }
   ],
   "releaseInventory": {
-    "checkedAt": "2026-09-05",
+    "checkedAt": "2026-11-16",
     "source": "https://api.github.com/repos/usesesame/sesame-desktop/releases",
-    "scope": "All public releases and installable assets returned by the paginated release API. Package digests are GitHub metadata, not locally verified downloads. Fixtures use tagged source writers, not installed packages."
+    "scope": "The fixtures cover v0.1.0 through v0.2.2 and v0.5.3, the newest release. Releases v0.2.3 through v0.5.2 also declare format 10 but have no fixture of their own. Package digests are GitHub metadata, not locally verified downloads. Fixtures use tagged source writers, not installed packages."
   },
   "writerInventory": {
-    "scope": "Tagged source writers for the five published releases; installed-package execution was not repeated in this review.",
+    "scope": "Tagged source writers for the six fixture releases; installed-package execution was not repeated in this review.",
     "sourcePaths": [
       "src-tauri/sesame-core/src/lib.rs",
       "src-tauri/sesame-core/src/api.rs",
@@ -628,7 +788,7 @@
     ],
     "formatVersion": 10,
     "envelope": "JSON VaultFile with formatVersion, kdf, keyWrap, optional deviceWrap, recoveryKdf, recoveryWrap, pinWrap, helloWrap, setupComplete, and payload.",
-    "payload": "JSON PersistedVaultPayloadV8 with tagged items, folders, trash, history, vaultName, vaultId, and revision. Record-field differences are recorded in writerGenerations and each fixture payloadShape.",
+    "payload": "JSON PersistedVaultPayloadV8 with tagged items, folders, trash, history, vaultName, vaultId, and revision. The padded generation pads this JSON with trailing spaces before encryption. Record-field differences are recorded in writerGenerations and each fixture payloadShape.",
     "cipher": "XChaCha20-Poly1305 with 32-byte keys and 24-byte random nonces; base64url without padding for encoded bytes.",
     "passwordAndRecoveryKdf": {
       "algorithm": "argon2id",
@@ -657,6 +817,7 @@
       "No pending-setup fixture is committed.",
       "No PIN, Windows Hello, or legacy device wrapper fixture is committed.",
       "No installed-package execution or restore/restart round trip is established by the read-only corpus tests."
-    ]
+    ],
+    "passwordAndRecoveryKdfNote": "passwordAndRecoveryKdf holds the parameters of the legacy and current generations. A generation that records its own kdf overrides it."
   }
 }
