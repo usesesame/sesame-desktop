@@ -1,24 +1,17 @@
 <script lang="ts">
-  import { describeFreshness } from '../update-freshness-text'
   import { slidingSelection } from './sliding-selection'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
-  import SyncPanel from './SyncPanel.svelte'
-  import SyncVaultStorageRow from './SyncVaultStorageRow.svelte'
-  import { appVersion } from '../app-meta'
-  import { SHORTCUTS } from '../shortcuts'
-  import { platformCapabilities } from '../platform'
-  import { MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
+  import { SETTINGS_TABS, type SettingsTabId } from '../settings-tabs'
   import type { BrowserIntegrationStatus, DesktopUpdateProgress, DesktopUpdateStatus, DiagnosticStatus, RecoveryReplacementStatus, ServerInspection, ServiceConnectionStatus, Theme } from '../types'
-  import AccountConnectionSetting from './AccountConnectionSetting.svelte'
-  import CustomServerSetting from './CustomServerSetting.svelte'
-  import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
-  import NeverSaveSitesSetting from './NeverSaveSitesSetting.svelte'
+  import GeneralSettings from './GeneralSettings.svelte'
+  import SecuritySettings from './SecuritySettings.svelte'
+  import BrowserSettings from './BrowserSettings.svelte'
+  import SyncSettings from './SyncSettings.svelte'
+  import DataSettings from './DataSettings.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
-  import { recoveryRequestPending } from '../recovery-replacement'
   import ViewHeader from './ViewHeader.svelte'
-
   export let theme: Theme = 'auto'
   export let siteIconsEnabled = false
   export let autoLockMinutes = 5
@@ -91,7 +84,6 @@
   export let onRefreshService: () => void
   export let serviceConnectionAvailable = true
   export let desktopUpdate: DesktopUpdateStatus = { available: false }
-  $: freshnessNote = describeFreshness(desktopUpdate)
   export let updateWorking = false
   export let updateProgress: DesktopUpdateProgress | null = null
   export let onCheckForUpdate: () => void
@@ -101,84 +93,32 @@
   export let onRefreshBrowserIntegration: () => void
   export let onRepairBrowserIntegration: () => void
 
-
-  type TabId = 'general' | 'security' | 'connections' | 'data'
-  const tabs: { id: TabId; label: string; icon: string }[] = [
-    { id: 'general', label: 'General', icon: 'monitor' },
-    { id: 'security', label: 'Security', icon: 'lock' },
-    { id: 'connections', label: 'Connections', icon: 'globe' },
-    { id: 'data', label: 'Data', icon: 'shield' },
-  ]
-  export let tab: TabId = 'general'
+  const tabs = SETTINGS_TABS
+  export let tab: SettingsTabId = 'general'
   const tabButtons: HTMLButtonElement[] = []
-  let recordingShortcut = false
+  let tabList: HTMLDivElement
+  let moreBefore = false
+  let moreAfter = false
 
-  function formatMoment(seconds: number | undefined): string {
-    return seconds === undefined ? '' : new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  $: void revealTab(tab)
+
+  async function revealTab(id: SettingsTabId) {
+    await tick()
+    const button = tabButtons[tabs.findIndex((item) => item.id === id)]
+    if (!tabList || !button) return
+    const margin = parseFloat(getComputedStyle(tabList).scrollPaddingInlineStart) || 0
+    const start = button.offsetLeft - margin
+    const end = button.offsetLeft + button.offsetWidth + margin
+    if (start < tabList.scrollLeft) tabList.scrollLeft = Math.max(0, start)
+    else if (end > tabList.scrollLeft + tabList.clientWidth) tabList.scrollLeft = end - tabList.clientWidth
+    measureTabOverflow()
   }
 
-  $: recoveryRequested = recoveryRequestPending(recoveryReplacement)
-
-  function formatAccelerator(value: string): string {
-    return value.split('+').join(' + ')
+  function measureTabOverflow() {
+    if (!tabList) return
+    moreBefore = tabList.scrollLeft > 1
+    moreAfter = tabList.scrollLeft + tabList.clientWidth < tabList.scrollWidth - 1
   }
-
-  function diagnosticTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  }
-
-  function startRecordingShortcut() {
-    recordingShortcut = true
-  }
-
-  function cancelRecordingShortcut() {
-    recordingShortcut = false
-  }
-
-  const NAMED_CODE_TOKENS: Record<string, string> = {
-    Space: 'Space', Tab: 'Tab', Enter: 'Return', Backspace: 'Backspace', Delete: 'Delete',
-    Minus: '-', Equal: '=', Comma: ',', Period: '.', Slash: '/', Semicolon: ';', Quote: "'",
-    BracketLeft: '[', BracketRight: ']', Backslash: '\\', Backquote: '`',
-  }
-
-  function tokenForCode(code: string): string | null {
-    if (code.startsWith('Key')) return code.slice(3)
-    if (code.startsWith('Digit')) return code.slice(5)
-    if (code.startsWith('Numpad')) return `Num${code.slice(6)}`
-    if (code.startsWith('Arrow')) return code
-    if (/^F\d{1,2}$/.test(code)) return code
-    return NAMED_CODE_TOKENS[code] ?? null
-  }
-
-  // Meta is left out: its token name in the shortcut crate is not confirmed.
-  function handleShortcutKeydown(event: KeyboardEvent) {
-    if (!recordingShortcut) return
-    event.preventDefault()
-    if (event.key === 'Escape') {
-      cancelRecordingShortcut()
-      return
-    }
-    if (event.key === 'Control' || event.key === 'Alt' || event.key === 'Shift' || event.key === 'Meta') return
-    const token = tokenForCode(event.code)
-    if (!token) return
-    const modifiers: string[] = []
-    if (event.ctrlKey) modifiers.push('Ctrl')
-    if (event.altKey) modifiers.push('Alt')
-    if (event.shiftKey) modifiers.push('Shift')
-    if (modifiers.length === 0) return
-    recordingShortcut = false
-    onUpdateQuickAccessShortcut([...modifiers, token].join('+'))
-  }
-
-  function formatBytes(bytes: number) {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${Math.max(0.1, bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
-
-  $: websiteIconCacheLabel = websiteIconCacheEntryCount === 0
-    ? 'The cache is empty.'
-    : `${websiteIconCacheIconCount} ${websiteIconCacheIconCount === 1 ? 'icon' : 'icons'} cached (${formatBytes(websiteIconCacheSizeBytes)}).`
 
   async function handleTabKeydown(event: KeyboardEvent, index: number) {
     let nextIndex: number | null = null
@@ -193,15 +133,13 @@
     await tick()
     tabButtons[nextIndex]?.focus()
   }
-
-
 </script>
 
-<svelte:window on:keydown={handleShortcutKeydown} />
+<svelte:window on:resize={measureTabOverflow} />
 
 <section class="settings-view">
   <ViewHeader title="Settings" />
-  <div class="settings-tabs" role="tablist" aria-label="Settings sections" use:slidingSelection>
+  <div bind:this={tabList} class="settings-tabs" class:more-before={moreBefore} class:more-after={moreAfter} role="tablist" aria-label="Settings sections" use:slidingSelection on:scroll={measureTabOverflow}>
     {#each tabs as item, index (item.id)}
       <button
         bind:this={tabButtons[index]}
@@ -223,214 +161,86 @@
   <div id={`settings-panel-${tab}`} class="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
     {#key tab}
     {#if tab === 'general'}
-      <div class="settings-groups">
-        <section class="settings-group" aria-labelledby="settings-group-general-appearance">
-          <h3 id="settings-group-general-appearance">Appearance</h3>
-          <div class="settings-list">
-            <article>
-              <div class="setting-copy"><strong>Theme</strong><p>Match your system, or force light or dark.</p></div>
-              <div class="theme-toggle" role="group" aria-label="Theme" use:slidingSelection><button type="button" class:active={theme === 'light'} aria-pressed={theme === 'light'} aria-label="Light" title="Light" on:click={() => onSetTheme('light')}><Icon name="sun" size={15} /></button><button type="button" class:active={theme === 'auto'} aria-pressed={theme === 'auto'} aria-label="System" title="System" on:click={() => onSetTheme('auto')}><Icon name="monitor" size={15} /></button><button type="button" class:active={theme === 'dark'} aria-pressed={theme === 'dark'} aria-label="Dark" title="Dark" on:click={() => onSetTheme('dark')}><Icon name="moon" size={15} /></button></div>
-            </article>
-            <article>
-              <div class="setting-copy"><strong>Website icons</strong><p>Download icons only as they come into view, then reuse Sesame's local copy for up to 30 days. The first request still reveals the saved domain to that site. Sesame accepts only ICO and PNG icons, and it decodes each one itself before showing it. {websiteIconCacheLabel}</p></div>
-              <div class="website-icon-actions"><button type="button" class="text-button" disabled={websiteIconCacheWorking || websiteIconCacheEntryCount === 0} on:click={onClearWebsiteIconCache}>Clear cache</button><button type="button" class="switch" class:active={siteIconsEnabled} role="switch" aria-checked={siteIconsEnabled} aria-label="Website icons" disabled={siteIconsWorking} on:click={() => onSetSiteIconsEnabled(!siteIconsEnabled)}><span></span></button></div>
-            </article>
-          </div>
-        </section>
-        <section class="settings-group" aria-labelledby="settings-group-general-app">
-          <h3 id="settings-group-general-app">This app</h3>
-          <div class="settings-list">
-            <article>
-              <div class="setting-copy"><strong>Keep Sesame in the tray</strong><p>Closing the window keeps it running. Turn off to quit on close.</p></div>
-              <button type="button" class="switch" class:active={keepInTray} role="switch" aria-checked={keepInTray} aria-label="Keep Sesame in the tray" disabled={trayWorking} on:click={onToggleTray}><span></span></button>
-            </article>
-            <article>
-              <div class="setting-copy"><strong>Start at sign-in</strong><p>Opens in the tray when you sign in. The vault stays locked until you unlock it.</p></div>
-              <button type="button" class="switch" class:active={autostartEnabled} role="switch" aria-checked={autostartEnabled} aria-label="Start at sign-in" disabled={autostartWorking} on:click={onToggleAutostart}><span></span></button>
-            </article>
-            {#if $platformCapabilities.quickAccessShortcut}
-            <article>
-              <div class="setting-copy"><strong>Quick access shortcut</strong><p>Opens the quick access popup from anywhere, even while Sesame is in the tray.</p></div>
-              <button type="button" class="text-button" disabled={quickAccessShortcutWorking} on:click={recordingShortcut ? cancelRecordingShortcut : startRecordingShortcut}>
-                {recordingShortcut ? 'Press keys (Esc cancels)' : formatAccelerator(quickAccessShortcut)}
-              </button>
-            </article>
-            {/if}
-            <article>
-              {#if $platformCapabilities.desktopUpdates}
-                <div class="setting-copy"><strong>Desktop updates</strong><p>{updateWorking && updateProgress ? `Downloading verified update${updateProgress.totalBytes ? `, ${Math.min(100, Math.round(updateProgress.downloadedBytes / updateProgress.totalBytes * 100))}% complete.` : '…'}` : desktopUpdate.available ? `Version ${desktopUpdate.version} is ready to install.${desktopUpdate.body ? ` ${desktopUpdate.body}` : ''}` : `Check the configured signed release feed. No Sesame account is required.${freshnessNote ? ` ${freshnessNote}` : ''}`}</p></div>
-                {#if desktopUpdate.available}<button type="button" class="text-button" disabled={updateWorking} on:click={onInstallUpdate}>{updateWorking ? 'Installing…' : 'Install update'}</button>{:else}<button type="button" class="text-button" disabled={updateWorking} on:click={onCheckForUpdate}>{updateWorking ? 'Checking…' : 'Check now'}</button>{/if}
-              {:else}
-                <div class="setting-copy"><strong>Desktop updates</strong><p>Sesame does not update itself on this system. You are running {$appVersion ? `version ${$appVersion}` : 'this build'}. Update it the way you installed it to get security fixes.</p></div>
-              {/if}
-            </article>
-            <article>
-              <div class="setting-copy">
-                <strong>Keyboard shortcuts</strong>
-                <dl class="shortcut-list">
-                  {#each SHORTCUTS as shortcut (shortcut.keys)}
-                    <div><dt>{shortcut.label}</dt><dd>{#each shortcut.keys.split(' ') as key (key)}<kbd>{key}</kbd>{/each}</dd></div>
-                  {/each}
-                  <div><dt>Search the list</dt><dd><kbd>/</kbd></dd></div>
-                </dl>
-              </div>
-            </article>
-          </div>
-        </section>
-      </div>
+      <GeneralSettings
+        {theme}
+        {onSetTheme}
+        {siteIconsEnabled}
+        {siteIconsWorking}
+        {onSetSiteIconsEnabled}
+        {websiteIconCacheWorking}
+        {websiteIconCacheEntryCount}
+        {websiteIconCacheIconCount}
+        {websiteIconCacheSizeBytes}
+        {onClearWebsiteIconCache}
+        {keepInTray}
+        {trayWorking}
+        {onToggleTray}
+        {autostartEnabled}
+        {autostartWorking}
+        {onToggleAutostart}
+        {quickAccessShortcut}
+        {quickAccessShortcutWorking}
+        {onUpdateQuickAccessShortcut}
+        {desktopUpdate}
+        {updateWorking}
+        {updateProgress}
+        {onCheckForUpdate}
+        {onInstallUpdate}
+      />
     {:else if tab === 'security'}
-      <div class="settings-groups">
-        <section class="settings-group" aria-labelledby="settings-group-security-device">
-          <h3 id="settings-group-security-device">This device</h3>
-          <div class="settings-list">
-            {#if $platformCapabilities.sessionAutoLock}
-            <article>
-              <div class="setting-copy"><strong>Automatic lock</strong><p>{$platformCapabilities.systemIdle ? 'Lock the vault after a period without keyboard or pointer activity.' : 'Lock the vault after a period without keyboard or pointer activity in Sesame. This desktop does not report when you are idle, so work in other programs does not count.'}</p></div>
-              <div class="auto-lock-options" role="group" aria-label="Automatic lock delay" use:slidingSelection>{#each autoLockOptions as minutes (minutes)}<button type="button" class:active={autoLockMinutes === minutes} aria-pressed={autoLockMinutes === minutes} aria-label={`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`} on:click={() => onSetAutoLockMinutes(minutes)}>{minutes}m</button>{/each}</div>
-            </article>
-            {/if}
-            {#if $platformCapabilities.os === 'linux' && !$platformCapabilities.screenLockMonitoring}
-            <article>
-              <div class="setting-copy"><strong>Screen lock</strong><p>Sesame cannot tell when this desktop locks its screen, so lock the vault yourself before you step away.</p></div>
-            </article>
-            {/if}
-            {#if $platformCapabilities.pinUnlock}
-            <article>
-              <div class="setting-copy"><strong>Unlock with PIN</strong><p>Use a PIN of {MIN_PIN_DIGITS} to {MAX_PIN_DIGITS} digits on this device. Your master password or recovery kit remains available.</p></div>
-              <button type="button" class="switch" class:active={pinUnlockAvailable} role="switch" aria-checked={pinUnlockAvailable} aria-label="Unlock with PIN" disabled={pinWorking} on:click={onTogglePin}><span></span></button>
-            </article>
-            {/if}
-            {#if $platformCapabilities.biometricUnlock}
-            <article>
-              <div class="setting-copy"><strong>Unlock with Windows Hello</strong><p>Use this device's Windows Hello gesture. Your master password or recovery kit remains available, and Sesame never receives your biometric data.</p></div>
-              <button type="button" class="switch" class:active={helloUnlockAvailable} role="switch" aria-checked={helloUnlockAvailable} aria-label="Unlock with Windows Hello" disabled={helloWorking} on:click={onToggleHello}><span></span></button>
-            </article>
-            {/if}
-            {#if $platformCapabilities.os === 'windows'}
-            <article>
-              <div class="setting-copy"><strong>Allow screen capture</strong><p>Sesame asks Windows to keep its windows out of screenshots, screen sharing and Recall. Turn this on only while someone helps you in a support session.</p></div>
-              <button type="button" class="switch" class:active={screenCaptureKnown && screenCaptureAllowed} role="switch" aria-checked={screenCaptureKnown ? screenCaptureAllowed : "mixed"} aria-label="Allow screen capture" disabled={screenCaptureWorking || !screenCaptureKnown} on:click={onToggleScreenCapture}><span></span></button>
-            </article>
-            {/if}
-            <article>
-              <div class="setting-copy"><strong>Clipboard timeout</strong><p>How long a copied password or code stays on the clipboard before Sesame clears it.</p></div>
-              <div class="clipboard-clear-options" role="group" aria-label="Clipboard clear delay" use:slidingSelection>{#each clipboardClearOptions as seconds (seconds)}<button type="button" class:active={clipboardClearSeconds === seconds} aria-pressed={clipboardClearSeconds === seconds} aria-label={`${seconds} seconds`} on:click={() => onSetClipboardClearSeconds(seconds)}>{seconds}s</button>{/each}</div>
-            </article>
-          </div>
-        </section>
-        <section class="settings-group" aria-labelledby="settings-group-security-key">
-          <h3 id="settings-group-security-key">Your vault key</h3>
-          <div class="settings-list">
-            <article>
-              <div class="setting-copy"><strong>Master password</strong><p>Replace your master password and get a fresh recovery kit.</p></div>
-              <button type="button" class="secondary-button settings-manage" on:click={onChangeMasterPassword}>Change</button>
-            </article>
-            <article>
-              {#if recoveryRequested && recoveryReplacement?.ready}
-                <div class="setting-copy"><strong>Recovery kit</strong><p>The new recovery kit you requested on {formatMoment(recoveryReplacement.requestedAt)} is ready. Getting it replaces your current kit.</p></div>
-                <div class="diagnostic-actions"><button type="button" class="text-button" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button><button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onIssueRecoveryKit}>Get new kit</button></div>
-              {:else if recoveryRequested}
-                <div class="setting-copy"><strong>Recovery kit</strong><p class="recovery-request-warning">A new recovery kit was requested on {formatMoment(recoveryReplacement?.requestedAt)}. It is ready on {formatMoment(recoveryReplacement?.availableAt)}. If you did not ask for this, cancel it and change your master password.</p>{#if !recoveryReplacement?.timeConfirmed}<p>Sesame needs two independent servers to agree on the time before it issues the kit. Connect to the internet to get it.</p>{/if}</div>
-                <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onCancelRecoveryRequest}>Cancel request</button>
-              {:else}
-                <div class="setting-copy"><strong>Recovery kit</strong><p>Lost your recovery kit? Request a new one with your master password. It is ready 72 hours later, and Sesame warns on every unlock until then. Sesame measures the wait with servers on the internet, not this computer's clock, and it needs two of them to agree.</p></div>
-                <button type="button" class="secondary-button settings-manage" disabled={recoveryWorking} on:click={onRequestRecoveryKit}>Request new kit</button>
-              {/if}
-            </article>
-          </div>
-        </section>
-      </div>
-    {:else if tab === 'connections'}
-      <div class="settings-groups">
-        {#if !browserIntegration?.ready || browserIntegration?.servedElsewhere}
-          <section class="settings-group" aria-labelledby="settings-group-connections-browser">
-            <h3 id="settings-group-connections-browser">Browser</h3>
-            <div class="settings-list">
-              <BrowserIntegrationSetting
-                desktopAvailable={serviceConnectionAvailable}
-                status={browserIntegration}
-                working={browserIntegrationWorking}
-                onRefresh={onRefreshBrowserIntegration}
-                onRepair={onRepairBrowserIntegration}
-              />
-            </div>
-          </section>
-        {/if}
-        <NeverSaveSitesSetting />
-        {#if !serviceConnection.serverAddress}
-          <section class="settings-group" aria-labelledby="settings-group-connections-account">
-            <h3 id="settings-group-connections-account">Sesame account</h3>
-            <div class="settings-list">
-              <AccountConnectionSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onConnect={onLinkService} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
-            </div>
-          </section>
-        {/if}
-        <SyncPanel />
-        <section class="settings-group" aria-labelledby="settings-group-connections-server">
-          <h3 id="settings-group-connections-server">Connect to your own server</h3>
-          <div class="settings-list">
-            <CustomServerSetting connection={serviceConnection} working={serviceWorking} available={serviceConnectionAvailable} onInspect={onInspectServer} onConnect={onConnectServer} onDisconnect={onDisconnectService} onRefresh={onRefreshService} />
-          </div>
-        </section>
-      </div>
-    {:else}
-      <div class="settings-groups">
-        <section class="settings-group" aria-labelledby="settings-group-data-vault">
-          <h3 id="settings-group-data-vault">Your vault</h3>
-          <div class="settings-list">
-            <SyncVaultStorageRow />
-            <article>
-              <div class="setting-copy"><strong>Export and deletion</strong><p>Export a readable copy or remove Sesame data from this device.</p></div>
-              <button type="button" class="secondary-button settings-manage" on:click={onManageData}>Manage</button>
-            </article>
-          </div>
-        </section>
-        <section class="settings-group" aria-labelledby="settings-group-data-diagnostics">
-          <h3 id="settings-group-data-diagnostics">Diagnostics</h3>
-          <div class="settings-list">
-            <article class="settings-row-expandable">
-              <div class="setting-copy"><strong>Local diagnostics</strong><p>{diagnosticEventCount} {diagnosticEventCount === 1 ? 'event' : 'events'} stored, {diagnosticErrorCount} flagged. Routine events clear after a day; flagged ones are kept for support. Events record categories and timing only, never vault contents or raw errors.</p></div>
-              <div class="diagnostic-actions"><button type="button" class="secondary-button settings-manage" on:click={onExportDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Export</button><button type="button" class="text-button" on:click={onClearDiagnostics} disabled={diagnosticWorking || diagnosticEventCount === 0}>Clear</button></div>
-              {#if diagnosticStatus.recent.length > 0}
-                <details class="diagnostics-detail">
-                  <summary><Icon name="chevron-right" size={14} />Recent activity</summary>
-                  <div class="diagnostics-columns">
-                  {#if diagnosticStatus.byOperation.length > 0}
-                    <div class="diagnostics-breakdown">
-                      <strong>By area</strong>
-                      <ul>
-                        {#each diagnosticStatus.byOperation as entry, i (i)}
-                          <li><span>{entry.operation}</span><small>{entry.count} event{entry.count === 1 ? '' : 's'}{entry.errorCount > 0 ? ` · ${entry.errorCount} flagged` : ''}</small></li>
-                        {/each}
-                      </ul>
-                    </div>
-                  {/if}
-                  {#if diagnosticStatus.byCode.length > 0}
-                    <div class="diagnostics-breakdown">
-                      <strong>Codes</strong>
-                      <ul>
-                        {#each diagnosticStatus.byCode as entry, i (i)}
-                          <li><span class="diagnostic-code" class:error={entry.level === 'error'} class:warn={entry.level === 'warn'}>{entry.code}</span><small>{entry.count} {entry.count === 1 ? 'time' : 'times'}</small></li>
-                        {/each}
-                      </ul>
-                    </div>
-                  {/if}
-                  </div>
-                  <div class="diagnostics-breakdown">
-                    <strong>Recent events</strong>
-                    <ul>
-                      {#each diagnosticStatus.recent as event, i (i)}
-                        <li><span class="diagnostic-code" class:error={event.level === 'error'} class:warn={event.level === 'warn'}>{event.code}</span><small>{event.operation} · {diagnosticTime(event.timestamp)}</small></li>
-                      {/each}
-                    </ul>
-                  </div>
-                  <p class="tiny-note">Each launch gets one random session id, which groups these events in the exported file. Codes and categories only, never vault contents.</p>
-                </details>
-              {/if}
-            </article>
-          </div>
-        </section>
-      </div>
+      <SecuritySettings
+        {autoLockMinutes}
+        {autoLockOptions}
+        {onSetAutoLockMinutes}
+        {pinUnlockAvailable}
+        {pinWorking}
+        {onTogglePin}
+        {helloUnlockAvailable}
+        {helloWorking}
+        {onToggleHello}
+        {screenCaptureAllowed}
+        {screenCaptureKnown}
+        {screenCaptureWorking}
+        {onToggleScreenCapture}
+        {clipboardClearSeconds}
+        {clipboardClearOptions}
+        {onSetClipboardClearSeconds}
+        {onChangeMasterPassword}
+        {recoveryReplacement}
+        {recoveryWorking}
+        {onRequestRecoveryKit}
+        {onIssueRecoveryKit}
+        {onCancelRecoveryRequest}
+      />
+    {:else if tab === 'browser'}
+      <BrowserSettings
+        {browserIntegration}
+        {browserIntegrationWorking}
+        {serviceConnectionAvailable}
+        {onRefreshBrowserIntegration}
+        {onRepairBrowserIntegration}
+      />
+    {:else if tab === 'sync'}
+      <SyncSettings
+        {serviceConnection}
+        {serviceWorking}
+        {serviceConnectionAvailable}
+        {onLinkService}
+        {onInspectServer}
+        {onConnectServer}
+        {onDisconnectService}
+        {onRefreshService}
+      />
+    {:else if tab === 'data'}
+      <DataSettings
+        {onManageData}
+        {diagnosticEventCount}
+        {diagnosticErrorCount}
+        {diagnosticWorking}
+        {diagnosticStatus}
+        {onExportDiagnostics}
+        {onClearDiagnostics}
+      />
     {/if}
     {/key}
   </div>

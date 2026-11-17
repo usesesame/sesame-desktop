@@ -590,11 +590,11 @@ describe('the first run Sync notice', () => {
     expect(localStorage.getItem('sesame-sync-notice-v1')).toBe('seen')
   })
 
-  it('opens the Connections tab and counts as seen when the person asks for Sync settings', () => {
+  it('opens the Sync tab and counts as seen when the person asks for Sync settings', () => {
     const { controller } = harness()
     controller.state.patch({ syncNoticeSeen: false, settingsTab: 'general' })
     controller.openSyncSettings()
-    expect(controller.state.value().settingsTab).toBe('connections')
+    expect(controller.state.value().settingsTab).toBe('sync')
     expect(controller.state.value().syncNoticeSeen).toBe(true)
     expect(localStorage.getItem('sesame-sync-notice-v1')).toBe('seen')
   })
