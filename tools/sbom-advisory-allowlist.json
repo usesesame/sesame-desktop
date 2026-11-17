@@ -134,34 +134,6 @@
       "expires": "2027-01-18"
     },
     {
-      "id": "RUSTSEC-2024-0370",
-      "package": "proc-macro-error",
-      "reason": "The crate is marked unmaintained and the advisory names no vulnerability. It is a procedural macro dependency of glib-macros that runs at build time and is not part of the shipped program.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "RUSTSEC-2026-0371",
-      "package": "zbus_names",
-      "reason": "The crate is marked unmaintained because it moved into zbus 6, and the advisory names no vulnerability. The program uses it through zbus 5.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "RUSTSEC-2026-0370",
-      "package": "zvariant",
-      "reason": "The crate is marked unmaintained because it moved into zbus 6, and the advisory names no vulnerability. The program uses it through zbus 5.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "RUSTSEC-2026-0372",
-      "package": "zvariant_derive",
-      "reason": "The crate is marked unmaintained because it moved into zbus 6, and the advisory names no vulnerability. The program uses it through zbus 5.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
       "id": "USN-7214-1",
       "package": "harfbuzz",
       "reason": "OSV lists a fixed version only for a newer Ubuntu release than 24.04, which the AppImage is built on. The AppImage bundles this library from its build image.",

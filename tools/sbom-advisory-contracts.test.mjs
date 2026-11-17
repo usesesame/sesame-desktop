@@ -12,6 +12,7 @@ import {
   defaultSbomPath,
   awaitsUbuntuFix,
   isWithdrawn,
+  onlyUnmaintained,
   loadAllowlist,
   loadUnfixedLibraryRules,
   queryOsv,
@@ -542,4 +543,71 @@ test('a withdrawn field that is not a valid past time does not withdraw the advi
   }
   assert.equal(isWithdrawn({ withdrawn: '2026-11-16T18:55:38Z' }, Date.parse('2026-11-17T00:00:00Z')), true)
   assert.equal(isWithdrawn({}, Date.parse('2026-11-17T00:00:00Z')), false)
+})
+
+const crate = (role, { name = 'fictional-crate', pulledInBy = 'fictional-framework' } = {}) => ({
+  ...component(name, '5.0.0', `pkg:cargo/${name}@5.0.0`),
+  properties: [
+    ...(role === undefined ? [] : [].concat(role).map((value) => ({ name: 'sesame:cargo-dependency', value }))),
+    ...(pulledInBy ? [{ name: 'sesame:cargo-pulled-in-by', value: pulledInBy }] : []),
+  ],
+})
+const unmaintainedNotice = ({ id = 'RUSTSEC-2026-9001', name = 'fictional-crate', facts = {}, effects = {}, ...rest } = {}) => ({
+  id,
+  affected: [
+    {
+      package: { ecosystem: 'crates.io', name, purl: `pkg:cargo/${name}` },
+      ecosystem_specific: { affects: { arch: [], os: [], functions: [] }, affected_functions: null, ...effects },
+      database_specific: { categories: [], cvss: null, informational: 'unmaintained', ...facts },
+    },
+  ],
+  database_specific: { license: 'CC0-1.0' },
+  ...rest,
+})
+const auditCrate = (target, advisories) =>
+  collectSbomAdvisories([{ bom: { components: [target] } }], { query: async () => advisories, today: '2026-11-17' })
+
+test('an unmaintained notice for a crate that only arrives through other crates is a notice', async () => {
+  const report = await auditCrate(crate('transitive'), [unmaintainedNotice()])
+  assert.equal(report.vulnerable.length, 0)
+  assert.deepEqual(report.unmaintained.map((entry) => [entry.name, entry.ids, entry.pulledInBy]), [
+    ['fictional-crate', ['RUSTSEC-2026-9001'], 'fictional-framework'],
+  ])
+  assert.deepEqual(report.reviewed, [])
+})
+
+test('an unmaintained notice fails for a direct, unmarked or ambiguously marked crate', async () => {
+  for (const role of ['direct', undefined, 'unknown', ['transitive', 'direct'], '']) {
+    const report = await auditCrate(crate(role), [unmaintainedNotice()])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(role))
+    assert.deepEqual(report.unmaintained, [], JSON.stringify(role))
+  }
+  const npm = { ...crate('transitive'), purl: 'pkg:npm/fictional-crate@5.0.0' }
+  assert.equal((await auditCrate(npm, [unmaintainedNotice()])).vulnerable.length, 1)
+})
+
+test('a notice that carries anything beyond unmaintained still fails for a transitive crate', async () => {
+  const cases = {
+    unsound: unmaintainedNotice({ facts: { informational: 'unsound' } }),
+    notice: unmaintainedNotice({ facts: { informational: 'notice' } }),
+    vulnerability: unmaintainedNotice({ facts: { informational: null } }),
+    'no informational kind': unmaintainedNotice({ facts: { informational: undefined } }),
+    cvss: unmaintainedNotice({ facts: { cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' } }),
+    category: unmaintainedNotice({ facts: { categories: ['memory-corruption'] } }),
+    'affected functions': unmaintainedNotice({ effects: { affected_functions: ['fictional_crate::parse'] } }),
+    'affects functions': unmaintainedNotice({ effects: { affects: { functions: ['fictional_crate::parse'] } } }),
+    severity: unmaintainedNotice({ severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H' }] }),
+    alias: unmaintainedNotice({ aliases: ['CVE-2026-0001'] }),
+    cwe: unmaintainedNotice({ database_specific: { cwe_ids: ['CWE-400'] } }),
+    'github advisory': unmaintainedNotice({ id: 'GHSA-fictional-0001' }),
+    'another crate': unmaintainedNotice({ name: 'another-crate' }),
+    'no affected entry': { ...unmaintainedNotice(), affected: [] },
+  }
+  for (const [label, advisory] of Object.entries(cases)) {
+    const report = await auditCrate(crate('transitive'), [advisory])
+    assert.equal(report.vulnerable.length, 1, label)
+    assert.equal(onlyUnmaintained(advisory, crate('transitive')), false, label)
+  }
+  const mixed = await auditCrate(crate('transitive'), [unmaintainedNotice(), unmaintainedNotice({ id: 'RUSTSEC-2026-9002', facts: { informational: 'unsound' } })])
+  assert.deepEqual(mixed.vulnerable.map((entry) => entry.ids), [['RUSTSEC-2026-9001', 'RUSTSEC-2026-9002']])
 })

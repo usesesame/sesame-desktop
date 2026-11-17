@@ -7,7 +7,16 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-import { compiledCrates, markNeverCompiled, neverCompiledProperty, vendorTreeDigest } from './create-sbom.mjs'
+import {
+  cargoDependencyRoles,
+  compiledCrates,
+  dependencyRoleProperty,
+  markDependencyRoles,
+  markNeverCompiled,
+  neverCompiledProperty,
+  pulledInByProperty,
+  vendorTreeDigest,
+} from './create-sbom.mjs'
 import { packageNameFromModuleId } from './shipped-packages.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -224,4 +233,92 @@ test('the bill of materials refuses a crate list that leaves out a workspace cra
     listed.map((component) => component.scope ?? 'built'),
     ['built', 'built', 'excluded'],
   )
+})
+
+const fictionalMetadata = () => {
+  const ids = {
+    app: 'path+file:///work/app#fictional-app@0.1.0',
+    core: 'path+file:///work/core#fictional-core@0.1.0',
+    framework: 'registry+https://github.com/rust-lang/crates.io-index#fictional-framework@2.0.0',
+    bus: 'registry+https://github.com/rust-lang/crates.io-index#fictional-bus@5.0.0',
+    names: 'registry+https://github.com/rust-lang/crates.io-index#fictional-names@4.0.0',
+    shared: 'registry+https://github.com/rust-lang/crates.io-index#fictional-shared@1.0.0',
+    stray: 'registry+https://github.com/rust-lang/crates.io-index#fictional-stray@1.0.0',
+  }
+  const packages = Object.values(ids).map((id) => {
+    const [name, version] = id.split('#')[1].split('@')
+    return { id, name, version }
+  })
+  const node = (id, deps) => ({ id, deps: deps.map((pkg) => ({ pkg })) })
+  return {
+    ids,
+    metadata: {
+      packages,
+      workspace_members: [ids.app, ids.core],
+      resolve: {
+        nodes: [
+          node(ids.app, [ids.core, ids.framework, ids.bus]),
+          node(ids.core, [ids.shared]),
+          node(ids.framework, [ids.bus, ids.shared]),
+          node(ids.bus, [ids.names]),
+          node(ids.names, []),
+          node(ids.shared, []),
+          node(ids.stray, []),
+        ],
+      },
+    },
+  }
+}
+
+test('crates a workspace member names are direct and the rest record what pulls them in', () => {
+  const { metadata } = fictionalMetadata()
+  const roles = cargoDependencyRoles(metadata)
+  const shown = Object.fromEntries([...roles].map(([key, role]) => [key, [role.direct, [...role.pulledInBy].sort()]]))
+  assert.deepEqual(shown, {
+    'fictional-app@0.1.0': [true, []],
+    'fictional-core@0.1.0': [true, []],
+    'fictional-framework@2.0.0': [true, []],
+    'fictional-bus@5.0.0': [true, []],
+    'fictional-names@4.0.0': [false, ['fictional-bus', 'fictional-framework']],
+    'fictional-shared@1.0.0': [true, []],
+    'fictional-stray@1.0.0': [true, []],
+  })
+  assert.throws(() => cargoDependencyRoles({ ...metadata, workspace_members: [] }), /workspace crates/)
+})
+
+test('a crate the metadata does not place is marked direct', () => {
+  const { metadata } = fictionalMetadata()
+  const components = [
+    { name: 'fictional-app', version: '0.1.0', properties: [{ name: 'sesame:source', value: 'path' }] },
+    { name: 'fictional-names', version: '4.0.0' },
+    { name: 'fictional-bus', version: '5.0.0' },
+    { name: 'fictional-unknown', version: '9.0.0' },
+  ]
+  markDependencyRoles(components, cargoDependencyRoles(metadata))
+  const role = (component) => component.properties.filter((property) => property.name === dependencyRoleProperty).map((property) => property.value)
+  assert.deepEqual(components.map(role), [['direct'], ['transitive'], ['direct'], ['direct']])
+  assert.deepEqual(
+    components[1].properties.find((property) => property.name === pulledInByProperty).value,
+    'fictional-bus, fictional-framework',
+  )
+  assert.ok(components.every((component, index) => index === 1 || !component.properties.some((property) => property.name === pulledInByProperty)))
+  const orphan = [{ name: 'fictional-missing', version: '0.1.0', properties: [{ name: 'sesame:source', value: 'path' }] }]
+  assert.throws(() => markDependencyRoles(orphan, cargoDependencyRoles(metadata)), /workspace crates/)
+})
+
+test('every cargo crate in the bill of materials says whether a Sesame crate names it directly', () => {
+  const { bom } = generate()
+  const cargo = bom.components.filter((component) => component.purl.startsWith('pkg:cargo/'))
+  const role = (component) =>
+    component.properties.filter((property) => property.name === dependencyRoleProperty).map((property) => property.value)
+  for (const component of cargo) {
+    assert.equal(role(component).length, 1, `${component.name} has no single dependency role`)
+  }
+  const roleOf = (name) => cargo.filter((component) => component.name === name).map((component) => role(component)[0])
+  for (const name of ['sesame', 'sesame-core', 'sesame-app', 'sesame-sync', 'tauri', 'zbus', 'time', 'serde']) {
+    assert.ok(roleOf(name).includes('direct'), `${name} is named by a workspace crate`)
+  }
+  const zvariant = cargo.find((component) => component.name === 'zvariant')
+  assert.deepEqual(role(zvariant), ['transitive'])
+  assert.match(zvariant.properties.find((property) => property.name === pulledInByProperty).value, /\bzbus\b/)
 })

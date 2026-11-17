@@ -117,6 +117,39 @@ const neverCompiled = (component) =>
     (property) => property.name === 'sesame:cargo-build' && property.value === 'never-compiled',
   )
 const audited = (component) => hasPurl(component) && !neverCompiled(component)
+const propertyValues = (component, name) =>
+  (component.properties ?? []).filter((property) => property.name === name).map((property) => property.value)
+
+export const arrivesTransitively = (component) => {
+  if (typeof component.purl !== 'string' || !component.purl.startsWith('pkg:cargo/')) return false
+  const roles = propertyValues(component, 'sesame:cargo-dependency')
+  return roles.length > 0 && roles.every((role) => role === 'transitive')
+}
+
+const rustsecId = /^RUSTSEC-\d{4}-\d{4,}$/
+const isEmptyList = (value) => value === undefined || value === null || (Array.isArray(value) && value.length === 0)
+
+export const onlyUnmaintained = (vulnerability, component) => {
+  if (!rustsecId.test(vulnerability.id ?? '')) return false
+  if (!isEmptyList(vulnerability.aliases) || !isEmptyList(vulnerability.severity)) return false
+  if (!isEmptyList(vulnerability.database_specific?.cwe_ids)) return false
+  const affected = vulnerability.affected
+  if (!Array.isArray(affected) || affected.length === 0) return false
+  return affected.every((entry) => {
+    const facts = entry?.database_specific ?? {}
+    const effects = entry?.ecosystem_specific ?? {}
+    return (
+      entry.package?.ecosystem === 'crates.io' &&
+      entry.package?.name === component.name &&
+      facts.informational === 'unmaintained' &&
+      (facts.cvss === undefined || facts.cvss === null) &&
+      isEmptyList(facts.categories) &&
+      (effects.affected_functions === undefined || effects.affected_functions === null) &&
+      isEmptyList(effects.affects?.functions) &&
+      isEmptyList(entry.severity)
+    )
+  })
+}
 
 const ecosystemCounts = (components) => {
   const counts = {}
@@ -247,6 +280,7 @@ export const collectSbomAdvisories = async (
       usedLibraries.add(library)
       return 'waiting'
     }
+    if (arrivesTransitively(component) && onlyUnmaintained(vulnerability, component)) return 'unmaintained'
     return null
   }
   const vulnerable = results
@@ -261,7 +295,8 @@ export const collectSbomAdvisories = async (
         version: entry.component.version,
         purl: entry.component.purl,
         ids: identified.map((vulnerability) => vulnerability.id),
-        waitingIds: identified.filter((_, index) => covered[index] === 'waiting').map((vulnerability) => vulnerability.id),
+        pulledInBy: propertyValues(entry.component, 'sesame:cargo-pulled-in-by').join(', '),
+        idsCoveredBy: (kind) => identified.filter((_, index) => covered[index] === kind).map((vulnerability) => vulnerability.id),
         cleared: covered.length > 0 && covered.every(Boolean),
       }
     })
@@ -277,8 +312,11 @@ export const collectSbomAdvisories = async (
   const unusedLibraries = libraries.filter((rule) => !usedLibraries.has(rule))
   const withIds = (entries, pick) =>
     entries.map((entry) => ({ ...publicAdvisory(entry), ids: pick(entry) })).filter((entry) => entry.ids.length > 0)
-  const waiting = withIds(vulnerable, (entry) => entry.waitingIds)
-  const reviewed = withIds(allowed, (entry) => entry.ids.filter((id) => !entry.waitingIds.includes(id)))
+  const waiting = withIds(vulnerable, (entry) => entry.idsCoveredBy('waiting'))
+  const reviewed = withIds(allowed, (entry) => entry.idsCoveredBy('reviewed'))
+  const unmaintained = vulnerable
+    .map((entry) => ({ ...publicAdvisory(entry), ids: entry.idsCoveredBy('unmaintained'), pulledInBy: entry.pulledInBy }))
+    .filter((entry) => entry.ids.length > 0)
   return {
     sources: summaries.map((summary, index) => ({
       ...summary,
@@ -296,6 +334,7 @@ export const collectSbomAdvisories = async (
     allowed: allowed.map(publicAdvisory),
     reviewed,
     waiting,
+    unmaintained,
     unused,
     unusedLibraries,
     expired,
@@ -386,6 +425,11 @@ const main = async () => {
   for (const component of report.waiting) {
     process.stdout.write(
       `Waiting on an Ubuntu fix: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+    )
+  }
+  for (const component of report.unmaintained) {
+    process.stdout.write(
+      `Unmaintained crate that only arrives through ${component.pulledInBy}: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
     )
   }
   for (const rule of report.expiredLibraries) {
