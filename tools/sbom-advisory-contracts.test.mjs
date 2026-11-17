@@ -465,3 +465,37 @@ test('the shipped library rules name the Ubuntu release that builds the AppImage
   assert.equal(new Set(libraries.map((rule) => rule.package)).size, libraries.length)
   for (const rule of libraries) assert.ok(rule.reason.length > 40, rule.package)
 })
+
+test('a crate marked as never compiled is left out of the audit and counted', async () => {
+  const unbuilt = (purl) => ({
+    ...component('fictional-optional', '3.0.0', purl),
+    properties: [{ name: 'sesame:cargo-build', value: 'never-compiled' }],
+  })
+  const purls = []
+  const query = async (purl) => {
+    purls.push(purl)
+    return [{ id: 'RUSTSEC-fictional-1' }]
+  }
+  const bom = {
+    components: [unbuilt('pkg:cargo/fictional-optional@3.0.0'), component('fictional-clean', '1.0.0', 'pkg:cargo/fictional-clean@1.0.0')],
+  }
+  const report = await collectSbomAdvisories([{ bom }], { query, today: '2026-11-17' })
+  assert.deepEqual(purls, ['pkg:cargo/fictional-clean@1.0.0'])
+  assert.equal(report.neverCompiled, 1)
+  assert.equal(report.skipped, 0)
+  assert.deepEqual(report.vulnerable.map((entry) => entry.name), ['fictional-clean'])
+})
+
+test('the never compiled mark does not hide a package outside cargo', async () => {
+  const bom = {
+    components: [
+      {
+        ...component('fictional-npm', '1.0.0', 'pkg:npm/fictional-npm@1.0.0'),
+        properties: [{ name: 'sesame:cargo-build', value: 'never-compiled' }],
+      },
+    ],
+  }
+  const report = await collectSbomAdvisories([{ bom }], { query: async () => [{ id: 'GHSA-fictional-2' }], today: '2026-11-17' })
+  assert.equal(report.vulnerable.length, 1)
+  assert.equal(report.neverCompiled, 0)
+})
