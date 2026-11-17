@@ -26,6 +26,8 @@ pub struct AliasRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AliasFailure {
+    NotSent,
+    NotConnected,
     Unreachable,
     TokenRefused,
     DomainRefused,
@@ -39,7 +41,8 @@ pub enum AliasFailure {
 impl AliasFailure {
     pub fn message(self) -> &'static str {
         match self {
-            Self::Unreachable => {
+            Self::NotSent => "Sesame could not prepare the request, so your API token was not sent.",
+            Self::NotConnected | Self::Unreachable => {
                 "Sesame could not reach the alias service. Check your connection and try again."
             }
             Self::TokenRefused => {
@@ -60,6 +63,12 @@ impl AliasFailure {
                 "The alias service sent an answer Sesame could not use, so no alias was added."
             }
         }
+    }
+}
+
+impl AliasFailure {
+    pub fn token_may_have_left(self) -> bool {
+        !matches!(self, Self::NotSent | Self::NotConnected)
     }
 }
 
@@ -109,7 +118,7 @@ fn client_with(policy: AliasClientPolicy) -> Result<Client, AliasFailure> {
         .connect_timeout(policy.connect_timeout)
         .timeout(policy.timeout)
         .build()
-        .map_err(|_| AliasFailure::Unreachable)
+        .map_err(|_| AliasFailure::NotSent)
 }
 
 pub async fn create_alias(request: &AliasRequest) -> Result<String, AliasFailure> {
@@ -118,7 +127,7 @@ pub async fn create_alias(request: &AliasRequest) -> Result<String, AliasFailure
 }
 
 fn secret_header(value: &str) -> Result<HeaderValue, AliasFailure> {
-    let mut header = HeaderValue::from_str(value).map_err(|_| AliasFailure::TokenRefused)?;
+    let mut header = HeaderValue::from_str(value).map_err(|_| AliasFailure::NotSent)?;
     header.set_sensitive(true);
     Ok(header)
 }
@@ -155,10 +164,7 @@ async fn create_alias_at(
                 .json(&body)
         }
     };
-    let response = builder
-        .send()
-        .await
-        .map_err(|_| AliasFailure::Unreachable)?;
+    let response = builder.send().await.map_err(|error| send_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(failure_for_status(request.service, status));
@@ -170,6 +176,16 @@ async fn create_alias_at(
         .await
         .ok_or(AliasFailure::UnusableAnswer)?;
     alias_from_body(request.service, &body)
+}
+
+fn send_failure(error: &reqwest::Error) -> AliasFailure {
+    if error.is_builder() {
+        AliasFailure::NotSent
+    } else if error.is_connect() {
+        AliasFailure::NotConnected
+    } else {
+        AliasFailure::Unreachable
+    }
 }
 
 fn failure_for_status(service: EmailAliasService, status: StatusCode) -> AliasFailure {
@@ -245,9 +261,8 @@ mod tests {
     fn local_client(timeout: Duration) -> Client {
         client_with(AliasClientPolicy {
             https_only: false,
-            follow_redirects: false,
-            connect_timeout: Duration::from_secs(2),
             timeout,
+            ..alias_client_policy()
         })
         .expect("local client")
     }
@@ -445,6 +460,8 @@ mod tests {
             &request(EmailAliasService::Addy, None),
         ));
         assert_eq!(result, Err(AliasFailure::Unreachable));
+        assert!(AliasFailure::Unreachable.token_may_have_left());
+        assert_eq!(server.requests().len(), 1);
         assert!(started.elapsed() < Duration::from_millis(2_000));
     }
 
@@ -466,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn a_redirect_is_not_followed_and_the_token_goes_nowhere_else() {
+    fn a_redirect_is_not_followed_by_the_production_policy_and_the_token_goes_nowhere_else() {
         let target = TestServer::start(|_| addy_answer("fictional.alias@anonaddy.me"));
         let target_base = target.base();
         let redirecting = TestServer::start(move |_| {
@@ -540,10 +557,23 @@ mod tests {
     #[test]
     fn a_dropped_connection_is_reported_as_unreachable() {
         let server = TestServer::start(|_| Reply::disconnect());
-        assert_eq!(
-            create_against(&server, &request(EmailAliasService::SimpleLogin, None)),
-            Err(AliasFailure::Unreachable)
-        );
+        let failure =
+            create_against(&server, &request(EmailAliasService::SimpleLogin, None)).unwrap_err();
+        assert_eq!(failure, AliasFailure::Unreachable);
+        assert!(failure.token_may_have_left());
+        assert_eq!(server.requests().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_connection_is_known_to_have_sent_nothing() {
+        let failure = crate::test_support::block_on(create_alias_at(
+            &local_client(Duration::from_secs(5)),
+            &crate::network::test_server::closed_port_base(),
+            &request(EmailAliasService::Addy, None),
+        ))
+        .unwrap_err();
+        assert_eq!(failure, AliasFailure::NotConnected);
+        assert!(!failure.token_may_have_left());
     }
 
     #[test]
@@ -558,13 +588,20 @@ mod tests {
 
     #[test]
     fn the_production_client_refuses_a_plain_http_endpoint() {
+        let server = TestServer::start(|_| addy_answer("fictional.alias@anonaddy.me"));
+        assert!(server.base().starts_with("http://"));
         let client = client_with(alias_client_policy()).expect("client");
-        let failure = crate::test_support::block_on(create_alias_at(
-            &client,
-            "http://127.0.0.1:1",
-            &request(EmailAliasService::Addy, None),
-        ));
-        assert_eq!(failure, Err(AliasFailure::Unreachable));
+        for service in [EmailAliasService::Addy, EmailAliasService::SimpleLogin] {
+            let failure = crate::test_support::block_on(create_alias_at(
+                &client,
+                &server.base(),
+                &request(service, None),
+            ))
+            .unwrap_err();
+            assert_eq!(failure, AliasFailure::NotSent, "{service:?}");
+            assert!(!failure.token_may_have_left());
+        }
+        assert!(server.requests().is_empty());
     }
 
     #[test]
@@ -586,10 +623,9 @@ mod tests {
         let server = TestServer::start(|_| addy_answer("fictional.alias@anonaddy.me"));
         let mut bad = request(EmailAliasService::SimpleLogin, None);
         bad.token = Zeroizing::new("fictional\ntoken".to_string());
-        assert_eq!(
-            create_against(&server, &bad),
-            Err(AliasFailure::TokenRefused)
-        );
+        let failure = create_against(&server, &bad).unwrap_err();
+        assert_eq!(failure, AliasFailure::NotSent);
+        assert!(!failure.token_may_have_left());
         assert!(server.requests().is_empty());
     }
 }

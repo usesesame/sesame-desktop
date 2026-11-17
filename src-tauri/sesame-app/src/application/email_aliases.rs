@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 use zeroize::{Zeroize, Zeroizing};
 
-use super::release_record::record_in;
+use super::release_record::record;
 use crate::network::email_alias::{api_host, AliasFailure, AliasRequest};
 use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::storage::commit_payload_change;
@@ -149,11 +149,12 @@ fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = session.as_ref().ok_or("Unlock your vault first.")?;
     let payload = session.open_payload()?;
-    let settings = payload.email_aliases.as_ref().ok_or(NOT_SET_UP)?;
-    if !settings.is_valid() {
-        return Err(NOT_SET_UP.into());
-    }
-    let request = AliasRequest {
+    let settings = payload
+        .email_aliases
+        .as_ref()
+        .filter(|settings| settings.is_valid())
+        .ok_or(NOT_SET_UP)?;
+    Ok(AliasRequest {
         service: settings.service,
         token: Zeroizing::new(settings.token.clone()),
         domain: settings.domain.clone(),
@@ -162,14 +163,32 @@ fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<
         } else {
             None
         },
-    };
-    drop(payload);
-    record_in(
-        vault,
-        Some(session),
-        ReleaseDraft::new(EntryKind::EmailAlias, Outcome::Released).host(api_host(request.service)),
-    );
-    Ok(request)
+    })
+}
+
+struct AliasAttempt<'a> {
+    vault: &'a VaultState,
+    host: &'static str,
+    outcome: Outcome,
+}
+
+impl AliasAttempt<'_> {
+    fn finish(&mut self, result: &Result<String, AliasFailure>) {
+        if let Err(failure) = result {
+            if !failure.token_may_have_left() {
+                self.outcome = Outcome::Withdrawn;
+            }
+        }
+    }
+}
+
+impl Drop for AliasAttempt<'_> {
+    fn drop(&mut self) {
+        record(
+            self.vault,
+            ReleaseDraft::new(EntryKind::EmailAlias, self.outcome).host(self.host),
+        );
+    }
 }
 
 pub async fn create_email_alias_in_state<F, Fut>(
@@ -182,7 +201,15 @@ where
     Fut: Future<Output = Result<String, AliasFailure>>,
 {
     let request = prepare_alias_request(vault, site.as_deref())?;
-    send(request).await.map_err(String::from)
+    let mut attempt = AliasAttempt {
+        vault,
+        host: api_host(request.service),
+        outcome: Outcome::Released,
+    };
+    let result = send(request).await;
+    attempt.finish(&result);
+    drop(attempt);
+    result.map_err(String::from)
 }
 
 #[cfg(test)]
@@ -348,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_aliases_forgets_the_token() {
+    fn turning_aliases_off_removes_the_token_from_the_current_vault() {
         let vault = vault_with_addy(false);
         let status = remove_email_alias_settings_in_state(&vault.state).expect("removed");
         assert_eq!(status.service, None);
@@ -416,6 +443,93 @@ mod tests {
         assert_eq!(entry.item_id, None);
         let serialized = serde_json::to_string(&page).expect("page json");
         assert!(!serialized.contains(TOKEN));
+    }
+
+    fn recorded(vault: &TestVault) -> Vec<(EntryKind, Outcome, Option<String>)> {
+        release_record_page_in_state(&vault.state, ReleaseRecordQuery::default())
+            .expect("record page")
+            .entries
+            .into_iter()
+            .map(|entry| (entry.kind, entry.outcome, entry.host))
+            .collect()
+    }
+
+    #[test]
+    fn a_request_that_never_left_is_recorded_as_not_sent() {
+        for failure in [AliasFailure::NotSent, AliasFailure::NotConnected] {
+            let vault = vault_with_addy(false);
+            let (result, seen) = sent_requests(&vault, None, Err(failure));
+            assert_eq!(result.unwrap_err(), failure.message());
+            assert_eq!(seen.len(), 1);
+            assert_eq!(
+                recorded(&vault),
+                vec![(
+                    EntryKind::EmailAlias,
+                    Outcome::Withdrawn,
+                    Some("app.addy.io".to_string())
+                )],
+                "{failure:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_that_may_have_left_is_recorded_as_sent() {
+        for answer in [
+            Ok("fictional.alias@anonaddy.me".to_string()),
+            Err(AliasFailure::Unreachable),
+            Err(AliasFailure::TokenRefused),
+            Err(AliasFailure::UnusableAnswer),
+            Err(AliasFailure::ServiceDown),
+        ] {
+            let vault = vault_with_addy(false);
+            let (result, seen) = sent_requests(&vault, None, answer.clone());
+            assert_eq!(result.is_ok(), answer.is_ok());
+            assert_eq!(seen.len(), 1);
+            assert_eq!(
+                recorded(&vault),
+                vec![(
+                    EntryKind::EmailAlias,
+                    Outcome::Released,
+                    Some("app.addy.io".to_string())
+                )],
+                "{answer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_cut_short_after_it_started_is_still_recorded_as_sent() {
+        let vault = vault_with_addy(false);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            block_on(create_email_alias_in_state(
+                &vault.state,
+                None,
+                |_request: AliasRequest| async move {
+                    panic!("fictional interruption");
+                    #[allow(unreachable_code)]
+                    Ok::<String, AliasFailure>(String::new())
+                },
+            ))
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(
+            recorded(&vault),
+            vec![(
+                EntryKind::EmailAlias,
+                Outcome::Released,
+                Some("app.addy.io".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn nothing_is_recorded_when_no_request_was_made() {
+        let vault = TestVault::with_login("login-a", "https://example.com");
+        let (result, seen) = sent_requests(&vault, None, Ok(String::new()));
+        assert!(result.is_err());
+        assert!(seen.is_empty());
+        assert!(recorded(&vault).is_empty());
     }
 
     #[test]

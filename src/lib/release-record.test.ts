@@ -66,6 +66,12 @@ describe('activity sentences', () => {
     expect(entryDetails(entry({ kind: 'csvExport', count: 40 }))).not.toContain('40 times')
   })
 
+  test('an alias request says whether the token was sent', () => {
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released', host: 'app.addy.io' }), titleFor)).toBe('Sent your alias API token to app.addy.io to make a new alias')
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'withdrawn', host: 'app.simplelogin.io' }), titleFor)).toBe('Sesame tried to make a new alias but did not send your API token to app.simplelogin.io')
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released' }), titleFor)).toBe('Sent your alias API token to the alias service to make a new alias')
+  })
+
   test('refusals are told apart from releases', () => {
     expect(isRefusal('released')).toBe(false)
     expect(isRefusal('noted')).toBe(false)
