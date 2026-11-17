@@ -151,6 +151,54 @@
       }
     },
     {
+      "name": "change request with a word count for a character password",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-8",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 10
+      }
+    },
+    {
+      "name": "change request with a character length for a passphrase",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "change",
+        "requestId": "change-8-9",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 20
+      }
+    },
+    {
+      "name": "create request with a word count for a character password",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-5",
+        "origin": "https://login.example.com",
+        "style": "characters",
+        "size": 8
+      }
+    },
+    {
+      "name": "create request with a character length for a passphrase",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "create",
+        "requestId": "create-8-6",
+        "origin": "https://login.example.com",
+        "style": "passphrase",
+        "size": 16
+      }
+    },
+    {
       "name": "change request at version 7",
       "valid": false,
       "message": {
@@ -196,6 +244,19 @@
         "origin": "https://login.example.com",
         "handle": "fictional-handle-for-examples-only-AAAAAAAA",
         "action": "filled",
+        "username": "person@example.com"
+      }
+    },
+    {
+      "name": "pending failed fill report with a username",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "pending",
+        "requestId": "pending-8-10",
+        "origin": "https://login.example.com",
+        "handle": "fictional-handle-for-examples-only-AAAAAAAA",
+        "action": "notFilled",
         "username": "person@example.com"
       }
     },
