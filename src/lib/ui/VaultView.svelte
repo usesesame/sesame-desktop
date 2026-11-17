@@ -29,6 +29,7 @@
   export let onDiscardPending: (change: PendingChangeView) => void = () => {}
   export let onCopyPending: (change: PendingChangeView) => void = () => {}
   export let onEditPending: (change: PendingChangeView) => void = () => {}
+  export let onOpenHistoryPending: (change: PendingChangeView) => void = () => {}
   export let allItems: VaultItem[] = []
   export let visibleItems: VaultItem[] = []
   export let recentItems: VaultItem[] = []
@@ -99,6 +100,7 @@
   export let onStartAutoType: () => void
   export let onCancelAutoType: () => void
   export let onCopy: (value: string, label: string) => void
+  export let onCopyTotp: () => void = () => {}
   export let onOpenWebsite: (url: string) => void
   export let onGoSecurity: () => void
   export let onAddWebsite: () => void
@@ -421,7 +423,7 @@
     <button class="text-button empty-add" on:click={() => onOpenNewLogin()}>Add a login instead</button>
   </section>
 {:else}
-  <PendingChangesNotice changes={pendingChanges.filter((change) => !($vault.loginCard && $selection.activeItemKind === 'login' && change.itemId === $vault.loginCard.id))} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} />
+  <PendingChangesNotice changes={pendingChanges.filter((change) => !($vault.loginCard && $selection.activeItemKind === 'login' && change.itemId === $vault.loginCard.id))} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} onOpenHistory={onOpenHistoryPending} />
   <div class="vault-layout pane-{pane}" style={layoutStyle}>
     <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
@@ -610,7 +612,7 @@
           </div>
         </div>
 
-        <PendingChangesNotice placement="login" label="Waiting on this login" changes={pendingChanges.filter((change) => change.itemId === loginCard.id)} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} />
+        <PendingChangesNotice placement="login" label="Waiting on this login" changes={pendingChanges.filter((change) => change.itemId === loginCard.id)} working={pendingWorking} onKeep={onKeepPending} onGoBack={onGoBackPending} onDiscard={onDiscardPending} onCopy={onCopyPending} onEdit={onEditPending} onOpenHistory={onOpenHistoryPending} />
 
         {#if activeIssue && selectedEntry}
           <section class="checkup-fix-panel" aria-labelledby="checkup-fix-title">
@@ -667,7 +669,7 @@
               <button class="site-action" disabled={!loginCard.username && !loginCard.hasPassword} on:click={onStartAutoType}><Icon name="keyboard" size={17} /><span>Auto-type</span></button>
             {/if}
           {/if}
-          {#if loginCard.totpCode}<button class="totp-action" on:click={() => loginCard.totpCode && onCopy(loginCard.totpCode, '2FA code')} aria-label={`Copy 2FA code. ${totpRemaining} seconds remaining.`}><span>2FA code</span><strong>{loginCard.totpCode}</strong><span class="totp-countdown" style={`--totp-progress: ${totpProgress}`} aria-hidden="true"><small>{totpRemaining}</small></span></button>{#if totpRefreshIssue}<span class="totp-refresh-issue">Waiting to refresh</span>{/if}{:else}<button class="no-totp" on:click={onOpenLoginEditor}><Icon name="key" size={15} /> Add 2FA</button>{/if}
+          {#if loginCard.totpCode}<button class="totp-action" on:click={onCopyTotp} aria-label={`Copy 2FA code. ${totpRemaining} seconds remaining.`}><span>2FA code</span><strong>{loginCard.totpCode}</strong><span class="totp-countdown" style={`--totp-progress: ${totpProgress}`} aria-hidden="true"><small>{totpRemaining}</small></span></button>{#if totpRefreshIssue}<span class="totp-refresh-issue">Waiting to refresh</span>{/if}{:else}<button class="no-totp" on:click={onOpenLoginEditor}><Icon name="key" size={15} /> Add 2FA</button>{/if}
         </div>
 
         <section class="details-section">

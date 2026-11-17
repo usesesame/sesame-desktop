@@ -16,6 +16,11 @@ interface PendingChangesControllerOptions {
   feedback: FeedbackController
   editLogin: (id: string) => void
   copyPassword: (id: string) => Promise<void>
+  openHistory: (id: string) => void
+}
+
+export function changedSince(change: PendingChangeView): boolean {
+  return change.kind === 'change' && (change.superseded || (!change.canGoBack && change.daysLeft !== undefined))
 }
 
 export function pendingChangeMessage(change: PendingChangeView): string {
@@ -23,6 +28,12 @@ export function pendingChangeMessage(change: PendingChangeView): string {
     return change.username
       ? `You signed up on ${change.host} as ${change.username}. Keep this login if the site accepted it.`
       : `Sesame saved a new login for ${change.host}. Keep it if the site accepted it.`
+  }
+  if (change.superseded) {
+    return `A newer password was saved for ${change.title} since this one. Open its history to see each version.`
+  }
+  if (changedSince(change)) {
+    return `${change.title} changed after Sesame saved this password. Open its history to see each version.`
   }
   if (change.fill === 'notFilled') {
     return `The browser could not fill the new password for ${change.title}. Go back to the old password.`
@@ -37,7 +48,7 @@ export function pendingChangeMessage(change: PendingChangeView): string {
   return `Sesame saved a new password for ${change.title}. Keep it if the site accepted it.`
 }
 
-export function createPendingChangesController({ stores, feedback, editLogin, copyPassword }: PendingChangesControllerOptions) {
+export function createPendingChangesController({ stores, feedback, editLogin, copyPassword, openHistory }: PendingChangesControllerOptions) {
   const { pendingChanges, vault } = stores
   let disposed = false
   let stopListener: (() => void) | undefined
@@ -77,14 +88,19 @@ export function createPendingChangesController({ stores, feedback, editLogin, co
 
   return {
     refresh,
-    keep: (change: PendingChangeView) => change.kind === 'new'
-      ? act(change, keepPendingChange, 'Login kept', `${change.title} stays in your vault.`)
-      : act(change, keepPendingChange, 'New password kept', `${change.title} keeps the new password.`),
+    keep(change: PendingChangeView) {
+      if (change.kind === 'new') return act(change, keepPendingChange, 'Login kept', `${change.title} stays in your vault.`)
+      if (changedSince(change)) return act(change, keepPendingChange, 'Notice closed', `The earlier passwords stay in the history of ${change.title}.`)
+      return act(change, keepPendingChange, 'New password kept', `${change.title} keeps the new password.`)
+    },
     goBack: (change: PendingChangeView) => act(change, goBackPendingChange, 'Old password restored', `The new one is still in the history of ${change.title}.`),
     discard: (change: PendingChangeView) => act(change, discardPendingLogin, 'Login moved to Trash', 'You can restore it from Trash for 30 days.'),
     copy: (change: PendingChangeView) => copyPassword(change.itemId),
     edit(change: PendingChangeView) {
       editLogin(change.itemId)
+    },
+    openHistory(change: PendingChangeView) {
+      openHistory(change.itemId)
     },
     clearSecrets() {
       pendingChanges.patch({ changes: [], working: null })

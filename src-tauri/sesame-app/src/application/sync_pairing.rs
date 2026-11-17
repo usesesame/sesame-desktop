@@ -12,6 +12,7 @@ use crate::application::sync::{
     present, present_proof, refresh, vault_id_of, verify_master_password, SyncStore,
 };
 use crate::sync::client::{PairingRecord, SyncClient, SyncError};
+use crate::sync::devicelist::DeviceListEntry;
 use crate::sync::engine::{add_entry, seal_label, NewDevice};
 use crate::sync::identity::DeviceIdentity;
 use crate::sync::pairing::{ApproverIdentity, NewDeviceIdentity};
@@ -185,6 +186,32 @@ pub struct ApproveRequest<'a> {
     pub allow_classical: bool,
 }
 
+pub(super) async fn deliver_key_package(
+    vault: &VaultState,
+    client: &SyncClient,
+    identity: &DeviceIdentity,
+    entry: &DeviceListEntry,
+    package: &KeyPackageV3,
+) -> Result<(), String> {
+    client
+        .approve(identity, entry, package)
+        .await
+        .map_err(|error| match error {
+            SyncError::Conflict => {
+                "Another device changed the device list. Show a new code and try again.".to_string()
+            }
+            other => present(other),
+        })?;
+    crate::application::release_record::record(
+        vault,
+        crate::vault::release_record::ReleaseDraft::new(
+            crate::vault::release_record::EntryKind::DevicePaired,
+            crate::vault::release_record::Outcome::Released,
+        ),
+    );
+    Ok(())
+}
+
 pub async fn approve_in_state<P, F>(
     vault: &VaultState,
     store: &SyncStore,
@@ -330,7 +357,7 @@ where
         if vault_id_of(unlocked)? != state.vault_id {
             return Err("The unlocked vault is not the Sync vault.".into());
         }
-        let sealed = unlocked.expose_vault_key(|key| {
+        unlocked.expose_vault_key(|key| {
             let label = seal_label(key, &state.vault_id, &newcomer.device_id, &newcomer.label)
                 .map_err(present_proof)?;
             let package = crate::sync::keys::seal_for_recipient(
@@ -340,15 +367,7 @@ where
                 list.epoch(),
             )?;
             Ok((label, package))
-        })?;
-        vault.release_record.append(
-            unlocked,
-            crate::vault::release_record::ReleaseDraft::new(
-                crate::vault::release_record::EntryKind::DevicePaired,
-                crate::vault::release_record::Outcome::Released,
-            ),
-        );
-        sealed
+        })?
     };
     let entry = add_entry(
         identity,
@@ -371,15 +390,7 @@ where
         ciphertext: URL_SAFE_NO_PAD.encode(&package_bytes),
         signature: String::new(),
     });
-    client
-        .approve(identity, &entry, &package)
-        .await
-        .map_err(|error| match error {
-            SyncError::Conflict => {
-                "Another device changed the device list. Show a new code and try again.".to_string()
-            }
-            other => present(other),
-        })?;
+    deliver_key_package(vault, client, identity, &entry, &package).await?;
     let mut next = state;
     next.entries.push(entry);
     store.save_state(&next)?;

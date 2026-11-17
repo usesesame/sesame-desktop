@@ -92,6 +92,7 @@ pub(super) struct FakeEffects<'a> {
     path: PathBuf,
     presence: Option<&'a ReleasePresence>,
     fail_emit: bool,
+    fail_copy: bool,
     copy_epoch: u64,
     health: RecoveryHealth,
     throttle: Mutex<Option<PersistedPinThrottle>>,
@@ -106,6 +107,7 @@ impl<'a> FakeEffects<'a> {
             path,
             presence: None,
             fail_emit: false,
+            fail_copy: false,
             copy_epoch: COPY_EPOCH,
             health: RecoveryHealth::default(),
             throttle: Mutex::new(None),
@@ -146,6 +148,13 @@ impl<'a> FakeEffects<'a> {
     pub(super) fn with_pin_throttle(path: PathBuf, throttle: PersistedPinThrottle) -> Self {
         Self {
             throttle: Mutex::new(Some(throttle)),
+            ..Self::new(path)
+        }
+    }
+
+    pub(super) fn failing_copy(path: PathBuf) -> Self {
+        Self {
+            fail_copy: true,
             ..Self::new(path)
         }
     }
@@ -204,6 +213,9 @@ impl DesktopEffects for FakeEffects<'_> {
         value: Zeroizing<String>,
         clear_after_ms: Option<u64>,
     ) -> VaultResult<u64> {
+        if self.fail_copy {
+            return Err("Sesame could not copy to the clipboard.".into());
+        }
         self.record(Effect::CopySecret {
             value: value.to_string(),
             clear_after_ms,

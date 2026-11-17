@@ -13,7 +13,9 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 }
 
 const PREVIEW_DAY = 86_400
+const PRESENCE_REQUIRED = 'presenceRequired'
 let previewRetentionDays = 180
+let previewPresenceAsked = false
 
 function previewReleaseState(): 'entries' | 'empty' | 'unreadable' {
   const requested = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('previewActivity')
@@ -118,6 +120,11 @@ export async function getReleaseRecordHint(approvalId: string): Promise<ReleaseR
 
 export async function setReleaseRecordRetention(days: number): Promise<ReleaseRecordStatus> {
   if (previewMode) {
+    if (days < previewRetentionDays && !previewPresenceAsked) {
+      previewPresenceAsked = true
+      throw new Error(PRESENCE_REQUIRED)
+    }
+    previewPresenceAsked = false
     previewRetentionDays = days
     return { ...(await getReleaseRecordStatus()), retentionDays: days }
   }

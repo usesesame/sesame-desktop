@@ -2,4 +2,4 @@
 import type { FillState } from "./FillState";
 import type { PendingKind } from "./PendingKind";
 
-export type PendingChangeView = { id: string, itemId: string, kind: PendingKind, host: string, title: string, username: string, createdAt: number, fill: FillState, accepted: boolean, canGoBack: boolean, daysLeft?: number, urgent: boolean, };
+export type PendingChangeView = { id: string, itemId: string, kind: PendingKind, host: string, title: string, username: string, createdAt: number, fill: FillState, accepted: boolean, canGoBack: boolean, superseded: boolean, daysLeft?: number, urgent: boolean, };

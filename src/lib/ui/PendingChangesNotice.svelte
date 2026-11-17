@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pendingChangeMessage } from '../controllers/pending-changes-controller'
+  import { changedSince, pendingChangeMessage } from '../controllers/pending-changes-controller'
   import type { PendingChangeView } from '../types'
 
   export let changes: PendingChangeView[] = []
@@ -11,6 +11,7 @@
   export let onDiscard: (change: PendingChangeView) => void
   export let onCopy: (change: PendingChangeView) => void
   export let onEdit: (change: PendingChangeView) => void
+  export let onOpenHistory: (change: PendingChangeView) => void = () => {}
 
   const suggestsGoingBack = (change: PendingChangeView) => change.kind === 'change' && change.fill === 'notFilled' && change.canGoBack
 </script>
@@ -26,6 +27,9 @@
             <button type="button" class="text-button" disabled={working !== null} on:click={() => onEdit(change)}>Edit</button>
             <button type="button" class="text-button" disabled={working !== null} on:click={() => onCopy(change)}>Copy password</button>
             <button type="button" class="text-button" disabled={working !== null} on:click={() => onDiscard(change)}>Move to Trash</button>
+          {:else if changedSince(change)}
+            <button type="button" class="secondary-button" disabled={working !== null} on:click={() => onOpenHistory(change)}>Open history</button>
+            <button type="button" class="text-button" disabled={working !== null} on:click={() => onKeep(change)}>Dismiss</button>
           {:else if suggestsGoingBack(change)}
             <button type="button" class="secondary-button" disabled={working !== null} on:click={() => onGoBack(change)}>Go back to old password</button>
             <button type="button" class="text-button" disabled={working !== null} on:click={() => onKeep(change)}>Keep new password</button>

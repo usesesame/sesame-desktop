@@ -228,6 +228,7 @@ fn handle_pipe_payload(
     let vault = app.state::<VaultState>();
     let fill_state = app.state::<BrowserFillState>();
     let effects = crate::adapters::desktop_effects::DesktopHostEffects::new(app);
+    let record_before = vault.release_record.mark();
     let response = match request.message_type.as_str() {
         "capabilities" => browser_replies::capabilities_response(&request),
         "activate" => activation_response(app, &fill_state, &request),
@@ -241,7 +242,9 @@ fn handle_pipe_payload(
         "pending" => pending_changes::pending_response_in_state(&vault, &request),
         _ => BrowserResponse::error_for(&request, "Unsupported browser request."),
     };
-    crate::commands::announce_release_record(app);
+    if vault.release_record.mark() != record_before {
+        crate::commands::announce_release_record(app);
+    }
     if matches!(
         request.message_type.as_str(),
         "change" | "create" | "pending"

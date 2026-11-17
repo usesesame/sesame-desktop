@@ -161,6 +161,8 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
       return 'Gave the vault key to a new device through Sync'
     case 'cleared':
       return 'The activity record was cleared'
+    case 'retentionShortened':
+      return 'You shortened how long Sesame keeps activity'
     case 'unreadable':
       return 'Sesame could not read part of the activity record'
     case 'interrupted':
@@ -195,7 +197,7 @@ export function entryDetails(entry: ReleaseEntryView, withDate = false): string 
   const parts = [withDate ? `${shortDate(entry.at)} at ${entryTime(entry.at)}` : entryTime(entry.at)]
   const note = entry.matchKind ? matchNotes[entry.matchKind] : null
   if (note) parts.push(note)
-  if (entry.kind === 'cleared') parts.push(`${entry.count} ${entry.count === 1 ? 'entry' : 'entries'} removed`)
+  if (entry.kind === 'cleared' || entry.kind === 'retentionShortened') parts.push(`${entry.count} ${entry.count === 1 ? 'entry' : 'entries'} removed`)
   else if (entry.kind === 'unreadable') {
     if (entry.count > 1) parts.push(`${entry.count} entries lost`)
   } else if (COUNTED_REQUESTS.includes(entry.kind)) parts.push(`${entry.count} ${entry.count === 1 ? 'request' : 'requests'}`)
@@ -257,7 +259,7 @@ export function statusNotice(status: ReleaseRecordStatus | null): string | null 
 
 export const RECORD_SCOPE_TEXT = [
   'Sesame lists every time a password or other secret leaves your vault, and every browser request it turned down.',
-  'The list is encrypted, stays on this device, and drops entries older than the time you set in Settings.',
+  'The list is encrypted, stays on this device, and drops entries older than the time you choose above.',
   'It leaves out one-time codes you only look at and breach checks.',
   'Another program on this computer could change or delete the list, so use it as a guide.',
 ]

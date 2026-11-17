@@ -289,18 +289,29 @@ pub const RETENTION_CHOICES: [u32; 4] = [30, 90, 180, 365];
 
 pub fn set_release_record_retention_in_state(
     vault: &VaultState,
+    presence: &ReleasePresence,
     days: u32,
 ) -> VaultResult<ReleaseRecordStatus> {
     if !RETENTION_CHOICES.contains(&days) {
         return Err("Choose how long Sesame keeps activity from the list.".into());
     }
-    vault.release_record.set_retention_days(days);
+    let shorter = days < vault.release_record.retention_days();
+    if shorter {
+        require_release_presence(vault, presence)?;
+    }
     let session = vault
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    if let Some(session) = session.as_ref() {
-        vault.release_record.apply_retention(session)?;
+    match session.as_ref() {
+        Some(session) if shorter => {
+            vault.release_record.shorten_retention(session, days)?;
+        }
+        Some(session) => {
+            vault.release_record.set_retention_days(days);
+            vault.release_record.apply_retention(session)?;
+        }
+        None => vault.release_record.set_retention_days(days),
     }
     drop(session);
     Ok(release_record_status_in_state(vault))

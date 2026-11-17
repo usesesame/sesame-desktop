@@ -100,9 +100,12 @@ pub fn managed_vault_paths(vault: &Path) -> Vec<PathBuf> {
         parent.join(RECOVERY_HEALTH_FILE),
         parent.join(RECOVERY_REPLACEMENT_FILE),
         parent.join(crate::release_record::RECORD_FILE),
-        parent.join(crate::release_record::DAMAGED_FILE),
+        parent.join(crate::pending_change::PENDING_FILE),
+        parent.join(crate::pending_change::NEXT_KEY_PENDING_FILE),
         parent.join("backups"),
     ];
+    paths.extend(crate::release_record::damaged_paths(vault));
+    paths.extend(crate::pending_change::damaged_pending_paths(vault));
     if let Some(name) = vault.file_name().and_then(|name| name.to_str()) {
         let prefix = format!(".{name}.");
         if let Ok(entries) = fs::read_dir(parent) {

@@ -1,12 +1,12 @@
 use tauri::State;
 
 use crate::application::logins::{
-    add_items_tag_in_state, bulk_assign_folder_in_state, create_folder_in_state,
-    delete_folder_in_state, delete_login_in_state, duplicate_groups_in_state,
-    merge_comparison_in_state, merge_duplicate_logins_in_state, record_item_use_in_state,
-    refresh_totp_in_state, rename_folder_in_state, reveal_login_secret_in_state,
-    save_login_in_state, set_item_favourite_in_state, set_login_folders_in_state,
-    totp_codes_in_state,
+    add_items_tag_in_state, bulk_assign_folder_in_state, copy_totp_code_in_state,
+    create_folder_in_state, delete_folder_in_state, delete_login_in_state,
+    duplicate_groups_in_state, merge_comparison_in_state, merge_duplicate_logins_in_state,
+    record_item_use_in_state, refresh_totp_in_state, rename_folder_in_state,
+    reveal_login_secret_in_state, save_login_in_state, set_item_favourite_in_state,
+    set_login_folders_in_state, totp_codes_in_state,
 };
 use crate::application::records::{
     login_card_in_state, login_summary_in_state, vault_snapshot_in_state,
@@ -188,6 +188,23 @@ pub fn list_totp_codes(state: State<'_, VaultState>) -> VaultResult<Vec<TotpCode
 #[tauri::command]
 pub fn refresh_totp(id: String, state: State<'_, VaultState>) -> VaultResult<TotpRefresh> {
     refresh_totp_in_state(&state, &id)
+}
+
+#[tauri::command]
+pub fn copy_totp_code(
+    app: tauri::AppHandle,
+    id: String,
+    clear_after_ms: Option<u64>,
+    state: State<'_, VaultState>,
+) -> VaultResult<u64> {
+    let copied = copy_totp_code_in_state(
+        &state,
+        &crate::adapters::desktop_effects::DesktopHostEffects::new(&app),
+        &id,
+        clear_after_ms,
+    );
+    crate::commands::announce_release_record(&app);
+    copied
 }
 
 #[tauri::command]

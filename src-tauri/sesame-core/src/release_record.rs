@@ -11,13 +11,14 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{bytes_match, decrypt_bytes, encrypt_bytes};
 use crate::platform::open_private_append;
-use crate::storage::atomic_replace;
+use crate::storage::{atomic_replace, damaged_copy_paths, set_aside_damaged};
 use crate::types::CipherBlob;
 use crate::util::{fill_secret, read_file_with_limit, unix_timestamp};
 use crate::{UnlockedVault, VaultResult};
 
 pub const RECORD_FILE: &str = "release-record.sesame";
 pub const DAMAGED_FILE: &str = "release-record.damaged.sesame";
+pub const DAMAGED_COPIES: usize = 3;
 pub const DEFAULT_RETENTION_DAYS: u32 = 180;
 pub const MIN_RETENTION_DAYS: u32 = 7;
 pub const MAX_RETENTION_DAYS: u32 = 730;
@@ -66,6 +67,7 @@ pub enum EntryKind {
     AttachmentSaved,
     DevicePaired,
     Cleared,
+    RetentionShortened,
     Unreadable,
     Interrupted,
     FileChanged,
@@ -395,6 +397,16 @@ pub struct RecordStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordMark {
+    record_id: Option<[u8; 16]>,
+    next_seq: u64,
+    unwritten: usize,
+    unwritten_lost: u32,
+    notice: Option<RecordNotice>,
+    retention_days: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appended {
     Written,
     Deferred,
@@ -507,6 +519,14 @@ pub fn damaged_path(vault_path: &Path) -> PathBuf {
         .join(DAMAGED_FILE)
 }
 
+pub fn damaged_paths(vault_path: &Path) -> Vec<PathBuf> {
+    damaged_copy_paths(
+        vault_path.parent().unwrap_or_else(|| Path::new("")),
+        "release-record",
+        DAMAGED_COPIES,
+    )
+}
+
 fn derive_key(vault_key: &[u8; 32], record_id: &[u8; 16]) -> VaultResult<Zeroizing<[u8; 32]>> {
     let hkdf = Hkdf::<Sha256>::new(Some(record_id), vault_key);
     let mut key = Zeroizing::new([0_u8; 32]);
@@ -568,17 +588,13 @@ fn entry_line(
     prev: &[u8; 32],
     entry: &RecordEntry,
 ) -> VaultResult<Vec<u8>> {
-    let mut plaintext = Zeroizing::new(
-        serde_json::to_vec(entry)
-            .map_err(|_| "Sesame could not prepare the activity entry.".to_string())?,
-    );
-    if plaintext.len() > PLAINTEXT_BYTES {
-        return Err("Sesame could not prepare the activity entry.".into());
-    }
-    plaintext.resize(PLAINTEXT_BYTES, b' ');
+    let mut plaintext = Zeroizing::new([b' '; PLAINTEXT_BYTES]);
+    let mut cursor = std::io::Cursor::new(&mut plaintext[..]);
+    serde_json::to_writer(&mut cursor, entry)
+        .map_err(|_| "Sesame could not prepare the activity entry.".to_string())?;
     let blob = encrypt_bytes(
         key,
-        &plaintext,
+        &plaintext[..],
         &entry_aad(record_id, vault_id, entry.seq, prev),
     )?;
     let mut line = serde_json::to_vec(&blob)
@@ -638,6 +654,7 @@ pub enum Damage {
 
 pub enum ReadOutcome {
     Missing,
+    Unavailable,
     Unreadable,
     Read(ReadRecord),
 }
@@ -646,7 +663,10 @@ pub fn read_record_file(path: &Path, vault_key: &[u8; 32], vault_id: &str) -> Re
     let bytes = match read_file_with_limit(path, MAX_RECORD_FILE_BYTES) {
         Ok(bytes) => Zeroizing::new(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return ReadOutcome::Missing,
-        Err(_) => return ReadOutcome::Unreadable,
+        Err(error) if crate::util::read_failure_is_damage(path, &error) => {
+            return ReadOutcome::Unreadable
+        }
+        Err(_) => return ReadOutcome::Unavailable,
     };
     read_record_bytes(&bytes, vault_key, vault_id)
 }
@@ -741,23 +761,26 @@ fn current_file_len(path: &Path) -> Option<u64> {
     metadata.is_file().then_some(metadata.len())
 }
 
-fn append_line(open: &mut OpenRecord, entry: &RecordEntry) -> VaultResult<()> {
-    let line = entry_line(
+fn encode_for(open: &OpenRecord, entry: &RecordEntry) -> VaultResult<Vec<u8>> {
+    entry_line(
         &open.key,
         &open.record_id,
         &open.vault_id,
         &open.prev,
         entry,
-    )?;
+    )
+}
+
+fn append_line(open: &mut OpenRecord, entry: &RecordEntry, line: &[u8]) -> VaultResult<()> {
     if current_file_len(&open.path) != Some(open.file_len) {
         return Err(FILE_CHANGED.into());
     }
     let mut file = open_private_append(&open.path)?;
-    let written = file.write_all(&line).and_then(|_| file.sync_data());
+    let written = file.write_all(line).and_then(|_| file.sync_data());
     if written.is_err() {
         return Err("Sesame could not write the activity record.".into());
     }
-    open.prev = line_hash(&line);
+    open.prev = line_hash(line);
     open.file_len += line.len() as u64;
     open.next_seq += 1;
     open.entries.push(entry.clone());
@@ -776,6 +799,29 @@ impl RecordState {
 
     pub fn retention_days(&self) -> u32 {
         recover(self.inner.lock()).retention_days
+    }
+
+    pub fn mark(&self) -> RecordMark {
+        let inner = recover(self.inner.lock());
+        RecordMark {
+            record_id: inner.open.as_ref().map(|open| open.record_id),
+            next_seq: inner.open.as_ref().map_or(0, |open| open.next_seq),
+            unwritten: inner.unwritten.len(),
+            unwritten_lost: inner.unwritten_lost,
+            notice: inner.notice,
+            retention_days: inner.retention_days,
+        }
+    }
+
+    pub fn discard(&self) {
+        let mut inner = recover(self.inner.lock());
+        inner.open = None;
+        inner.queue.clear();
+        inner.queue_overflow = 0;
+        inner.unwritten.clear();
+        inner.unwritten_lost = 0;
+        inner.coalescer = Coalescer::default();
+        inner.notice = None;
     }
 
     pub fn open(&self, session: &UnlockedVault) -> VaultResult<()> {
@@ -879,7 +925,9 @@ impl RecordState {
         let vault_id = session_vault_id(session);
         let fresh = session
             .expose_vault_key(|vault_key| write_fresh(&path, vault_key, &vault_id, &mut entries))?;
-        let _ = crate::platform::securely_delete(&damaged_path(&session.path));
+        for damaged in damaged_paths(&session.path) {
+            let _ = crate::platform::securely_delete(&damaged);
+        }
         inner.unwritten.clear();
         inner.unwritten_lost = 0;
         inner.coalescer = Coalescer::default();
@@ -893,6 +941,58 @@ impl RecordState {
         inner.ensure_open(session)?;
         inner.trim(session, true);
         Ok(())
+    }
+
+    pub fn shorten_retention(&self, session: &UnlockedVault, days: u32) -> VaultResult<usize> {
+        let mut inner = recover(self.inner.lock());
+        inner.ensure_open(session)?;
+        inner.flush(session, false);
+        let previous_days = inner.retention_days;
+        inner.retention_days = days.clamp(MIN_RETENTION_DAYS, MAX_RETENTION_DAYS);
+        let Some((mut kept, removed)) = inner.retained(true) else {
+            return Ok(0);
+        };
+        let now = (inner.clock)();
+        kept.push(
+            ReleaseDraft::new(EntryKind::RetentionShortened, Outcome::Noted)
+                .count(u32::try_from(removed).unwrap_or(u32::MAX))
+                .into_entry(0, now, false),
+        );
+        let Some(open) = inner.open.as_mut() else {
+            inner.retention_days = previous_days;
+            return Err("Sesame could not open the activity record.".into());
+        };
+        let previous_entries = std::mem::replace(&mut open.entries, kept);
+        if let Err(error) = inner.rewrite(session) {
+            if let Some(open) = inner.open.as_mut() {
+                open.entries = previous_entries;
+            }
+            inner.retention_days = previous_days;
+            return Err(error);
+        }
+        Ok(removed)
+    }
+}
+
+fn is_refusal_entry(entry: &RecordEntry) -> bool {
+    entry.kind.is_browser() && entry.outcome.is_refusal()
+}
+
+fn evict_over_cap(entries: &mut Vec<RecordEntry>) {
+    if entries.len() <= MAX_ENTRIES {
+        return;
+    }
+    let mut excess = entries.len() - MAX_ENTRIES;
+    entries.retain(|entry| {
+        if excess > 0 && is_refusal_entry(entry) {
+            excess -= 1;
+            false
+        } else {
+            true
+        }
+    });
+    if excess > 0 {
+        entries.drain(..excess);
     }
 }
 
@@ -924,6 +1024,9 @@ impl Inner {
             .expose_vault_key(|vault_key| Ok(read_record_file(path, vault_key, vault_id)))?;
         let (mut entries, notice_entry, keep_aside) = match read {
             ReadOutcome::Missing => (Vec::new(), None, false),
+            ReadOutcome::Unavailable => {
+                return Err("Sesame could not open the activity record.".into());
+            }
             ReadOutcome::Unreadable => (
                 Vec::new(),
                 Some(ReleaseDraft::new(EntryKind::Unreadable, Outcome::Noted).count(1)),
@@ -960,7 +1063,7 @@ impl Inner {
             },
         };
         if keep_aside {
-            let _ = std::fs::rename(path, damaged_path(&session.path));
+            set_aside_damaged(path, &damaged_paths(&session.path));
         }
         if let Some(draft) = notice_entry {
             self.notice = Some(match draft.kind {
@@ -1023,12 +1126,10 @@ impl Inner {
         }
     }
 
-    fn trim(&mut self, session: &UnlockedVault, force: bool) {
+    fn retained(&self, force: bool) -> Option<(Vec<RecordEntry>, usize)> {
         let now = (self.clock)();
         let cutoff = now.saturating_sub(u64::from(self.retention_days) * DAY_SECS);
-        let Some(open) = self.open.as_ref() else {
-            return;
-        };
+        let open = self.open.as_ref()?;
         let slack = if force { 0 } else { DAY_SECS };
         let stale = open
             .entries
@@ -1036,7 +1137,7 @@ impl Inner {
             .any(|entry| entry.at.saturating_add(slack) < cutoff);
         let over = open.entries.len() >= COMPACT_AT || (force && open.entries.len() > MAX_ENTRIES);
         if !stale && !over {
-            return;
+            return None;
         }
         let mut kept: Vec<RecordEntry> = open
             .entries
@@ -1044,10 +1145,15 @@ impl Inner {
             .filter(|entry| entry.at >= cutoff)
             .cloned()
             .collect();
-        if kept.len() > MAX_ENTRIES {
-            let excess = kept.len() - MAX_ENTRIES;
-            kept.drain(..excess);
-        }
+        evict_over_cap(&mut kept);
+        let removed = open.entries.len() - kept.len();
+        (removed > 0).then_some((kept, removed))
+    }
+
+    fn trim(&mut self, session: &UnlockedVault, force: bool) {
+        let Some((kept, _)) = self.retained(force) else {
+            return;
+        };
         if let Some(open) = self.open.as_mut() {
             open.entries = kept;
         }
@@ -1115,6 +1221,9 @@ impl Inner {
                 return true;
             }
         }
+        if let Some(expired) = self.coalescer.windows.remove(&key) {
+            self.write_out_window(key.clone(), expired);
+        }
         while self
             .coalescer
             .written
@@ -1153,16 +1262,9 @@ impl Inner {
             })
             .map(|(key, window)| (key.clone(), *window))
             .collect();
-        for ((kind, host, outcome), window) in expired {
-            self.coalescer
-                .windows
-                .remove(&(kind, host.clone(), outcome));
-            if window.repeats > 0 {
-                let mut draft = ReleaseDraft::new(kind, outcome).count(window.repeats);
-                draft.host = Some(host).filter(|host| !host.is_empty());
-                draft.at = Some(window.last_at);
-                self.push_unwritten(draft, false);
-            }
+        for (key, window) in expired {
+            self.coalescer.windows.remove(&key);
+            self.write_out_window(key, window);
         }
         if self.coalescer.over_limit > 0
             && (closing || now.saturating_sub(self.coalescer.over_limit_at) >= HOUR_SECS)
@@ -1186,14 +1288,24 @@ impl Inner {
         self.write_pending(session);
     }
 
+    fn write_out_window(&mut self, key: (EntryKind, String, Outcome), window: Window) {
+        if window.repeats == 0 {
+            return;
+        }
+        let (kind, host, outcome) = key;
+        let mut draft = ReleaseDraft::new(kind, outcome).count(window.repeats);
+        draft.host = Some(host).filter(|host| !host.is_empty());
+        draft.at = Some(window.last_at);
+        self.push_unwritten(draft, false);
+    }
+
     fn mark_late(&mut self) {
         for pending in self.unwritten.iter_mut() {
             pending.1 = true;
         }
     }
 
-    fn write_pending(&mut self, session: &UnlockedVault) {
-        let now = (self.clock)();
+    fn note_lost(&mut self, now: u64) {
         if self.unwritten_lost > 0 && self.unwritten.len() < UNWRITTEN_LIMIT {
             let mut draft =
                 ReleaseDraft::new(EntryKind::WritesLost, Outcome::Noted).count(self.unwritten_lost);
@@ -1201,20 +1313,36 @@ impl Inner {
             self.unwritten_lost = 0;
             self.unwritten.push_back((draft, false));
         }
+    }
+
+    fn write_pending(&mut self, session: &UnlockedVault) {
+        let now = (self.clock)();
+        self.note_lost(now);
         if self.open.as_ref().is_some_and(|open| !open.disk_valid) && self.rewrite(session).is_err()
         {
             self.mark_late();
             return;
         }
         let mut rewrote_after_change = false;
-        while let Some((draft, late)) = self.unwritten.pop_front() {
+        loop {
+            let Some((draft, late)) = self.unwritten.pop_front() else {
+                if self.unwritten_lost == 0 {
+                    break;
+                }
+                self.note_lost(now);
+                continue;
+            };
             let Some(open) = self.open.as_mut() else {
                 self.unwritten.push_front((draft, late));
                 self.mark_late();
                 return;
             };
             let entry = draft.clone().into_entry(open.next_seq, now, late);
-            match append_line(open, &entry) {
+            let Ok(line) = encode_for(open, &entry) else {
+                self.unwritten_lost = self.unwritten_lost.saturating_add(1);
+                continue;
+            };
+            match append_line(open, &entry, &line) {
                 Ok(()) => {}
                 Err(error) if error == FILE_CHANGED && !rewrote_after_change => {
                     rewrote_after_change = true;
@@ -1244,5 +1372,74 @@ impl Inner {
         {
             self.trim(session, true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(seq: u64, outcome: Outcome) -> RecordEntry {
+        ReleaseDraft::new(EntryKind::BrowserFill, outcome)
+            .host("example.com")
+            .into_entry(seq, 1_000 + seq, false)
+    }
+
+    #[test]
+    fn the_cap_removes_the_oldest_refusals_before_any_release() {
+        let mut entries: Vec<RecordEntry> = (0..MAX_ENTRIES as u64)
+            .map(|seq| {
+                let outcome = if seq % 2 == 0 {
+                    Outcome::Released
+                } else {
+                    Outcome::NoMatch
+                };
+                entry(seq, outcome)
+            })
+            .collect();
+        entries.push(entry(MAX_ENTRIES as u64, Outcome::Released));
+        entries.push(entry(MAX_ENTRIES as u64 + 1, Outcome::Denied));
+
+        evict_over_cap(&mut entries);
+
+        assert_eq!(entries.len(), MAX_ENTRIES);
+        let released = entries
+            .iter()
+            .filter(|entry| entry.outcome == Outcome::Released)
+            .count();
+        assert_eq!(released, MAX_ENTRIES / 2 + 1);
+        assert_eq!(entries[0].seq, 0);
+        assert_eq!(entries[1].seq, 2);
+        assert_eq!(
+            entries.last().map(|entry| entry.seq),
+            Some(MAX_ENTRIES as u64 + 1)
+        );
+    }
+
+    #[test]
+    fn the_cap_falls_back_to_the_oldest_entries_when_no_refusal_is_left() {
+        let mut entries: Vec<RecordEntry> = (0..MAX_ENTRIES as u64 + 2)
+            .map(|seq| entry(seq, Outcome::Released))
+            .collect();
+
+        evict_over_cap(&mut entries);
+
+        assert_eq!(entries.len(), MAX_ENTRIES);
+        assert_eq!(entries[0].seq, 2);
+    }
+
+    #[test]
+    fn an_entry_line_is_padded_to_the_fixed_size_or_refused() {
+        let key = [3_u8; 32];
+        let record_id = [4_u8; 16];
+        let prev = [5_u8; 32];
+        let fits = entry(0, Outcome::Released);
+        let line = entry_line(&key, &record_id, "vault", &prev, &fits).expect("encoded");
+        let opened = open_entry(&key, &record_id, "vault", 0, &prev, &line[..line.len() - 1]);
+        assert_eq!(opened, Some(fits));
+
+        let mut too_long = entry(0, Outcome::Released);
+        too_long.host = Some("h".repeat(PLAINTEXT_BYTES));
+        assert!(entry_line(&key, &record_id, "vault", &prev, &too_long).is_err());
     }
 }

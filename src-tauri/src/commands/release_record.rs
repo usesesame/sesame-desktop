@@ -96,8 +96,9 @@ pub fn set_release_record_retention(
     app: AppHandle,
     days: u32,
     state: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<ReleaseRecordStatus> {
-    let status = set_release_record_retention_in_state(&state, days)?;
+    let status = set_release_record_retention_in_state(&state, &presence, days)?;
     write_record_settings_at(
         &record_settings_path(&app)?,
         &RecordSettings {

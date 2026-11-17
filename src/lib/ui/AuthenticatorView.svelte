@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte'
   import Icon from '../Icon.svelte'
   import ViewHeader from './ViewHeader.svelte'
-  import { copyToClipboard, listTotpCodes } from '../vault'
+  import { copyTotpCode, listTotpCodes } from '../vault'
   import type { TotpCodeEntry } from '../types'
 
   export let onOpenImport: () => void
@@ -77,7 +77,7 @@
 
   async function copy(code: TotpCodeEntry) {
     try {
-      await copyToClipboard(code.code)
+      await copyTotpCode(code.id)
     } catch {
       copyFailed = true
       return

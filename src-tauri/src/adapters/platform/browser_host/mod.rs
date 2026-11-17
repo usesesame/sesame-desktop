@@ -1077,8 +1077,38 @@ mod boundary_tests {
         }
     }
 
+    fn relayed_change_answer(request: &BrowserRequest) -> BrowserResponse {
+        BrowserResponse::changed(
+            request,
+            "fictional-current-value".to_string(),
+            "fictional-new-value".to_string(),
+            "fictional-handle-for-examples-only-AAAAAAAA".to_string(),
+            "exact",
+        )
+    }
+
     #[test]
     fn a_relayed_change_answer_with_an_unexpected_secret_is_refused() {
+        let request = request("change");
+        let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
+
+        let mut output = Vec::new();
+        serve_with_relay(&mut input.as_slice(), &mut output, relayed_change_answer)
+            .expect("a well formed change answer is relayed");
+        assert_eq!(decode_frame(&output).message_type, "changed");
+
+        let mut output = Vec::new();
+        let result = serve_with_relay(&mut input.as_slice(), &mut output, |request| {
+            let mut response = relayed_change_answer(request);
+            response.password = Some("fictional-example-value".to_string());
+            response
+        });
+        assert!(result.is_err());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn a_relayed_pending_answer_with_an_unexpected_secret_is_refused() {
         let request = request("pending");
         let input = frame(&serde_json::to_vec(&request).expect("the request encodes")).to_vec();
         let mut output = Vec::new();

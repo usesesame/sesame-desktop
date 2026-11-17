@@ -53,6 +53,7 @@ pub struct PendingChangeView {
     pub fill: FillState,
     pub accepted: bool,
     pub can_go_back: bool,
+    pub superseded: bool,
     pub days_left: Option<u32>,
     pub urgent: bool,
 }
@@ -75,6 +76,7 @@ fn unavailable(request: &BrowserRequest, reason: &'static str) -> BrowserRespons
 
 fn unresolved_items(session: &UnlockedVault) -> HashSet<String> {
     read_pending(session)
+        .unwrap_or_default()
         .into_iter()
         .filter(PendingChange::is_unresolved)
         .map(|change| change.item_id)
@@ -116,6 +118,15 @@ pub fn change_response_in_state(
             Ok(payload) => payload,
             Err(_) => return unavailable(request, "approvalUnavailable").into(),
         };
+        if never_saves(&payload.never_save_sites, &origin) {
+            effects.record_browser_host_registration("change_never_site");
+            record_in(
+                vault,
+                Some(session),
+                browser_draft(ApprovalKind::Change, Outcome::NeverSave, &origin.hostname),
+            );
+            return unavailable(request, "approvalDeclined").into();
+        }
         let candidates = matching_entries(&payload.entries, &origin, true);
         let only_site_candidates = candidates
             .iter()
@@ -241,6 +252,14 @@ pub fn complete_change_in_state(
     let Ok(payload) = session.open_payload() else {
         return unavailable(request, "approvalUnavailable");
     };
+    if never_saves(&payload.never_save_sites, approval.origin()) {
+        note(
+            vault,
+            Some(session),
+            approval.draft(Outcome::NeverSave).item(&login_id, "login"),
+        );
+        return unavailable(request, "approvalDeclined");
+    }
     let Some(entry) = payload
         .entries
         .iter()
@@ -259,7 +278,9 @@ pub fn complete_change_in_state(
         return unavailable(request, "staleRequest");
     }
     let now = unix_timestamp();
-    let mut changes = read_pending(session);
+    let Ok(mut changes) = read_pending(session) else {
+        return unavailable(request, "approvalUnavailable");
+    };
     prune(&mut changes, now);
     if !has_room(&changes) {
         return unavailable(request, "approvalUnavailable");
@@ -285,11 +306,7 @@ pub fn complete_change_in_state(
         .find(|item| item.id == login_id)
         .map_or(0, |item| item.revision);
     drop(payload);
-    if commit_payload_change(session, next).is_err() {
-        return unavailable(request, "approvalUnavailable");
-    }
-    vault.advance_session_epoch();
-    changes.push(PendingChange {
+    let prepared = PendingChange {
         id: random_id(),
         handle_digest: digest,
         item_id: login_id.clone(),
@@ -304,8 +321,17 @@ pub fn complete_change_in_state(
         resolution: Resolution::Unconfirmed,
         resolved_at: None,
         username_attached: false,
-    });
-    let _ = write_pending(session, &changes);
+        applied: false,
+    };
+    if record_unapplied(session, &mut changes, prepared).is_err() {
+        return unavailable(request, "approvalUnavailable");
+    }
+    if commit_payload_change(session, next).is_err() {
+        abandon_unapplied(session, &mut changes);
+        return unavailable(request, "approvalUnavailable");
+    }
+    mark_applied(session, &mut changes);
+    vault.advance_session_epoch();
     note(
         vault,
         Some(session),
@@ -468,7 +494,9 @@ pub fn complete_create_in_state(
         return unavailable(request, "approvalDeclined");
     }
     let now = unix_timestamp();
-    let mut changes = read_pending(session);
+    let Ok(mut changes) = read_pending(session) else {
+        return unavailable(request, "approvalUnavailable");
+    };
     prune(&mut changes, now);
     if !has_room(&changes) {
         return unavailable(request, "approvalUnavailable");
@@ -484,11 +512,7 @@ pub fn complete_create_in_state(
     let mut next: VaultPayload = payload.clone();
     drop(payload);
     next.entries.push(entry);
-    if commit_payload_change(session, next).is_err() {
-        return unavailable(request, "approvalUnavailable");
-    }
-    vault.advance_session_epoch();
-    changes.push(PendingChange {
+    let prepared = PendingChange {
         id: random_id(),
         handle_digest: digest,
         item_id: item_id.clone(),
@@ -503,8 +527,17 @@ pub fn complete_create_in_state(
         resolution: Resolution::Unconfirmed,
         resolved_at: None,
         username_attached: false,
-    });
-    let _ = write_pending(session, &changes);
+        applied: false,
+    };
+    if record_unapplied(session, &mut changes, prepared).is_err() {
+        return unavailable(request, "approvalUnavailable");
+    }
+    if commit_payload_change(session, next).is_err() {
+        abandon_unapplied(session, &mut changes);
+        return unavailable(request, "approvalUnavailable");
+    }
+    mark_applied(session, &mut changes);
+    vault.advance_session_epoch();
     note(
         vault,
         Some(session),
@@ -514,6 +547,29 @@ pub fn complete_create_in_state(
             .field("password"),
     );
     BrowserResponse::created(request, password.to_string(), handle.to_string())
+}
+
+fn record_unapplied(
+    session: &UnlockedVault,
+    changes: &mut Vec<PendingChange>,
+    prepared: PendingChange,
+) -> VaultResult<()> {
+    changes.push(prepared);
+    write_pending(session, changes).inspect_err(|_| {
+        changes.pop();
+    })
+}
+
+fn abandon_unapplied(session: &UnlockedVault, changes: &mut Vec<PendingChange>) {
+    changes.pop();
+    let _ = write_pending(session, changes);
+}
+
+fn mark_applied(session: &UnlockedVault, changes: &mut [PendingChange]) {
+    if let Some(prepared) = changes.last_mut() {
+        prepared.applied = true;
+    }
+    let _ = write_pending(session, changes);
 }
 
 fn wire_state(change: &PendingChange) -> &'static str {
@@ -532,6 +588,9 @@ fn attach_username(
     now: u64,
 ) -> VaultResult<bool> {
     let username = bounded_display(username.trim(), MAX_USERNAME_CHARS);
+    if username.chars().any(is_control_or_format) {
+        return Ok(false);
+    }
     if username.is_empty()
         || change.kind != PendingKind::New
         || !change.is_unresolved()
@@ -565,6 +624,34 @@ fn attach_username(
     Ok(true)
 }
 
+fn is_control_or_format(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{0600}'..='\u{0605}'
+                | '\u{061C}'
+                | '\u{06DD}'
+                | '\u{070F}'
+                | '\u{0890}'..='\u{0891}'
+                | '\u{08E2}'
+                | '\u{180E}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{110BD}'
+                | '\u{110CD}'
+                | '\u{13430}'..='\u{1343F}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{E0001}'
+                | '\u{E0020}'..='\u{E007F}'
+        )
+}
+
 pub fn pending_response_in_state(vault: &VaultState, request: &BrowserRequest) -> BrowserResponse {
     let Some(origin) = request
         .origin
@@ -585,7 +672,9 @@ pub fn pending_response_in_state(vault: &VaultState, request: &BrowserRequest) -
         return unavailable(request, "locked");
     };
     let now = unix_timestamp();
-    let mut changes = read_pending(session);
+    let Ok(mut changes) = read_pending(session) else {
+        return unavailable(request, "approvalUnavailable");
+    };
     prune(&mut changes, now);
     let canonical = origin.canonical();
     let Some(index) = find_by_handle(&mut changes, handle, &canonical, now)
@@ -617,7 +706,9 @@ pub fn pending_response_in_state(vault: &VaultState, request: &BrowserRequest) -
         vault.advance_session_epoch();
     }
     let state = wire_state(&changes[index]);
-    let _ = write_pending(session, &changes);
+    if write_pending(session, &changes).is_err() {
+        return unavailable(request, "approvalUnavailable");
+    }
     BrowserResponse::pending_state(request, state)
 }
 
@@ -632,12 +723,25 @@ fn history_password(payload: &VaultPayload, history_id: &str) -> Option<Zeroizin
         })
 }
 
-fn latest_revision(changes: &[PendingChange], item_id: &str) -> Option<u32> {
-    changes
+fn newer_password_saved(payload: &VaultPayload, change: &PendingChange, live: &str) -> bool {
+    let Some(history_id) = change.history_id.as_deref() else {
+        return false;
+    };
+    let mut versions = payload
+        .history
         .iter()
-        .filter(|change| change.is_unresolved() && change.item_id == item_id)
-        .max_by_key(|change| change.created_at)
-        .map(|change| change.revision)
+        .filter_map(|entry| match &entry.item {
+            TaggedItem::Login(login) if login.id == change.item_id => {
+                Some((entry.id.as_str(), login))
+            }
+            _ => None,
+        });
+    if !versions.any(|(id, _)| id == history_id) {
+        return false;
+    }
+    versions
+        .next()
+        .is_some_and(|(_, after_change)| after_change.password != live)
 }
 
 fn views(session: &UnlockedVault, changes: &[PendingChange], now: u64) -> Vec<PendingChangeView> {
@@ -659,6 +763,10 @@ fn views(session: &UnlockedVault, changes: &[PendingChange], now: u64) -> Vec<Pe
                 })
             });
             let age = now.saturating_sub(change.created_at);
+            let current = entry.revision == change.revision;
+            let superseded = change.kind == PendingKind::Change
+                && !current
+                && newer_password_saved(&payload, change, &entry.password);
             let days_left = (change.kind == PendingKind::Change && in_history).then(|| {
                 let left = HISTORY_RETENTION_SECONDS.saturating_sub(age);
                 u32::try_from(left.div_ceil(DAY_SECS)).unwrap_or(u32::MAX)
@@ -673,9 +781,8 @@ fn views(session: &UnlockedVault, changes: &[PendingChange], now: u64) -> Vec<Pe
                 created_at: change.created_at,
                 fill: change.fill,
                 accepted: change.accepted_at.is_some(),
-                can_go_back: change.kind == PendingKind::Change
-                    && in_history
-                    && latest_revision(changes, &change.item_id) == Some(entry.revision),
+                can_go_back: change.kind == PendingKind::Change && in_history && current,
+                superseded,
                 days_left,
                 urgent: change.kind == PendingKind::Change
                     && in_history
@@ -700,7 +807,7 @@ pub fn list_pending_changes_in_state(vault: &VaultState) -> VaultResult<PendingC
         });
     };
     let now = unix_timestamp();
-    let changes = read_pending(session);
+    let changes = read_pending(session)?;
     Ok(PendingChangeList {
         changes: views(session, &changes, now),
         snapshot: Some(session.snapshot()),
@@ -718,7 +825,7 @@ fn resolve_with(
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
     let session = guard.as_mut().ok_or(UNLOCK_FIRST)?;
     let now = unix_timestamp();
-    let mut changes = read_pending(session);
+    let mut changes = read_pending(session)?;
     prune(&mut changes, now);
     let index = changes
         .iter()
@@ -762,7 +869,7 @@ pub fn go_back_pending_change_in_state(
             .find(|entry| entry.id == change.item_id)
             .cloned()
             .ok_or("That login no longer exists.")?;
-        if latest_revision(changes, &change.item_id) != Some(entry.revision) {
+        if entry.revision != change.revision {
             return Err("This login changed after that. Pick a version in its history.".into());
         }
         let old_password = change
@@ -773,12 +880,8 @@ pub fn go_back_pending_change_in_state(
         let next = payload_with_saved_login(&payload, entry, Some(old_password.to_string()), now)?;
         drop(payload);
         commit_payload_change(session, next)?;
-        for other in changes.iter_mut().skip(index) {
-            if other.is_unresolved() && other.item_id == change.item_id {
-                other.resolution = Resolution::Returned;
-                other.resolved_at = Some(now);
-            }
-        }
+        changes[index].resolution = Resolution::Returned;
+        changes[index].resolved_at = Some(now);
         Ok(true)
     })
 }

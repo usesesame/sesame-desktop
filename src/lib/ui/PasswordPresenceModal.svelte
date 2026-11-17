@@ -2,7 +2,7 @@
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
 
-  type PresenceIntent = 'reveal' | 'copy' | 'autotype' | 'enable-icons' | 'request-kit' | 'issue-kit' | 'reveal-field' | 'copy-field' | 'check-password' | 'unlock-note' | 'clear-activity'
+  type PresenceIntent = 'reveal' | 'copy' | 'autotype' | 'enable-icons' | 'request-kit' | 'issue-kit' | 'reveal-field' | 'copy-field' | 'check-password' | 'unlock-note' | 'clear-activity' | 'shorten-activity'
 
   export let presenceSecret = ''
   export let intent: PresenceIntent = 'reveal'
@@ -41,6 +41,11 @@
       heading: 'Clear the activity record',
       description: 'Sesame asks for your master password again before it clears the activity record, because the record is how you can see what left the vault.',
       action: 'Clear record',
+    },
+    'shorten-activity': {
+      heading: 'Keep activity for less time',
+      description: 'Sesame asks for your master password again before it removes older entries from the activity record, because the record is how you can see what left the vault.',
+      action: 'Remove older entries',
     },
     'check-password': {
       heading: 'Check this password',
