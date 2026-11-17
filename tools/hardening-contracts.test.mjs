@@ -1819,7 +1819,7 @@ test('the terminal verbs answer before the desktop starts and never touch the wi
   const client = read('src-tauri', 'src', 'terminal_client.rs')
   const verbs = client.match(/const VERBS: \[&str; \d+\] = \[([^\]]*)\]/)
   assert.ok(verbs, 'the terminal verbs moved')
-  assert.deepEqual([...verbs[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]), ['list', 'get', 'totp', 'help', '--help', '--version'])
+  assert.deepEqual([...verbs[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]), ['list', 'get', 'totp', 'help', '--help', '-h', '--version', '-V'])
   assert.doesNotMatch(client, /tauri::|AppHandle|webview_sandbox|crash_protection/, 'the terminal client loads desktop parts')
   const lib = read('src-tauri', 'src', 'lib.rs')
   const linux = lib.match(/pub fn run_terminal_command\(\) -> Option<i32> \{([\s\S]*?)\n\}/)

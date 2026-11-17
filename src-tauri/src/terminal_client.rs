@@ -19,7 +19,18 @@ pub const EXIT_MISSING: i32 = 7;
 pub const EXIT_BUSY: i32 = 8;
 pub const EXIT_OUTDATED: i32 = 9;
 
-const VERBS: [&str; 6] = ["list", "get", "totp", "help", "--help", "--version"];
+const HELP_WORDS: [&str; 3] = ["help", "--help", "-h"];
+const VERSION_WORDS: [&str; 2] = ["--version", "-V"];
+const VERBS: [&str; 8] = [
+    "list",
+    "get",
+    "totp",
+    "help",
+    "--help",
+    "-h",
+    "--version",
+    "-V",
+];
 const NOT_RUNNING: &str = "Sesame is not running. Open Sesame and try again.";
 const NOT_SESAME: &str = "This is not the Sesame app this command belongs to.";
 const UNREADABLE_REPLY: &str = "Sesame sent a reply this command does not understand.";
@@ -42,6 +53,7 @@ pub enum Invocation {
     Run(CliCommand),
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub fn is_terminal_verb(argument: &OsString) -> bool {
     argument
         .to_str()
@@ -76,11 +88,14 @@ pub fn parse_arguments(arguments: &[OsString]) -> Result<Invocation, String> {
     let Some((verb, rest)) = words.split_first() else {
         return Err("Choose list, get or totp.".to_string());
     };
-    match *verb {
-        "help" | "--help" | "-h" => return Ok(Invocation::Help),
-        "--version" => return Ok(Invocation::Version),
-        "list" | "get" | "totp" => {}
-        other => return Err(format!("Sesame has no command called {other}.")),
+    if HELP_WORDS.contains(verb) {
+        return Ok(Invocation::Help);
+    }
+    if VERSION_WORDS.contains(verb) {
+        return Ok(Invocation::Version);
+    }
+    if !VERBS.contains(verb) {
+        return Err(format!("Sesame has no command called {verb}."));
     }
     let mut copy = false;
     let mut positional = Vec::new();
@@ -538,9 +553,63 @@ mod tests {
         for verb in VERBS {
             assert!(is_terminal_verb(&OsString::from(verb)));
         }
-        for other in ["--minimized", "/home/casey/vault", "-h", "LIST", ""] {
+        for other in [
+            "--minimized",
+            "/home/casey/vault",
+            "LIST",
+            "-H",
+            "-v",
+            "--copy",
+            "",
+        ] {
             assert!(!is_terminal_verb(&OsString::from(other)));
         }
+    }
+
+    #[test]
+    fn every_first_word_the_parser_answers_is_a_verb_that_never_starts_the_desktop() {
+        let candidates = [
+            "list",
+            "get",
+            "totp",
+            "help",
+            "--help",
+            "-h",
+            "--version",
+            "-V",
+            "-H",
+            "-v",
+            "--copy",
+            "--",
+            "fetch",
+            "--minimized",
+        ];
+        for word in candidates {
+            for rest in [
+                &[][..],
+                &["Northwind mail"][..],
+                &["a", "b", "c"][..],
+                &["--bad"][..],
+            ] {
+                let mut words = vec![word];
+                words.extend_from_slice(rest);
+                let answered = !matches!(
+                    parse_arguments(&args(&words)),
+                    Err(problem) if problem.starts_with("Sesame has no command called")
+                );
+                assert_eq!(
+                    answered,
+                    is_terminal_verb(&OsString::from(word)),
+                    "{words:?}"
+                );
+            }
+        }
+        assert_eq!(parse_arguments(&args(&["-h"])), Ok(Invocation::Help));
+        assert_eq!(parse_arguments(&args(&["-V"])), Ok(Invocation::Version));
+        assert_eq!(
+            parse_arguments(&args(&["--version", "extra"])),
+            Ok(Invocation::Version)
+        );
     }
 
     #[test]
