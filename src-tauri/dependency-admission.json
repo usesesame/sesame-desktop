@@ -281,7 +281,7 @@
     },
     {
       "name": "tokio",
-      "version": "1.53",
+      "version": "1.54",
       "reason": "Test-only async runtime for the application crate; the same version is already locked through Tauri and reqwest."
     },
     {
