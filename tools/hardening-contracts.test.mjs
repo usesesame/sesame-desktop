@@ -1813,6 +1813,20 @@ test('the command line tool releases hidden values only behind the presence chec
   }
 })
 
+test('the terminal verbs answer before the desktop starts and never touch the window', () => {
+  const main = read('src-tauri', 'src', 'main.rs')
+  assert.match(main, /run_terminal_command\(\)[\s\S]*sesame_lib::run\(\)/, 'the desktop starts before the terminal verbs are checked')
+  const client = read('src-tauri', 'src', 'terminal_client.rs')
+  const verbs = client.match(/const VERBS: \[&str; \d+\] = \[([^\]]*)\]/)
+  assert.ok(verbs, 'the terminal verbs moved')
+  assert.deepEqual([...verbs[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]), ['list', 'get', 'totp', 'help', '--help', '--version'])
+  assert.doesNotMatch(client, /tauri::|AppHandle|webview_sandbox|crash_protection/, 'the terminal client loads desktop parts')
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const linux = lib.match(/pub fn run_terminal_command\(\) -> Option<i32> \{([\s\S]*?)\n\}/)
+  assert.ok(linux, 'the Linux terminal dispatch moved')
+  assert.doesNotMatch(linux[1], /crash_protection|harden_process/, 'a non-dumpable tool hides its executable from the desktop peer check')
+})
+
 test('no native messaging message type can reach the Activity record', () => {
   const pipe = read('src-tauri', 'src', 'browser_fill.rs')
   const dispatch = pipe.match(/match request\.message_type\.as_str\(\) \{([\s\S]*?)\n {4}\};/)

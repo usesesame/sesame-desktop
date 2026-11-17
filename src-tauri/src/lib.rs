@@ -11,6 +11,7 @@ mod diagnostics;
 mod record_writes_tests;
 mod rollback_guard;
 mod terminal;
+mod terminal_client;
 mod vault;
 
 pub(crate) use sesame_app::{application, browser_protocol, cli_protocol, release, sync};
@@ -390,6 +391,35 @@ pub fn run() {
                 clipboard::release(&app.state::<clipboard::ClipboardGuard>());
             }
         });
+}
+
+#[cfg(target_os = "linux")]
+pub fn run_terminal_command() -> Option<i32> {
+    let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if !arguments
+        .first()
+        .is_some_and(terminal_client::is_terminal_verb)
+    {
+        return None;
+    }
+    Some(terminal_client::run_from_environment(&arguments))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn run_terminal_command() -> Option<i32> {
+    None
+}
+
+pub fn run_terminal_client() -> i32 {
+    if dll_search::harden_process().is_err() {
+        return terminal_client::EXIT_FAILED;
+    }
+    #[cfg(windows)]
+    if crash_protection::harden_process().is_err() {
+        return terminal_client::EXIT_FAILED;
+    }
+    let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    terminal_client::run_from_environment(&arguments)
 }
 
 pub fn run_browser_host() {

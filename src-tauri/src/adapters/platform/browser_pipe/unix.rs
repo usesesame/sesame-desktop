@@ -314,8 +314,11 @@ impl TerminalClient {
 }
 
 pub fn open_terminal_request(payload: &[u8]) -> io::Result<TerminalClient> {
-    let expected_server = PeerIdentity::of_executable(&std::env::current_exe()?)?;
-    open_terminal_request_at(&socket_path_on(&TERMINAL)?, &expected_server, payload)
+    open_terminal_request_at(
+        &socket_path_on(&TERMINAL)?,
+        &PeerIdentity::SameUser,
+        payload,
+    )
 }
 
 fn open_terminal_request_at(
@@ -924,19 +927,6 @@ mod terminal_tests {
         let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
             .expect("the request is written");
         assert!(client.next_frame().is_err());
-    }
-
-    #[test]
-    fn the_client_refuses_to_send_to_a_server_that_is_not_its_own_executable() {
-        let socket = scratch_socket("wrong-server");
-        serve_echo(&socket, this_executable());
-
-        let refused = open_terminal_request_at(
-            &socket,
-            &PeerIdentity::Path(PathBuf::from("/bin/sh")),
-            b"fictional",
-        );
-        assert!(refused.is_err());
     }
 
     #[test]

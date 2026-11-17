@@ -21,12 +21,18 @@ pub fn served_elsewhere() -> bool {
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{request, serve_forever, serve_terminal, PipePeer, TerminalConnection};
+pub use windows::{
+    open_terminal_request, request, serve_forever, serve_terminal, PipePeer, TerminalClient,
+    TerminalConnection,
+};
 
 #[cfg(target_os = "linux")]
 mod unix;
 #[cfg(target_os = "linux")]
-pub use unix::{request, serve_forever, serve_terminal, PipePeer, TerminalConnection};
+pub use unix::{
+    open_terminal_request, request, serve_forever, serve_terminal, PipePeer, TerminalClient,
+    TerminalConnection,
+};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn request(_payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {

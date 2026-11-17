@@ -34,6 +34,7 @@ edition = "2021"
 
 [features]
 browser-helper-dev = []
+terminal-client = []
 wdio = ["sesame-app/wdio"]
 
 [lints.rust]
@@ -52,6 +53,11 @@ panic = "warn"
 [[bin]]
 name = "sesame"
 path = "src/main.rs"
+
+[[bin]]
+name = "sesame-cli"
+path = "src/bin/sesame-cli.rs"
+required-features = ["terminal-client"]
 
 [[bin]]
 name = "sesame-browser-host"
