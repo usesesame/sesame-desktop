@@ -212,19 +212,26 @@ pub fn pending_create(state: State<'_, BrowserFillState>) -> Option<BrowserCreat
     state.pending_create_request()
 }
 
+pub(crate) fn parse_pipe_request(
+    payload: &[u8],
+) -> Result<BrowserRequest, zeroize::Zeroizing<Vec<u8>>> {
+    match serde_json::from_slice::<BrowserRequest>(payload) {
+        Ok(request) if request.validate() => Ok(request),
+        _ => Err(response_bytes(BrowserResponse::error(
+            "invalid",
+            "Invalid browser request.",
+        ))),
+    }
+}
+
 fn handle_pipe_payload(
     app: &AppHandle,
     payload: Vec<u8>,
     peer: &PipePeer,
 ) -> zeroize::Zeroizing<Vec<u8>> {
-    let mut request = match serde_json::from_slice::<BrowserRequest>(&payload) {
-        Ok(request) if request.validate() => request,
-        _ => {
-            return response_bytes(BrowserResponse::error(
-                "invalid",
-                "Invalid browser request.",
-            ))
-        }
+    let mut request = match parse_pipe_request(&payload) {
+        Ok(request) => request,
+        Err(refusal) => return refusal,
     };
     let vault = app.state::<VaultState>();
     let fill_state = app.state::<BrowserFillState>();

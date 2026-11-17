@@ -30,6 +30,7 @@ pub struct Channel {
     pub(super) request_deadline: Duration,
     pub(super) reply_deadline: Duration,
     pub(super) served_elsewhere: &'static AtomicBool,
+    pub(super) verified_contents: &'static Mutex<Option<VerifiedProcess>>,
 }
 
 pub const BROWSER: Channel = Channel {
@@ -40,6 +41,7 @@ pub const BROWSER: Channel = Channel {
     request_deadline: IO_TIMEOUT,
     reply_deadline: RESPONSE_TIMEOUT,
     served_elsewhere: &SERVED_ELSEWHERE,
+    verified_contents: &VERIFIED_BROWSER_CONTENTS,
 };
 
 const TERMINAL_REPLY_TIMEOUT: Duration = Duration::from_secs(200);
@@ -53,6 +55,7 @@ pub const TERMINAL: Channel = Channel {
     request_deadline: IO_TIMEOUT,
     reply_deadline: TERMINAL_REPLY_TIMEOUT,
     served_elsewhere: &TERMINAL_SERVED_ELSEWHERE,
+    verified_contents: &VERIFIED_TERMINAL_CONTENTS,
 };
 
 pub(super) enum PeerIdentity {
@@ -71,9 +74,10 @@ impl PeerIdentity {
     }
 }
 
-type VerifiedProcess = (u32, u64, u64, u64, u64, [u8; 32]);
+pub(super) type VerifiedProcess = (u32, u64, u64, u64, u64, [u8; 32]);
 
-static VERIFIED_CONTENTS: Mutex<Option<VerifiedProcess>> = Mutex::new(None);
+static VERIFIED_BROWSER_CONTENTS: Mutex<Option<VerifiedProcess>> = Mutex::new(None);
+static VERIFIED_TERMINAL_CONTENTS: Mutex<Option<VerifiedProcess>> = Mutex::new(None);
 
 pub struct PipePeer {
     pid: u32,
@@ -270,7 +274,7 @@ pub(super) fn verify_peer_on(
     let accepted = match expected {
         PeerIdentity::SameUser => true,
         PeerIdentity::Path(path) => fs::canonicalize(format!("/proc/{pid}/exe"))? == *path,
-        PeerIdentity::Contents(identity) => contents_match(identity, pid, start_time)?,
+        PeerIdentity::Contents(identity) => contents_match(channel, identity, pid, start_time)?,
     };
     if !accepted {
         return Err(io::Error::new(
@@ -433,7 +437,12 @@ where
     let _ = catch_unwind(AssertUnwindSafe(|| handler(request, &connection)));
 }
 
-fn contents_match(identity: &ExecutableIdentity, pid: u32, start_time: u64) -> io::Result<bool> {
+fn contents_match(
+    channel: &Channel,
+    identity: &ExecutableIdentity,
+    pid: u32,
+    start_time: u64,
+) -> io::Result<bool> {
     let file = fs::File::open(format!("/proc/{pid}/exe"))?;
     let metadata = file.metadata()?;
     let (bytes, sha256) = identity.key();
@@ -445,7 +454,8 @@ fn contents_match(identity: &ExecutableIdentity, pid: u32, start_time: u64) -> i
         bytes,
         sha256,
     );
-    let mut verified = VERIFIED_CONTENTS
+    let mut verified = channel
+        .verified_contents
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if *verified == Some(key) {
@@ -1072,5 +1082,196 @@ mod terminal_tests {
         let mut second =
             open_terminal_request_at(&socket, &this_executable(), b"second").expect("written");
         assert_eq!(second.next_frame().expect("served").as_slice(), b"second");
+    }
+
+    fn this_executable_contents() -> PeerIdentity {
+        PeerIdentity::Contents(
+            ExecutableIdentity::of_file(Path::new("/proc/self/exe")).expect("an identity"),
+        )
+    }
+
+    fn copy_of_this_executable(name: &str, change_one_byte: bool) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "sesame-terminal-test-{}-{name}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("a scratch directory");
+        let copy = directory.join("sesame");
+        let mut bytes = fs::read("/proc/self/exe").expect("this test binary");
+        if change_one_byte {
+            let middle = bytes.len() / 2;
+            bytes[middle] ^= 0x01;
+        }
+        fs::write(&copy, bytes).expect("a copy");
+        copy
+    }
+
+    #[test]
+    fn a_copy_of_the_expected_executable_with_one_byte_changed_is_refused() {
+        let changed = copy_of_this_executable("one-byte", true);
+        let expected = ExecutableIdentity::of_file(&changed).expect("an identity");
+        let original =
+            ExecutableIdentity::of_file(Path::new("/proc/self/exe")).expect("an identity");
+        assert_eq!(expected.key().0, original.key().0);
+        assert_ne!(expected.key().1, original.key().1);
+        let socket = scratch_socket("one-byte");
+        serve_echo(&socket, PeerIdentity::Contents(expected));
+
+        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
+            .expect("the request is written");
+        assert!(client.next_frame().is_err());
+
+        let unchanged = copy_of_this_executable("same-bytes", false);
+        let socket = scratch_socket("same-bytes");
+        serve_echo(
+            &socket,
+            PeerIdentity::Contents(ExecutableIdentity::of_file(&unchanged).expect("an identity")),
+        );
+        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
+            .expect("the request is written");
+        assert_eq!(client.next_frame().expect("served").as_slice(), b"waiting");
+    }
+
+    #[test]
+    fn a_terminal_contents_check_does_not_wait_for_the_browser_cache() {
+        let socket = scratch_socket("own-cache");
+        serve_echo(&socket, this_executable_contents());
+        let browser_entry = VERIFIED_BROWSER_CONTENTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let client_socket = socket.clone();
+        std::thread::spawn(move || {
+            let reply = open_terminal_request_at(&client_socket, &this_executable(), b"fictional")
+                .and_then(|mut client| client.next_frame());
+            let _ = sender.send(reply.map(|frame| frame.to_vec()));
+        });
+        let reply = receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the terminal check waited for the browser cache");
+        drop(browser_entry);
+        assert_eq!(reply.expect("served"), b"waiting".to_vec());
+        let terminal_entry = VERIFIED_TERMINAL_CONTENTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(
+            terminal_entry.map(|entry| entry.0),
+            Some(std::process::id())
+        );
+    }
+
+    #[test]
+    fn a_tool_request_on_the_browser_socket_is_refused_there() {
+        let socket = std::env::temp_dir()
+            .join(format!(
+                "sesame-terminal-test-{}-tool-on-browser",
+                std::process::id()
+            ))
+            .join("browser.sock");
+        let _ = fs::remove_file(&socket);
+        let served = socket.clone();
+        std::thread::spawn(move || {
+            let _ = serve_at(&served, &this_executable(), |payload, _peer| {
+                match crate::browser_fill::parse_pipe_request(&payload) {
+                    Ok(_) => Zeroizing::new(b"accepted".to_vec()),
+                    Err(refusal) => refusal,
+                }
+            });
+        });
+        wait_for(&socket);
+
+        let tool = crate::cli_protocol::CliCommand::Get {
+            item: "Northwind mail".to_string(),
+            field: Some("password".to_string()),
+            copy: false,
+        }
+        .to_request("3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f")
+        .to_bytes()
+        .expect("encodes");
+        let reply = request_at(&socket, &this_executable(), &tool).expect("a reply");
+        let reply = String::from_utf8(reply.to_vec()).expect("utf8");
+        assert!(reply.contains("Invalid browser request."), "{reply}");
+
+        let capabilities = serde_json::to_vec(&serde_json::json!({
+            "version": crate::browser_protocol::CAPABILITIES_PROTOCOL_VERSION,
+            "type": "capabilities",
+            "requestId": "fictional-capabilities-1",
+        }))
+        .expect("encodes");
+        let reply = request_at(&socket, &this_executable(), &capabilities).expect("a reply");
+        assert_eq!(reply.as_slice(), b"accepted");
+    }
+
+    #[test]
+    fn a_browser_request_on_the_tool_socket_is_refused_there() {
+        let socket = scratch_socket("browser-on-tool");
+        let served = socket.clone();
+        std::thread::spawn(move || {
+            let _ = serve_terminal_at(
+                &served,
+                this_executable(),
+                || {},
+                |payload, connection| {
+                    let reply = match crate::application::cli_requests::parse_or_refuse(&payload) {
+                        Ok(_) => b"accepted".to_vec(),
+                        Err(refusal) => refusal.to_bytes().expect("encodes").to_vec(),
+                    };
+                    let _ = connection.send(&reply);
+                },
+            );
+        });
+        wait_for(&socket);
+
+        for (browser_request, refused_as) in [
+            (
+                serde_json::json!({
+                    "version": crate::browser_protocol::PROTOCOL_VERSION,
+                    "type": "activate",
+                    "requestId": "fictional-activate-1",
+                }),
+                crate::cli_protocol::CliErrorCode::Invalid,
+            ),
+            (
+                serde_json::json!({
+                    "version": crate::browser_protocol::CAPABILITIES_PROTOCOL_VERSION,
+                    "type": "capabilities",
+                    "requestId": "fictional-capabilities-2",
+                }),
+                crate::cli_protocol::CliErrorCode::UnsupportedVersion,
+            ),
+        ] {
+            let bytes = serde_json::to_vec(&browser_request).expect("encodes");
+            assert!(crate::browser_fill::parse_pipe_request(&bytes).is_ok());
+            let mut client = open_terminal_request_at(&socket, &this_executable(), &bytes)
+                .expect("the request is written");
+            let reply = crate::cli_protocol::parse_reply(&client.next_frame().expect("a reply"))
+                .expect("a protocol reply");
+            assert_eq!(reply.error_code(), Some(refused_as));
+        }
+
+        let list = crate::cli_protocol::CliCommand::List
+            .to_request("3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f")
+            .to_bytes()
+            .expect("encodes");
+        let mut client = open_terminal_request_at(&socket, &this_executable(), &list)
+            .expect("the request is written");
+        assert_eq!(
+            client.next_frame().expect("a reply").as_slice(),
+            b"accepted"
+        );
+    }
+
+    #[test]
+    fn a_second_sesame_leaves_a_live_terminal_socket_alone_and_says_so() {
+        let socket = scratch_socket("terminal-second");
+        serve_echo(&socket, this_executable());
+
+        let refused = bind_exclusive_on(&TERMINAL, &socket).expect_err("a live socket is kept");
+        assert_eq!(refused.kind(), ErrorKind::AddrInUse);
+        assert!(crate::browser_pipe::terminal_served_elsewhere());
+        let mut client =
+            open_terminal_request_at(&socket, &this_executable(), b"still").expect("still served");
+        assert_eq!(client.next_frame().expect("waiting").as_slice(), b"waiting");
     }
 }

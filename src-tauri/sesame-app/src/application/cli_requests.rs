@@ -81,14 +81,20 @@ enum Stop {
     Gone,
 }
 
+pub fn parse_or_refuse(payload: &[u8]) -> Result<(String, CliCommand), Box<CliReply>> {
+    parse_request(payload).map_err(|rejection| {
+        Box::new(CliReply::error(
+            rejection.request_id.as_deref(),
+            rejection.code,
+        ))
+    })
+}
+
 pub fn serve_cli_request(context: &CliContext<'_>, payload: &[u8], origin: &TerminalOrigin) {
-    let (request_id, command) = match parse_request(payload) {
+    let (request_id, command) = match parse_or_refuse(payload) {
         Ok(parsed) => parsed,
-        Err(rejection) => {
-            context.host.send(&CliReply::error(
-                rejection.request_id.as_deref(),
-                rejection.code,
-            ));
+        Err(refusal) => {
+            context.host.send(&refusal);
             return;
         }
     };
