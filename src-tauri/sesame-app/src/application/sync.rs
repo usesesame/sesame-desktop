@@ -221,6 +221,20 @@ pub fn upgrade_legacy_digest(store: &SyncStore, vault: &UnlockedVault) -> VaultR
     Ok(true)
 }
 
+pub fn release_claim_after_failure<T>(
+    state: &VaultState,
+    store: &SyncStore,
+    release: impl FnOnce() -> T,
+) -> T {
+    let session = state.session.lock();
+    if let Ok(Some(unlocked)) = session.as_deref() {
+        let _ = upgrade_legacy_digest(store, unlocked);
+    }
+    let released = release();
+    drop(session);
+    released
+}
+
 pub fn verify_master_password(vault: &UnlockedVault, master_password: &str) -> Result<(), String> {
     let mut confirmed = crate::vault::crypto::unwrap_with_password(
         master_password,

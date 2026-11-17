@@ -2686,6 +2686,76 @@ mod adoption_and_publish_tests {
     }
 
     #[test]
+    fn an_update_unlocked_during_a_run_upgrades_its_digest_so_a_copy_does_not_upload() {
+        use crate::sync::coordinator::{Coordinator, Outcome, Phase};
+
+        let devices = two_synced_devices();
+        let unlock_laptop = |coordinator: &Coordinator| {
+            devices.laptop.state.lock_for_lifecycle().expect("locked");
+            crate::application::lifecycle::unlock_vault_in_state(
+                &devices.laptop.state,
+                &crate::release::ReleasePresence::default(),
+                &FakeEffects::with_sync(
+                    devices.laptop.path().to_path_buf(),
+                    devices._scratch[0].path.clone(),
+                    coordinator.clone(),
+                ),
+                zeroize::Zeroizing::new(PASSWORD.to_string()),
+            )
+            .expect("unlocked");
+        };
+        let stored_digest = || {
+            devices
+                .laptop_store
+                .load_state()
+                .expect("state")
+                .expect("saved state")
+                .payload_digest
+        };
+        unlock_laptop(&Coordinator::new());
+        let mut earlier = devices
+            .laptop_store
+            .load_state()
+            .expect("state")
+            .expect("saved state");
+        state_digest(&devices.laptop, &mut earlier);
+        devices
+            .laptop_store
+            .save_state(&earlier)
+            .expect("state written by the earlier version");
+        devices.laptop.state.lock_for_lifecycle().expect("locked");
+        let coordinator = Coordinator::new();
+        assert!(coordinator.begin());
+
+        let stopped = devices.run(true);
+        assert_eq!(stopped, Err("sync_locked".to_string()));
+        unlock_laptop(&coordinator);
+        assert_eq!(
+            stored_digest(),
+            earlier.payload_digest,
+            "the unlock found a run in progress"
+        );
+        crate::application::sync_transfer::finish_run_in_state(
+            &devices.laptop.state,
+            Some(&devices.laptop_store),
+            &coordinator,
+            stopped,
+        );
+        assert_eq!(coordinator.status().phase, Phase::Paused);
+        assert_ne!(stored_digest(), earlier.payload_digest);
+
+        crate::application::logins::record_item_use_in_state(
+            &devices.laptop.state,
+            "fictional-login",
+        )
+        .expect("laptop use");
+        assert!(coordinator.begin());
+        assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+        coordinator.finish(Outcome::AlreadyCurrent);
+        assert_eq!(devices.uploads(), 1, "copying a password uploads nothing");
+    }
+
+    #[test]
     fn an_edit_on_one_device_and_use_on_the_other_download_without_a_conflict() {
         use crate::sync::coordinator::Outcome;
 
