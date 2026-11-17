@@ -9,6 +9,7 @@ import {
   checkReleasePresence,
   copyItemField,
   copyToClipboard,
+  copyTotpCode,
   createFolder,
   deleteFolder,
   getLoginCard,
@@ -317,6 +318,19 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     }
   }
 
+  async function copyTotp(id: string) {
+    try {
+      await copyTotpCode(id)
+    } catch (error) {
+      void recordDiagnostic('clipboard', 'failed')
+      void refreshDiagnostics()
+      feedback.setError(error)
+      return
+    }
+    void markUsed(id)
+    feedback.showNotice('2FA code copied', `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+  }
+
   async function tryOpenWebsite(url: string) {
     try {
       await openWebsite(url)
@@ -498,6 +512,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
     loginIds,
     selectEntry,
     copy,
+    copyTotp,
     openNew(password = '') {
       const opened = modal.open({ kind: 'login-editor' })
       if (!opened) return

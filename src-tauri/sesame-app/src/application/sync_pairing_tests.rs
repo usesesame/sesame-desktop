@@ -14,8 +14,8 @@ use crate::application::sync_join::{
     join_with_code_in_state, prepare_join, JoinRequest, PreparedJoin,
 };
 use crate::application::sync_pairing::{
-    approve_in_state, newcomer_matches_offer, refuse_classical_downgrade, reset_cancellation,
-    set_cancelled, ApproveRequest, CLASSICAL_KEY_REFUSAL,
+    approve_in_state, deliver_key_package, newcomer_matches_offer, refuse_classical_downgrade,
+    reset_cancellation, set_cancelled, ApproveRequest, CLASSICAL_KEY_REFUSAL,
 };
 use crate::application::tests::FakeEffects;
 use crate::network::test_server::{Recorded, Reply, TestServer};
@@ -1112,4 +1112,43 @@ fn a_hybrid_key_is_never_refused() {
     assert!(
         refuse_classical_downgrade(&key(1216), [key(32)].iter().map(String::as_str), false).is_ok()
     );
+}
+
+fn paired_entries(vault: &TestVault) -> usize {
+    let session = vault.state.session.lock().expect("session lock");
+    vault
+        .state
+        .release_record
+        .entries(session.as_ref().expect("unlocked"))
+        .expect("entries")
+        .into_iter()
+        .filter(|entry| entry.kind == crate::vault::release_record::EntryKind::DevicePaired)
+        .count()
+}
+
+#[test]
+fn a_new_device_is_recorded_only_once_the_service_takes_its_key() {
+    let _pairing = pairing_state_guard();
+    let (_, joined, package) = pending();
+    let approver = DeviceIdentity::generate().expect("approver");
+    let entry = joined.entries[1].clone();
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    for (status, recorded) in [(409, 0), (200, 1)] {
+        let server = TestServer::start(move |request: &Recorded| match request.path.as_str() {
+            "/v1/sync/devices" => Reply::json(status, &json!({})),
+            other => panic!("unexpected route {other}"),
+        });
+        let client = SyncClient::for_tests(&server.base(), "fictional-token", "unused");
+
+        let result = block_on(deliver_key_package(
+            &vault.state,
+            &client,
+            &approver,
+            &entry,
+            &package,
+        ));
+
+        assert_eq!(result.is_ok(), status == 200, "{status}");
+        assert_eq!(paired_entries(&vault), recorded, "{status}");
+    }
 }

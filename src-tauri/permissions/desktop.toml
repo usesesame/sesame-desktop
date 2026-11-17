@@ -42,6 +42,7 @@ commands.allow = [
   "get_login_summary",
   "get_duplicate_groups",
   "refresh_totp",
+  "copy_totp_code",
   "list_totp_codes",
   "get_identity",
   "get_secure_note",

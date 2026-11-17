@@ -18,6 +18,11 @@ pub fn read_file_with_limit(path: &Path, max_bytes: u64) -> std::io::Result<Vec<
     std::fs::read(path)
 }
 
+pub fn read_failure_is_damage(path: &Path, error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::InvalidData
+        && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
 pub fn require_file_with_limit(
     path: &Path,
     max_bytes: u64,
@@ -199,5 +204,30 @@ mod tests {
             .chars()
             .all(|character| character == '-' || character.is_ascii_alphanumeric()));
         assert_eq!(kit.matches('-').count(), 4);
+    }
+}
+
+#[cfg(test)]
+mod read_failure_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_regular_file_of_the_wrong_size_counts_as_damage() {
+        let directory = std::env::temp_dir().join(format!("sesame-read-failure-{}", random_id()));
+        std::fs::create_dir_all(&directory).expect("directory");
+        let empty = directory.join("empty.sesame");
+        std::fs::write(&empty, b"").expect("empty file");
+        let size = std::io::Error::new(std::io::ErrorKind::InvalidData, "size");
+        let denied = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+
+        assert!(read_failure_is_damage(&empty, &size));
+        assert!(!read_failure_is_damage(&empty, &denied));
+        assert!(!read_failure_is_damage(&directory, &size));
+        assert!(!read_failure_is_damage(
+            &directory.join("missing.sesame"),
+            &size
+        ));
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

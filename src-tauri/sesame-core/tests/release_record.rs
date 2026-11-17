@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use sesame_core::api::create_vault;
 use sesame_core::release_record::{
-    damaged_path, record_path, Appended, EntryKind, FieldKind, MatchKind, Outcome, RecordEntry,
-    RecordNotice, RecordState, ReleaseDraft, COMPACT_AT, LOCKED_QUEUE_LIMIT, MAX_ENTRIES,
-    MAX_RECORD_FILE_BYTES, REFUSALS_PER_HOUR,
+    damaged_path, damaged_paths, record_path, Appended, EntryKind, FieldKind, MatchKind, Outcome,
+    RecordEntry, RecordNotice, RecordState, ReleaseDraft, COMPACT_AT, LOCKED_QUEUE_LIMIT,
+    MAX_ENTRIES, MAX_RECORD_FILE_BYTES, REFUSALS_PER_HOUR,
 };
 use sesame_core::storage::{
     persist_session, replace_recovery_kit_for_session, RECOVERY_REPLACEMENT_DELAY_SECS,
@@ -649,4 +649,260 @@ fn odd_item_ids_and_hosts_are_bounded() {
         .as_deref()
         .is_some_and(|id| id.starts_with("sha256:")));
     assert_eq!(entries[0].host.as_deref().map(str::len), Some(253));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_record_that_cannot_be_read_at_unlock_is_left_in_place_and_tried_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    seeded(&fixture, 3);
+    fs::set_permissions(fixture.file(), fs::Permissions::from_mode(0o000)).expect("mode");
+
+    let state = fixture.state();
+    assert!(state.entries(&fixture.session).is_err());
+    assert_eq!(
+        state.append(&fixture.session, fill("example.com", "item-late")),
+        Appended::Deferred
+    );
+    assert!(!state.status().open);
+
+    fs::set_permissions(fixture.file(), fs::Permissions::from_mode(0o600)).expect("mode");
+    assert!(damaged_paths(&fixture.session.path)
+        .iter()
+        .all(|copy| !copy.exists()));
+    let entries = state.entries(&fixture.session).expect("entries");
+    assert_eq!(releases(&entries).len(), 4);
+    assert_eq!(state.status().notice, None);
+}
+
+#[test]
+fn a_second_damaged_record_never_replaces_the_first() {
+    let fixture = Fixture::new();
+    let copies = damaged_paths(&fixture.session.path);
+    assert_eq!(copies[0], damaged_path(&fixture.session.path));
+    for round in 0..(copies.len() + 1) {
+        fs::write(fixture.file(), format!("damaged record {round}\n")).expect("damaged");
+        let (state, _) = fixture.reopen();
+        assert_eq!(state.status().notice, Some(RecordNotice::Unreadable));
+    }
+
+    for (round, copy) in copies.iter().enumerate() {
+        assert_eq!(
+            fs::read_to_string(copy).expect("kept copy"),
+            format!("damaged record {round}\n")
+        );
+    }
+}
+
+#[test]
+fn a_window_that_expires_between_two_clock_reads_keeps_its_count() {
+    let fixture = Fixture::new();
+    let state = RecordState::default();
+    let now = Arc::new(AtomicU64::new(START));
+    let early = Arc::new(AtomicBool::new(false));
+    {
+        let now = Arc::clone(&now);
+        let early = Arc::clone(&early);
+        state.set_clock(Arc::new(move || {
+            let current = now.load(Ordering::SeqCst);
+            if early.swap(false, Ordering::SeqCst) {
+                current - 1
+            } else {
+                current
+            }
+        }));
+    }
+    let denied = || ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Denied).host("example.com");
+    assert_eq!(state.append(&fixture.session, denied()), Appended::Written);
+    assert_eq!(state.append(&fixture.session, denied()), Appended::Counted);
+
+    now.store(START + 60, Ordering::SeqCst);
+    early.store(true, Ordering::SeqCst);
+    state.append(&fixture.session, denied());
+    now.store(START + 200, Ordering::SeqCst);
+    let entries = state.entries(&fixture.session).expect("entries");
+
+    assert_eq!(entries.iter().map(|entry| entry.count).sum::<u32>(), 3);
+}
+
+#[test]
+fn an_entry_that_cannot_be_encoded_is_dropped_and_counted() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let oversized = ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Lookalike)
+        .item(&"i".repeat(128), &"k".repeat(32))
+        .fields([
+            "password",
+            "username",
+            "email",
+            "totp",
+            "backupCodes",
+            "field:1",
+            "legacy1",
+            "number",
+            "cardholderName",
+            "expiry",
+            "securityCode",
+            "fullName",
+        ])
+        .host(&format!("{}.example.com", "h".repeat(240)))
+        .similar_to(&format!("{}.example.org", "s".repeat(240)))
+        .match_kind(Some(MatchKind::WwwAlias));
+
+    state.append(&fixture.session, oversized);
+    assert_eq!(
+        state.append(&fixture.session, fill("example.com", "item-after")),
+        Appended::Written
+    );
+
+    let (_, entries) = fixture.reopen();
+    assert_eq!(releases(&entries).len(), 1);
+    let lost = entries
+        .iter()
+        .find(|entry| entry.kind == EntryKind::WritesLost)
+        .expect("lost entry");
+    assert_eq!(lost.count, 1);
+    assert_eq!(state.status().unwritten, 0);
+}
+
+#[test]
+fn the_mark_moves_only_when_the_record_changes() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let denied = || ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Busy).host("example.com");
+    let before = state.mark();
+    state.append(&fixture.session, denied());
+    let written = state.mark();
+    assert_ne!(written, before);
+
+    assert_eq!(state.append(&fixture.session, denied()), Appended::Counted);
+    state.append_locked(denied());
+
+    assert_eq!(state.mark(), written);
+}
+
+#[test]
+fn shortening_retention_leaves_an_entry_with_the_count() {
+    let fixture = Fixture::new();
+    let state = seeded(&fixture, 3);
+    fixture.advance(40 * DAY);
+    state.append(&fixture.session, fill("example.net", "item-new"));
+
+    assert_eq!(state.shorten_retention(&fixture.session, 30), Ok(3));
+
+    let (_, entries) = fixture.reopen();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].item_id.as_deref(), Some("item-new"));
+    assert_eq!(entries[1].kind, EntryKind::RetentionShortened);
+    assert_eq!(entries[1].count, 3);
+    assert_eq!(state.retention_days(), 30);
+}
+
+#[test]
+fn shortening_retention_with_nothing_old_adds_no_entry() {
+    let fixture = Fixture::new();
+    let state = seeded(&fixture, 2);
+
+    assert_eq!(state.shorten_retention(&fixture.session, 30), Ok(0));
+
+    let (_, entries) = fixture.reopen();
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn discarding_drops_queued_counted_and_unwritten_entries() {
+    let fixture = Fixture::new();
+    let state = seeded(&fixture, 1);
+    let denied = || ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Denied).host("gone.example");
+    state.append(&fixture.session, denied());
+    state.append(&fixture.session, denied());
+    state.append_locked(denied());
+    block_record(&fixture.file());
+    state.append(&fixture.session, fill("gone.example", "item-unwritten"));
+    assert!(state.status().unwritten > 0);
+
+    state.discard();
+    fs::remove_dir(fixture.file()).expect("unblocked record");
+
+    assert_eq!(state.status().unwritten, 0);
+    let entries = state.entries(&fixture.session).expect("entries");
+    assert!(entries
+        .iter()
+        .all(|entry| entry.host.as_deref() != Some("gone.example")));
+}
+
+#[test]
+fn a_failed_rewrite_while_shortening_retention_changes_nothing() {
+    let fixture = Fixture::new();
+    let state = seeded(&fixture, 3);
+    fixture.advance(40 * DAY);
+    state.append(&fixture.session, fill("example.net", "item-new"));
+    block_record(&fixture.file());
+
+    assert!(state.shorten_retention(&fixture.session, 30).is_err());
+    assert_eq!(state.retention_days(), 180);
+
+    fs::remove_dir(fixture.file()).expect("unblocked record");
+    assert_eq!(state.entries(&fixture.session).expect("entries").len(), 4);
+    let (_, entries) = fixture.reopen();
+    assert_eq!(releases(&entries).len(), 4);
+    assert!(entries
+        .iter()
+        .all(|entry| entry.kind != EntryKind::RetentionShortened));
+}
+
+#[test]
+fn entries_removed_by_a_shorter_retention_are_counted_even_when_the_flush_compacts() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let old = 100;
+    for index in 0..(COMPACT_AT - old - 2) {
+        state.append(
+            &fixture.session,
+            ReleaseDraft::new(EntryKind::Copy, Outcome::Released)
+                .item(&format!("recent-{index}"), "login"),
+        );
+    }
+    for index in 0..old {
+        let mut draft = ReleaseDraft::new(EntryKind::Copy, Outcome::Released)
+            .item(&format!("old-{index}"), "login");
+        draft.at = Some(START - 40 * DAY);
+        state.append(&fixture.session, draft);
+    }
+    let denied = || ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Denied).host("example.com");
+    assert_eq!(state.append(&fixture.session, denied()), Appended::Written);
+    assert_eq!(state.append(&fixture.session, denied()), Appended::Counted);
+    fixture.advance(61);
+
+    assert_eq!(state.shorten_retention(&fixture.session, 30), Ok(old));
+
+    let (_, entries) = fixture.reopen();
+    let marker = entries
+        .iter()
+        .find(|entry| entry.kind == EntryKind::RetentionShortened)
+        .expect("retention entry");
+    assert_eq!(marker.count as usize, old);
+    assert!(entries.iter().all(|entry| !entry
+        .item_id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("old-"))));
+}
+
+#[test]
+fn something_other_than_a_file_at_the_record_path_is_left_in_place() {
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.file()).expect("directory in place of the record");
+
+    let state = fixture.state();
+    assert!(state.entries(&fixture.session).is_err());
+    assert_eq!(
+        state.append(&fixture.session, fill("example.com", "item-late")),
+        Appended::Deferred
+    );
+
+    assert!(fixture.file().is_dir());
+    assert!(damaged_paths(&fixture.session.path)
+        .iter()
+        .all(|copy| !copy.exists()));
 }

@@ -3,12 +3,15 @@
   import ViewHeader from './ViewHeader.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import ReleaseRecordRows from './ReleaseRecordRows.svelte'
+  import ReleaseRecordSetting from './ReleaseRecordSetting.svelte'
   import { getReleaseRecord, onReleaseRecordChanged } from '../release-record-api'
   import { RECORD_SCOPE_TEXT, activityItemFilter, groupByDay, itemTitle, longDate, statusNotice, type TitleLookup } from '../release-record'
   import type { ReleaseEntryView, ReleaseRecordStatus } from '../types'
 
   export let titleFor: TitleLookup
   export let onOpenItem: (itemId: string) => void = () => {}
+  export let onClear: (done: () => void) => Promise<void> = async () => {}
+  export let onSetRetention: (days: number, done: (status: ReleaseRecordStatus) => void) => Promise<void> = async () => {}
 
   const PAGE = 200
   const filterOptions = [
@@ -97,6 +100,10 @@
       <button type="button" class="text-button activity-more" on:click={() => void load(entries.length + PAGE)}>Show older activity</button>
     {/if}
   {/if}
+
+  <div class="activity-settings">
+    <ReleaseRecordSetting {onClear} {onSetRetention} />
+  </div>
 
   <div class="activity-scope">
     <h3>About this list</h3>

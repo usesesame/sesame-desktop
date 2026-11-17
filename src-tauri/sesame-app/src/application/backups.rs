@@ -321,6 +321,9 @@ pub fn delete_local_vault_in_state(
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
     let staged = stage_managed_vault_files(&vault, parent);
+    if staged.is_ok() {
+        state.release_record.discard();
+    }
     drop(session);
     let _ = effects.clear_armed_clipboard();
     // Never recreate a PIN throttle file after the vault and its PIN wrapper are gone.

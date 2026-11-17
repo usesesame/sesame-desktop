@@ -372,6 +372,39 @@ pub fn refresh_totp_in_state(state: &VaultState, id: &str) -> VaultResult<TotpRe
     })
 }
 
+pub fn copy_totp_code_in_state(
+    state: &VaultState,
+    effects: &dyn crate::application::DesktopEffects,
+    id: &str,
+    clear_after_ms: Option<u64>,
+) -> VaultResult<u64> {
+    let (code, login_id) = {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+        let session = session.as_ref().ok_or("Unlock your vault first.")?;
+        let item = session.open_item(id)?;
+        let TaggedItem::Login(entry) = &*item else {
+            return Err("That saved login no longer exists.".into());
+        };
+        let (code, _, _) = entry
+            .totp
+            .as_deref()
+            .and_then(current_totp)
+            .ok_or("This login has no 2FA code.")?;
+        (Zeroizing::new(code), entry.id.clone())
+    };
+    let copied = effects.copy_secret(code, clear_after_ms)?;
+    crate::application::release_record::record(
+        state,
+        ReleaseDraft::new(EntryKind::Copy, Outcome::Released)
+            .item(&login_id, "login")
+            .field("totp"),
+    );
+    Ok(copied)
+}
+
 pub fn merge_duplicate_logins_in_state(
     state: &VaultState,
     request: MergeDuplicateLoginsRequest,

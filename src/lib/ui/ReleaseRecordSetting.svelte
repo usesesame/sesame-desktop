@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { slidingSelection } from './sliding-selection'
-  import { getReleaseRecordStatus, setReleaseRecordRetention } from '../release-record-api'
+  import { getReleaseRecordStatus } from '../release-record-api'
+  import type { ReleaseRecordStatus } from '../types'
 
   export let onClear: (done: () => void) => Promise<void>
+  export let onSetRetention: (days: number, done: (status: ReleaseRecordStatus) => void) => Promise<void>
 
   const RETENTION_CHOICES = [30, 90, 180, 365]
 
@@ -21,7 +23,7 @@
     working = true
     errorMessage = ''
     try {
-      retentionDays = (await setReleaseRecordRetention(days)).retentionDays
+      await onSetRetention(days, (status) => { retentionDays = status.retentionDays })
     } catch (error) {
       errorMessage = error instanceof Error ? error.message : 'Sesame could not change how long it keeps activity.'
     } finally {
@@ -40,10 +42,10 @@
 </script>
 
 <section class="settings-group" aria-labelledby="settings-group-activity">
-  <h3 id="settings-group-activity">Activity</h3>
+  <h3 id="settings-group-activity">Keeping this list</h3>
   <div class="settings-list">
     <article>
-      <div class="setting-copy"><strong>Keep activity for</strong><p>Sesame removes entries older than this from the activity record on this device.</p></div>
+      <div class="setting-copy"><strong>Keep activity for</strong><p>Sesame removes older entries. A shorter time asks for your master password.</p></div>
       <div class="clipboard-clear-options" role="group" aria-label="How long Sesame keeps activity" use:slidingSelection>{#each RETENTION_CHOICES as days (days)}<button type="button" class:active={retentionDays === days} aria-pressed={retentionDays === days} aria-label={`${days} days`} disabled={working} on:click={() => void choose(days)}>{days}d</button>{/each}</div>
     </article>
     <article>
@@ -51,7 +53,7 @@
         <div class="setting-copy"><strong>Clear the activity record?</strong><p>Sesame removes every entry and keeps one that says the record was cleared. It asks for your master password first.</p></div>
         <div class="diagnostic-actions"><button type="button" class="text-button" disabled={working} on:click={() => (confirming = false)}>Cancel</button><button type="button" class="secondary-button settings-manage" disabled={working} on:click={() => void clear()}>Clear record</button></div>
       {:else}
-        <div class="setting-copy"><strong>Clear activity</strong><p>Remove every entry from the activity record on this device.</p></div>
+        <div class="setting-copy"><strong>Clear activity</strong><p>Remove every entry from this list.</p></div>
         <button type="button" class="secondary-button settings-manage" disabled={working} on:click={() => (confirming = true)}>Clear</button>
       {/if}
     </article>

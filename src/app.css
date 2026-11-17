@@ -1033,9 +1033,9 @@ button.no-totp:hover { filter: brightness(.97); }
 .settings-group > h3 { margin: 0 0 var(--space-2); padding-left: var(--space-3); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-medium); letter-spacing: .02em; }
 .settings-list { padding: var(--space-2) var(--space-4); border: 0; border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-raised); }
 .view-header + .settings-tabs { margin-top: var(--space-5); }
-.settings-view article { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft); }
-.settings-view article:last-child { border-bottom: 0; }
-.settings-view article .setting-copy { flex: 1; min-width: 0; }
+.settings-view article, .activity-settings article { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft); }
+.settings-view article:last-child, .activity-settings article:last-child { border-bottom: 0; }
+.settings-view article .setting-copy, .activity-settings article .setting-copy { flex: 1; min-width: 0; }
 .setting-copy { min-width: 0; }
 .settings-manage { min-height: 34px; padding: 0 var(--space-4); }
 .setting-copy p.recovery-request-warning { color: var(--warn-text); }
@@ -1099,8 +1099,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .browser-checks svg { flex: none; }
 
 .switch { cursor: pointer; }
-.settings-view article strong { color: var(--text); font-size: var(--type-3); }
-.settings-view article p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); }
+.settings-view article strong, .activity-settings article strong { color: var(--text); font-size: var(--type-3); }
+.settings-view article p, .activity-settings article p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--type-2); }
 /* A secondary note under the row copy stays one step quieter than the copy. */
 .settings-view article .tiny-note { color: var(--text-faint); }
 
@@ -1270,7 +1270,7 @@ button.no-totp:hover { filter: brightness(.97); }
   .settings-tabs button { padding: 7px 12px; }
   .settings-groups { gap: var(--space-4); }
   .settings-list { padding: var(--space-1) var(--space-4); }
-  .settings-view article { gap: var(--space-3); padding: var(--space-3) 0; }
+  .settings-view article, .activity-settings article { gap: var(--space-3); padding: var(--space-3) 0; }
 }
 
 @media (max-width: 960px) {
@@ -1292,7 +1292,7 @@ button.no-totp:hover { filter: brightness(.97); }
   .view-header-aside { justify-self: start; text-align: left; }
   .credential-row { grid-template-columns: 105px minmax(0, 1fr) auto auto auto; }
   .backup-card { align-items: flex-start; flex-direction: column; }
-  .settings-view article { flex-wrap: wrap; }
+  .settings-view article, .activity-settings article { flex-wrap: wrap; }
   .settings-service-connect, .settings-service-actions { width: calc(100% - 52px); margin-left: 52px; }
   .settings-service-connect input { flex: 1; }
   .settings-server-row .settings-service-actions { width: auto; margin-left: 0; }
@@ -1395,6 +1395,9 @@ button.activity-row-body:hover { background: var(--control-hover); }
 .activity-row.refused .activity-sentence { color: var(--warn-text); }
 .activity-row-body small { color: var(--text-muted); font-size: var(--type-2); font-variant-numeric: tabular-nums; }
 .activity-more { margin-top: var(--space-3); }
+.activity-settings { margin-top: var(--space-6); }
+.activity-settings article { flex-wrap: wrap; }
+.activity-settings article .setting-copy { flex: 1 1 240px; }
 .activity-scope { margin-top: var(--space-6); border-top: 1px solid var(--border-soft); padding-top: var(--space-4); }
 .activity-scope h3 { margin: 0 0 var(--space-2); color: var(--text-heading); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .approval-record { display: grid; gap: var(--space-1); margin: var(--space-2) 0 0; }

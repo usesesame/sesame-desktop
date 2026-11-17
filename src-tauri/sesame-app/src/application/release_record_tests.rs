@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 use zeroize::Zeroizing;
@@ -14,7 +14,7 @@ use crate::test_support::{grant, TestVault};
 use crate::vault::release_record::{EntryKind, FieldKind, MatchKind, Outcome, ReleaseDraft};
 use crate::vault::{Card, CustomFieldEntry, Identity, VaultEntry, VaultState};
 
-use super::backups::create_backup_in_state;
+use super::backups::{create_backup_in_state, delete_local_vault_in_state};
 use super::browser_fill::{
     never_save_browser_site_in_state, resolve_browser_save_in_state, ApprovalDecision,
     ApprovalKind, NormalizedOrigin,
@@ -27,8 +27,8 @@ use super::browser_replies::{
     totp_response_in_state, BrowserApprovalOffer, BrowserReply,
 };
 use super::lifecycle::unlock_vault_in_state;
-use super::logins::reveal_login_secret_in_state;
-use super::quick_access::quick_access_field_in_state;
+use super::logins::{copy_totp_code_in_state, reveal_login_secret_in_state};
+use super::quick_access::copy_quick_access_field_in_state;
 use super::release_record::{
     clear_release_record_in_state, record, release_record_hint_in_state,
     release_record_page_in_state, set_release_record_retention_in_state, ReleaseEntryView,
@@ -638,7 +638,15 @@ fn reveals_copies_and_quick_access_are_recorded_after_presence() {
     )
     .expect("copied");
     reveal_login_secret_in_state(&vault.state, &presence, "login-a").expect("revealed");
-    quick_access_field_in_state(&vault.state, &presence, "login-a", "password").expect("copied");
+    copy_quick_access_field_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        "login-a",
+        "password",
+        None,
+    )
+    .expect("copied");
 
     let found = entries(&vault.state);
     let kinds: Vec<(EntryKind, Option<&str>, Vec<FieldKind>)> = found
@@ -745,11 +753,19 @@ fn recording_never_saves_the_vault_or_moves_the_snapshot() {
 fn a_lock_during_writes_loses_no_entry() {
     let vault = Arc::new(TestVault::with_login("login-a", "https://example.com"));
     let effects = FakeEffects::new(vault.path().to_path_buf());
+    let halfway = Arc::new(Barrier::new(5));
+    let locked = Arc::new(Barrier::new(5));
     let writers: Vec<_> = (0..4)
         .map(|writer| {
             let vault = Arc::clone(&vault);
+            let halfway = Arc::clone(&halfway);
+            let locked = Arc::clone(&locked);
             thread::spawn(move || {
                 for index in 0..40 {
+                    if index == 20 {
+                        halfway.wait();
+                        locked.wait();
+                    }
                     record(
                         &vault.state,
                         ReleaseDraft::new(EntryKind::Copy, Outcome::Released)
@@ -760,8 +776,9 @@ fn a_lock_during_writes_loses_no_entry() {
             })
         })
         .collect();
-    thread::sleep(std::time::Duration::from_millis(5));
+    halfway.wait();
     vault.state.lock_for_lifecycle().expect("locked");
+    locked.wait();
     for writer in writers {
         writer.join().expect("writer finished");
     }
@@ -784,6 +801,13 @@ fn a_lock_during_writes_loses_no_entry() {
     .expect("page");
     let total: u32 = page.entries.iter().map(|entry| entry.count).sum();
     assert_eq!(total, 160);
+    let written_while_locked: u32 = page
+        .entries
+        .iter()
+        .filter(|entry| entry.late)
+        .map(|entry| entry.count)
+        .sum();
+    assert_eq!(written_while_locked, 80);
     assert_eq!(page.status.notice, None);
     assert_eq!(page.status.unwritten, 0);
 }
@@ -819,7 +843,7 @@ fn a_flood_of_denied_requests_from_one_page_stays_small() {
 }
 
 #[test]
-fn no_entry_record_file_page_or_diagnostic_holds_a_secret() {
+fn no_decrypted_entry_page_or_diagnostic_holds_a_secret() {
     let vault = canary_vault();
     let presence = ReleasePresence::default();
     let (state, clock) = state_with_clock();
@@ -836,8 +860,11 @@ fn no_entry_record_file_page_or_diagnostic_holds_a_secret() {
         copy_item_field_in_state(&vault.state, &presence, &effects, id, kind, field, None)
             .expect("copied");
     }
-    quick_access_field_in_state(&vault.state, &presence, "login-a", "password").expect("copied");
-    quick_access_field_in_state(&vault.state, &presence, "identity-a", "fullName").expect("copied");
+    for (id, field) in [("login-a", "password"), ("identity-a", "fullName")] {
+        copy_quick_access_field_in_state(&vault.state, &presence, &effects, id, field, None)
+            .expect("copied");
+    }
+    copy_totp_code_in_state(&vault.state, &effects, "login-a", None).expect("copied");
     let request = fill_request("https://example.com/");
     let offered = offer(fill_response_in_state(
         &vault.state,
@@ -873,17 +900,22 @@ fn no_entry_record_file_page_or_diagnostic_holds_a_secret() {
     )
     .expect("saved");
 
+    let decrypted = {
+        let session = vault.state.session.lock().expect("session lock");
+        vault
+            .state
+            .release_record
+            .entries(session.as_ref().expect("unlocked"))
+            .expect("decrypted entries")
+    };
+    assert!(decrypted.len() >= 13);
+    let decrypted_json = serde_json::to_string(&decrypted).expect("entries json");
+    assert!(!decrypted_json.contains(CANARY));
+    assert!(!decrypted_json.contains("https://"));
     let page =
         release_record_page_in_state(&vault.state, ReleaseRecordQuery::default()).expect("page");
-    assert!(page.entries.len() >= 12);
     let page_json = serde_json::to_string(&page).expect("page json");
     assert!(!page_json.contains(CANARY));
-    assert!(!page_json.contains("https://"));
-    let record_path = crate::vault::release_record::record_path(vault.path());
-    let raw = String::from_utf8(std::fs::read(record_path).expect("record")).expect("utf8");
-    assert!(!raw.contains(CANARY));
-    assert!(!raw.contains("example.com"));
-    assert!(!raw.contains("login-a"));
     for call in effects.calls() {
         if let Effect::RecordBrowserHostRegistration(code) = call {
             assert!(!code.contains("example"));
@@ -1038,26 +1070,167 @@ fn clearing_the_record_needs_presence_and_leaves_one_entry() {
 #[test]
 fn retention_accepts_only_the_offered_choices() {
     let vault = TestVault::with_login("login-a", "https://example.com");
-    assert!(set_release_record_retention_in_state(&vault.state, 3).is_err());
-    assert!(set_release_record_retention_in_state(&vault.state, 4_000).is_err());
-    let status = set_release_record_retention_in_state(&vault.state, 90).expect("set");
-    assert_eq!(status.retention_days, 90);
-    assert_eq!(vault.state.release_record.retention_days(), 90);
+    let presence = ReleasePresence::default();
+    assert!(set_release_record_retention_in_state(&vault.state, &presence, 3).is_err());
+    assert!(set_release_record_retention_in_state(&vault.state, &presence, 4_000).is_err());
+    let status = set_release_record_retention_in_state(&vault.state, &presence, 365).expect("set");
+    assert_eq!(status.retention_days, 365);
+    assert_eq!(vault.state.release_record.retention_days(), 365);
 }
 
-#[test]
-fn a_shorter_retention_removes_older_entries_at_once() {
-    let vault = TestVault::with_login("login-a", "https://example.com");
+fn old_and_new_copies(vault: &TestVault) {
     let now = crate::vault::util::unix_timestamp();
-    let mut old = ReleaseDraft::new(EntryKind::Copy, Outcome::Released).item("old", "login");
-    old.at = Some(now - 60 * 86_400);
-    record(&vault.state, old);
+    for (id, age_days) in [("old", 60), ("older", 70)] {
+        let mut old = ReleaseDraft::new(EntryKind::Copy, Outcome::Released).item(id, "login");
+        old.at = Some(now - age_days * 86_400);
+        record(&vault.state, old);
+    }
     record(
         &vault.state,
         ReleaseDraft::new(EntryKind::Copy, Outcome::Released).item("new", "login"),
     );
+}
 
-    set_release_record_retention_in_state(&vault.state, 30).expect("set");
+#[test]
+fn a_shorter_retention_needs_presence_and_leaves_an_entry_with_the_count() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    let presence = ReleasePresence::default();
+    old_and_new_copies(&vault);
 
-    assert_eq!(only(&vault.state).item_id.as_deref(), Some("new"));
+    assert_eq!(
+        set_release_record_retention_in_state(&vault.state, &presence, 30),
+        Err(crate::release::PRESENCE_REQUIRED.to_string())
+    );
+    assert_eq!(vault.state.release_record.retention_days(), 180);
+    assert_eq!(entries(&vault.state).len(), 3);
+
+    grant(&vault, &presence);
+    set_release_record_retention_in_state(&vault.state, &presence, 30).expect("set");
+
+    let found = entries(&vault.state);
+    assert_eq!(found.len(), 2);
+    let marker = found
+        .iter()
+        .find(|entry| entry.kind == EntryKind::RetentionShortened)
+        .expect("retention entry");
+    assert_eq!(marker.count, 2);
+    assert!(found
+        .iter()
+        .any(|entry| entry.item_id.as_deref() == Some("new")));
+}
+
+#[test]
+fn a_longer_retention_needs_no_presence_and_removes_nothing() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    old_and_new_copies(&vault);
+
+    set_release_record_retention_in_state(&vault.state, &ReleasePresence::default(), 365)
+        .expect("set");
+
+    let found = entries(&vault.state);
+    assert_eq!(found.len(), 3);
+    assert!(found
+        .iter()
+        .all(|entry| entry.kind != EntryKind::RetentionShortened));
+}
+
+#[test]
+fn deleting_the_vault_drops_queued_and_unwritten_entries_from_it() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    let denied =
+        || ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Denied).host("deleted.example.com");
+    record(&vault.state, denied());
+    record(&vault.state, denied());
+    vault.state.lock_for_lifecycle().expect("locked");
+    vault.state.release_record.append_locked(
+        ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Locked).host("deleted.example.com"),
+    );
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    delete_local_vault_in_state(&vault.state, &effects, PASSWORD.to_string()).expect("deleted");
+
+    let (opened, _) = sesame_core::api::create_vault(PASSWORD, "Next vault").expect("next vault");
+    let mut next = crate::vault::UnlockedVault::from_opened(vault.path().to_path_buf(), &opened)
+        .expect("next session");
+    next.setup_complete = true;
+    crate::vault::storage::persist_session(&mut next).expect("next vault saved");
+    *vault.state.session.lock().expect("session lock") = Some(next);
+    {
+        let session = vault.state.session.lock().expect("session lock");
+        vault
+            .state
+            .release_record
+            .open(session.as_ref().expect("session"))
+            .expect("record opened");
+    }
+
+    assert!(entries(&vault.state)
+        .iter()
+        .all(|entry| entry.host.as_deref() != Some("deleted.example.com")));
+}
+
+#[test]
+fn copying_a_one_time_code_is_recorded_from_the_vault() {
+    let vault = canary_vault();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    copy_totp_code_in_state(&vault.state, &effects, "login-a", None).expect("copied");
+
+    let entry = only(&vault.state);
+    assert_eq!(entry.kind, EntryKind::Copy);
+    assert_eq!(entry.item_id.as_deref(), Some("login-a"));
+    assert_eq!(entry.fields, vec![FieldKind::TwoFactorCode]);
+    let copied: Vec<String> = effects
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            Effect::CopySecret { value, .. } => Some(value),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied.len(), 1);
+    assert_eq!(copied[0].len(), 6);
+    assert!(copied[0].bytes().all(|byte| byte.is_ascii_digit()));
+}
+
+#[test]
+fn a_one_time_code_copy_for_a_login_without_one_is_refused() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    assert!(copy_totp_code_in_state(&vault.state, &effects, "login-a", None).is_err());
+    assert!(copy_totp_code_in_state(&vault.state, &effects, "login-missing", None).is_err());
+    assert!(effects.calls().is_empty());
+    assert!(entries(&vault.state).is_empty());
+}
+
+#[test]
+fn a_copy_that_fails_records_nothing() {
+    let vault = canary_vault();
+    let presence = ReleasePresence::default();
+    grant(&vault, &presence);
+    let effects = FakeEffects::failing_copy(vault.path().to_path_buf());
+
+    assert!(copy_item_field_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        "login-a",
+        "login",
+        "password",
+        None
+    )
+    .is_err());
+    assert!(copy_quick_access_field_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        "login-a",
+        "password",
+        None
+    )
+    .is_err());
+    assert!(copy_totp_code_in_state(&vault.state, &effects, "login-a", None).is_err());
+
+    assert!(entries(&vault.state).is_empty());
 }

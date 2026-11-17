@@ -8,6 +8,7 @@ const getReleaseRecord = vi.fn()
 vi.mock('../release-record-api', () => ({
   getReleaseRecord: (...args: unknown[]) => getReleaseRecord(...args),
   onReleaseRecordChanged: async () => () => {},
+  getReleaseRecordStatus: async () => ({ available: true, entryCount: 0, retentionDays: 180, unwritten: 0 }),
 }))
 
 import ReleaseRecordView from './ReleaseRecordView.svelte'
@@ -22,9 +23,13 @@ function page(entries: ReleaseEntryView[], partial: Partial<ReleaseRecordPage['s
   return { entries, total: entries.length, status: { available: true, entryCount: entries.length, startsAt: entries[0]?.at, retentionDays: 180, unwritten: 0, ...partial } }
 }
 
-beforeEach(() => getReleaseRecord.mockReset())
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  getReleaseRecord.mockReset()
+})
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   cleanup()
   document.body.replaceChildren()
 })
@@ -72,4 +77,11 @@ test('the filter asks only for refused and unanswered requests', async () => {
   await fireEvent.click(screen.getByRole('button', { name: /All activity/ }))
   await fireEvent.click(screen.getByRole('option', { name: 'Refused and unanswered' }))
   await waitFor(() => expect(getReleaseRecord).toHaveBeenLastCalledWith(expect.objectContaining({ refusedOnly: true })))
+})
+
+test('the choices for keeping and clearing the list sit on the Activity page', async () => {
+  getReleaseRecord.mockResolvedValue(page([entry({ itemId: 'login-a', itemKind: 'login', host: 'example.com' })]))
+  render(ReleaseRecordView, { titleFor })
+  await waitFor(() => expect(screen.getByText('Keep activity for')).toBeTruthy())
+  expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
 })

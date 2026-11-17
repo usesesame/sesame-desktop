@@ -12,6 +12,7 @@
   export let onCancelPreview: () => void
   export let onRestore: (id: string) => void
   export let titleFor: (kind: string, itemId: string) => string | null = () => null
+  export let openItemId: string | null = null
 
   interface HistoryGroup {
     itemId: string
@@ -25,6 +26,12 @@
   function toggle(itemId: string) {
     expanded = { ...expanded, [itemId]: !expanded[itemId] }
   }
+
+  function openItem(itemId: string | null) {
+    if (itemId) expanded = { ...expanded, [itemId]: true }
+  }
+
+  $: openItem(openItemId)
 
   function formatWhen(capturedAt: number): string {
     return new Date(capturedAt * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })

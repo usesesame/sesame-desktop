@@ -7,13 +7,15 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::crypto::{bytes_match, decrypt_bytes, encrypt_bytes};
-use crate::storage::atomic_replace;
+use crate::storage::{atomic_replace, damaged_copy_paths, set_aside_damaged};
 use crate::types::CipherBlob;
 use crate::util::{fill_secret, read_file_with_limit};
 use crate::{UnlockedVault, VaultResult};
 
 pub const PENDING_FILE: &str = "pending-changes.sesame";
+pub const NEXT_KEY_PENDING_FILE: &str = "pending-changes.next-key.sesame";
 pub const DAMAGED_PENDING_FILE: &str = "pending-changes.damaged.sesame";
+pub const DAMAGED_PENDING_COPIES: usize = 3;
 pub const MAX_UNRESOLVED: usize = 64;
 pub const HANDLE_LIFETIME_SECS: u64 = 86_400;
 pub const RESOLVED_KEEP_SECS: u64 = 86_400;
@@ -68,11 +70,17 @@ pub struct PendingChange {
     pub resolution: Resolution,
     pub resolved_at: Option<u64>,
     pub username_attached: bool,
+    #[serde(default = "applied_by_default")]
+    pub applied: bool,
+}
+
+fn applied_by_default() -> bool {
+    true
 }
 
 impl PendingChange {
     pub fn is_unresolved(&self) -> bool {
-        self.resolution == Resolution::Unconfirmed
+        self.applied && self.resolution == Resolution::Unconfirmed
     }
 }
 
@@ -92,11 +100,26 @@ pub fn pending_path(vault_path: &Path) -> PathBuf {
         .join(PENDING_FILE)
 }
 
+pub fn next_key_pending_path(vault_path: &Path) -> PathBuf {
+    vault_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(NEXT_KEY_PENDING_FILE)
+}
+
 pub fn damaged_pending_path(vault_path: &Path) -> PathBuf {
     vault_path
         .parent()
         .unwrap_or_else(|| Path::new(""))
         .join(DAMAGED_PENDING_FILE)
+}
+
+pub fn damaged_pending_paths(vault_path: &Path) -> Vec<PathBuf> {
+    damaged_copy_paths(
+        vault_path.parent().unwrap_or_else(|| Path::new("")),
+        "pending-changes",
+        DAMAGED_PENDING_COPIES,
+    )
 }
 
 pub fn issue_handle() -> VaultResult<(Zeroizing<String>, String)> {
@@ -137,7 +160,8 @@ pub fn find_by_handle<'a>(
 
 pub fn prune(changes: &mut Vec<PendingChange>, now: u64) {
     changes.retain(|change| {
-        change.is_unresolved()
+        !change.applied
+            || change.is_unresolved()
             || change
                 .resolved_at
                 .is_some_and(|at| now < at.saturating_add(RESOLVED_KEEP_SECS))
@@ -206,15 +230,23 @@ pub fn open(bytes: &[u8], vault_key: &[u8; 32], vault_id: &str) -> Option<Vec<Pe
     serde_json::from_slice(&plaintext).ok()
 }
 
-pub fn read_pending(session: &UnlockedVault) -> Vec<PendingChange> {
-    let path = pending_path(&session.path);
-    let bytes = match read_file_with_limit(&path, MAX_FILE_BYTES) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(_) => {
-            set_aside(session);
-            return Vec::new();
+const UNAVAILABLE: &str = "Sesame could not read the list of new passwords. Try again.";
+
+enum StoredList {
+    Missing,
+    Unavailable,
+    Damaged,
+    Opened(Vec<PendingChange>),
+}
+
+fn open_file(session: &UnlockedVault, path: &Path) -> StoredList {
+    let bytes = match read_file_with_limit(path, MAX_FILE_BYTES) {
+        Ok(bytes) => Zeroizing::new(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return StoredList::Missing,
+        Err(error) if crate::util::read_failure_is_damage(path, &error) => {
+            return StoredList::Damaged
         }
+        Err(_) => return StoredList::Unavailable,
     };
     let vault_id = session.vault_id().unwrap_or_default().to_string();
     let opened = session
@@ -222,19 +254,78 @@ pub fn read_pending(session: &UnlockedVault) -> Vec<PendingChange> {
         .ok()
         .flatten();
     match opened {
-        Some(changes) => changes,
-        None => {
-            set_aside(session);
-            Vec::new()
+        Some(changes) => StoredList::Opened(changes),
+        None => StoredList::Damaged,
+    }
+}
+
+fn read_stored(session: &UnlockedVault) -> StoredList {
+    let path = pending_path(&session.path);
+    let next = next_key_pending_path(&session.path);
+    match open_file(session, &path) {
+        StoredList::Unavailable => StoredList::Unavailable,
+        StoredList::Opened(changes) => {
+            let _ = std::fs::remove_file(&next);
+            StoredList::Opened(changes)
+        }
+        missing_or_damaged => match open_file(session, &next) {
+            StoredList::Opened(changes) => {
+                if std::fs::rename(&next, &path).is_err() {
+                    return StoredList::Unavailable;
+                }
+                StoredList::Opened(changes)
+            }
+            StoredList::Unavailable => StoredList::Unavailable,
+            StoredList::Missing => missing_or_damaged,
+            StoredList::Damaged => {
+                let _ = std::fs::remove_file(&next);
+                missing_or_damaged
+            }
+        },
+    }
+}
+
+pub fn read_pending(session: &UnlockedVault) -> VaultResult<Vec<PendingChange>> {
+    match read_stored(session) {
+        StoredList::Missing => Ok(Vec::new()),
+        StoredList::Unavailable => Err(UNAVAILABLE.into()),
+        StoredList::Damaged => {
+            set_aside_damaged(
+                &pending_path(&session.path),
+                &damaged_pending_paths(&session.path),
+            );
+            Ok(Vec::new())
+        }
+        StoredList::Opened(mut changes) => {
+            settle(session, &mut changes);
+            Ok(changes)
         }
     }
 }
 
-fn set_aside(session: &UnlockedVault) {
-    let _ = std::fs::rename(
-        pending_path(&session.path),
-        damaged_pending_path(&session.path),
-    );
+fn settle(session: &UnlockedVault, changes: &mut Vec<PendingChange>) {
+    if changes.iter().all(|change| change.applied) {
+        return;
+    }
+    let Ok(payload) = session.open_payload() else {
+        return;
+    };
+    changes.retain_mut(|change| {
+        if change.applied {
+            return true;
+        }
+        let committed = match change.kind {
+            PendingKind::Change => change.history_id.as_deref().is_some_and(|history_id| {
+                payload.history.iter().any(|entry| entry.id == history_id)
+            }),
+            PendingKind::New => payload
+                .entries
+                .iter()
+                .any(|entry| entry.id == change.item_id),
+        };
+        change.applied = committed;
+        committed
+    });
 }
 
 pub fn write_pending(session: &UnlockedVault, changes: &[PendingChange]) -> VaultResult<()> {
@@ -242,6 +333,41 @@ pub fn write_pending(session: &UnlockedVault, changes: &[PendingChange]) -> Vaul
     let bytes = session.expose_vault_key(|vault_key| seal(vault_key, &vault_id, changes))?;
     atomic_replace(&pending_path(&session.path), &bytes)
         .map_err(|_| "Sesame could not save the list of new passwords.".to_string())
+}
+
+pub struct NextKeyList {
+    staged: bool,
+}
+
+pub fn stage_for_new_key(
+    session: &UnlockedVault,
+    new_key: &[u8; 32],
+    new_vault_id: &str,
+) -> VaultResult<NextKeyList> {
+    let changes = match read_stored(session) {
+        StoredList::Opened(changes) => changes,
+        StoredList::Unavailable => return Err(UNAVAILABLE.into()),
+        StoredList::Missing | StoredList::Damaged => return Ok(NextKeyList { staged: false }),
+    };
+    let bytes = seal(new_key, new_vault_id, &changes)?;
+    atomic_replace(&next_key_pending_path(&session.path), &bytes)
+        .map_err(|_| "Sesame could not save the list of new passwords.".to_string())?;
+    Ok(NextKeyList { staged: true })
+}
+
+pub fn finish_new_key(session: &UnlockedVault, list: NextKeyList) {
+    if list.staged {
+        let _ = std::fs::rename(
+            next_key_pending_path(&session.path),
+            pending_path(&session.path),
+        );
+    }
+}
+
+pub fn abandon_new_key(session: &UnlockedVault, list: NextKeyList) {
+    if list.staged {
+        let _ = std::fs::remove_file(next_key_pending_path(&session.path));
+    }
 }
 
 #[cfg(test)]
@@ -264,6 +390,7 @@ mod tests {
             resolution: Resolution::Unconfirmed,
             resolved_at: None,
             username_attached: false,
+            applied: true,
         }
     }
 

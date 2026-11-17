@@ -5,10 +5,10 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
-  import { clearReleaseRecord, onReleaseRecordChanged } from './lib/release-record-api'
+  import { clearReleaseRecord, onReleaseRecordChanged, setReleaseRecordRetention } from './lib/release-record-api'
   import { startActivityReports } from './lib/activity'
   import { loadPlatformCapabilities } from './lib/platform'
-  import type { ImportSource, NavigationGroup, View } from './lib/types'
+  import type { ImportSource, NavigationGroup, ReleaseRecordStatus, View } from './lib/types'
   import { storeSortMode } from './lib/preferences'
   import { createFeedbackController } from './lib/controllers/feedback-controller'
   import { createLoginController } from './lib/controllers/login-controller'
@@ -247,6 +247,10 @@
     feedback: feedbackController,
     editLogin: (id) => void loginController.editContext(id),
     copyPassword: (id) => loginController.copyContextField(id, 'password'),
+    openHistory: (id) => {
+      historyOpenItemId = id
+      selection.patch({ activeView: 'history' })
+    },
   })
 
   const backupController = createBackupController({
@@ -347,6 +351,7 @@
   const allItems = itemController.allItems
   const recentItems = itemController.recentItems
   let focusSearchToken = 0
+  let historyOpenItemId: string | null = null
   let focusResultsToken = 0
 
   // Universal search means every item, so it clears the filters first.
@@ -360,8 +365,8 @@
   }
 
   function copySelectedTotp() {
-    const code = $vault.loginCard?.totpCode
-    if (code) void loginController.copy(code, '2FA code')
+    const card = $vault.loginCard
+    if (card?.totpCode) void loginController.copyTotp(card.id)
   }
 
   function openSelectedSite() {
@@ -383,6 +388,15 @@
     }
     done()
     feedbackController.showNotice('Activity cleared', 'Sesame kept one entry that says the record was cleared.')
+  }
+
+  async function setActivityRetention(days: number, done: (status: ReleaseRecordStatus) => void): Promise<void> {
+    try {
+      done(await setReleaseRecordRetention(days))
+    } catch (error) {
+      if (!presenceController.required(error)) throw error
+      presenceController.ask('shorten-activity', () => setActivityRetention(days, done).catch((retryError: unknown) => feedbackController.setError(retryError)))
+    }
   }
 
   function showItemActivity(itemId: string, itemKind: string) {
@@ -715,6 +729,7 @@
         onDiscardPending={(change) => void pendingChangesController.discard(change)}
         onCopyPending={(change) => void pendingChangesController.copy(change)}
         onEditPending={(change) => pendingChangesController.edit(change)}
+        onOpenHistoryPending={(change) => pendingChangesController.openHistory(change)}
         allItems={$allItems}
         visibleItems={$visibleItems}
         recentItems={$recentItems}
@@ -785,6 +800,7 @@
         onStartAutoType={loginController.startAutoType}
         onCancelAutoType={loginController.cancelAutoType}
         onCopy={loginController.copy}
+        onCopyTotp={copySelectedTotp}
         onOpenWebsite={loginController.openCurrentWebsite}
         onGoSecurity={() => selection.patch({ activeView: 'security' })}
         onAddWebsite={loginController.openEditorWebsite}
@@ -840,7 +856,7 @@
         onRestore={(id) => void trashController.restore(id)}
       />
     {:else if $selection.activeView === 'activity'}
-      <ReleaseRecordView titleFor={historyItemTitle} onOpenItem={openActivityItem} />
+      <ReleaseRecordView titleFor={historyItemTitle} onOpenItem={openActivityItem} onClear={clearActivity} onSetRetention={setActivityRetention} />
     {:else if $selection.activeView === 'history'}
       <HistoryView
         items={$vault.snapshot?.history ?? []}
@@ -852,12 +868,12 @@
         onCancelPreview={historyController.cancelPreview}
         onRestore={(id) => void historyController.restore(id)}
         titleFor={historyItemTitle}
+        openItemId={historyOpenItemId}
       />
     {:else if $selection.activeView === 'backups'}
       <BackupsView backupBusy={$backupState.backupBusy} health={$backupState.health} currentRevision={Math.max($vault.snapshot?.revision ?? 0, $vault.status.revision)} exportPresenceRequired={$backupState.exportPresenceRequired} bind:exportPresencePassword={$backupState.exportPresencePassword} errorMessage={$feedbackState.errorMessage} onExportBackup={backupController.exportEncryptedBackup} onConfirmPresence={backupController.confirmExportPresence} onBeginRestore={backupController.beginRestore} onMakeBackup={backupController.makeBackup} onOpenDrill={backupController.openDrill} />
     {:else}
       <SettingsView
-        onClearActivity={clearActivity}
         theme={$settings.theme}
         siteIconsEnabled={$settings.siteIconsEnabled}
         autoLockMinutes={$settings.autoLockMinutes}

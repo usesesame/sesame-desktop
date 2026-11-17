@@ -150,6 +150,11 @@ pub fn adopt_with(
         }
     };
 
+    let next_pending = crate::vault::pending_change::stage_for_new_key(
+        vault,
+        &key,
+        payload.vault_id.as_deref().unwrap_or_default(),
+    )?;
     let protected_key = crate::vault::VaultKey::new(key)?;
     key.zeroize();
     let stale_hello = vault.hello_wrap.take();
@@ -167,6 +172,7 @@ pub fn adopt_with(
         crate::vault::storage::commit_payload_change_without_previous(vault, payload)
     {
         // Nothing partially applied: a failed write restores the old key and contents.
+        crate::vault::pending_change::abandon_new_key(vault, next_pending);
         vault.kdf = previous.0;
         vault.key_wrap = previous.1;
         vault.recovery_kdf = previous.2;
@@ -176,6 +182,7 @@ pub fn adopt_with(
         vault.replace_vault_key(previous.6);
         return Err(error);
     }
+    crate::vault::pending_change::finish_new_key(vault, next_pending);
     if let Some(old) = previous.5 {
         crate::vault::windows_hello::delete_key(&old.key_name);
     }

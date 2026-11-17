@@ -7,6 +7,7 @@ use sesame_core::secret_fields::secret_keys;
 use zeroize::Zeroizing;
 
 use crate::application::release::require_release_presence;
+use crate::application::release_record::record;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
 use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
@@ -112,7 +113,9 @@ pub fn copy_quick_access_field_in_state(
     clear_after_ms: Option<u64>,
 ) -> VaultResult<u64> {
     let value = quick_access_field_in_state(state, presence, id, field)?;
-    effects.copy_secret(value, clear_after_ms)
+    let copied = effects.copy_secret(value, clear_after_ms)?;
+    record_quick_access(state, id, field);
+    Ok(copied)
 }
 
 pub fn quick_access_field_in_state(
@@ -136,16 +139,30 @@ pub fn quick_access_field_in_state(
     if action.guarded {
         require_release_presence(state, presence)?;
     }
-    let value = quick_access_value(&item, action.field)
+    quick_access_value(&item, action.field)
         .map(Zeroizing::new)
-        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())?;
-    state.release_record.append(
-        session,
+        .ok_or_else(|| "Nothing is saved in that field for this item.".to_string())
+}
+
+fn record_quick_access(state: &VaultState, id: &str, field: &str) {
+    let id = id.trim();
+    let kind = state
+        .session
+        .lock()
+        .ok()
+        .and_then(|session| {
+            session
+                .as_ref()
+                .and_then(|session| session.open_item(id).ok())
+                .map(|item| item.kind().to_string())
+        })
+        .unwrap_or_default();
+    record(
+        state,
         ReleaseDraft::new(EntryKind::QuickAccess, Outcome::Released)
-            .item(item.id(), item.kind())
-            .field(action.field),
+            .item(id, &kind)
+            .field(field.trim()),
     );
-    Ok(value)
 }
 
 pub fn open_quick_access_item_in_state(state: &VaultState, id: &str) -> VaultResult<String> {

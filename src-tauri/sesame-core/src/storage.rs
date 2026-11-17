@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
@@ -409,6 +409,9 @@ fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<
     let new_recovery_wrap =
         encrypt_bytes(&recovery_wrapping_key, &*new_vault_key, RECOVERY_WRAP_AAD)?;
 
+    let vault_id = session.vault_id().unwrap_or_default().to_string();
+    let next_pending =
+        crate::pending_change::stage_for_new_key(session, &new_vault_key, &vault_id)?;
     let protected_new_key = crate::vault_key::VaultKey::new(*new_vault_key)?;
     let previous_key = session.replace_vault_key(protected_new_key);
     let previous_kdf = std::mem::replace(&mut session.kdf, new_kdf);
@@ -419,6 +422,7 @@ fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<
     let previous_hello_wrap = session.hello_wrap.take();
 
     if let Err(error) = persist_session_without_previous(session) {
+        crate::pending_change::abandon_new_key(session, next_pending);
         session.replace_vault_key(previous_key);
         session.kdf = previous_kdf;
         session.key_wrap = previous_key_wrap;
@@ -428,6 +432,7 @@ fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<
         session.hello_wrap = previous_hello_wrap;
         return Err(error);
     }
+    crate::pending_change::finish_new_key(session, next_pending);
     if let Some(old) = previous_hello_wrap {
         crate::windows_hello::delete_key(&old.key_name);
     }
@@ -1057,6 +1062,25 @@ pub fn atomic_replace(destination: &Path, bytes: &[u8]) -> VaultResult<()> {
         return Err(error);
     }
     Ok(())
+}
+
+pub fn damaged_copy_paths(directory: &Path, stem: &str, copies: usize) -> Vec<PathBuf> {
+    (1..=copies)
+        .map(|index| match index {
+            1 => directory.join(format!("{stem}.damaged.sesame")),
+            _ => directory.join(format!("{stem}.damaged-{index}.sesame")),
+        })
+        .collect()
+}
+
+pub fn set_aside_damaged(path: &Path, copies: &[PathBuf]) -> bool {
+    let free = copies.iter().find(|copy| {
+        matches!(fs::symlink_metadata(copy), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    });
+    match free {
+        Some(free) => fs::rename(path, free).is_ok(),
+        None => false,
+    }
 }
 
 #[cfg(test)]

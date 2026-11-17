@@ -32,10 +32,39 @@ pub fn auto_type(
     state: State<'_, VaultState>,
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<()> {
-    let credentials = login_credentials(&state, &presence, &id);
-    crate::commands::announce_release_record(&app);
-    let (username, password) = credentials?;
-    send_credentials(&username, &password)
+    let (username, password) = login_credentials(&state, &presence, &id)?;
+    let mut typed = Typed::default();
+    let result = send_credentials(&username, &password, &mut typed);
+    if record_auto_type(&state, &id, typed) {
+        crate::commands::announce_release_record(&app);
+    }
+    result
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Typed {
+    username: bool,
+    password: bool,
+}
+
+fn record_auto_type(state: &VaultState, id: &str, typed: Typed) -> bool {
+    if !typed.username && !typed.password {
+        return false;
+    }
+    crate::application::release_record::record(
+        state,
+        ReleaseDraft::new(EntryKind::AutoType, Outcome::Released)
+            .item(id, "login")
+            .fields(
+                [
+                    typed.username.then_some("username"),
+                    typed.password.then_some("password"),
+                ]
+                .into_iter()
+                .flatten(),
+            ),
+    );
+    true
 }
 
 fn login_credentials(
@@ -56,19 +85,6 @@ fn login_credentials(
     if entry.username.is_empty() && entry.password.is_empty() {
         return Err("This login has nothing saved to type.".to_string());
     }
-    state.release_record.append(
-        session,
-        ReleaseDraft::new(EntryKind::AutoType, Outcome::Released)
-            .item(&entry.id, "login")
-            .fields(
-                [
-                    (!entry.username.is_empty()).then_some("username"),
-                    (!entry.password.is_empty()).then_some("password"),
-                ]
-                .into_iter()
-                .flatten(),
-            ),
-    );
     Ok((
         Zeroizing::new(entry.username.clone()),
         Zeroizing::new(entry.password.clone()),
@@ -86,15 +102,25 @@ struct ForegroundWindow {
 trait TypingTarget {
     fn foreground(&self) -> Option<ForegroundWindow>;
     fn own_process_id(&self) -> u32;
-    fn type_text(&mut self, text: &[char]) -> VaultResult<()>;
+    fn type_text(&mut self, text: &[char], reached: &mut bool) -> VaultResult<()>;
     fn press_tab(&mut self) -> VaultResult<()>;
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 fn type_credentials(
     target: &mut impl TypingTarget,
     username: &str,
     password: &str,
+) -> VaultResult<()> {
+    type_tracked(target, username, password, &mut Typed::default())
+}
+
+#[cfg(any(windows, test))]
+fn type_tracked(
+    target: &mut impl TypingTarget,
+    username: &str,
+    password: &str,
+    typed: &mut Typed,
 ) -> VaultResult<()> {
     let window = target
         .foreground()
@@ -106,7 +132,7 @@ fn type_credentials(
         let characters = Zeroizing::new(username.chars().collect::<Vec<_>>());
         for chunk in characters.chunks(CHUNK_CHARS) {
             ensure_still_focused(target, window)?;
-            target.type_text(chunk)?;
+            target.type_text(chunk, &mut typed.username)?;
         }
         ensure_still_focused(target, window)?;
         target.press_tab()?;
@@ -114,7 +140,7 @@ fn type_credentials(
     let characters = Zeroizing::new(password.chars().collect::<Vec<_>>());
     for chunk in characters.chunks(CHUNK_CHARS) {
         ensure_still_focused(target, window)?;
-        target.type_text(chunk)?;
+        target.type_text(chunk, &mut typed.password)?;
     }
     Ok(())
 }
@@ -135,6 +161,7 @@ struct WindowsKeyboard;
 impl WindowsKeyboard {
     fn send(
         events: Vec<windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT>,
+        reached: &mut bool,
     ) -> VaultResult<()> {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT};
 
@@ -145,6 +172,9 @@ impl WindowsKeyboard {
                 std::mem::size_of::<INPUT>() as i32,
             )
         };
+        if sent > 0 {
+            *reached = true;
+        }
         if sent as usize == events.len() {
             Ok(())
         } else {
@@ -200,7 +230,7 @@ impl TypingTarget for WindowsKeyboard {
         unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }
     }
 
-    fn type_text(&mut self, text: &[char]) -> VaultResult<()> {
+    fn type_text(&mut self, text: &[char], reached: &mut bool) -> VaultResult<()> {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_KEYUP, KEYEVENTF_UNICODE};
 
         let mut events = Vec::with_capacity(text.len() * 4);
@@ -211,26 +241,29 @@ impl TypingTarget for WindowsKeyboard {
                 events.push(key_input(0, *unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
             }
         }
-        Self::send(events)
+        Self::send(events, reached)
     }
 
     fn press_tab(&mut self) -> VaultResult<()> {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_KEYUP, VK_TAB};
 
-        Self::send(vec![
-            key_input(VK_TAB, 0, 0),
-            key_input(VK_TAB, 0, KEYEVENTF_KEYUP),
-        ])
+        Self::send(
+            vec![
+                key_input(VK_TAB, 0, 0),
+                key_input(VK_TAB, 0, KEYEVENTF_KEYUP),
+            ],
+            &mut false,
+        )
     }
 }
 
 #[cfg(windows)]
-fn send_credentials(username: &str, password: &str) -> VaultResult<()> {
-    type_credentials(&mut WindowsKeyboard, username, password)
+fn send_credentials(username: &str, password: &str, typed: &mut Typed) -> VaultResult<()> {
+    type_tracked(&mut WindowsKeyboard, username, password, typed)
 }
 
 #[cfg(not(windows))]
-fn send_credentials(_username: &str, _password: &str) -> VaultResult<()> {
+fn send_credentials(_username: &str, _password: &str, _typed: &mut Typed) -> VaultResult<()> {
     Err("Auto-type is available on Windows only.".to_string())
 }
 
@@ -267,6 +300,7 @@ mod tests {
         last: RefCell<Option<ForegroundWindow>>,
         sent: Vec<Sent>,
         fail_sending_after: Option<usize>,
+        partial_failure: bool,
     }
 
     impl FakeTarget {
@@ -280,6 +314,7 @@ mod tests {
                 last: RefCell::new(None),
                 sent: Vec::new(),
                 fail_sending_after: None,
+                partial_failure: false,
             }
         }
 
@@ -321,8 +356,12 @@ mod tests {
             SESAME.process_id
         }
 
-        fn type_text(&mut self, text: &[char]) -> VaultResult<()> {
-            self.record(Sent::Text(text.iter().collect()))
+        fn type_text(&mut self, text: &[char], reached: &mut bool) -> VaultResult<()> {
+            let result = self.record(Sent::Text(text.iter().collect()));
+            if result.is_ok() || self.partial_failure {
+                *reached = true;
+            }
+            result
         }
 
         fn press_tab(&mut self) -> VaultResult<()> {
@@ -475,6 +514,101 @@ mod tests {
         type_credentials(&mut target, "fictional-user", "").expect("typed");
 
         assert_eq!(target.typed(), "fictiona".to_string() + "l-user" + "<tab>");
+    }
+
+    #[test]
+    fn only_the_fields_that_reached_the_window_are_marked_typed() {
+        let mut target = FakeTarget::with_foreground(vec![
+            Some(BROWSER),
+            Some(BROWSER),
+            Some(BROWSER),
+            Some(CHAT),
+        ]);
+        let mut typed = Typed::default();
+
+        type_tracked(&mut target, "fictional", "fictional-password", &mut typed)
+            .expect_err("focus moved");
+
+        assert_eq!(
+            typed,
+            Typed {
+                username: true,
+                password: false
+            }
+        );
+
+        let mut target = FakeTarget::staying_on(SESAME);
+        let mut typed = Typed::default();
+        type_tracked(&mut target, "fictional", "fictional-password", &mut typed)
+            .expect_err("own window");
+        assert_eq!(typed, Typed::default());
+    }
+
+    fn recorded_auto_types(vault: &TestVault) -> Vec<Vec<crate::vault::release_record::FieldKind>> {
+        let session = vault.state.session.lock().expect("session lock");
+        vault
+            .state
+            .release_record
+            .entries(session.as_ref().expect("session"))
+            .expect("entries")
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::AutoType)
+            .map(|entry| entry.fields)
+            .collect()
+    }
+
+    #[test]
+    fn a_chunk_that_was_only_partly_sent_still_counts_as_typed() {
+        for (partial, expected) in [(true, true), (false, false)] {
+            let mut target = FakeTarget::staying_on(BROWSER);
+            target.fail_sending_after = Some(0);
+            target.partial_failure = partial;
+            let mut typed = Typed::default();
+
+            type_tracked(&mut target, "", "abcdefgh", &mut typed).expect_err("send failed");
+
+            assert_eq!(typed.password, expected, "partial {partial}");
+            assert!(!typed.username);
+        }
+    }
+
+    #[test]
+    fn auto_type_is_recorded_only_for_what_was_typed() {
+        use crate::vault::release_record::FieldKind;
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+
+        assert!(!record_auto_type(&vault.state, "login-a", Typed::default()));
+        assert!(recorded_auto_types(&vault).is_empty());
+
+        assert!(record_auto_type(
+            &vault.state,
+            "login-a",
+            Typed {
+                username: true,
+                password: false
+            }
+        ));
+        assert_eq!(recorded_auto_types(&vault), vec![vec![FieldKind::Username]]);
+    }
+
+    #[test]
+    fn reading_credentials_for_auto_type_records_nothing_by_itself() {
+        let vault = TestVault::with_login("login-a", "https://northwind.example");
+        let presence = ReleasePresence::default();
+        {
+            let session = vault.state.session.lock().expect("session lock");
+            presence
+                .grant_with_password(
+                    session.as_ref().expect("session"),
+                    vault.state.session_epoch(),
+                    "fictional master password",
+                )
+                .expect("granted presence");
+        }
+
+        login_credentials(&vault.state, &presence, "login-a").expect("credentials");
+
+        assert!(recorded_auto_types(&vault).is_empty());
     }
 
     #[test]

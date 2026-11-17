@@ -40,6 +40,7 @@ function view(partial: Partial<PendingChangeView>): PendingChangeView {
     fill: 'unknown',
     accepted: false,
     canGoBack: true,
+    superseded: false,
     daysLeft: 30,
     urgent: false,
     ...partial,
@@ -62,6 +63,8 @@ describe('pending password notices', () => {
       view({ urgent: true, daysLeft: 6 }),
       view({ urgent: true, daysLeft: 1 }),
       view({ canGoBack: false, daysLeft: undefined }),
+      view({ canGoBack: false, superseded: true }),
+      view({ canGoBack: false, superseded: true, fill: 'notFilled', urgent: true, daysLeft: 3 }),
       view({ kind: 'new', username: '' }),
       view({ kind: 'new', username: 'casey@example.com' }),
     ]
@@ -75,6 +78,17 @@ describe('pending password notices', () => {
   it('warns from day 23 how long the old password stays in history', () => {
     expect(pendingChangeMessage(view({ urgent: true, daysLeft: 6 }))).toBe('The new password for Northwind is still not confirmed. The old one leaves history in 6 days.')
     expect(pendingChangeMessage(view({ urgent: true, daysLeft: 1 }))).toContain('in 1 day.')
+  })
+
+  it('says a newer password was saved since an older change and offers no way back', () => {
+    const message = pendingChangeMessage(view({ canGoBack: false, superseded: true, fill: 'notFilled' }))
+    expect(message).toBe('A newer password was saved for Northwind since this one. Open its history to see each version.')
+    expect(message).not.toMatch(/go back/i)
+  })
+
+  it('says the login changed when another edit moved it on and the old password is still in history', () => {
+    expect(pendingChangeMessage(view({ canGoBack: false, superseded: false, daysLeft: 20 }))).toBe('Northwind changed after Sesame saved this password. Open its history to see each version.')
+    expect(pendingChangeMessage(view({ canGoBack: false, daysLeft: undefined }))).toContain('no longer in history')
   })
 
   it('shows the username a sign up attached', () => {
@@ -93,7 +107,7 @@ describe('pending password controller', () => {
     const change = view({})
     stores.pendingChanges.patch({ changes: [change] })
     vaultApi.goBackPendingChange.mockResolvedValue({ changes: [], snapshot: { ...SNAPSHOT, revision: 3 } })
-    const controller = createPendingChangesController({ stores, feedback: createFeedbackController(), editLogin: vi.fn(), copyPassword: vi.fn() })
+    const controller = createPendingChangesController({ stores, feedback: createFeedbackController(), editLogin: vi.fn(), copyPassword: vi.fn(), openHistory: vi.fn() })
 
     await controller.goBack(change)
 
@@ -109,17 +123,33 @@ describe('pending password controller', () => {
     stores.pendingChanges.patch({ changes: [change] })
     vaultApi.keepPendingChange.mockRejectedValue(new Error('This password is no longer waiting.'))
     const feedback = createFeedbackController()
-    const controller = createPendingChangesController({ stores, feedback, editLogin: vi.fn(), copyPassword: vi.fn() })
+    const controller = createPendingChangesController({ stores, feedback, editLogin: vi.fn(), copyPassword: vi.fn(), openHistory: vi.fn() })
 
     await controller.keep(change)
 
     expect(stores.pendingChanges.value().changes).toEqual([change])
   })
 
+  it('opens the history of the login for an older change and closes its notice without rewriting', async () => {
+    const stores = createAppStores()
+    const openHistory = vi.fn()
+    const feedback = createFeedbackController()
+    const change = view({ canGoBack: false, superseded: true })
+    vaultApi.keepPendingChange.mockResolvedValue({ changes: [] })
+    const controller = createPendingChangesController({ stores, feedback, editLogin: vi.fn(), copyPassword: vi.fn(), openHistory })
+
+    controller.openHistory(change)
+    await controller.keep(change)
+
+    expect(openHistory).toHaveBeenCalledWith('login-a')
+    expect(vaultApi.keepPendingChange).toHaveBeenCalledWith('change-1')
+    expect(vaultApi.goBackPendingChange).not.toHaveBeenCalled()
+  })
+
   it('copies through the guarded login copy and never reads the password itself', async () => {
     const stores = createAppStores()
     const copyPassword = vi.fn().mockResolvedValue(undefined)
-    const controller = createPendingChangesController({ stores, feedback: createFeedbackController(), editLogin: vi.fn(), copyPassword })
+    const controller = createPendingChangesController({ stores, feedback: createFeedbackController(), editLogin: vi.fn(), copyPassword, openHistory: vi.fn() })
     await controller.copy(view({}))
     expect(copyPassword).toHaveBeenCalledWith('login-a')
   })

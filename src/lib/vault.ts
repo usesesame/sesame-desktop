@@ -949,6 +949,14 @@ export async function listTotpCodes(): Promise<TotpCodeEntry[]> {
   return invoke<TotpCodeEntry[]>('list_totp_codes')
 }
 
+export async function copyTotpCode(id: string): Promise<void> {
+  if (previewMode) {
+    await copyToClipboard(previewCards[id]?.totpCode ?? previewTotpCodes().find((code) => code.id === id)?.code ?? '')
+    return
+  }
+  await invoke<number>('copy_totp_code', { id, clearAfterMs: clipboardClearMs })
+}
+
 export async function refreshTotp(id: string): Promise<TotpRefresh> {
   if (previewMode) {
     const card = previewCards[id]
@@ -1711,10 +1719,11 @@ function previewPendingChanges(): PendingChangeView[] {
   const wanted = (previewQuery('previewPending') ?? '').split(',').filter(Boolean)
   const now = Math.floor(Date.now() / 1_000)
   const views: Record<string, PendingChangeView> = {
-    change: { id: 'preview-change', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 180, fill: 'filled', accepted: false, canGoBack: true, daysLeft: 30, urgent: false },
-    new: { id: 'preview-new', itemId: 'notion', kind: 'new', host: 'signup.example.com', title: 'signup.example.com', username: 'alice@example.com', createdAt: now - 600, fill: 'filled', accepted: true, canGoBack: false, urgent: false },
-    notFilled: { id: 'preview-not-filled', itemId: 'github', kind: 'change', host: 'github.com', title: 'GitHub', username: 'sesame-preview', createdAt: now - 60, fill: 'notFilled', accepted: false, canGoBack: true, daysLeft: 30, urgent: false },
-    urgent: { id: 'preview-urgent', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 24 * 86_400, fill: 'filled', accepted: false, canGoBack: true, daysLeft: 6, urgent: true },
+    change: { id: 'preview-change', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 180, fill: 'filled', accepted: false, canGoBack: true, superseded: false, daysLeft: 30, urgent: false },
+    superseded: { id: 'preview-superseded', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 3_600, fill: 'filled', accepted: false, canGoBack: false, superseded: true, daysLeft: 30, urgent: false },
+    new: { id: 'preview-new', itemId: 'notion', kind: 'new', host: 'signup.example.com', title: 'signup.example.com', username: 'alice@example.com', createdAt: now - 600, fill: 'filled', accepted: true, canGoBack: false, superseded: false, urgent: false },
+    notFilled: { id: 'preview-not-filled', itemId: 'github', kind: 'change', host: 'github.com', title: 'GitHub', username: 'sesame-preview', createdAt: now - 60, fill: 'notFilled', accepted: false, canGoBack: true, superseded: false, daysLeft: 30, urgent: false },
+    urgent: { id: 'preview-urgent', itemId: 'gmail', kind: 'change', host: 'accounts.example.com', title: 'Gmail', username: 'hello@example.test', createdAt: now - 24 * 86_400, fill: 'filled', accepted: false, canGoBack: true, superseded: false, daysLeft: 6, urgent: true },
   }
   return wanted.flatMap((key) => (views[key] ? [views[key]] : []))
 }

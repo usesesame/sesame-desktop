@@ -15,6 +15,7 @@ const vaultApi = vi.hoisted(() => ({
   checkReleasePresence: vi.fn(),
   copyItemField: vi.fn(),
   copyToClipboard: vi.fn(),
+  copyTotpCode: vi.fn(),
   createFolder: vi.fn(),
   deleteFolder: vi.fn(),
   getLoginCard: vi.fn(),
@@ -120,6 +121,28 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+describe('copying a one-time code', () => {
+  it('asks the vault for the code of the login so the copy is recorded', async () => {
+    vaultApi.copyTotpCode.mockResolvedValue(undefined)
+    const { controller, feedback } = harness()
+
+    await controller.copyTotp('login-a')
+
+    expect(vaultApi.copyTotpCode).toHaveBeenCalledWith('login-a')
+    expect(vaultApi.copyToClipboard).not.toHaveBeenCalled()
+    expect(feedback.state.value().notice?.title).toBe('2FA code copied')
+  })
+
+  it('shows the error when the copy fails', async () => {
+    vaultApi.copyTotpCode.mockRejectedValue(new Error('This login has no 2FA code.'))
+    const { controller, feedback } = harness()
+
+    await controller.copyTotp('login-a')
+
+    expect(feedback.state.value().errorMessage).toBe('This login has no 2FA code.')
+  })
 })
 
 describe('copying a login password', () => {

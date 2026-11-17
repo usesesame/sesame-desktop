@@ -135,7 +135,7 @@ fn report(vault: &TestVault, handle: &str, action: &str) -> BrowserResponse {
 fn rewrite_created_at(vault: &TestVault, age: u64) {
     let session = vault.state.session.lock().expect("session lock");
     let session = session.as_ref().expect("session");
-    let mut changes = read_pending(session);
+    let mut changes = read_pending(session).expect("pending list");
     for change in &mut changes {
         change.created_at = unix_timestamp().saturating_sub(age);
     }
@@ -732,9 +732,32 @@ fn going_back_is_refused_after_the_login_was_edited() {
 }
 
 #[test]
-fn two_changes_for_one_login_keep_both_earlier_passwords_reachable() {
+fn a_typed_password_after_a_change_is_called_a_newer_password() {
     let vault = TestVault::with_login("login-a", ORIGIN);
-    let first = approved_change(&vault).new_password.clone().expect("first");
+    approved_change(&vault);
+    {
+        let mut session = vault.state.session.lock().expect("lock");
+        let session = session.as_mut().expect("session");
+        let payload = session.open_payload().expect("payload");
+        let entry = payload.entries[0].clone();
+        let next = crate::vault::storage::payload_with_saved_login(
+            &payload,
+            entry,
+            Some("fictional-typed-later".to_string()),
+            100,
+        )
+        .expect("typed");
+        drop(payload);
+        crate::vault::storage::commit_payload_change(session, next).expect("committed");
+    }
+
+    let list = list_pending_changes_in_state(&vault.state).expect("list");
+
+    assert!(!list.changes[0].can_go_back);
+    assert!(list.changes[0].superseded);
+}
+
+fn second_change(vault: &TestVault) -> BrowserResponse {
     let (state, clock) = state_with_clock();
     let effects = FakeEffects::new(vault.path().to_path_buf());
     let offer = match change_response_in_state(
@@ -758,31 +781,98 @@ fn two_changes_for_one_login_keep_both_earlier_passwords_reachable() {
         )
         .expect("approved");
     let decision = offer.receiver.recv().expect("decision");
-    let second = complete_change_in_state(
+    complete_change_in_state(
         &vault.state,
         &effects,
         &request("change", ORIGIN),
         &offer.approval,
         decision,
         &|| true,
-    );
+    )
+}
+
+#[test]
+fn two_changes_for_one_login_keep_both_earlier_passwords_reachable() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    let first = approved_change(&vault).new_password.clone().expect("first");
+    let second = second_change(&vault);
     assert_eq!(second.current_password.as_deref(), Some(first.as_str()));
+    let second = second.new_password.clone().expect("second");
 
     let list = list_pending_changes_in_state(&vault.state).expect("list");
     assert_eq!(list.changes.len(), 2);
-    assert!(list.changes.iter().all(|view| view.can_go_back));
-    let older = list.changes.last().expect("older").id.clone();
+    let newer = list.changes.first().expect("newer").clone();
+    let older = list.changes.last().expect("older").clone();
+    assert!(newer.can_go_back);
+    assert!(!newer.superseded);
+    assert!(!older.can_go_back);
+    assert!(older.superseded);
 
-    go_back_pending_change_in_state(&vault.state, &older).expect("went back");
+    assert!(go_back_pending_change_in_state(&vault.state, &older.id).is_err());
+    assert_eq!(live_password(&vault, "login-a"), second);
 
-    assert_eq!(live_password(&vault, "login-a"), OLD_PASSWORD);
-    assert!(list_pending_changes_in_state(&vault.state)
+    go_back_pending_change_in_state(&vault.state, &newer.id).expect("went back");
+
+    assert_eq!(live_password(&vault, "login-a"), first);
+    let remaining = list_pending_changes_in_state(&vault.state)
         .expect("list")
-        .changes
-        .is_empty());
+        .changes;
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, older.id);
+    assert!(!remaining[0].can_go_back);
     let history = history_passwords(&vault, "login-a");
+    assert!(history.contains(&OLD_PASSWORD.to_string()));
     assert!(history.contains(&first));
-    assert!(history.contains(&second.new_password.clone().expect("second")));
+    assert!(history.contains(&second));
+}
+
+#[test]
+fn an_older_change_cannot_undo_a_newer_change_the_site_accepted() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    let accepted = second_change(&vault);
+    let handle = accepted.handle.clone().expect("handle");
+    let accepted_password = accepted.new_password.clone().expect("second");
+    assert_eq!(
+        report(&vault, &handle, "accepted").state.as_deref(),
+        Some("confirmed")
+    );
+    let older = list_pending_changes_in_state(&vault.state)
+        .expect("list")
+        .changes;
+    assert_eq!(older.len(), 1);
+    assert!(older[0].superseded);
+    assert!(!older[0].can_go_back);
+
+    assert!(go_back_pending_change_in_state(&vault.state, &older[0].id).is_err());
+
+    assert_eq!(live_password(&vault, "login-a"), accepted_password);
+    assert_eq!(
+        report(&vault, &handle, "accepted").state.as_deref(),
+        Some("confirmed")
+    );
+}
+
+#[test]
+fn an_edit_that_keeps_the_password_is_not_called_a_newer_password() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    {
+        let mut session = vault.state.session.lock().expect("lock");
+        let session = session.as_mut().expect("session");
+        let payload = session.open_payload().expect("payload");
+        let mut entry = payload.entries[0].clone();
+        entry.title = "Renamed".to_string();
+        let next = crate::vault::storage::payload_with_saved_login(&payload, entry, None, 100)
+            .expect("renamed");
+        drop(payload);
+        crate::vault::storage::commit_payload_change(session, next).expect("committed");
+    }
+
+    let list = list_pending_changes_in_state(&vault.state).expect("list");
+
+    assert!(!list.changes[0].can_go_back);
+    assert!(!list.changes[0].superseded);
 }
 
 #[test]
@@ -904,4 +994,310 @@ fn a_damaged_list_is_set_aside_and_the_passwords_stay_in_the_vault() {
     assert_eq!(live_password(&vault, "login-a"), new_password);
     assert!(history_passwords(&vault, "login-a").contains(&OLD_PASSWORD.to_string()));
     assert!(crate::vault::pending_change::damaged_pending_path(vault.path()).exists());
+}
+
+fn notice_count(vault: &TestVault) -> usize {
+    list_pending_changes_in_state(&vault.state)
+        .expect("list")
+        .changes
+        .len()
+}
+
+#[test]
+fn a_master_password_change_keeps_every_notice() {
+    use crate::vault::ChangeMasterPasswordRequest;
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    approved_create(&vault, "https://signup.example.net");
+    assert_eq!(notice_count(&vault), 2);
+    {
+        let mut session = vault.state.session.lock().expect("session lock");
+        let session = session.as_mut().expect("session");
+        session.recovery_wrap = None;
+        session.recovery_kdf = None;
+        crate::vault::storage::persist_session(session).expect("persisted");
+    }
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    super::unlock::change_master_password_in_state(
+        &vault.state,
+        &effects,
+        ChangeMasterPasswordRequest {
+            current_password: Some("fictional master password".to_string()),
+            recovery_kit: None,
+            new_password: "fictional new master password".to_string(),
+        },
+    )
+    .expect("changed");
+
+    assert_eq!(notice_count(&vault), 2);
+    assert!(!crate::vault::pending_change::damaged_pending_path(vault.path()).exists());
+}
+
+#[test]
+fn adopting_a_new_vault_key_keeps_every_notice() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    assert_eq!(notice_count(&vault), 1);
+    {
+        let mut session = vault.state.session.lock().expect("lock");
+        let session = session.as_mut().expect("session");
+        let payload = session.open_payload().expect("payload").clone();
+        super::sync_adopt::adopt(session, [5_u8; 32], payload, "fictional master password")
+            .expect("adopted");
+    }
+
+    assert_eq!(notice_count(&vault), 1);
+}
+
+#[test]
+fn a_second_damaged_list_never_replaces_the_first() {
+    use crate::vault::pending_change::damaged_pending_paths;
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    let slots = damaged_pending_paths(vault.path());
+    for round in 0..(slots.len() + 1) {
+        std::fs::write(
+            pending_path(vault.path()),
+            format!("{{\"format\":\"damaged-{round}\"}}"),
+        )
+        .expect("damaged");
+        list_pending_changes_in_state(&vault.state).expect("list");
+    }
+
+    for (round, slot) in slots.iter().enumerate() {
+        assert_eq!(
+            std::fs::read_to_string(slot).expect("kept copy"),
+            format!("{{\"format\":\"damaged-{round}\"}}")
+        );
+    }
+}
+
+#[test]
+fn a_list_that_cannot_be_read_now_is_left_in_place_and_refuses_changes() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    std::fs::create_dir(pending_path(vault.path())).expect("unreadable list");
+
+    assert!(list_pending_changes_in_state(&vault.state).is_err());
+    let response = approved_change(&vault);
+
+    assert_eq!(response.message_type, "change-unavailable");
+    assert_eq!(response.reason.as_deref(), Some("approvalUnavailable"));
+    assert_eq!(live_password(&vault, "login-a"), OLD_PASSWORD);
+    assert!(pending_path(vault.path()).is_dir());
+    assert!(!crate::vault::pending_change::damaged_pending_path(vault.path()).exists());
+}
+
+#[cfg(unix)]
+fn read_only_folder(vault: &TestVault, read_only: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let folder = vault.path().parent().expect("folder");
+    let mode = if read_only { 0o500 } else { 0o700 };
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(mode)).expect("mode");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_change_or_create_whose_list_cannot_be_written_never_touches_the_vault() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    let before = std::fs::read(vault.path()).expect("vault bytes");
+    read_only_folder(&vault, true);
+
+    let changed = approved_change(&vault);
+    let created = approved_create(&vault, "https://signup.example.net");
+
+    read_only_folder(&vault, false);
+    assert_eq!(changed.message_type, "change-unavailable");
+    assert_eq!(changed.reason.as_deref(), Some("approvalUnavailable"));
+    assert!(changed.new_password.is_none());
+    assert_eq!(created.message_type, "create-unavailable");
+    assert!(created.password.is_none());
+    assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
+    assert_eq!(live_password(&vault, "login-a"), OLD_PASSWORD);
+    assert_eq!(notice_count(&vault), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_report_whose_list_cannot_be_written_is_not_answered_as_success() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    let handle = approved_change(&vault).handle.clone().expect("handle");
+    read_only_folder(&vault, true);
+
+    let reported = report(&vault, &handle, "accepted");
+
+    read_only_folder(&vault, false);
+    assert_eq!(reported.message_type, "pending-unavailable");
+    assert_eq!(reported.reason.as_deref(), Some("approvalUnavailable"));
+    assert!(reported.state.is_none());
+    assert_eq!(notice_count(&vault), 1);
+}
+
+#[test]
+fn a_change_that_was_never_committed_is_dropped_and_one_that_was_is_kept() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    {
+        let session = vault.state.session.lock().expect("session lock");
+        let session = session.as_ref().expect("session");
+        let mut changes = read_pending(session).expect("pending list");
+        let committed = changes[0].clone();
+        changes[0].applied = false;
+        let mut abandoned = committed.clone();
+        abandoned.id = "abandoned".to_string();
+        abandoned.history_id = Some("history-never-written".to_string());
+        abandoned.applied = false;
+        changes.push(abandoned);
+        let mut abandoned_new = committed;
+        abandoned_new.id = "abandoned-new".to_string();
+        abandoned_new.kind = PendingKind::New;
+        abandoned_new.item_id = "login-never-written".to_string();
+        abandoned_new.history_id = None;
+        abandoned_new.applied = false;
+        changes.push(abandoned_new);
+        write_pending(session, &changes).expect("written");
+    }
+
+    let list = list_pending_changes_in_state(&vault.state).expect("list");
+
+    assert_eq!(list.changes.len(), 1);
+    assert_ne!(list.changes[0].id, "abandoned");
+    let session = vault.state.session.lock().expect("session lock");
+    let stored = read_pending(session.as_ref().expect("session")).expect("pending list");
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].applied);
+}
+
+#[test]
+fn a_change_on_a_never_save_site_is_refused_before_and_after_approval() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    let (state, clock) = state_with_clock();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    let request = request("change", ORIGIN);
+    let offer = match change_response_in_state(&vault.state, &state, &effects, &request) {
+        BrowserReply::Approval(offer) => offer,
+        BrowserReply::Response(_) => panic!("no approval"),
+    };
+    let_delay_pass(&state, &clock);
+    state
+        .decide(
+            offer.approval.approval_id(),
+            ApprovalDecision::Selected("login-a".to_string()),
+        )
+        .expect("approved");
+    let decision = offer.receiver.recv().expect("decision");
+    vault.seed(|payload| payload.never_save_sites.push(ORIGIN.to_string()));
+
+    let response = complete_change_in_state(
+        &vault.state,
+        &effects,
+        &request,
+        &offer.approval,
+        decision,
+        &|| true,
+    );
+
+    assert_eq!(response.message_type, "change-unavailable");
+    assert_eq!(response.reason.as_deref(), Some("approvalDeclined"));
+    assert!(response.new_password.is_none());
+    assert_eq!(live_password(&vault, "login-a"), OLD_PASSWORD);
+
+    let BrowserReply::Response(response) = change_response_in_state(
+        &vault.state,
+        &BrowserFillState::default(),
+        &effects,
+        &request,
+    ) else {
+        panic!("offered a change on a never save site");
+    };
+    assert_eq!(response.reason.as_deref(), Some("approvalDeclined"));
+}
+
+#[test]
+fn a_username_with_control_or_direction_characters_is_not_attached() {
+    for username in [
+        "alice\u{202E}moc.elpmaxe@",
+        "alice\u{2066}@example.com",
+        "alice\u{200B}@example.com",
+        "alice\u{0007}@example.com",
+        "alice\n@example.com",
+        "alice\u{FEFF}@example.com",
+    ] {
+        let vault = TestVault::with_login("login-a", ORIGIN);
+        let response = approved_create(&vault, "https://signup.example.net");
+        let handle = response.handle.clone().expect("handle");
+        let mut accept = pending(&handle, "accepted", "https://signup.example.net");
+        accept.username = Some(username.to_string());
+
+        let reported = pending_response_in_state(&vault.state, &accept);
+
+        assert_eq!(reported.state.as_deref(), Some("confirmed"), "{username:?}");
+        let list = list_pending_changes_in_state(&vault.state).expect("list");
+        assert!(list.changes[0].username.is_empty(), "{username:?}");
+    }
+}
+
+fn without_recovery_wrap(vault: &TestVault) {
+    let mut session = vault.state.session.lock().expect("session lock");
+    let session = session.as_mut().expect("session");
+    session.recovery_wrap = None;
+    session.recovery_kdf = None;
+    crate::vault::storage::persist_session(session).expect("persisted");
+}
+
+fn change_master_password(vault: &TestVault) -> crate::vault::VaultResult<()> {
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    super::unlock::change_master_password_in_state(
+        &vault.state,
+        &effects,
+        crate::vault::ChangeMasterPasswordRequest {
+            current_password: Some("fictional master password".to_string()),
+            recovery_kit: None,
+            new_password: "fictional new master password".to_string(),
+        },
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn a_key_change_is_refused_while_the_list_cannot_be_read() {
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    without_recovery_wrap(&vault);
+    let before = std::fs::read(vault.path()).expect("vault bytes");
+    std::fs::create_dir(pending_path(vault.path())).expect("unreadable list");
+
+    assert!(change_master_password(&vault).is_err());
+
+    assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
+    assert!(pending_path(vault.path()).is_dir());
+}
+
+#[test]
+fn a_key_change_interrupted_after_the_vault_commit_keeps_every_notice() {
+    use crate::vault::pending_change::next_key_pending_path;
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    without_recovery_wrap(&vault);
+    let old_key_list = std::fs::read(pending_path(vault.path())).expect("old list");
+
+    change_master_password(&vault).expect("changed");
+    let new_key_list = std::fs::read(pending_path(vault.path())).expect("new list");
+    std::fs::write(next_key_pending_path(vault.path()), new_key_list).expect("staged list");
+    std::fs::write(pending_path(vault.path()), old_key_list).expect("old list in place");
+
+    assert_eq!(notice_count(&vault), 1);
+    assert!(!next_key_pending_path(vault.path()).exists());
+    assert!(!crate::vault::pending_change::damaged_pending_path(vault.path()).exists());
+}
+
+#[test]
+fn a_list_staged_for_a_key_that_was_never_committed_is_removed() {
+    use crate::vault::pending_change::next_key_pending_path;
+    let vault = TestVault::with_login("login-a", ORIGIN);
+    approved_change(&vault);
+    let unused_key_list =
+        crate::vault::pending_change::seal(&[9_u8; 32], "fictional-vault", &[]).expect("sealed");
+    std::fs::write(next_key_pending_path(vault.path()), unused_key_list).expect("staged list");
+
+    assert_eq!(notice_count(&vault), 1);
+    assert!(!next_key_pending_path(vault.path()).exists());
 }

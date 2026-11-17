@@ -75,6 +75,7 @@ pub fn copy_item_field_in_state(
     clear_after_ms: Option<u64>,
 ) -> VaultResult<u64> {
     let value = item_field_in_state(state, presence, id, kind, field)?;
+    let copied = effects.copy_secret(value, clear_after_ms)?;
     record_field(state, EntryKind::Copy, id, kind, field);
-    effects.copy_secret(value, clear_after_ms)
+    Ok(copied)
 }
