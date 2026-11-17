@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -74,6 +75,7 @@ pub enum EntryKind {
     LockedOverflow,
     RefusalLimit,
     WritesLost,
+    Newer,
 }
 
 impl EntryKind {
@@ -231,6 +233,62 @@ pub struct RecordEntry {
     pub count: u32,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub late: bool,
+    #[serde(skip)]
+    newer: Option<NewerEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NewerEntry {
+    seq: u64,
+    json: Zeroizing<Vec<u8>>,
+    size: usize,
+}
+
+impl NewerEntry {
+    fn open(json: &[u8], size: usize) -> Option<RecordEntry> {
+        let fields: BTreeMap<String, &RawValue> = serde_json::from_slice(json).ok()?;
+        let seq: u64 = serde_json::from_str(fields.get("seq")?.get()).ok()?;
+        let at: u64 = serde_json::from_str(fields.get("at")?.get()).ok()?;
+        Some(RecordEntry {
+            seq,
+            at,
+            kind: EntryKind::Newer,
+            outcome: Outcome::Noted,
+            item_id: None,
+            item_kind: None,
+            fields: Vec::new(),
+            host: None,
+            similar_to: None,
+            match_kind: None,
+            count: 1,
+            late: false,
+            newer: Some(Self {
+                seq,
+                json: Zeroizing::new(json.to_vec()),
+                size,
+            }),
+        })
+    }
+
+    fn plaintext(&self, seq: u64) -> VaultResult<Zeroizing<Vec<u8>>> {
+        let unsealable = || "Sesame could not prepare the activity entry.".to_string();
+        let json = if seq == self.seq {
+            self.json.clone()
+        } else {
+            let renumbered = RawValue::from_string(seq.to_string()).map_err(|_| unsealable())?;
+            let mut fields: BTreeMap<String, &RawValue> =
+                serde_json::from_slice(&self.json).map_err(|_| unsealable())?;
+            fields.insert("seq".to_string(), &*renumbered);
+            let mut json = Zeroizing::new(Vec::with_capacity(self.json.len() + 32));
+            serde_json::to_writer(&mut *json, &fields).map_err(|_| unsealable())?;
+            json
+        };
+        let size = self.size.max(json.len());
+        let mut plaintext = Zeroizing::new(Vec::with_capacity(size));
+        plaintext.extend_from_slice(&json);
+        plaintext.resize(size, b' ');
+        Ok(plaintext)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -330,6 +388,7 @@ impl ReleaseDraft {
             match_kind: self.match_kind,
             count: self.count.max(1),
             late,
+            newer: None,
         }
     }
 
@@ -588,10 +647,19 @@ fn entry_line(
     prev: &[u8; 32],
     entry: &RecordEntry,
 ) -> VaultResult<Vec<u8>> {
-    let mut plaintext = Zeroizing::new([b' '; PLAINTEXT_BYTES]);
-    let mut cursor = std::io::Cursor::new(&mut plaintext[..]);
-    serde_json::to_writer(&mut cursor, entry)
-        .map_err(|_| "Sesame could not prepare the activity entry.".to_string())?;
+    let plaintext = match entry.newer.as_ref() {
+        Some(newer) => newer.plaintext(entry.seq)?,
+        None if entry.kind == EntryKind::Newer => {
+            return Err("Sesame could not prepare the activity entry.".into());
+        }
+        None => {
+            let mut plaintext = Zeroizing::new(vec![b' '; PLAINTEXT_BYTES]);
+            let mut cursor = std::io::Cursor::new(&mut plaintext[..]);
+            serde_json::to_writer(&mut cursor, entry)
+                .map_err(|_| "Sesame could not prepare the activity entry.".to_string())?;
+            plaintext
+        }
+    };
     let blob = encrypt_bytes(
         key,
         &plaintext[..],
@@ -626,14 +694,15 @@ fn open_entry(
 ) -> Option<RecordEntry> {
     let blob: CipherBlob = serde_json::from_slice(line).ok()?;
     let plaintext = decrypt_bytes(key, &blob, &entry_aad(record_id, vault_id, seq, prev)).ok()?;
-    if plaintext.len() != PLAINTEXT_BYTES {
-        return None;
-    }
     let end = plaintext
         .iter()
         .rposition(|byte| *byte != b' ')
         .map_or(0, |index| index + 1);
-    let entry: RecordEntry = serde_json::from_slice(&plaintext[..end]).ok()?;
+    let json = &plaintext[..end];
+    let entry = match serde_json::from_slice::<RecordEntry>(json) {
+        Ok(entry) if plaintext.len() == PLAINTEXT_BYTES && entry.kind != EntryKind::Newer => entry,
+        _ => NewerEntry::open(json, plaintext.len())?,
+    };
     (entry.seq == seq).then_some(entry)
 }
 
@@ -721,6 +790,34 @@ pub fn read_record_bytes(bytes: &[u8], vault_key: &[u8; 32], vault_id: &str) -> 
         file_len: offset as u64,
         damage,
     })
+}
+
+#[cfg(any(test, feature = "test-util"))]
+pub fn append_sealed_plaintext(
+    path: &Path,
+    vault_key: &[u8; 32],
+    vault_id: &str,
+    json: &[u8],
+) -> VaultResult<()> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    let ReadOutcome::Read(read) = read_record_bytes(&bytes, vault_key, vault_id) else {
+        return Err("The activity record could not be read.".into());
+    };
+    if read.damage.is_some() {
+        return Err("The activity record is damaged.".into());
+    }
+    let key = derive_key(vault_key, &read.record_id)?;
+    let mut plaintext = json.to_vec();
+    plaintext.resize(PLAINTEXT_BYTES.max(json.len()), b' ');
+    let blob = encrypt_bytes(
+        &key,
+        &plaintext,
+        &entry_aad(&read.record_id, vault_id, read.next_seq, &read.prev),
+    )?;
+    let mut line = serde_json::to_vec(&blob).map_err(|error| error.to_string())?;
+    line.push(b'\n');
+    let mut file = open_private_append(path)?;
+    file.write_all(&line).map_err(|error| error.to_string())
 }
 
 fn write_fresh(
@@ -1441,5 +1538,488 @@ mod tests {
         let mut too_long = entry(0, Outcome::Released);
         too_long.host = Some("h".repeat(PLAINTEXT_BYTES));
         assert!(entry_line(&key, &record_id, "vault", &prev, &too_long).is_err());
+    }
+
+    const PASSWORD: &str = "fictional master password";
+    const START: u64 = 1_800_000_000;
+
+    struct Fixture {
+        directory: PathBuf,
+        session: UnlockedVault,
+        clock: Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let directory =
+                std::env::temp_dir().join(format!("sesame-newer-{}", crate::random_id()));
+            std::fs::create_dir_all(&directory).expect("test directory");
+            let (opened, _) =
+                crate::api::create_vault(PASSWORD, "Fictional vault").expect("created vault");
+            let mut session = UnlockedVault::from_opened(directory.join("vault.sesame"), &opened)
+                .expect("session");
+            session.setup_complete = true;
+            crate::storage::persist_session(&mut session).expect("initial save");
+            Self {
+                directory,
+                session,
+                clock: Arc::new(std::sync::atomic::AtomicU64::new(START)),
+            }
+        }
+
+        fn state(&self) -> RecordState {
+            let state = RecordState::default();
+            let clock = Arc::clone(&self.clock);
+            state.set_clock(Arc::new(move || {
+                clock.load(std::sync::atomic::Ordering::SeqCst)
+            }));
+            state
+        }
+
+        fn advance(&self, seconds: u64) {
+            self.clock
+                .fetch_add(seconds, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn file(&self) -> PathBuf {
+            record_path(&self.session.path)
+        }
+
+        fn seed(&self, count: usize) -> RecordState {
+            let state = self.state();
+            for index in 0..count {
+                let appended = state.append(&self.session, fill(&format!("item-{index}")));
+                assert_eq!(appended, Appended::Written);
+                self.advance(1);
+            }
+            state
+        }
+
+        fn seal(&self, json: &str) {
+            let vault_id = session_vault_id(&self.session);
+            self.session
+                .expose_vault_key(|vault_key| {
+                    append_sealed_plaintext(&self.file(), vault_key, &vault_id, json.as_bytes())
+                })
+                .expect("sealed entry");
+        }
+
+        fn lines(&self) -> Vec<Vec<u8>> {
+            std::fs::read(self.file())
+                .expect("record bytes")
+                .split_inclusive(|byte| *byte == b'\n')
+                .map(<[u8]>::to_vec)
+                .collect()
+        }
+
+        fn write_lines(&self, lines: &[Vec<u8>]) {
+            std::fs::write(self.file(), lines.concat()).expect("rewritten record");
+        }
+
+        fn plaintexts(&self) -> Vec<Vec<u8>> {
+            let bytes = std::fs::read(self.file()).expect("record bytes");
+            let vault_id = session_vault_id(&self.session);
+            let mut lines = bytes.split_inclusive(|byte| *byte == b'\n');
+            let header = lines.next().expect("header");
+            let (record_id, _) = parse_header(&header[..header.len() - 1]).expect("header");
+            let key = session_key(&self.session, &record_id).expect("key");
+            let mut prev = line_hash(header);
+            let mut found = Vec::new();
+            for (seq, line) in lines.enumerate() {
+                let blob: CipherBlob =
+                    serde_json::from_slice(&line[..line.len() - 1]).expect("blob");
+                let aad = entry_aad(&record_id, &vault_id, seq as u64, &prev);
+                found.push(decrypt_bytes(&key, &blob, &aad).expect("opens").to_vec());
+                prev = line_hash(line);
+            }
+            found
+        }
+
+        fn reopen(&self) -> (RecordState, Vec<RecordEntry>) {
+            let state = self.state();
+            let entries = state.entries(&self.session).expect("entries");
+            (state, entries)
+        }
+
+        fn rotate(&mut self) {
+            crate::storage::replace_recovery_kit_for_session(
+                &mut self.session,
+                PASSWORD,
+                START,
+                START + crate::storage::RECOVERY_REPLACEMENT_DELAY_SECS,
+                false,
+            )
+            .expect("rotated vault key");
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    fn fill(item: &str) -> ReleaseDraft {
+        ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Released)
+            .item(item, "login")
+            .field("password")
+            .host("example.com")
+    }
+
+    fn alias_json(seq: u64, at: u64) -> String {
+        format!(
+            r#"{{"seq":{seq},"at":{at},"kind":"emailAlias","outcome":"released","itemId":"item-0","host":"example.com","count":1}}"#
+        )
+    }
+
+    fn padded(json: &str, size: usize) -> Vec<u8> {
+        let mut plaintext = json.as_bytes().to_vec();
+        plaintext.resize(size, b' ');
+        plaintext
+    }
+
+    fn json_fields(plaintext: &[u8]) -> BTreeMap<String, serde_json::Value> {
+        serde_json::from_slice(plaintext).expect("json object")
+    }
+
+    fn assert_newer(entry: &RecordEntry, seq: u64, at: u64) {
+        assert_eq!(entry.kind, EntryKind::Newer);
+        assert_eq!(entry.outcome, Outcome::Noted);
+        assert_eq!((entry.seq, entry.at, entry.count), (seq, at, 1));
+        assert_eq!(entry.item_id, None);
+        assert_eq!(entry.item_kind, None);
+        assert_eq!(entry.host, None);
+        assert!(entry.fields.is_empty());
+        assert!(!entry.late);
+    }
+
+    fn assert_damaged_after(fixture: &Fixture, kept: usize) {
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), kept + 1);
+        assert!(entries[..kept]
+            .iter()
+            .all(|entry| entry.kind == EntryKind::BrowserFill));
+        assert_eq!(entries[kept].kind, EntryKind::Unreadable);
+        assert_eq!(state.status().notice, Some(RecordNotice::Unreadable));
+        assert!(damaged_path(&fixture.session.path).exists());
+    }
+
+    #[test]
+    fn an_unknown_kind_in_the_middle_keeps_the_chain_and_the_entries_after_it() {
+        let fixture = Fixture::new();
+        fixture.seed(2);
+        fixture.seal(&alias_json(2, START + 5));
+        fixture.seal(&format!(
+            r#"{{"seq":3,"at":{},"kind":"copy","outcome":"released","itemId":"item-after","itemKind":"login","fields":["password"],"count":1}}"#,
+            START + 6
+        ));
+        let before = fixture.lines();
+
+        let state = fixture.state();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-last")),
+            Appended::Written
+        );
+        assert_eq!(fixture.lines()[..before.len()], before[..]);
+
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 5);
+        assert_newer(&entries[2], 2, START + 5);
+        assert_eq!(entries[3].kind, EntryKind::Copy);
+        assert_eq!(entries[3].item_id.as_deref(), Some("item-after"));
+        assert_eq!(entries[4].item_id.as_deref(), Some("item-last"));
+        assert_eq!(state.status().notice, None);
+        assert_eq!(state.status().complete_since, Some(START));
+        assert!(damaged_paths(&fixture.session.path)
+            .iter()
+            .all(|copy| !copy.exists()));
+    }
+
+    #[test]
+    fn an_unknown_outcome_field_or_value_reads_as_a_newer_entry() {
+        let shapes = [
+            r#"{"seq":1,"at":AT,"kind":"browserFill","outcome":"partlyReleased","itemId":"item-0","itemKind":"login","host":"example.com","count":1}"#,
+            r#"{"seq":1,"at":AT,"kind":"browserFill","outcome":"released","itemId":"item-0","itemKind":"login","host":"example.com","count":1,"device":"fictional-laptop"}"#,
+            r#"{"seq":1,"at":AT,"kind":"browserFill","outcome":"released","itemId":"item-0","fields":["passkey"],"host":"example.com","count":1}"#,
+            r#"{"seq":1,"at":AT,"kind":"browserFill","outcome":"released","itemId":"item-0","host":"example.com","matchKind":"subdomain","count":1}"#,
+            r#"{"seq":1,"at":AT,"kind":"browserFill","outcome":"released","itemId":"item-0","host":"example.com"}"#,
+            r#"{"seq":1,"at":AT,"kind":"newer","outcome":"noted","count":1}"#,
+            r#"{"at":AT,"seq":1,"kind":{"nested":["fictional",1.5,null]},"count":340282366920938463463374607431768211455}"#,
+        ];
+        for shape in shapes {
+            let fixture = Fixture::new();
+            fixture.seed(1);
+            let json = shape.replace("AT", &(START + 9).to_string());
+            fixture.seal(&json);
+            fixture.state().append(&fixture.session, fill("item-after"));
+
+            let (state, entries) = fixture.reopen();
+            assert_eq!(entries.len(), 3, "{shape}");
+            assert_newer(&entries[1], 1, START + 9);
+            assert_eq!(entries[2].item_id.as_deref(), Some("item-after"));
+            assert_eq!(state.status().notice, None);
+            assert_eq!(
+                fixture.plaintexts()[1],
+                padded(&json, PLAINTEXT_BYTES),
+                "{shape}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_larger_sealed_entry_from_a_newer_version_is_kept_at_its_size() {
+        let mut fixture = Fixture::new();
+        let state = fixture.seed(1);
+        let json = format!(
+            r#"{{"seq":1,"at":{},"kind":"browserFill","outcome":"released","note":"{}"}}"#,
+            START + 3,
+            "n".repeat(PLAINTEXT_BYTES)
+        );
+        fixture.seal(&json);
+        drop(state);
+        let state = fixture.state();
+        state.entries(&fixture.session).expect("entries");
+
+        fixture.rotate();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        let (_, entries) = fixture.reopen();
+        assert_newer(&entries[1], 1, START + 3);
+        assert_eq!(fixture.plaintexts()[1], json.as_bytes());
+    }
+
+    #[test]
+    fn a_newer_entry_that_fails_authentication_is_still_damage() {
+        let fixture = Fixture::new();
+        fixture.seed(2);
+        fixture.seal(&alias_json(2, START + 5));
+        fixture.state().append(&fixture.session, fill("item-after"));
+        let mut lines = fixture.lines();
+        let target = lines[3].len() - 10;
+        lines[3][target] ^= 0x01;
+        fixture.write_lines(&lines);
+
+        assert_damaged_after(&fixture, 2);
+    }
+
+    #[test]
+    fn a_newer_entry_sealed_under_another_record_is_still_damage() {
+        let fixture = Fixture::new();
+        fixture.seed(2);
+        let vault_id = session_vault_id(&fixture.session);
+        let lines = fixture.lines();
+        let (record_id, _) = parse_header(&lines[0][..lines[0].len() - 1]).expect("header");
+        let prev = line_hash(&lines[2]);
+        let mut other_record = record_id;
+        other_record[0] ^= 0x01;
+        let key = session_key(&fixture.session, &record_id).expect("key");
+        for (record, vault, seq) in [
+            (other_record, vault_id.as_str(), 2),
+            (record_id, "fictional-other-vault", 2),
+            (record_id, vault_id.as_str(), 3),
+        ] {
+            let plaintext = padded(&alias_json(seq, START + 5), PLAINTEXT_BYTES);
+            let blob = encrypt_bytes(&key, &plaintext, &entry_aad(&record, vault, seq, &prev))
+                .expect("blob");
+            let mut line = serde_json::to_vec(&blob).expect("line");
+            line.push(b'\n');
+            let mut tampered = lines.clone();
+            tampered.push(line);
+            fixture.write_lines(&tampered);
+
+            assert_damaged_after(&fixture, 2);
+            for copy in damaged_paths(&fixture.session.path) {
+                let _ = std::fs::remove_file(copy);
+            }
+            fixture.write_lines(&lines);
+        }
+    }
+
+    #[test]
+    fn a_newer_entry_with_the_wrong_sequence_number_is_still_damage() {
+        let fixture = Fixture::new();
+        fixture.seed(2);
+        fixture.seal(&alias_json(7, START + 5));
+        assert_damaged_after(&fixture, 2);
+    }
+
+    #[test]
+    fn a_plaintext_that_is_not_an_entry_object_is_still_damage() {
+        let not_entries = [
+            "not json at all".to_string(),
+            "[2,1800000005]".to_string(),
+            r#"{"seq":2}"#.to_string(),
+            r#"{"seq":2,"at":"yesterday"}"#.to_string(),
+            r#"{"seq":-2,"at":1800000005}"#.to_string(),
+            format!(r#"{{"seq":2,"at":{}}} trailing"#, START + 5),
+            String::new(),
+        ];
+        for plaintext in not_entries {
+            let fixture = Fixture::new();
+            fixture.seed(2);
+            fixture.seal(&plaintext);
+            assert_damaged_after(&fixture, 2);
+        }
+    }
+
+    #[test]
+    fn a_vault_key_change_reseals_a_newer_entry_byte_for_byte() {
+        let mut fixture = Fixture::new();
+        fixture.seed(2);
+        fixture.seal(&alias_json(2, START + 5));
+        let state = fixture.state();
+        state.entries(&fixture.session).expect("entries");
+        let header = fixture.lines()[0].clone();
+
+        fixture.rotate();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        assert_ne!(fixture.lines()[0], header);
+        assert_eq!(
+            fixture.plaintexts()[2],
+            padded(&alias_json(2, START + 5), PLAINTEXT_BYTES)
+        );
+        let (state, entries) = fixture.reopen();
+        assert_newer(&entries[2], 2, START + 5);
+        assert_eq!(entries.len(), 4);
+        assert_eq!(state.status().notice, None);
+    }
+
+    #[test]
+    fn damage_after_a_newer_entry_keeps_it_byte_for_byte() {
+        let fixture = Fixture::new();
+        fixture.seed(1);
+        fixture.seal(&alias_json(1, START + 5));
+        let mut lines = fixture.lines();
+        lines.push(b"not an entry\n".to_vec());
+        fixture.write_lines(&lines);
+
+        let (state, entries) = fixture.reopen();
+        assert_newer(&entries[1], 1, START + 5);
+        assert_eq!(entries[2].kind, EntryKind::Unreadable);
+        assert_eq!(state.status().notice, Some(RecordNotice::Unreadable));
+        assert_eq!(
+            fixture.plaintexts()[1],
+            padded(&alias_json(1, START + 5), PLAINTEXT_BYTES)
+        );
+    }
+
+    #[test]
+    fn a_file_changed_outside_sesame_is_written_again_with_the_newer_entry() {
+        let fixture = Fixture::new();
+        fixture.seed(1);
+        fixture.seal(&alias_json(1, START + 5));
+        let state = fixture.state();
+        state.entries(&fixture.session).expect("entries");
+        let mut lines = fixture.lines();
+        lines.pop();
+        fixture.write_lines(&lines);
+
+        state.append(&fixture.session, fill("item-after"));
+
+        let (_, entries) = fixture.reopen();
+        assert_newer(&entries[1], 1, START + 5);
+        assert_eq!(entries[2].kind, EntryKind::FileChanged);
+        assert_eq!(
+            fixture.plaintexts()[1],
+            padded(&alias_json(1, START + 5), PLAINTEXT_BYTES)
+        );
+    }
+
+    #[test]
+    fn retention_renumbers_a_newer_entry_and_keeps_every_other_field() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(3);
+        fixture.advance(40 * DAY_SECS);
+        let at = START + 40 * DAY_SECS;
+        fixture.seal(&alias_json(3, at));
+        drop(state);
+        let state = fixture.state();
+        state.append(&fixture.session, fill("item-new"));
+        state.set_retention_days(30);
+        state.apply_retention(&fixture.session).expect("trimmed");
+
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 2);
+        assert_newer(&entries[0], 0, at);
+        assert_eq!(entries[1].item_id.as_deref(), Some("item-new"));
+        assert_eq!(state.status().notice, None);
+        let mut expected = json_fields(alias_json(3, at).as_bytes());
+        expected.insert("seq".into(), 0.into());
+        let sealed = &fixture.plaintexts()[0];
+        assert_eq!(sealed.len(), PLAINTEXT_BYTES);
+        assert_eq!(json_fields(sealed.trim_ascii_end()), expected);
+    }
+
+    #[test]
+    fn shortening_retention_counts_an_old_newer_entry_and_keeps_a_recent_one() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(1);
+        fixture.seal(&alias_json(1, START + 1));
+        fixture.advance(40 * DAY_SECS);
+        let at = START + 40 * DAY_SECS;
+        fixture.seal(&format!(
+            r#"{{"seq":2,"at":{at},"kind":"terminalRelease","outcome":"released","count":1}}"#
+        ));
+        drop(state);
+        let state = fixture.state();
+        state.append(&fixture.session, fill("item-new"));
+
+        assert_eq!(state.shorten_retention(&fixture.session, 30), Ok(2));
+
+        let (_, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 3);
+        assert_newer(&entries[0], 0, at);
+        assert_eq!(entries[1].item_id.as_deref(), Some("item-new"));
+        assert_eq!(entries[2].kind, EntryKind::RetentionShortened);
+        assert_eq!(entries[2].count, 2);
+        assert_eq!(
+            json_fields(fixture.plaintexts()[0].trim_ascii_end())["kind"],
+            "terminalRelease"
+        );
+    }
+
+    #[test]
+    fn clearing_removes_and_counts_a_newer_entry() {
+        let fixture = Fixture::new();
+        fixture.seed(2);
+        fixture.seal(&alias_json(2, START + 5));
+        let state = fixture.state();
+        let before = state.entries(&fixture.session).expect("entries");
+        assert_newer(&before[2], 2, START + 5);
+
+        state.clear(&fixture.session).expect("cleared");
+
+        let (_, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, EntryKind::Cleared);
+        assert_eq!(entries[0].count, 3);
+    }
+
+    #[test]
+    fn this_build_never_writes_the_newer_form() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(1);
+
+        state.append(
+            &fixture.session,
+            ReleaseDraft::new(EntryKind::Newer, Outcome::Noted),
+        );
+
+        let (_, entries) = fixture.reopen();
+        assert!(entries.iter().all(|entry| entry.kind != EntryKind::Newer));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.kind == EntryKind::WritesLost));
+        assert!(fixture
+            .plaintexts()
+            .iter()
+            .all(|plaintext| !plaintext.windows(7).any(|window| window == b"\"newer\"")));
     }
 }

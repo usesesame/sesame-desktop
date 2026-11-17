@@ -9,7 +9,7 @@ function entry(partial: Partial<ReleaseEntryView>): ReleaseEntryView {
   return { seq: 1, at: 1_800_000_000, kind: 'browserFill', outcome: 'released', fields: [], count: 1, late: false, ...partial }
 }
 
-const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost']
+const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
 const ALL_OUTCOMES: Outcome[] = ['released', 'saved', 'updated', 'denied', 'timedOut', 'connectionClosed', 'vaultChanged', 'withdrawn', 'lookalike', 'noMatch', 'locked', 'busy', 'mismatch', 'replayed', 'neverSave', 'noted']
 
 function readable(text: string) {
@@ -64,6 +64,13 @@ describe('activity sentences', () => {
     expect(entrySentence(entry({ kind: 'retentionShortened', outcome: 'noted', count: 4 }), () => null)).toBe('You shortened how long Sesame keeps activity')
     expect(entryDetails(entry({ kind: 'retentionShortened', outcome: 'noted', count: 4 }))).toContain('4 entries removed')
     expect(entryDetails(entry({ kind: 'csvExport', count: 40 }))).not.toContain('40 times')
+  })
+
+  test('an entry from a newer version is one plain line with its time', () => {
+    const newer = entry({ kind: 'newer', outcome: 'noted' })
+    expect(entrySentence(newer, titleFor)).toBe('Something a newer version of Sesame recorded')
+    expect(entryDetails(newer)).toBe(entryDetails(entry({ kind: 'backupCreated' })))
+    expect(isRefusal(newer.outcome)).toBe(false)
   })
 
   test('refusals are told apart from releases', () => {

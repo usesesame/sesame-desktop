@@ -1234,3 +1234,109 @@ fn a_copy_that_fails_records_nothing() {
 
     assert!(entries(&vault.state).is_empty());
 }
+
+fn seal_newer(vault: &TestVault, json: &str) {
+    {
+        let guard = vault.state.session.lock().expect("session lock");
+        let session = guard.as_ref().expect("unlocked");
+        let vault_id = session.vault_id().expect("vault id").to_string();
+        let path = crate::vault::release_record::record_path(&session.path);
+        session
+            .expose_vault_key(|vault_key| {
+                crate::vault::release_record::append_sealed_plaintext(
+                    &path,
+                    vault_key,
+                    &vault_id,
+                    json.as_bytes(),
+                )
+            })
+            .expect("sealed entry");
+    }
+    vault.state.release_record.discard();
+}
+
+#[test]
+fn an_entry_from_a_newer_version_is_listed_but_never_counted_as_a_release() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    let (state, _) = state_with_clock();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    record(
+        &vault.state,
+        ReleaseDraft::new(EntryKind::Copy, Outcome::Released).item("login-a", "login"),
+    );
+    let now = crate::vault::util::unix_timestamp();
+    for (seq, rest) in [
+        (
+            1,
+            r#""kind":"browserFill","outcome":"released","count":1,"device":"fictional-laptop""#,
+        ),
+        (
+            2,
+            r#""kind":"browserFill","outcome":"partlyReleased","count":4"#,
+        ),
+        (
+            3,
+            r#""kind":"browserFill","outcome":"denied","count":2,"via":"fictional-phone""#,
+        ),
+        (4, r#""kind":"emailAlias","outcome":"released","count":1"#),
+    ] {
+        seal_newer(
+            &vault,
+            &format!(
+                r#"{{"seq":{seq},"at":{now},"itemId":"login-a","itemKind":"login","host":"example.com",{rest}}}"#
+            ),
+        );
+    }
+
+    let all = entries(&vault.state);
+    assert_eq!(all.len(), 5);
+    let newer: Vec<_> = all
+        .iter()
+        .filter(|entry| entry.kind == EntryKind::Newer)
+        .collect();
+    assert_eq!(newer.len(), 4);
+    assert!(newer.iter().all(|entry| entry.outcome == Outcome::Noted
+        && entry.item_id.is_none()
+        && entry.host.is_none()
+        && entry.at == now));
+
+    let for_item = release_record_page_in_state(
+        &vault.state,
+        ReleaseRecordQuery {
+            item_id: Some("login-a".to_string()),
+            ..ReleaseRecordQuery::default()
+        },
+    )
+    .expect("item page");
+    assert_eq!(for_item.total, 1);
+    assert_eq!(for_item.entries[0].kind, EntryKind::Copy);
+    let refused = release_record_page_in_state(
+        &vault.state,
+        ReleaseRecordQuery {
+            refused_only: true,
+            ..ReleaseRecordQuery::default()
+        },
+    )
+    .expect("refused page");
+    assert_eq!(refused.total, 0);
+
+    let offered = offer(fill_response_in_state(
+        &vault.state,
+        &state,
+        &effects,
+        &fill_request("https://example.com"),
+    ));
+    let hint =
+        release_record_hint_in_state(&vault.state, &state, offered.approval.approval_id(), now)
+            .expect("hint")
+            .expect("pending approval");
+    let item = hint
+        .items
+        .iter()
+        .find(|item| item.item_id == "login-a")
+        .expect("login-a");
+    assert_eq!(item.released_here, 0);
+    assert_eq!(item.last_released_at, None);
+    assert_eq!(hint.denied_recently, 0);
+    assert!(!hint.incomplete);
+}
