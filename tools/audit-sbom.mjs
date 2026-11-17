@@ -126,6 +126,16 @@ export const arrivesTransitively = (component) => {
   return roles.length > 0 && roles.every((role) => role === 'transitive')
 }
 
+export const resourceExhaustionWeaknesses = new Set(['CWE-1333', 'CWE-400', 'CWE-405', 'CWE-407', 'CWE-770', 'CWE-834'])
+
+export const neverShips = (component) =>
+  typeof component.purl === 'string' && component.purl.startsWith('pkg:npm/') && component.scope === 'excluded'
+
+export const onlyResourceExhaustion = (weaknesses) =>
+  Array.isArray(weaknesses) &&
+  weaknesses.length > 0 &&
+  weaknesses.every((weakness) => resourceExhaustionWeaknesses.has(weakness))
+
 const rustsecId = /^RUSTSEC-\d{4}-\d{4,}$/
 const isEmptyList = (value) => value === undefined || value === null || (Array.isArray(value) && value.length === 0)
 
@@ -281,6 +291,7 @@ export const collectSbomAdvisories = async (
       return 'waiting'
     }
     if (arrivesTransitively(component) && onlyUnmaintained(vulnerability, component)) return 'unmaintained'
+    if (neverShips(component) && onlyResourceExhaustion(vulnerability.database_specific?.cwe_ids)) return 'build-tool'
     return null
   }
   const vulnerable = results
@@ -296,6 +307,7 @@ export const collectSbomAdvisories = async (
         purl: entry.component.purl,
         ids: identified.map((vulnerability) => vulnerability.id),
         pulledInBy: propertyValues(entry.component, 'sesame:cargo-pulled-in-by').join(', '),
+        weaknesses: Object.fromEntries(identified.map((vulnerability) => [vulnerability.id, vulnerability.database_specific?.cwe_ids])),
         idsCoveredBy: (kind) => identified.filter((_, index) => covered[index] === kind).map((vulnerability) => vulnerability.id),
         cleared: covered.length > 0 && covered.every(Boolean),
       }
@@ -317,6 +329,12 @@ export const collectSbomAdvisories = async (
   const unmaintained = vulnerable
     .map((entry) => ({ ...publicAdvisory(entry), ids: entry.idsCoveredBy('unmaintained'), pulledInBy: entry.pulledInBy }))
     .filter((entry) => entry.ids.length > 0)
+  const buildTools = vulnerable
+    .map((entry) => {
+      const ids = entry.idsCoveredBy('build-tool')
+      return { ...publicAdvisory(entry), ids, weaknesses: [...new Set(ids.flatMap((id) => entry.weaknesses[id]))].sort() }
+    })
+    .filter((entry) => entry.ids.length > 0)
   return {
     sources: summaries.map((summary, index) => ({
       ...summary,
@@ -335,6 +353,7 @@ export const collectSbomAdvisories = async (
     reviewed,
     waiting,
     unmaintained,
+    buildTools,
     unused,
     unusedLibraries,
     expired,
@@ -430,6 +449,11 @@ const main = async () => {
   for (const component of report.unmaintained) {
     process.stdout.write(
       `Unmaintained crate that only arrives through ${component.pulledInBy}: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+    )
+  }
+  for (const component of report.buildTools) {
+    process.stdout.write(
+      `Resource exhaustion in a build tool that never ships: ${component.name}@${component.version}: ${component.ids.join(', ')} with ${component.weaknesses.join(', ')}\n`,
     )
   }
   for (const rule of report.expiredLibraries) {

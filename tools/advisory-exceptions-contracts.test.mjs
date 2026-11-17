@@ -8,6 +8,7 @@ import {
   evaluateFindings,
   loadExceptions,
   npmFindings,
+  npmShippedState,
   validateExceptions,
 } from './audit-dependencies.mjs'
 
@@ -92,4 +93,48 @@ test('an npm advisory without a GHSA identifier can never be accepted', () => {
   const findings = npmFindings(npmReport([advisory({ url: 'https://example.invalid/advisory' })]))
   assert.equal(findings[0].id, 'npm advisory 1100001')
   assert.equal(evaluateFindings(findings, [exception()]).blocking.length, 1)
+})
+
+const globReport = (cwe, name = 'example-glob') =>
+  npmReport([advisory({ name, url: 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf', ...(cwe === undefined ? {} : { cwe }) })])
+const devLock = {
+  packages: {
+    '': { name: 'example-app' },
+    'node_modules/example-glob': { version: '4.0.7', dev: true },
+    'node_modules/example-bundler/node_modules/example-glob': { version: '2.3.1', dev: true },
+    'node_modules/example-runtime': { version: '1.0.0' },
+    'node_modules/example-split': { version: '1.0.0', dev: true },
+    'node_modules/example-tool/node_modules/example-split': { version: '0.9.0', devOptional: true },
+    'node_modules/example-alias': { name: 'example-real', version: '3.0.0', dev: true },
+  },
+}
+const buildOnly = npmShippedState(devLock, new Set(['example-ui']))
+
+test('resource exhaustion in an npm package that never ships is a notice', () => {
+  for (const cwe of [['CWE-1333'], ['CWE-400', 'CWE-405'], ['CWE-407'], ['CWE-770'], ['CWE-834']]) {
+    const result = evaluateFindings(npmFindings(globReport(cwe)), [], { ships: buildOnly })
+    assert.deepEqual(result.blocking, [], cwe.join())
+    assert.deepEqual(result.buildTools.map(({ package: name, cwe: weaknesses }) => [name, weaknesses]), [['example-glob', cwe]])
+  }
+  assert.equal(buildOnly('example-real'), false)
+})
+
+test('a build tool advisory with another or no weakness still fails', () => {
+  for (const cwe of [undefined, [], ['CWE-94'], ['CWE-22'], ['CWE-1321'], ['CWE-506'], ['CWE-1333', 'CWE-78'], 'CWE-1333']) {
+    const result = evaluateFindings(npmFindings(globReport(cwe)), [], { ships: buildOnly })
+    assert.equal(result.blocking.length, 1, JSON.stringify(cwe))
+    assert.deepEqual(result.buildTools, [], JSON.stringify(cwe))
+  }
+})
+
+test('resource exhaustion fails in a package that ships or whose shipped state is unknown', () => {
+  const blocked = (name, ships) => evaluateFindings(npmFindings(globReport(['CWE-1333'], name)), [], { ships }).blocking.length
+  assert.equal(blocked('example-runtime', buildOnly), 1, 'a production copy ships')
+  assert.equal(blocked('example-split', buildOnly), 1, 'one copy that is not dev only ships')
+  assert.equal(blocked('example-ui', npmShippedState({ packages: { 'node_modules/example-ui': { dev: true } } }, new Set(['example-ui']))), 1, 'the bundle lists it')
+  assert.equal(blocked('example-missing', buildOnly), 1, 'the lock file does not list it')
+  assert.equal(blocked('example-glob', npmShippedState(devLock, null)), 1, 'the shipped list is missing')
+  assert.equal(blocked('example-glob', undefined), 1, 'no shipped state was given')
+  const cargo = cargoFindings({ vulnerabilities: { list: [{ advisory: { id: 'RUSTSEC-2026-0001' }, package: { name: 'example-glob' } }] } })
+  assert.equal(evaluateFindings(cargo.map((finding) => ({ ...finding, cwe: ['CWE-1333'] })), [], { ships: buildOnly }).blocking.length, 1)
 })

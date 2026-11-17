@@ -611,3 +611,46 @@ test('a notice that carries anything beyond unmaintained still fails for a trans
   const mixed = await auditCrate(crate('transitive'), [unmaintainedNotice(), unmaintainedNotice({ id: 'RUSTSEC-2026-9002', facts: { informational: 'unsound' } })])
   assert.deepEqual(mixed.vulnerable.map((entry) => entry.ids), [['RUSTSEC-2026-9001', 'RUSTSEC-2026-9002']])
 })
+
+const npmPackage = (scope, name = 'fictional-glob') => ({ ...component(name, '4.0.0', `pkg:npm/${name}@4.0.0`), ...(scope === undefined ? {} : { scope }) })
+const githubAdvisory = (cweIds, id = 'GHSA-fictional-glob') => ({
+  id,
+  affected: [{ package: { ecosystem: 'npm', name: 'fictional-glob' } }],
+  database_specific: cweIds === undefined ? { severity: 'HIGH' } : { severity: 'HIGH', cwe_ids: cweIds },
+})
+const auditPackage = (target, advisories) =>
+  collectSbomAdvisories([{ bom: { components: [target] } }], { query: async () => advisories, today: '2026-11-17' })
+
+test('resource exhaustion in an npm package that never ships is a notice', async () => {
+  for (const cweIds of [['CWE-1333'], ['CWE-400'], ['CWE-405'], ['CWE-407'], ['CWE-770'], ['CWE-834'], ['CWE-1333', 'CWE-400']]) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(cweIds)])
+    assert.equal(report.vulnerable.length, 0, cweIds.join())
+    assert.deepEqual(report.buildTools.map((entry) => [entry.name, entry.ids, entry.weaknesses]), [
+      ['fictional-glob', ['GHSA-fictional-glob'], [...cweIds].sort()],
+    ])
+    assert.deepEqual(report.reviewed, [])
+  }
+})
+
+test('any other weakness or a missing weakness list in a build tool still fails', async () => {
+  for (const cweIds of [undefined, null, [], 'CWE-1333', ['CWE-94'], ['CWE-22'], ['CWE-1321'], ['CWE-506'], ['CWE-1333', 'CWE-94'], ['cwe-1333']]) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(cweIds)])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(cweIds))
+    assert.deepEqual(report.buildTools, [], JSON.stringify(cweIds))
+  }
+  const malware = await auditPackage(npmPackage('excluded'), [{ id: 'MAL-2026-0001', affected: [{ package: { ecosystem: 'npm', name: 'fictional-glob' } }] }])
+  assert.equal(malware.vulnerable.length, 1)
+  const mixed = await auditPackage(npmPackage('excluded'), [githubAdvisory(['CWE-1333']), githubAdvisory(['CWE-78'], 'GHSA-fictional-exec')])
+  assert.deepEqual(mixed.vulnerable.map((entry) => entry.ids), [['GHSA-fictional-glob', 'GHSA-fictional-exec']])
+})
+
+test('resource exhaustion fails in a package that ships or whose shipped state is unknown', async () => {
+  for (const scope of ['required', 'optional', undefined, 'EXCLUDED']) {
+    const report = await auditPackage(npmPackage(scope), [githubAdvisory(['CWE-1333'])])
+    assert.equal(report.vulnerable.length, 1, String(scope))
+  }
+  const cargo = { ...component('fictional-glob', '4.0.0', 'pkg:cargo/fictional-glob@4.0.0'), scope: 'excluded' }
+  assert.equal((await auditPackage(cargo, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
+  const bundled = { ...component('fictional-glob', '4.0.0', 'pkg:deb/ubuntu/fictional-glob@4.0.0'), scope: 'excluded' }
+  assert.equal((await auditPackage(bundled, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
+})
