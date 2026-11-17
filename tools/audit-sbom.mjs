@@ -127,7 +127,17 @@ const ecosystemCounts = (components) => {
   return counts
 }
 
-const queryComponents = async (entries, { query, concurrency }) => {
+const osvTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/
+
+export const isWithdrawn = (vulnerability, now = Date.now()) => {
+  const value = vulnerability?.withdrawn
+  if (typeof value !== 'string' || !osvTime.test(value)) return false
+  const time = Date.parse(value)
+  if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 19) !== value.slice(0, 19)) return false
+  return time <= now
+}
+
+const queryComponents = async (entries, { query, concurrency, now = Date.now() }) => {
   const results = new Array(entries.length)
   let cursor = 0
   const worker = async () => {
@@ -135,7 +145,12 @@ const queryComponents = async (entries, { query, concurrency }) => {
       const index = cursor
       cursor += 1
       const entry = entries[index]
-      results[index] = { ...entry, vulnerabilities: await query(entry.component.purl) }
+      const found = await query(entry.component.purl)
+      results[index] = {
+        ...entry,
+        vulnerabilities: found.filter((vulnerability) => !isWithdrawn(vulnerability, now)),
+        withdrawn: found.filter((vulnerability) => isWithdrawn(vulnerability, now)),
+      }
     }
   }
   const workers = Math.max(1, Math.min(concurrency, entries.length))
@@ -153,6 +168,17 @@ const advisoryList = (results) =>
       ids: entry.vulnerabilities.map((vulnerability) => vulnerability.id).filter(Boolean),
     }))
 
+const withdrawnList = (results) =>
+  results
+    .filter((entry) => entry.withdrawn.length > 0)
+    .map((entry) => ({
+      label: entry.label ?? null,
+      name: entry.component.name,
+      version: entry.component.version,
+      purl: entry.component.purl,
+      ids: entry.withdrawn.map((vulnerability) => vulnerability.id ?? 'an advisory without an id'),
+    }))
+
 const publicAdvisory = (entry) => ({
   label: entry.label,
   name: entry.name,
@@ -161,10 +187,10 @@ const publicAdvisory = (entry) => ({
   ids: entry.ids,
 })
 
-export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8 } = {}) => {
+export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8, now } = {}) => {
   const components = Array.isArray(bom.components) ? bom.components : []
   const queried = components.filter(audited)
-  const results = await queryComponents(queried.map((component) => ({ component })), { query, concurrency })
+  const results = await queryComponents(queried.map((component) => ({ component })), { query, concurrency, now })
   return {
     total: components.length,
     queried: queried.length,
@@ -172,6 +198,7 @@ export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8
     neverCompiled: components.filter(neverCompiled).length,
     byEcosystem: ecosystemCounts(queried),
     vulnerable: advisoryList(results),
+    withdrawn: withdrawnList(results),
   }
 }
 
@@ -183,6 +210,7 @@ export const collectSbomAdvisories = async (
     allowlist: configured = [],
     unfixed = { release: null, libraries: [] },
     today = new Date().toISOString().slice(0, 10),
+    now,
   } = {},
 ) => {
   const lapsed = (rule) => typeof rule.expires === 'string' && rule.expires < today
@@ -203,9 +231,9 @@ export const collectSbomAdvisories = async (
       neverCompiled: components.filter(neverCompiled).length,
       byEcosystem: ecosystemCounts(queried),
     })
-    for (const component of queried) entries.push({ sourceIndex: index, component })
+    for (const component of queried) entries.push({ sourceIndex: index, label: source.label ?? null, component })
   }
-  const results = await queryComponents(entries, { query, concurrency })
+  const results = await queryComponents(entries, { query, concurrency, now })
   const usedRules = new Set()
   const usedLibraries = new Set()
   const coverage = (component, vulnerability) => {
@@ -264,6 +292,7 @@ export const collectSbomAdvisories = async (
     neverCompiled: summaries.reduce((sum, summary) => sum + summary.neverCompiled, 0),
     byEcosystem,
     vulnerable: fatal.map(publicAdvisory),
+    withdrawn: withdrawnList(results),
     allowed: allowed.map(publicAdvisory),
     reviewed,
     waiting,
@@ -343,6 +372,11 @@ const main = async () => {
     process.stdout.write(
       `Combined: queried ${report.queried} of ${report.total} components against OSV (${report.skipped} without a purl; ${formatEcosystems(report.byEcosystem)}).\n`,
     )
+  }
+  const withdrawnCount = report.withdrawn.reduce((sum, component) => sum + component.ids.length, 0)
+  process.stdout.write(`Left out ${withdrawnCount} advisories that their publisher withdrew.\n`)
+  for (const component of report.withdrawn) {
+    process.stdout.write(`Withdrawn: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`)
   }
   for (const component of report.reviewed) {
     process.stdout.write(

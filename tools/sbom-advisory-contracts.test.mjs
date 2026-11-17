@@ -11,6 +11,7 @@ import {
   collectSbomAdvisories,
   defaultSbomPath,
   awaitsUbuntuFix,
+  isWithdrawn,
   loadAllowlist,
   loadUnfixedLibraryRules,
   queryOsv,
@@ -498,4 +499,47 @@ test('the never compiled mark does not hide a package outside cargo', async () =
   const report = await collectSbomAdvisories([{ bom }], { query: async () => [{ id: 'GHSA-fictional-2' }], today: '2026-11-17' })
   assert.equal(report.vulnerable.length, 1)
   assert.equal(report.neverCompiled, 0)
+})
+
+const withdrawnSource = () => [
+  { label: 'locked.cdx.json', bom: { components: [component('fictional-merge', '1.0.0', 'pkg:npm/fictional-merge@1.0.0')] } },
+]
+const auditWithdrawn = (advisories) =>
+  collectSbomAdvisories(withdrawnSource(), {
+    query: async () => advisories,
+    today: '2026-11-17',
+    now: Date.parse('2026-11-17T12:00:00Z'),
+  })
+
+test('an advisory its publisher withdrew is left out and counted', async () => {
+  const report = await auditWithdrawn([{ id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38Z' }])
+  assert.equal(report.vulnerable.length, 0)
+  assert.deepEqual(report.withdrawn.map((entry) => [entry.label, entry.name, entry.ids]), [
+    ['locked.cdx.json', 'fictional-merge', ['GHSA-fictional-gone']],
+  ])
+  const single = await collectAdvisories(withdrawnSource()[0].bom, {
+    query: async () => [{ id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38.123456789Z' }],
+    now: Date.parse('2026-11-17T12:00:00Z'),
+  })
+  assert.equal(single.vulnerable.length, 0)
+  assert.equal(single.withdrawn.length, 1)
+})
+
+test('an advisory without a withdrawn time still fails beside a withdrawn one', async () => {
+  const report = await auditWithdrawn([
+    { id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38Z' },
+    { id: 'GHSA-fictional-live' },
+  ])
+  assert.deepEqual(report.vulnerable.map((entry) => entry.ids), [['GHSA-fictional-live']])
+  assert.deepEqual(report.withdrawn.map((entry) => entry.ids), [['GHSA-fictional-gone']])
+})
+
+test('a withdrawn field that is not a valid past time does not withdraw the advisory', async () => {
+  for (const withdrawn of [null, '', 'yes', true, 1763319338, '2026-11-16', '2026-02-30T00:00:00Z', '2026-11-16T25:00:00Z', '2026-11-16T18:55:38+02:00', '2026-11-18T00:00:00Z']) {
+    const report = await auditWithdrawn([{ id: 'GHSA-fictional-live', withdrawn }])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(withdrawn))
+    assert.equal(report.withdrawn.length, 0, JSON.stringify(withdrawn))
+  }
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-16T18:55:38Z' }, Date.parse('2026-11-17T00:00:00Z')), true)
+  assert.equal(isWithdrawn({}, Date.parse('2026-11-17T00:00:00Z')), false)
 })
