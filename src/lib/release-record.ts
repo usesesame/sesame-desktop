@@ -159,6 +159,8 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
       return `Saved an attachment from ${title} to a file`
     case 'devicePaired':
       return 'Gave the vault key to a new device through Sync'
+    case 'emailAlias':
+      return `Sent your alias API token to ${entry.host ?? 'the alias service'} to make a new alias`
     case 'cleared':
       return 'The activity record was cleared'
     case 'retentionShortened':

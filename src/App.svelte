@@ -5,6 +5,7 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
+  import { clearEmailAliases } from './lib/email-aliases'
   import { clearReleaseRecord, onReleaseRecordChanged, setReleaseRecordRetention } from './lib/release-record-api'
   import { startActivityReports } from './lib/activity'
   import { loadPlatformCapabilities } from './lib/platform'
@@ -412,6 +413,7 @@
   }
 
   function clearSessionState() {
+    clearEmailAliases()
     loginController.clearSecrets()
     importController.clearSecrets()
     cleanupController.clearSecrets()

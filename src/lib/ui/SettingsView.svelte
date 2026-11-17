@@ -14,6 +14,7 @@
   import CustomServerSetting from './CustomServerSetting.svelte'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import NeverSaveSitesSetting from './NeverSaveSitesSetting.svelte'
+  import EmailAliasesSetting from './EmailAliasesSetting.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
   import { recoveryRequestPending } from '../recovery-replacement'
@@ -357,6 +358,7 @@
           </section>
         {/if}
         <NeverSaveSitesSetting />
+        <EmailAliasesSetting />
         {#if !serviceConnection.serverAddress}
           <section class="settings-group" aria-labelledby="settings-group-connections-account">
             <h3 id="settings-group-connections-account">Sesame account</h3>

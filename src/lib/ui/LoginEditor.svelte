@@ -6,12 +6,13 @@
   import Icon from '../Icon.svelte'
   import { generatorLabels, generatorOptionKeys } from '../generator'
   import { useAppStores } from '../stores/app-stores'
-  import { grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
+  import { createEmailAlias, grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
+  import { emailAliases, loadEmailAliases, serviceNames } from '../email-aliases'
   import { messageFor } from '../controllers/feedback-controller'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import LoginCustomFields from './LoginCustomFields.svelte'
   import type { Folder, LoginInput, MatchRule } from '../types'
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
 
   const PASSWORD_HIDE_AFTER_MS = 30_000
 
@@ -37,6 +38,32 @@
   }
 
   const { generator, vault } = useAppStores()
+
+  let aliasWorking = false
+  let aliasNote = ''
+  let aliasError = ''
+  $: aliasService = $emailAliases?.service
+
+  onMount(() => {
+    if (!$emailAliases) loadEmailAliases().catch(() => {})
+  })
+
+  async function createAlias() {
+    if (aliasWorking || !aliasService) return
+    aliasWorking = true
+    aliasNote = ''
+    aliasError = ''
+    try {
+      const alias = await createEmailAlias(loginDraft.url || undefined)
+      loginDraft = { ...loginDraft, email: alias }
+      dirty = true
+      aliasNote = `${serviceNames[aliasService]} made a new alias. Save the login to keep it.`
+    } catch (error) {
+      aliasError = messageFor(error)
+    } finally {
+      aliasWorking = false
+    }
+  }
 
   export let loginDraft: LoginInput
   export let folderOptions: Folder[] = []
@@ -294,6 +321,12 @@
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
       <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="off" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
+      {#if aliasService}
+        <p class="suggestion-note alias-action">
+          <button type="button" class="text-button" disabled={aliasWorking || savingLogin} on:click={createAlias}>{aliasWorking ? 'Creating alias…' : 'Create alias'}</button>
+          {#if aliasError}<span class="alias-error" role="alert">{aliasError}</span>{:else if aliasNote}<span role="status">{aliasNote}</span>{/if}
+        </p>
+      {/if}
       <datalist id="username-suggestions">{#each usernameSuggestions as value (value)}<option {value}></option>{/each}</datalist>
       <datalist id="email-suggestions">{#each emailSuggestions as value (value)}<option {value}></option>{/each}</datalist>
     </div>
@@ -376,3 +409,9 @@
     <PasswordPresenceModal bind:presenceSecret={presenceSecret} errorMessage={presenceError} onConfirm={confirmEditorPresence} onCancel={cancelEditorPresence} />
   {/if}
 </ModalShell>
+
+<style>
+  .alias-action { grid-column: -2; }
+  .alias-action .text-button { margin-left: calc(var(--space-1) * -1); }
+  .alias-error { color: var(--danger); }
+</style>
