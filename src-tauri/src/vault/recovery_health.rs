@@ -1,6 +1,6 @@
-use chrono::Utc;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use time::OffsetDateTime;
 
 use super::VaultResult;
 
@@ -32,8 +32,12 @@ pub fn update_after_export_with_payload(
     revision: u64,
 ) -> VaultResult<()> {
     let health = read_recovery_health(app)?.unwrap_or_default();
-    let health =
-        sesame_app::vault::recovery_health::record_export(health, vault_id, revision, Utc::now());
+    let health = sesame_app::vault::recovery_health::record_export(
+        health,
+        vault_id,
+        revision,
+        OffsetDateTime::now_utc(),
+    );
     write_recovery_health(app, &health)
 }
 
@@ -47,7 +51,7 @@ pub fn update_after_verification_with_payload(
         health,
         vault_id,
         revision,
-        Utc::now(),
+        OffsetDateTime::now_utc(),
     ) else {
         return Ok(());
     };

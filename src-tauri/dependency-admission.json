@@ -82,11 +82,6 @@
       "reason": "In use before this gate was adopted."
     },
     {
-      "name": "chrono",
-      "version": "0.4",
-      "reason": "In use before this gate was adopted."
-    },
-    {
       "name": "csv",
       "version": "1.4",
       "reason": "In use before this gate was adopted."
@@ -278,6 +273,11 @@
       "name": "tauri-plugin-updater",
       "version": "2",
       "reason": "In use before this gate was adopted."
+    },
+    {
+      "name": "time",
+      "version": "0.3",
+      "reason": "Replaces chrono, which RustSec marks as unmaintained. Tauri already brings time into the app through the cookie crate, so no new crate is compiled. jiff was the other choice and would have been a new crate in the build."
     },
     {
       "name": "tokio",

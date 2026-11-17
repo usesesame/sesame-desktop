@@ -40,9 +40,12 @@ pub(crate) fn path_from_file(file: tauri_plugin_dialog::FilePath) -> Option<Path
 }
 
 fn dated_name(prefix: &str, extension: &str) -> String {
+    let today = time::OffsetDateTime::now_utc().date();
     format!(
-        "{prefix}-{}.{extension}",
-        chrono::Utc::now().format("%Y-%m-%d")
+        "{prefix}-{:04}-{:02}-{:02}.{extension}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
     )
 }
 

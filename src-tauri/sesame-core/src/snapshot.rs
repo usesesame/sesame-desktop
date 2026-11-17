@@ -106,7 +106,7 @@ pub fn security_summary(payload: &VaultPayload) -> SecuritySummary {
     let mut two_factor_sites = 0;
     let mut two_factor_logins = Vec::new();
 
-    let today = chrono::Utc::now().date_naive();
+    let today = time::OffsetDateTime::now_utc().date();
     for card in &payload.cards {
         match card_expiry(&card.expiry_month, &card.expiry_year, today) {
             CardExpiry::Expired => expired_cards += 1,

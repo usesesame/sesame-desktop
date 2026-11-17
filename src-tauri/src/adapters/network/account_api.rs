@@ -48,8 +48,10 @@ pub struct DisconnectOutcome {
 
 fn expiry_seconds(value: Option<&str>) -> Option<u64> {
     value
-        .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
-        .and_then(|moment| u64::try_from(moment.timestamp()).ok())
+        .and_then(|text| {
+            time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .and_then(|moment| u64::try_from(moment.unix_timestamp()).ok())
 }
 
 fn validated_link_code(raw: &str) -> VaultResult<String> {
@@ -414,7 +416,10 @@ pub async fn get_service_connection_status(app: AppHandle) -> VaultResult<Servic
         }))
         .send()
         .await;
-    let ended = ended_state(&connection, chrono::Utc::now().timestamp());
+    let ended = ended_state(
+        &connection,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    );
     if matches!(heartbeat, Ok(ref response) if response.status().as_u16() == 401) {
         token.zeroize();
         let _ = remove_service_connection(&app);

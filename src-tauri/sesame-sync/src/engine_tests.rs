@@ -89,9 +89,7 @@ fn served(world: &World, header: &Header) -> ServedHeader {
         header: header.clone(),
         digest: header.digest(),
         receipt: URL_SAFE_NO_PAD.encode(world.instance.sign(&receipt.signing_payload()).to_bytes()),
-        accepted_at: chrono::DateTime::from_timestamp(accepted_at as i64, 0)
-            .expect("time")
-            .to_rfc3339(),
+        accepted_at: rfc3339(accepted_at as i64),
     }
 }
 
@@ -241,9 +239,7 @@ fn receipts_must_verify_under_the_pinned_instance_key() {
     assert!(verify_server_view(&state, &instance_key(&world), &view(&renamed, 2)).is_err());
 
     let mut later = honest.clone();
-    later[1].accepted_at = chrono::DateTime::from_timestamp(1_800_000_999, 0)
-        .expect("time")
-        .to_rfc3339();
+    later[1].accepted_at = rfc3339(1_800_000_999);
     assert!(verify_server_view(&state, &instance_key(&world), &view(&later, 2)).is_err());
 
     let mut unreadable = honest;
@@ -925,4 +921,11 @@ mod removal_packages {
 
         assert!(verify_package_for_removal(&world.entries, &bound).is_err());
     }
+}
+
+fn rfc3339(unix_seconds: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .expect("time")
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("time")
 }
