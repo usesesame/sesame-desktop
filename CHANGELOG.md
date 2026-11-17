@@ -4,6 +4,69 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.6.0
+
+### Before you update
+
+- 0.6.0 moves the vault to format 11, and 0.5.3 cannot open a format 11
+  vault. Before the first upgrade Sesame keeps one untouched copy of the old
+  file in the backups folder, so going back to 0.5.3 means restoring that
+  copy and losing what was saved after it.
+- Update every synced device to 0.6.0. A device on 0.5 stops syncing with a
+  message to update once it learns the new minimum, which it checks once an
+  hour. Until then it can refuse a newer snapshot with a message about a
+  recovery path, and it leaves its own vault as it was.
+
+### Logins
+
+- A login can hold its own named fields. A hidden field is only revealed or
+  copied after the master password check, and history, Trash, merges and
+  both exports carry the fields. Extra fields from imports and from older
+  vaults now show as custom fields.
+- Each login has a browser filling rule: this address only, the whole site,
+  or never fill. A whole-site login matches another host with the same
+  scheme, port and registrable domain, so tenants of a shared domain such as
+  github.io stay apart, and the approval says when a login matched by site.
+- The save prompt has "Never for this site", and Settings lists those sites
+  so they can be removed.
+
+### Browser
+
+- A password changed or generated from the browser is made by Sesame after
+  you approve, saved to the login and then handed to the browser. The old
+  password stays in history, and a notice waits until you keep the new
+  password or go back. This needs extension 0.3.0 or newer.
+- Going back is offered only for the change the login still holds, and the
+  notices survive a master password change and a crash.
+- The browser helper registers for Brave and Vivaldi on Linux.
+
+### Activity
+
+- A new Activity view lists every fill, copy, reveal and export, each item
+  shows its recent use, and the fill approval says how often a login was
+  filled on that site and whether you denied it recently.
+- The list is an encrypted file beside the vault that stays on the device.
+  Another program running as the same user can still change or delete it,
+  and the view says so.
+- Shortening how long activity is kept asks for the master password and
+  leaves an entry.
+
+### Sync
+
+- Copying or filling a password no longer uploads the whole vault. Sync
+  ignores the last used times when it decides whether the vault changed, so
+  two devices that each only used a password no longer raise a conflict.
+- A busy server, a rate limit and a vault over the size limit are each
+  explained and retried where that helps. They used to read as the server
+  being unreachable.
+- A device that unlocked for the first time after updating while a Sync run
+  was in flight kept its old Sync state. The run now upgrades it first.
+
+### Everyday use
+
+- The item list sorts once per change instead of on every redraw.
+- Import and merge backups keep the newest five.
+
 ## 0.5.3
 
 ### Everyday use
