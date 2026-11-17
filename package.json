@@ -61,8 +61,7 @@
     "desktop:linux:prerequisites": "node tools/check-linux-prerequisites.mjs",
     "desktop:linux:bundle-prerequisites": "node tools/check-linux-prerequisites.mjs --bundle",
     "desktop:linux:dev": "npm run desktop:linux:prerequisites && npm run tauri:dev:browser",
-    "types:generate": "node tools/generate-types.mjs",
-    "desktop:test:rust:sync": "npm run desktop:test:rust"
+    "types:generate": "node tools/generate-types.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
