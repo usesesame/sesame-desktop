@@ -9,10 +9,23 @@ use crate::network::email_alias::{api_host, AliasFailure, AliasRequest};
 use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::storage::commit_payload_change;
 use crate::vault::{
-    EmailAliasService, EmailAliasSettings, VaultResult, VaultState, MAX_ALIAS_DOMAIN_CHARS,
+    is_domain_name, EmailAliasService, EmailAliasSettings, VaultResult, VaultState,
 };
 
 const NOT_SET_UP: &str = "Turn on email aliases in Settings first.";
+const PRIVATE_NAME_ENDINGS: &[&str] = &[
+    "localhost",
+    "local",
+    "internal",
+    "intranet",
+    "private",
+    "lan",
+    "home",
+    "corp",
+    "arpa",
+    "onion",
+    "invalid",
+];
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export, optional_fields)]
@@ -25,7 +38,7 @@ pub struct EmailAliasStatus {
 
 impl EmailAliasStatus {
     fn of(settings: Option<&EmailAliasSettings>) -> Self {
-        match settings {
+        match settings.filter(|settings| settings.is_valid()) {
             Some(settings) => Self {
                 service: Some(settings.service),
                 domain: (!settings.domain.is_empty()).then(|| settings.domain.clone()),
@@ -134,12 +147,15 @@ pub fn site_description(site: &str) -> Option<String> {
         .ok()
         .filter(|url| matches!(url.scheme(), "http" | "https"))
         .or_else(|| Url::parse(&format!("https://{site}")).ok())?;
-    match parsed.host()? {
-        Host::Domain(domain) if domain.contains('.') && domain.len() <= MAX_ALIAS_DOMAIN_CHARS => {
-            Some(domain.trim_end_matches('.').to_ascii_lowercase())
-        }
-        _ => None,
-    }
+    let Host::Domain(domain) = parsed.host()? else {
+        return None;
+    };
+    let domain = domain
+        .strip_suffix('.')
+        .unwrap_or(domain)
+        .to_ascii_lowercase();
+    let ending = domain.rsplit('.').next().unwrap_or_default();
+    (is_domain_name(&domain) && !PRIVATE_NAME_ENDINGS.contains(&ending)).then_some(domain)
 }
 
 fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<AliasRequest> {
@@ -406,19 +422,55 @@ mod tests {
 
     #[test]
     fn only_a_host_name_can_become_a_description() {
-        assert_eq!(site_description("Example.COM"), Some("example.com".into()));
-        assert_eq!(
-            site_description("https://user:pass@example.com:8443/a?b#c"),
-            Some("example.com".into())
-        );
+        for (site, description) in [
+            ("Example.COM", "example.com"),
+            ("https://user:pass@example.com:8443/a?b#c", "example.com"),
+            ("user:pass@login.example.com:8443/path", "login.example.com"),
+            ("http://example.com./", "example.com"),
+            ("example.com.", "example.com"),
+            ("https://bücher.example/", "xn--bcher-kva.example"),
+            ("https://EXAMPLE.com/%2e%2e/", "example.com"),
+        ] {
+            assert_eq!(
+                site_description(site).as_deref(),
+                Some(description),
+                "{site:?}"
+            );
+        }
         for nothing in [
             "",
             "   ",
+            ".",
+            "..",
+            "example.com..",
+            ".example.com",
             "https://127.0.0.1/",
+            "127.0.0.1",
+            "https://2130706433/",
+            "https://0x7f.1/",
             "https://[::1]/",
+            "[fe80::1]:8080",
             "localhost",
+            "https://localhost:8443/",
+            "intranet",
+            "nas.local",
+            "https://router.lan/",
+            "printer.home.arpa",
+            "files.internal",
+            "fictionalhiddenservice.onion",
+            "https://example.123/",
             "javascript:alert(1)",
+            "javascript:alert(document.domain)//example.com",
+            "javascript://example.com/%0aalert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "data:,example.com",
             "file:///etc/passwd",
+            "ftp://files.example.com",
+            "https://ex$ample.com/",
+            "https://exa_mple.com/",
+            "https://-example.com/",
+            &format!("https://{}.example/", "a".repeat(64)),
+            &format!("https://{}example.com/", "a.".repeat(1100)),
         ] {
             assert_eq!(site_description(nothing), None, "{nothing:?}");
         }
@@ -530,6 +582,72 @@ mod tests {
         assert!(result.is_err());
         assert!(seen.is_empty());
         assert!(recorded(&vault).is_empty());
+    }
+
+    #[test]
+    fn an_unusable_stored_setting_counts_as_not_set_up() {
+        for settings in [
+            EmailAliasSettings {
+                service: EmailAliasService::Addy,
+                token: "has space".to_string(),
+                domain: "anonaddy.me".to_string(),
+                name_site: true,
+            },
+            EmailAliasSettings {
+                service: EmailAliasService::Addy,
+                token: TOKEN.to_string(),
+                domain: String::new(),
+                name_site: false,
+            },
+            EmailAliasSettings {
+                service: EmailAliasService::SimpleLogin,
+                token: TOKEN.to_string(),
+                domain: "anonaddy.me".to_string(),
+                name_site: false,
+            },
+        ] {
+            let vault = TestVault::with_login("login-a", "https://example.com");
+            vault.seed(|payload| payload.email_aliases = Some(settings));
+            vault.reopen();
+            let status = email_alias_status_in_state(&vault.state).expect("status");
+            assert_eq!(status, EmailAliasStatus::of(None));
+            let (result, seen) =
+                sent_requests(&vault, Some("https://example.com"), Ok(String::new()));
+            assert_eq!(result.unwrap_err(), NOT_SET_UP);
+            assert!(seen.is_empty());
+            assert!(recorded(&vault).is_empty());
+
+            save_email_alias_settings_in_state(
+                &vault.state,
+                input(EmailAliasService::SimpleLogin, Some(TOKEN), None, false),
+            )
+            .expect("a new token replaces the unusable one");
+            assert_eq!(
+                email_alias_status_in_state(&vault.state)
+                    .expect("status")
+                    .service,
+                Some(EmailAliasService::SimpleLogin)
+            );
+        }
+    }
+
+    #[test]
+    fn changing_the_setting_advances_the_session_like_any_vault_change() {
+        let vault = vault_with_addy(false);
+        let before = vault.state.session_epoch();
+        save_email_alias_settings_in_state(
+            &vault.state,
+            input(EmailAliasService::Addy, None, Some("anonaddy.me"), true),
+        )
+        .expect("saved");
+        assert!(vault.state.session_epoch() > before);
+        let unchanged = vault.state.session_epoch();
+        save_email_alias_settings_in_state(
+            &vault.state,
+            input(EmailAliasService::Addy, None, Some("anonaddy.me"), true),
+        )
+        .expect("saved again");
+        assert_eq!(vault.state.session_epoch(), unchanged);
     }
 
     #[test]
