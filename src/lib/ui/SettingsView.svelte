@@ -135,7 +135,7 @@
   }
 </script>
 
-<svelte:window on:resize={measureTabOverflow} />
+<svelte:window on:resize={() => void revealTab(tab)} />
 
 <section class="settings-view">
   <ViewHeader title="Settings" />
