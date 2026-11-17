@@ -18,16 +18,6 @@ use crate::{
 };
 use crate::{VaultFile, VaultPayload, VaultResult, VAULT_FORMAT_VERSION};
 
-pub fn unwrap_vault_key(file: &VaultFile, secret: &str) -> VaultResult<Zeroizing<[u8; 32]>> {
-    VaultLoader::unwrap_key(file, Credential::PasswordOrRecoveryKit(secret)).map_err(Into::into)
-}
-
-pub fn authenticate_vault_file(file: &VaultFile, secret: &str) -> VaultResult<()> {
-    VaultLoader::authenticate(file, Credential::PasswordOrRecoveryKit(secret))
-        .map(|_| ())
-        .map_err(Into::into)
-}
-
 pub fn verify_backup_file(path: &Path, secret: &str) -> VaultResult<BackupVerification> {
     let file = read_backup_file(path)?;
     let authenticated =
@@ -690,16 +680,6 @@ fn apply_restored_vault_file_with_storage<S: RestoreStorage>(
         pin_unlock_available,
         hello_unlock_available,
     })
-}
-
-/// Single-step authenticate-and-apply; the restore command splits the phases itself.
-pub fn restore_backup_to(
-    source: &Path,
-    destination: &Path,
-    secret: &str,
-) -> VaultResult<RestoreInstall> {
-    let prepared = prepare_backup_for_restore(source, destination, secret)?;
-    apply_restored_vault_file(destination, &prepared)
 }
 
 fn same_file(source: &Path, destination: &Path) -> bool {

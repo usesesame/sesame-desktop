@@ -385,10 +385,6 @@ pub fn login_summary_for(entry: &VaultEntry) -> LoginSummary {
     }
 }
 
-pub fn duplicate_groups_for(payload: &VaultPayload) -> Vec<DuplicateGroup> {
-    duplicate_groups_from_summaries(payload.entries.iter().map(login_summary_for).collect())
-}
-
 pub fn duplicate_groups_from_summaries(summaries: Vec<LoginSummary>) -> Vec<DuplicateGroup> {
     let mut by_key = HashMap::new();
     for summary in summaries {

@@ -30,11 +30,6 @@ use crate::{
 /// A PIN-enabled vault always has one; absence reads as tampering.
 pub const PIN_THROTTLE_FILE: &str = "pin-throttle.sesame";
 
-/// Every unlock path runs this before deriving a key from the file's parameters.
-pub fn check_supported_vault_format(file: &VaultFile) -> VaultResult<()> {
-    crate::loader::VaultLoader::validate(file).map_err(Into::into)
-}
-
 /// Absent reads as tampering, not a fresh count: setting a PIN always writes it.
 pub fn read_pin_throttle_state_at(path: &Path) -> VaultResult<Option<PersistedPinThrottle>> {
     let bytes = match crate::util::read_file_with_limit(path, 16 * 1024) {
