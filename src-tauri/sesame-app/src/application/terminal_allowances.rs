@@ -14,23 +14,44 @@ pub const MAX_ALLOWED_REQUESTS: usize = 50;
 const MAX_ALLOWANCES: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum TerminalKey {
-    Controlling {
-        device: u64,
-        session: u32,
-        leader_started: u64,
-    },
-    Parent {
-        pid: u32,
-        created: u64,
-    },
+#[cfg_attr(all(windows, not(test)), allow(dead_code))]
+pub struct TerminalKey {
+    device: u64,
+    session: u32,
+    leader_started: u64,
+}
+
+impl TerminalKey {
+    #[cfg(any(not(windows), test))]
+    pub fn controlling(device: u64, session: u32, leader_started: u64) -> Self {
+        Self {
+            device,
+            session,
+            leader_started,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct UnverifiedProgram {
+    pub reported_name: String,
+}
+
+impl UnverifiedProgram {
+    pub fn reported(name: String) -> Self {
+        Self {
+            reported_name: name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TerminalOrigin {
     pub key: Option<TerminalKey>,
     pub device: Option<String>,
-    pub program: Option<String>,
+    pub program: Option<UnverifiedProgram>,
     pub remote: bool,
 }
 
@@ -46,7 +67,7 @@ impl TerminalOrigin {
 pub struct TerminalAllowanceView {
     pub terminal: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub program: Option<String>,
+    pub program: Option<UnverifiedProgram>,
     pub remote: bool,
     pub expires_in_ms: u64,
 }
@@ -77,7 +98,7 @@ pub struct TerminalAllowanceList {
 struct Allowance {
     key: TerminalKey,
     terminal: String,
-    program: Option<String>,
+    program: Option<UnverifiedProgram>,
     remote: bool,
     epoch: u64,
     expires_at: Instant,

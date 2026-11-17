@@ -33,6 +33,7 @@ mod listener {
         CliUnlockRequestEvent,
     };
     use crate::application::cli_requests::{serve_cli_request, CliContext, CliHost};
+    use crate::application::terminal_allowances::TerminalOrigin;
     use crate::browser_pipe::TerminalConnection;
     use crate::cli_protocol::CliReply;
     use crate::release::ReleasePresence;
@@ -106,8 +107,18 @@ mod listener {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn origin(connection: &TerminalConnection) -> TerminalOrigin {
+        origin_of(connection.peer().pid(), connection.peer().start_time())
+    }
+
+    #[cfg(windows)]
+    fn origin(connection: &TerminalConnection) -> TerminalOrigin {
+        origin_of(connection.peer().pid())
+    }
+
     fn handle(app: &AppHandle, payload: &[u8], connection: &TerminalConnection) {
-        let origin = origin_of(connection.peer().pid());
+        let origin = origin(connection);
         let vault = app.state::<VaultState>();
         let presence = app.state::<ReleasePresence>();
         let approvals = app.state::<CliApprovalState>();

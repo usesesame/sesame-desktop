@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::approval_slot::{ApprovalSlot, SlotClaim};
 use super::browser_fill::APPROVAL_TOO_SOON;
 use super::browser_fill_broker::{Clock, FocusDelay};
+use super::terminal_allowances::UnverifiedProgram;
 use crate::cli_protocol::CliErrorCode;
 use crate::vault::random_id;
 
@@ -57,7 +58,7 @@ pub struct CliApprovalRequestEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub program: Option<String>,
+    pub program: Option<UnverifiedProgram>,
     pub remote: bool,
     pub can_allow_terminal: bool,
     pub needs_presence: bool,
@@ -81,7 +82,7 @@ pub struct CliUnlockRequestEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub program: Option<String>,
+    pub program: Option<UnverifiedProgram>,
     pub remote: bool,
 }
 

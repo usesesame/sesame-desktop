@@ -88,6 +88,10 @@ impl PipePeer {
     pub fn pid(&self) -> u32 {
         self.pid
     }
+
+    pub fn start_time(&self) -> u64 {
+        self.start_time
+    }
 }
 
 pub fn request(payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {

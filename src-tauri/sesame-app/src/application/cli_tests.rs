@@ -24,7 +24,9 @@ use super::cli_broker::{
 use super::cli_requests::{serve_cli_request, CliContext, CliHost};
 use super::lifecycle::lock_and_notify;
 use super::release_record::{release_record_page_in_state, ReleaseRecordQuery};
-use super::terminal_allowances::{TerminalAllowances, TerminalKey, TerminalOrigin, ALLOWANCE_TTL};
+use super::terminal_allowances::{
+    TerminalAllowances, TerminalKey, TerminalOrigin, UnverifiedProgram, ALLOWANCE_TTL,
+};
 
 const CANARY: &str = "fictional-password-canary";
 const RFC_KEY: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -269,13 +271,9 @@ fn get(n: u8, field: Option<&str>, copy: bool) -> Vec<u8> {
 
 fn terminal(leader_started: u64) -> TerminalOrigin {
     TerminalOrigin {
-        key: Some(TerminalKey::Controlling {
-            device: 34_819,
-            session: 4_101,
-            leader_started,
-        }),
+        key: Some(TerminalKey::controlling(34_819, 4_101, leader_started)),
         device: Some("pts/3".to_string()),
-        program: Some("bash".to_string()),
+        program: Some(UnverifiedProgram::reported("bash".to_string())),
         remote: false,
     }
 }

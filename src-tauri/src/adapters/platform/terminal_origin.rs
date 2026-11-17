@@ -1,6 +1,12 @@
-use crate::application::terminal_allowances::{TerminalKey, TerminalOrigin};
+#[cfg(target_os = "linux")]
+use crate::application::terminal_allowances::TerminalKey;
+use crate::application::terminal_allowances::{TerminalOrigin, UnverifiedProgram};
 
 const MAX_PROGRAM_CHARS: usize = 64;
+
+fn reported(name: &str) -> Option<UnverifiedProgram> {
+    printable(name).map(UnverifiedProgram::reported)
+}
 
 fn printable(name: &str) -> Option<String> {
     let cleaned: String = name
@@ -45,7 +51,7 @@ mod platform {
     }
 
     fn command_of(pid: u32) -> Option<String> {
-        printable(&std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?)
+        std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()
     }
 
     pub(super) fn device_name(terminal: u64) -> String {
@@ -63,11 +69,23 @@ mod platform {
         command.is_some_and(|name| name.starts_with("sshd"))
     }
 
-    pub(crate) fn origin_of(pid: u32) -> TerminalOrigin {
+    pub(crate) fn origin_of(pid: u32, verified_started: u64) -> TerminalOrigin {
+        origin_from(pid, verified_started, &stat_of, &command_of)
+    }
+
+    pub(super) fn origin_from(
+        pid: u32,
+        verified_started: u64,
+        stat_of: &dyn Fn(u32) -> Option<Stat>,
+        command_of: &dyn Fn(u32) -> Option<String>,
+    ) -> TerminalOrigin {
         let Some(stat) = stat_of(pid) else {
             return TerminalOrigin::without_terminal();
         };
-        let program = command_of(stat.parent);
+        if stat.started != verified_started {
+            return TerminalOrigin::without_terminal();
+        }
+        let program = command_of(stat.parent).as_deref().and_then(reported);
         if stat.terminal == 0 || stat.session == 0 {
             return TerminalOrigin {
                 program,
@@ -86,15 +104,16 @@ mod platform {
                 ..TerminalOrigin::without_terminal()
             };
         }
+        let leader_command = command_of(leader.parent);
         TerminalOrigin {
-            key: Some(TerminalKey::Controlling {
-                device: stat.terminal,
-                session: stat.session,
-                leader_started: leader.started,
-            }),
+            key: Some(TerminalKey::controlling(
+                stat.terminal,
+                stat.session,
+                leader.started,
+            )),
             device: Some(device_name(stat.terminal)),
             program,
-            remote: is_remote_parent(command_of(leader.parent).as_deref()),
+            remote: is_remote_parent(leader_command.as_deref().map(str::trim)),
         }
     }
 }
@@ -185,33 +204,18 @@ mod platform {
         else {
             return TerminalOrigin::without_terminal();
         };
-        let name = entries(&[parent])
-            .into_iter()
-            .find(|(found, _)| *found == parent)
-            .and_then(|(_, entry)| printable(&entry.name));
         let (Some(child_created), Some(parent_created)) = (created(pid), created(parent)) else {
-            return TerminalOrigin {
-                program: name,
-                ..TerminalOrigin::without_terminal()
-            };
+            return TerminalOrigin::without_terminal();
         };
         if parent_created >= child_created {
-            return TerminalOrigin {
-                program: name,
-                ..TerminalOrigin::without_terminal()
-            };
+            return TerminalOrigin::without_terminal();
         }
         TerminalOrigin {
-            key: Some(TerminalKey::Parent {
-                pid: parent,
-                created: parent_created,
-            }),
-            device: Some(match &name {
-                Some(name) => format!("{name} {parent}"),
-                None => format!("process {parent}"),
-            }),
-            program: name,
-            remote: false,
+            program: entries(&[parent])
+                .into_iter()
+                .find(|(found, _)| *found == parent)
+                .and_then(|(_, entry)| reported(&entry.name)),
+            ..TerminalOrigin::without_terminal()
         }
     }
 }
@@ -259,16 +263,152 @@ mod tests {
         assert_eq!(printable("  "), None);
     }
 
+    fn this_process_started() -> u64 {
+        parse_stat(&std::fs::read_to_string("/proc/self/stat").expect("own stat"))
+            .expect("parsed")
+            .started
+    }
+
     #[test]
     fn this_test_process_reports_a_consistent_origin() {
-        let first = origin_of(std::process::id());
-        let second = origin_of(std::process::id());
+        let started = this_process_started();
+        let first = origin_of(std::process::id(), started);
+        let second = origin_of(std::process::id(), started);
         assert_eq!(first, second);
         assert_eq!(first.key.is_some(), first.device.is_some());
     }
 
     #[test]
     fn a_process_that_is_not_running_has_no_terminal() {
-        assert_eq!(origin_of(u32::MAX), TerminalOrigin::without_terminal());
+        assert_eq!(origin_of(u32::MAX, 1), TerminalOrigin::without_terminal());
+    }
+
+    #[test]
+    fn a_pid_whose_start_time_differs_from_the_verified_one_has_no_terminal() {
+        let started = this_process_started();
+        assert_eq!(
+            origin_of(std::process::id(), started + 1),
+            TerminalOrigin::without_terminal()
+        );
+    }
+
+    struct Process {
+        pid: u32,
+        parent: u32,
+        session: u32,
+        terminal: u64,
+        started: u64,
+        command: &'static str,
+    }
+
+    fn origin_among(processes: &[Process], pid: u32, verified_started: u64) -> TerminalOrigin {
+        let stat_of = |wanted: u32| {
+            processes
+                .iter()
+                .find(|process| process.pid == wanted)
+                .map(|process| Stat {
+                    parent: process.parent,
+                    session: process.session,
+                    terminal: process.terminal,
+                    started: process.started,
+                })
+        };
+        let command_of = |wanted: u32| {
+            processes
+                .iter()
+                .find(|process| process.pid == wanted)
+                .map(|process| format!("{}\n", process.command))
+        };
+        origin_from(pid, verified_started, &stat_of, &command_of)
+    }
+
+    #[test]
+    fn a_session_leader_whose_pid_is_reused_does_not_inherit_the_allowance() {
+        use crate::application::terminal_allowances::TerminalAllowances;
+
+        let first_shell = [
+            Process {
+                pid: 3_100,
+                parent: 1_000,
+                session: 3_100,
+                terminal: 34_819,
+                started: 100,
+                command: "bash",
+            },
+            Process {
+                pid: 3_150,
+                parent: 3_100,
+                session: 3_100,
+                terminal: 34_819,
+                started: 180,
+                command: "sesame",
+            },
+        ];
+        let allowed = origin_among(&first_shell, 3_150, 180);
+        assert_eq!(allowed.device.as_deref(), Some("pts/3"));
+        assert_eq!(
+            allowed
+                .program
+                .as_ref()
+                .map(|program| program.reported_name.as_str()),
+            Some("bash")
+        );
+        let allowances = TerminalAllowances::default();
+        assert!(allowances.grant(&allowed, 7));
+        assert!(allowances.covers(&origin_among(&first_shell, 3_150, 180), 7));
+
+        let reused = [
+            Process {
+                pid: 3_100,
+                parent: 1_000,
+                session: 3_100,
+                terminal: 34_819,
+                started: 900,
+                command: "bash",
+            },
+            Process {
+                pid: 3_150,
+                parent: 3_100,
+                session: 3_100,
+                terminal: 34_819,
+                started: 950,
+                command: "sesame",
+            },
+        ];
+        let later = origin_among(&reused, 3_150, 950);
+        assert!(later.key.is_some());
+        assert_eq!(later.device, allowed.device);
+        assert_ne!(later.key, allowed.key);
+        assert!(!allowances.covers(&later, 7));
+
+        assert_eq!(
+            origin_among(&reused, 3_150, 180),
+            TerminalOrigin::without_terminal()
+        );
+    }
+
+    #[test]
+    fn a_leader_that_left_its_session_gives_no_terminal() {
+        let processes = [
+            Process {
+                pid: 3_100,
+                parent: 1_000,
+                session: 2_000,
+                terminal: 0,
+                started: 100,
+                command: "fictional-daemon",
+            },
+            Process {
+                pid: 3_150,
+                parent: 3_100,
+                session: 3_100,
+                terminal: 34_819,
+                started: 180,
+                command: "sesame",
+            },
+        ];
+        let origin = origin_among(&processes, 3_150, 180);
+        assert_eq!(origin.key, None);
+        assert_eq!(origin.device, None);
     }
 }
