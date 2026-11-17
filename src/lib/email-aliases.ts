@@ -16,6 +16,10 @@ export async function loadEmailAliases(): Promise<EmailAliasStatus> {
   return publish(await getEmailAliasSettings(), requested)
 }
 
+export async function refreshEmailAliases(): Promise<void> {
+  await loadEmailAliases().catch(() => undefined)
+}
+
 export async function saveEmailAliases(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
   const requested = generation
   return publish(await saveEmailAliasSettings(settings), requested)

@@ -5,7 +5,7 @@
   import { vaultItems } from './lib/vault-items'
   import { createAppStores, provideAppStores } from './lib/stores/app-stores'
   import { exportRecoveryKit, onIdleWarning, onIdleWarningCleared, onQuickAccessOpenItem, previewMode, recordDiagnostic } from './lib/vault'
-  import { clearEmailAliases } from './lib/email-aliases'
+  import { clearEmailAliases, refreshEmailAliases } from './lib/email-aliases'
   import { clearReleaseRecord, onReleaseRecordChanged, setReleaseRecordRetention } from './lib/release-record-api'
   import { startActivityReports } from './lib/activity'
   import { loadPlatformCapabilities } from './lib/platform'
@@ -445,6 +445,7 @@
   }
 
   async function refreshActiveView() {
+    await refreshEmailAliases()
     if (selection.value().activeView === 'security') {
       if (cleanupState.value().duplicateReviewOpen) await cleanupController.loadDuplicateGroups()
       await cleanupController.refreshBreachScan()

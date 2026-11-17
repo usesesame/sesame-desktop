@@ -49,7 +49,8 @@
   })
 
   async function createAlias() {
-    if (aliasWorking || !aliasService) return
+    const service = aliasService
+    if (aliasWorking || !service) return
     aliasWorking = true
     aliasNote = ''
     aliasError = ''
@@ -57,7 +58,7 @@
       const alias = await createEmailAlias(loginDraft.url || undefined)
       loginDraft = { ...loginDraft, email: alias }
       dirty = true
-      aliasNote = `${serviceNames[aliasService]} made a new alias. Save the login to keep it.`
+      aliasNote = `${serviceNames[service]} made a new alias. Save the login to keep it.`
     } catch (error) {
       aliasError = messageFor(error)
     } finally {

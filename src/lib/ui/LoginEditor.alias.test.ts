@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { APP_STORES, createAppStores } from '../stores/app-stores'
 import type { LoginInput } from '../types'
-import { clearEmailAliases, emailAliases } from '../email-aliases'
+import { clearEmailAliases, emailAliases, refreshEmailAliases } from '../email-aliases'
 import LoginEditor from './LoginEditor.svelte'
 
 const vault = vi.hoisted(() => ({
@@ -92,4 +92,58 @@ test('a failed request leaves the email field alone and shows the message', asyn
   expect((await screen.findByRole('alert')).textContent).toBe('The alias service did not accept your API token. Paste a new one in Settings.')
   expect((screen.getByLabelText(/^Email/) as HTMLInputElement).value).toBe('kept@example.test')
   expect(vault.getEmailAliasSettings).not.toHaveBeenCalled()
+})
+
+test('the action follows the vault when it changes while the editor is open', async () => {
+  vault.getEmailAliasSettings.mockResolvedValue({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  renderEditor(draft())
+  await screen.findByRole('button', { name: 'Create alias' })
+
+  vault.getEmailAliasSettings.mockResolvedValue({ nameSite: false })
+  await refreshEmailAliases()
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Create alias' })).toBeNull())
+
+  vault.getEmailAliasSettings.mockResolvedValue({ service: 'simpleLogin', nameSite: false })
+  await refreshEmailAliases()
+  expect(await screen.findByRole('button', { name: 'Create alias' })).toBeTruthy()
+})
+
+test('a refresh that fails keeps what the editor already knew', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  vault.getEmailAliasSettings.mockRejectedValue(new Error('Unlock your vault first.'))
+  renderEditor(draft())
+
+  await refreshEmailAliases()
+
+  expect(screen.getByRole('button', { name: 'Create alias' })).toBeTruthy()
+})
+
+test('one click asks for one alias and a failure is not retried', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  let fail: (error: Error) => void = () => {}
+  vault.createEmailAlias.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject }))
+  renderEditor(draft())
+  const button = screen.getByRole('button', { name: 'Create alias' })
+
+  await fireEvent.click(button)
+  await fireEvent.click(button)
+  expect(vault.createEmailAlias).toHaveBeenCalledOnce()
+
+  fail(new Error('Sesame could not reach the alias service. Check your connection and try again.'))
+  expect((await screen.findByRole('alert')).textContent).toBe('Sesame could not reach the alias service. Check your connection and try again.')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(vault.createEmailAlias).toHaveBeenCalledOnce()
+})
+
+test('the note names the service that made the alias even if the setting changes meanwhile', async () => {
+  emailAliases.set({ service: 'simpleLogin', nameSite: false })
+  let finish: (alias: string) => void = () => {}
+  vault.createEmailAlias.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  renderEditor(draft())
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  finish('quiet_harbor42@simplelogin.example')
+
+  expect((await screen.findByRole('status')).textContent).toBe('SimpleLogin made a new alias. Save the login to keep it.')
 })
