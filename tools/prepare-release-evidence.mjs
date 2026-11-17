@@ -95,6 +95,6 @@ const manifest = {
 }
 const manifestFilename = `sesame-${version}-windows-${architecture}.release.json`
 await writeFile(path.join(output, manifestFilename), `${JSON.stringify(manifest, null, 2)}\n`)
-const sums = [artifact, updaterSignature, sbom, vaultCompatibility.matrix, vaultCompatibility.evidence].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
+const sums = [artifact, updaterSignature, sbom].map((item) => `${item.sha256}  ${item.filename}`).join('\n')
 await writeFile(path.join(output, 'SHA256SUMS'), `${sums}\n`)
 process.stdout.write(`${manifestFilename}\n`)

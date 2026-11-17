@@ -547,6 +547,19 @@ test('both publish tools look releases up through the list that includes drafts'
   }
 })
 
+test('the Windows checksum file names only files that the release ships', async () => {
+  const source = await readFile(new URL('./prepare-release-evidence.mjs', import.meta.url), 'utf8')
+  const listed = source.match(/const sums = \[([^\]]+)\]\.map/)?.[1].split(',').map((name) => name.trim())
+  assert.deepEqual(listed, ['artifact', 'updaterSignature', 'sbom'])
+  const shipped = windowsLaneAssetPatterns(version)
+  for (const filename of [`Sesame_${version}_x64-setup.exe`, `Sesame_${version}_x64-setup.exe.sig`, `sesame-${version}.cdx.json`]) {
+    assert.ok(shipped.some((pattern) => pattern.test(filename)), `${filename} is not a release asset`)
+  }
+  for (const filename of ['vault-compatibility.json', 'vault-compatibility-matrix.json']) {
+    assert.ok(!shipped.some((pattern) => pattern.test(filename)), `${filename} is not shipped and cannot be listed`)
+  }
+})
+
 const changelog = '### Everyday use\n\n- A fictional change that the changelog describes.'
 const windowsSection = [
   'Early access build for Windows 10 and 11, x64.',
