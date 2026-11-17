@@ -13,7 +13,7 @@ mod rollback_guard;
 mod terminal;
 mod vault;
 
-pub(crate) use sesame_app::{application, browser_protocol, release, sync};
+pub(crate) use sesame_app::{application, browser_protocol, cli_protocol, release, sync};
 #[cfg(fuzzing)]
 pub use sync::fuzz_entry as sync_fuzz;
 
@@ -362,6 +362,7 @@ pub fn run() {
             if browser_fill::start(app.handle().clone()).is_err() {
                 diagnostics::record_browser_host_registration(app.handle(), "pipe_server_failed");
             }
+            let _ = terminal::start(app.handle().clone());
             session_guard::start(app.handle().clone());
             Ok(())
         })

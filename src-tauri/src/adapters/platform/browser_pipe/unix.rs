@@ -11,8 +11,9 @@ use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
-use super::{MAX_PIPE_MESSAGE_BYTES, SERVED_ELSEWHERE};
+use super::{MAX_PIPE_MESSAGE_BYTES, SERVED_ELSEWHERE, TERMINAL_SERVED_ELSEWHERE};
 use crate::browser_host::appimage::{self, ExecutableIdentity};
+use crate::cli_protocol::{MAX_CLI_REPLY_BYTES, MAX_CLI_REQUEST_BYTES};
 
 const IO_TIMEOUT: Duration = Duration::from_millis(1_500);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -39,6 +40,19 @@ pub const BROWSER: Channel = Channel {
     request_deadline: IO_TIMEOUT,
     reply_deadline: RESPONSE_TIMEOUT,
     served_elsewhere: &SERVED_ELSEWHERE,
+};
+
+const TERMINAL_REPLY_TIMEOUT: Duration = Duration::from_secs(200);
+pub const MAX_TERMINAL_CONNECTIONS: usize = 4;
+
+pub const TERMINAL: Channel = Channel {
+    label: "terminal",
+    socket_file: "cli.sock",
+    max_request_bytes: MAX_CLI_REQUEST_BYTES,
+    max_reply_bytes: MAX_CLI_REPLY_BYTES,
+    request_deadline: IO_TIMEOUT,
+    reply_deadline: TERMINAL_REPLY_TIMEOUT,
+    served_elsewhere: &TERMINAL_SERVED_ELSEWHERE,
 };
 
 pub(super) enum PeerIdentity {
@@ -69,6 +83,10 @@ pub struct PipePeer {
 impl PipePeer {
     pub fn is_connected(&self) -> bool {
         process_start_time(self.pid).is_some_and(|current| current == self.start_time)
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
     }
 }
 
@@ -257,6 +275,140 @@ pub(super) fn verify_peer_on(
         ));
     }
     Ok(PipePeer { pid, start_time })
+}
+
+pub struct TerminalConnection {
+    stream: Mutex<UnixStream>,
+    peer: PipePeer,
+}
+
+impl TerminalConnection {
+    pub fn peer(&self) -> &PipePeer {
+        &self.peer
+    }
+
+    pub fn send(&self, payload: &[u8]) -> io::Result<()> {
+        let mut stream = self
+            .stream
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        write_frame_on(&TERMINAL, &mut stream, payload, TERMINAL.max_reply_bytes)
+    }
+}
+
+pub struct TerminalClient {
+    stream: UnixStream,
+    deadline: Instant,
+}
+
+impl TerminalClient {
+    pub fn next_frame(&mut self) -> io::Result<Zeroizing<Vec<u8>>> {
+        read_frame_on(
+            &TERMINAL,
+            &mut self.stream,
+            TERMINAL.max_reply_bytes,
+            self.deadline,
+        )
+        .map(Zeroizing::new)
+    }
+}
+
+pub fn open_terminal_request(payload: &[u8]) -> io::Result<TerminalClient> {
+    let expected_server = PeerIdentity::of_executable(&std::env::current_exe()?)?;
+    open_terminal_request_at(&socket_path_on(&TERMINAL)?, &expected_server, payload)
+}
+
+fn open_terminal_request_at(
+    path: &Path,
+    expected_server: &PeerIdentity,
+    payload: &[u8],
+) -> io::Result<TerminalClient> {
+    let stream = connect_verified(&TERMINAL, path, expected_server, payload)?;
+    Ok(TerminalClient {
+        stream,
+        deadline: Instant::now() + TERMINAL.reply_deadline,
+    })
+}
+
+pub fn serve_terminal<F>(expected_client: &Path, handler: F) -> io::Result<()>
+where
+    F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
+{
+    let expected_client = PeerIdentity::of_executable(expected_client)?;
+    serve_terminal_at(&socket_path_on(&TERMINAL)?, expected_client, handler)
+}
+
+struct OpenConnection(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for OpenConnection {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn serve_terminal_at<F>(path: &Path, expected_client: PeerIdentity, handler: F) -> io::Result<()>
+where
+    F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
+{
+    let listener = bind_exclusive_on(&TERMINAL, path)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))?;
+    let expected_client = std::sync::Arc::new(expected_client);
+    let handler = std::sync::Arc::new(handler);
+    let open = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    let mut consecutive_accept_failures = 0_u32;
+    loop {
+        let Some(stream) = accept_with_retry(&listener, &mut consecutive_accept_failures)? else {
+            continue;
+        };
+        if open.fetch_add(1, Ordering::AcqRel) >= MAX_TERMINAL_CONNECTIONS {
+            open.fetch_sub(1, Ordering::AcqRel);
+            continue;
+        }
+        let slot = OpenConnection(std::sync::Arc::clone(&open));
+        let expected_client = std::sync::Arc::clone(&expected_client);
+        let handler = std::sync::Arc::clone(&handler);
+        let spawned = std::thread::Builder::new()
+            .name("sesame-terminal-request".into())
+            .spawn(move || {
+                let _slot = slot;
+                serve_terminal_connection(stream, &expected_client, handler.as_ref());
+            });
+        if spawned.is_err() {
+            continue;
+        }
+    }
+}
+
+fn serve_terminal_connection<F>(mut stream: UnixStream, expected_client: &PeerIdentity, handler: &F)
+where
+    F: Fn(Vec<u8>, &TerminalConnection),
+{
+    if stream
+        .set_read_timeout(Some(TERMINAL.request_deadline))
+        .is_err()
+        || stream
+            .set_write_timeout(Some(TERMINAL.request_deadline))
+            .is_err()
+    {
+        return;
+    }
+    let Ok(peer) = verify_peer_on(&TERMINAL, &stream, expected_client) else {
+        return;
+    };
+    let Ok(request) = read_frame_on(
+        &TERMINAL,
+        &mut stream,
+        TERMINAL.max_request_bytes,
+        Instant::now() + TERMINAL.request_deadline,
+    ) else {
+        return;
+    };
+    let connection = TerminalConnection {
+        stream: Mutex::new(stream),
+        peer,
+    };
+    let _ = catch_unwind(AssertUnwindSafe(|| handler(request, &connection)));
 }
 
 fn contents_match(identity: &ExecutableIdentity, pid: u32, start_time: u64) -> io::Result<bool> {
@@ -668,5 +820,233 @@ mod tests {
         let second = request_at(&socket, &path_identity(&this), b"second")
             .expect("the broker survives a handler panic");
         assert_eq!(second.as_slice(), b"second");
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    fn scratch_socket(name: &str) -> PathBuf {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "sesame-terminal-test-{}-{name}",
+                std::process::id()
+            ))
+            .join("cli.sock");
+        let _ = fs::remove_file(&path);
+        path
+    }
+
+    fn this_executable() -> PeerIdentity {
+        PeerIdentity::Path(
+            fs::canonicalize(std::env::current_exe().expect("this test binary"))
+                .expect("a canonical path"),
+        )
+    }
+
+    fn wait_for(socket: &Path) {
+        for _ in 0..200 {
+            if socket.exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the test server never bound its socket");
+    }
+
+    fn serve_echo(socket: &Path, expected_client: PeerIdentity) {
+        let served = socket.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = serve_terminal_at(&served, expected_client, |request, connection| {
+                let _ = connection.send(b"waiting");
+                let _ = connection.send(&request);
+            });
+        });
+        wait_for(socket);
+    }
+
+    fn dropped(stream: &mut UnixStream) -> bool {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .expect("a read timeout");
+        let mut buffer = [0_u8; 32];
+        match stream.read(&mut buffer) {
+            Ok(0) => true,
+            Err(error) => error.kind() == ErrorKind::ConnectionReset,
+            Ok(_) => false,
+        }
+    }
+
+    #[test]
+    fn the_terminal_socket_is_separate_from_the_browser_socket() {
+        let terminal = socket_path_on(&TERMINAL).expect("a runtime directory");
+        let browser = socket_path_on(&BROWSER).expect("a runtime directory");
+        assert!(terminal.ends_with("sesame/cli.sock"));
+        assert_ne!(terminal, browser);
+        assert_eq!(TERMINAL.max_request_bytes, 4 * 1024);
+        assert_eq!(TERMINAL.max_reply_bytes, 64 * 1024);
+        assert_eq!(TERMINAL.request_deadline, Duration::from_millis(1_500));
+        assert_eq!(TERMINAL.reply_deadline, Duration::from_secs(200));
+    }
+
+    #[test]
+    fn the_expected_client_gets_every_frame_of_its_reply() {
+        let socket = scratch_socket("served");
+        serve_echo(&socket, this_executable());
+
+        let mut client =
+            open_terminal_request_at(&socket, &this_executable(), b"fictional request")
+                .expect("a verified server");
+        assert_eq!(client.next_frame().expect("first").as_slice(), b"waiting");
+        assert_eq!(
+            client.next_frame().expect("second").as_slice(),
+            b"fictional request"
+        );
+    }
+
+    #[test]
+    fn a_client_running_another_executable_is_refused_before_any_read() {
+        let socket = scratch_socket("wrong-client");
+        serve_echo(&socket, PeerIdentity::Path(PathBuf::from("/bin/sh")));
+
+        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
+            .expect("the request is written");
+        assert!(client.next_frame().is_err());
+    }
+
+    #[test]
+    fn a_client_whose_executable_contents_differ_is_refused() {
+        let socket = scratch_socket("wrong-contents");
+        let other = ExecutableIdentity::of_file(Path::new("/bin/sh")).expect("an identity");
+        serve_echo(&socket, PeerIdentity::Contents(other));
+
+        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
+            .expect("the request is written");
+        assert!(client.next_frame().is_err());
+    }
+
+    #[test]
+    fn the_client_refuses_to_send_to_a_server_that_is_not_its_own_executable() {
+        let socket = scratch_socket("wrong-server");
+        serve_echo(&socket, this_executable());
+
+        let refused = open_terminal_request_at(
+            &socket,
+            &PeerIdentity::Path(PathBuf::from("/bin/sh")),
+            b"fictional",
+        );
+        assert!(refused.is_err());
+    }
+
+    #[test]
+    fn oversized_empty_and_bodiless_frames_are_dropped_and_the_next_client_is_served() {
+        let socket = scratch_socket("frames");
+        serve_echo(&socket, this_executable());
+
+        let mut oversized = UnixStream::connect(&socket).expect("a connection");
+        oversized
+            .write_all(&((MAX_CLI_REQUEST_BYTES + 1) as u32).to_le_bytes())
+            .expect("a header");
+        assert!(dropped(&mut oversized));
+
+        let mut empty = UnixStream::connect(&socket).expect("a connection");
+        empty.write_all(&0_u32.to_le_bytes()).expect("a header");
+        assert!(dropped(&mut empty));
+
+        let started = Instant::now();
+        let mut bodiless = UnixStream::connect(&socket).expect("a connection");
+        bodiless.write_all(&8_u32.to_le_bytes()).expect("a header");
+        assert!(dropped(&mut bodiless));
+        assert!(started.elapsed() < Duration::from_secs(3));
+
+        assert!(open_terminal_request_at(
+            &socket,
+            &this_executable(),
+            &[b'x'; MAX_CLI_REQUEST_BYTES + 1]
+        )
+        .is_err());
+        let mut client =
+            open_terminal_request_at(&socket, &this_executable(), b"next").expect("still served");
+        assert_eq!(client.next_frame().expect("first").as_slice(), b"waiting");
+    }
+
+    #[test]
+    fn a_dribbled_request_is_dropped_at_the_request_deadline() {
+        let socket = scratch_socket("dribble");
+        serve_echo(&socket, this_executable());
+
+        let mut stream = UnixStream::connect(&socket).expect("a connection");
+        let mut writer = stream.try_clone().expect("a cloned stream");
+        let started = Instant::now();
+        let dribble = std::thread::spawn(move || {
+            let mut frame = Vec::from(8_u32.to_le_bytes());
+            frame.extend_from_slice(&[7_u8; 8]);
+            for byte in frame {
+                if writer.write_all(&[byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+        });
+        assert!(dropped(&mut stream));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        dribble.join().expect("the dribbling writer");
+    }
+
+    #[test]
+    fn at_most_four_connections_are_open_at_once() {
+        let socket = scratch_socket("limit");
+        let served = socket.clone();
+        let release = std::sync::Arc::new(AtomicBool::new(false));
+        let held = std::sync::Arc::clone(&release);
+        std::thread::spawn(move || {
+            let _ = serve_terminal_at(&served, this_executable(), move |_request, connection| {
+                let _ = connection.send(b"waiting");
+                while !held.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let _ = connection.send(b"done");
+            });
+        });
+        wait_for(&socket);
+
+        let mut open = Vec::new();
+        for _ in 0..MAX_TERMINAL_CONNECTIONS {
+            let mut client =
+                open_terminal_request_at(&socket, &this_executable(), b"held").expect("served");
+            assert_eq!(client.next_frame().expect("waiting").as_slice(), b"waiting");
+            open.push(client);
+        }
+        let mut fifth = UnixStream::connect(&socket).expect("a connection");
+        assert!(dropped(&mut fifth));
+
+        release.store(true, Ordering::SeqCst);
+        for mut client in open {
+            assert_eq!(client.next_frame().expect("done").as_slice(), b"done");
+        }
+    }
+
+    #[test]
+    fn a_panicking_terminal_handler_does_not_end_the_listener() {
+        let socket = scratch_socket("panic");
+        let served = socket.clone();
+        std::thread::spawn(move || {
+            let panicked = AtomicBool::new(false);
+            let _ = serve_terminal_at(&served, this_executable(), move |request, connection| {
+                if !panicked.swap(true, Ordering::SeqCst) {
+                    panic!("fictional handler panic");
+                }
+                let _ = connection.send(&request);
+            });
+        });
+        wait_for(&socket);
+
+        let mut first =
+            open_terminal_request_at(&socket, &this_executable(), b"first").expect("written");
+        assert!(first.next_frame().is_err());
+        let mut second =
+            open_terminal_request_at(&socket, &this_executable(), b"second").expect("written");
+        assert_eq!(second.next_frame().expect("served").as_slice(), b"second");
     }
 }
