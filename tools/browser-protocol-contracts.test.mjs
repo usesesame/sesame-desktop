@@ -13,6 +13,7 @@ const totpCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v4')
 const capabilitiesCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v6')
 const lookalikeCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v5')
 const siteMatchCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v7')
+const pendingPasswordCanonical = join(root, 'src-tauri', 'contracts', 'browser', 'v8')
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'))
@@ -506,4 +507,43 @@ test('site match protocol v7 adds the site rule without reaching an older reques
   const completeStart = replies.indexOf('pub fn complete_fill_in_state(')
   const completeBody = replies.slice(completeStart, replies.indexOf('\n}\n', completeStart))
   assert.match(completeBody, /login_match\(\s*entry,\s*&approval\.origin,\s*fill_carries_site_match\(request\.version\),?\s*\)/, 'the release no longer rechecks the rule under the vault lock')
+})
+
+test('the version 8 request schema enforces the size and username rules the host enforces', () => {
+  const contract = json(join(pendingPasswordCanonical, 'contract.json'))
+  const requestSchema = json(join(pendingPasswordCanonical, 'request.schema.json'))
+  const vectors = json(join(pendingPasswordCanonical, 'vectors.json'))
+  const { characters, passphraseWords } = contract.limits
+
+  for (const name of ['change', 'create']) {
+    const [rule] = requestSchema.$defs[name].allOf
+    assert.deepEqual(rule.if, { properties: { style: { const: 'characters' } }, required: ['style'] })
+    assert.deepEqual(rule.then.properties.size, characters, `${name} character bounds drifted`)
+    assert.deepEqual(rule.else.properties.size, passphraseWords, `${name} passphrase bounds drifted`)
+    for (const style of ['characters', 'passphrase']) {
+      assert.ok(
+        vectors.requestCases.some(
+          (entry) =>
+            entry.valid === false &&
+            entry.message.type === name &&
+            entry.message.style === style &&
+            entry.message.size >= passphraseWords.minimum &&
+            entry.message.size <= characters.maximum,
+        ),
+        `no vector refuses a ${name} size that only the ${style} bounds forbid`,
+      )
+    }
+  }
+
+  assert.deepEqual(requestSchema.$defs.pending.allOf, [
+    { if: { required: ['username'] }, then: { properties: { action: { const: 'accepted' } } } },
+  ])
+  for (const action of contract.pendingActions.filter((action) => action !== 'accepted')) {
+    assert.ok(
+      vectors.requestCases.some(
+        (entry) => entry.valid === false && entry.message.action === action && 'username' in entry.message,
+      ),
+      `no vector refuses a username with ${action}`,
+    )
+  }
 })
