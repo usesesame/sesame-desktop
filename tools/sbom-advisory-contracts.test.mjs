@@ -269,6 +269,8 @@ test('an allowlist entry must carry an expiry within ninety days of its review',
   assert.throws(() => loadAllowlist(write(base)), /expiry date/)
   assert.throws(() => loadAllowlist(write({ ...base, expires: '2027-06-01' })), /within 90 days/)
   assert.throws(() => loadAllowlist(write({ ...base, expires: '2026-10-01' })), /within 90 days/)
+  assert.throws(() => loadAllowlist(write({ ...base, reviewed: '2027-02-30', expires: '2027-03-03' })), /expiry date/)
+  assert.throws(() => loadAllowlist(write({ ...base, expires: '2026-11-31' })), /expiry date/)
   assert.equal(loadAllowlist(write({ ...base, expires: '2026-12-01' })).length, 1)
 })
 
@@ -417,6 +419,7 @@ test('a library without a rule, an expired rule and a package outside Ubuntu do 
 test('one advisory outside the rule fails the library even when the others wait', async () => {
   const report = await auditBundled([ubuntuAdvisory(), ubuntuAdvisory({ id: 'UBUNTU-CVE-fictional-9', priority: 'high' })])
   assert.deepEqual(report.vulnerable.map((entry) => entry.ids), [['UBUNTU-CVE-fictional-1', 'UBUNTU-CVE-fictional-9']])
+  assert.deepEqual(report.waiting.map((entry) => entry.ids), [['UBUNTU-CVE-fictional-1']])
 })
 
 test('a reviewed entry is counted as used even when its library still fails', async () => {

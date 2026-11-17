@@ -21,9 +21,14 @@ const isoDate = /^\d{4}-\d{2}-\d{2}$/
 const ubuntuRelease = /^Ubuntu:\d{2}\.\d{2}(:LTS)?$/
 const waitingPriorities = new Set(['negligible', 'low', 'medium'])
 const dayNumber = (value) => Date.parse(`${value}T00:00:00Z`) / 86_400_000
+const isCalendarDate = (value) => {
+  if (!isoDate.test(value ?? '')) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
 
 const requireReviewWindow = (entry, kind) => {
-  if (!isoDate.test(entry.reviewed ?? '') || !isoDate.test(entry.expires ?? '')) {
+  if (!isCalendarDate(entry.reviewed) || !isCalendarDate(entry.expires)) {
     throw new Error(`Every ${kind} needs a reviewed date and an expiry date as YYYY-MM-DD: ${JSON.stringify(entry)}`)
   }
   const days = dayNumber(entry.expires) - dayNumber(entry.reviewed)
@@ -235,7 +240,7 @@ export const collectSbomAdvisories = async (
   const unusedLibraries = libraries.filter((rule) => !usedLibraries.has(rule))
   const withIds = (entries, pick) =>
     entries.map((entry) => ({ ...publicAdvisory(entry), ids: pick(entry) })).filter((entry) => entry.ids.length > 0)
-  const waiting = withIds(allowed, (entry) => entry.waitingIds)
+  const waiting = withIds(vulnerable, (entry) => entry.waitingIds)
   const reviewed = withIds(allowed, (entry) => entry.ids.filter((id) => !entry.waitingIds.includes(id)))
   return {
     sources: summaries.map((summary, index) => ({
