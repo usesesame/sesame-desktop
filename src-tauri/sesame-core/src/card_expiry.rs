@@ -1,7 +1,7 @@
 //! Payment-card expiry classification for the checkup. Cards store a month and
 //! a year as free text, so anything unreadable is left without a finding.
 
-use chrono::{Days, NaiveDate};
+use time::{Date, Duration, Month};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardExpiry {
@@ -11,9 +11,9 @@ pub enum CardExpiry {
     Expired,
 }
 
-pub const EXPIRING_WITHIN_DAYS: u64 = 30;
+pub const EXPIRING_WITHIN_DAYS: i64 = 30;
 
-pub fn card_expiry(month: &str, year: &str, today: NaiveDate) -> CardExpiry {
+pub fn card_expiry(month: &str, year: &str, today: Date) -> CardExpiry {
     let Some(month) = parse_month(month) else {
         return CardExpiry::Unreadable;
     };
@@ -26,14 +26,17 @@ pub fn card_expiry(month: &str, year: &str, today: NaiveDate) -> CardExpiry {
     if today > last_day {
         return CardExpiry::Expired;
     }
-    if last_day <= today + Days::new(EXPIRING_WITHIN_DAYS) {
+    let Some(horizon) = today.checked_add(Duration::days(EXPIRING_WITHIN_DAYS)) else {
+        return CardExpiry::Unreadable;
+    };
+    if last_day <= horizon {
         return CardExpiry::Expiring;
     }
     CardExpiry::Current
 }
 
-fn parse_month(value: &str) -> Option<u32> {
-    let month = value.trim().parse::<u32>().ok()?;
+fn parse_month(value: &str) -> Option<u8> {
+    let month = value.trim().parse::<u8>().ok()?;
     (1..=12).contains(&month).then_some(month)
 }
 
@@ -50,21 +53,18 @@ fn parse_year(value: &str) -> Option<i32> {
     (1970..=2200).contains(&year).then_some(year)
 }
 
-fn end_of_month(year: i32, month: u32) -> Option<NaiveDate> {
-    let (next_year, next_month) = if month == 12 {
-        (year + 1, 1)
-    } else {
-        (year, month + 1)
-    };
-    NaiveDate::from_ymd_opt(next_year, next_month, 1)?.pred_opt()
+fn end_of_month(year: i32, month: u8) -> Option<Date> {
+    let month = Month::try_from(month).ok()?;
+    Date::from_calendar_date(year, month, month.length(year)).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).expect("test date")
+    fn date(year: i32, month: u8, day: u8) -> Date {
+        Date::from_calendar_date(year, Month::try_from(month).expect("test month"), day)
+            .expect("test date")
     }
 
     #[test]

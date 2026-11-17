@@ -28,11 +28,12 @@ pub struct Document {
     #[serde(default)]
     pub minimum_android_version: Option<String>,
     pub features: std::collections::BTreeMap<String, bool>,
-    pub expires_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub expires_at: time::OffsetDateTime,
     #[serde(default)]
     pub instance_id: Option<String>,
-    #[serde(default)]
-    pub issued_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub issued_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -60,7 +61,7 @@ pub fn verify_capability_envelope(
     body: &[u8],
     key: &VerifyingKey,
     expected_key_id: Option<&str>,
-    now: chrono::DateTime<chrono::Utc>,
+    now: time::OffsetDateTime,
 ) -> Result<Document, CapabilityError> {
     let envelope: Envelope =
         serde_json::from_slice(body).map_err(|_| unavailable(CAPABILITY_INVALID))?;
@@ -86,9 +87,9 @@ pub fn verify_capability_envelope(
         return Err(unavailable("Desktop linking is currently unavailable."));
     }
     if document.expires_at <= now
-        || document.issued_at.is_some_and(|issued| {
-            issued > now + chrono::Duration::seconds(ISSUED_AT_TOLERANCE_SECS)
-        })
+        || document
+            .issued_at
+            .is_some_and(|issued| issued > now + time::Duration::seconds(ISSUED_AT_TOLERANCE_SECS))
     {
         return Err(CapabilityError::ClockDifference);
     }
@@ -186,7 +187,6 @@ pub fn version_lt(current: &str, minimum: &str) -> bool {
 mod tests {
     use super::*;
     use crate::platform::DESKTOP_PLATFORM;
-    use chrono::{TimeZone, Utc};
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
@@ -197,8 +197,8 @@ mod tests {
         SigningKey::from_bytes(&[9_u8; 32])
     }
 
-    fn now() -> chrono::DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap()
+    fn now() -> time::OffsetDateTime {
+        time::OffsetDateTime::from_unix_timestamp(1_791_633_600).unwrap()
     }
 
     fn payload() -> serde_json::Value {

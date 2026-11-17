@@ -23,7 +23,7 @@ sesame-core = { path = "../sesame-core" }
 sesame-sync = { path = "../sesame-sync" }
 base64 = "0.23"
 ed25519-dalek = "3"
-chrono = { version = "0.4", features = ["serde"] }
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -61,6 +62,55 @@ const cargoComponents = cargoLock
     return component
   })
 
+export const neverCompiledProperty = { name: 'sesame:cargo-build', value: 'never-compiled' }
+
+export const compiledCrates = (treeOutput) =>
+  new Set(
+    treeOutput
+      .split('\n')
+      .map((line) => line.match(/^(\S+) v(\S+)/))
+      .filter(Boolean)
+      .map(([, name, version]) => `${name}@${version}`),
+  )
+
+const cargoTree = () =>
+  execFileSync(
+    'cargo',
+    [
+      'tree',
+      '--manifest-path',
+      path.join(root, 'src-tauri', 'Cargo.toml'),
+      '--locked',
+      '--workspace',
+      '--all-features',
+      '--target',
+      'all',
+      '--edges',
+      'normal,build,dev',
+      '--prefix',
+      'none',
+      '--format',
+      '{p}',
+    ],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'] },
+  )
+
+export const markNeverCompiled = (components, compiled) => {
+  const unbuiltMembers = components.filter(
+    (component) =>
+      component.properties?.some((property) => property.name === 'sesame:source') &&
+      !compiled.has(`${component.name}@${component.version}`),
+  )
+  if (compiled.size === 0 || unbuiltMembers.length > 0) {
+    throw new Error('cargo tree did not list the workspace crates, so the built crates cannot be told apart.')
+  }
+  for (const component of components) {
+    if (compiled.has(`${component.name}@${component.version}`)) continue
+    component.scope = 'excluded'
+    component.properties = [...(component.properties ?? []), neverCompiledProperty]
+  }
+}
+
 export const vendorTreeDigest = async (directory, base = root) => {
   const files = []
   const walk = async (current) => {
@@ -87,6 +137,7 @@ export const vendorTreeDigest = async (directory, base = root) => {
 const main = async () => {
   const shippedPackages = await readShippedPackages(shippedPackagesFile)
   const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
+  markNeverCompiled(cargoComponents, compiledCrates(cargoTree()))
   for (const component of cargoComponents) {
     if (component.name === 'glib' && component.properties) {
       component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })

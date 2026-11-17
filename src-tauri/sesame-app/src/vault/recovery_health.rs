@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use time::OffsetDateTime;
 
 use super::{storage, VaultResult};
 
@@ -13,14 +13,22 @@ pub struct RecoveryHealth {
     pub vault_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_exported_revision: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
     #[ts(optional, type = "string")]
-    pub last_exported_at: Option<DateTime<Utc>>,
+    pub last_exported_at: Option<OffsetDateTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_verified_revision: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
     #[ts(optional, type = "string")]
-    pub last_verified_at: Option<DateTime<Utc>>,
+    pub last_verified_at: Option<OffsetDateTime>,
 }
 
 pub fn read_recovery_health_at(path: &Path) -> VaultResult<Option<RecoveryHealth>> {
@@ -47,7 +55,7 @@ pub fn record_export(
     mut health: RecoveryHealth,
     vault_id: &str,
     revision: u64,
-    now: DateTime<Utc>,
+    now: OffsetDateTime,
 ) -> RecoveryHealth {
     if health.vault_id != vault_id {
         health = RecoveryHealth {
@@ -64,7 +72,7 @@ pub fn record_verification(
     mut health: RecoveryHealth,
     vault_id: &str,
     revision: u64,
-    now: DateTime<Utc>,
+    now: OffsetDateTime,
 ) -> Option<RecoveryHealth> {
     if health.vault_id.is_empty() {
         health.vault_id = vault_id.into();
@@ -75,4 +83,43 @@ pub fn record_verification(
     health.last_verified_revision = Some(revision);
     health.last_verified_at = Some(now);
     Some(health)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_written_before_the_time_crate_still_reads() {
+        let stored = br#"{"vaultId":"fictional-vault","lastExportedRevision":7,"lastExportedAt":"2026-10-10T12:00:00.123456789Z","lastVerifiedAt":"2026-10-10T14:00:00+02:00"}"#;
+        let health: RecoveryHealth = serde_json::from_slice(stored).expect("record");
+        assert_eq!(
+            health.last_exported_at.map(|at| at.unix_timestamp()),
+            Some(1_791_633_600)
+        );
+        assert_eq!(
+            health.last_verified_at.map(|at| at.unix_timestamp()),
+            Some(1_791_633_600)
+        );
+        assert_eq!(health.last_verified_revision, None);
+    }
+
+    #[test]
+    fn a_record_keeps_its_times_as_utc_text_and_leaves_out_missing_ones() {
+        let now = OffsetDateTime::from_unix_timestamp(1_791_633_600).expect("time");
+        let health = record_export(RecoveryHealth::default(), "fictional-vault", 7, now);
+        let written = serde_json::to_string(&health).expect("record");
+        assert_eq!(
+            written,
+            r#"{"vaultId":"fictional-vault","lastExportedRevision":7,"lastExportedAt":"2026-10-10T12:00:00Z"}"#
+        );
+        let read: RecoveryHealth = serde_json::from_str(&written).expect("record");
+        assert_eq!(read, health);
+    }
+
+    #[test]
+    fn a_record_with_a_time_that_is_not_a_date_is_refused() {
+        let stored = br#"{"vaultId":"fictional-vault","lastExportedAt":"yesterday"}"#;
+        assert!(serde_json::from_slice::<RecoveryHealth>(stored).is_err());
+    }
 }

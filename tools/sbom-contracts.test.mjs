@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-import { vendorTreeDigest } from './create-sbom.mjs'
+import { compiledCrates, markNeverCompiled, neverCompiledProperty, vendorTreeDigest } from './create-sbom.mjs'
 import { packageNameFromModuleId } from './shipped-packages.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -183,4 +183,45 @@ test('the bill of materials refuses to classify npm packages without a shipped m
   } finally {
     rmSync(output, { recursive: true, force: true })
   }
+})
+
+test('a crate the lock file lists and no build compiles is marked and the built crates are not', () => {
+  const { bom } = generate()
+  const crate = (name) => bom.components.filter((component) => component.purl?.startsWith(`pkg:cargo/${name}@`))
+  const marked = (component) =>
+    (component.properties ?? []).some(
+      (property) => property.name === neverCompiledProperty.name && property.value === neverCompiledProperty.value,
+    )
+  for (const name of ['sesame', 'sesame-core', 'sesame-app', 'sesame-sync', 'tauri', 'time', 'glib', 'serde_with']) {
+    const found = crate(name)
+    assert.ok(found.length > 0, `${name} is missing from the bill of materials`)
+    assert.ok(!found.some(marked), `${name} is built and must be audited`)
+  }
+  const unbuilt = bom.components.filter(marked)
+  assert.ok(unbuilt.length > 0 && unbuilt.length < 60, `${unbuilt.length} crates are marked as never compiled`)
+  assert.ok(unbuilt.every((component) => component.purl.startsWith('pkg:cargo/') && component.scope === 'excluded'))
+  assert.deepEqual(crate('chrono').map(marked), [true])
+})
+
+test('cargo tree lines are read as crate names and versions', () => {
+  const compiled = compiledCrates(
+    'fictional-app v0.1.0 (/work/fictional-app)\nfictional-macro v2.0.1 (proc-macro)\nfictional-lib v1.2.3\nfictional-lib v1.2.3\n\n',
+  )
+  assert.deepEqual([...compiled].sort(), ['fictional-app@0.1.0', 'fictional-lib@1.2.3', 'fictional-macro@2.0.1'])
+})
+
+test('the bill of materials refuses a crate list that leaves out a workspace crate', () => {
+  const components = () => [
+    { name: 'fictional-app', version: '0.1.0', properties: [{ name: 'sesame:source', value: 'path' }] },
+    { name: 'fictional-lib', version: '1.2.3' },
+    { name: 'fictional-optional', version: '3.0.0' },
+  ]
+  assert.throws(() => markNeverCompiled(components(), new Set()), /workspace crates/)
+  assert.throws(() => markNeverCompiled(components(), new Set(['fictional-lib@1.2.3'])), /workspace crates/)
+  const listed = components()
+  markNeverCompiled(listed, new Set(['fictional-app@0.1.0', 'fictional-lib@1.2.3']))
+  assert.deepEqual(
+    listed.map((component) => component.scope ?? 'built'),
+    ['built', 'built', 'excluded'],
+  )
 })

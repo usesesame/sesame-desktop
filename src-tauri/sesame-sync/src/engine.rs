@@ -33,9 +33,12 @@ pub struct ServedHeader {
 
 impl ServedHeader {
     pub fn accepted_at_unix(&self) -> Option<u64> {
-        chrono::DateTime::parse_from_rfc3339(&self.accepted_at)
-            .ok()
-            .and_then(|time| u64::try_from(time.timestamp()).ok())
+        time::OffsetDateTime::parse(
+            &self.accepted_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .ok()
+        .and_then(|time| u64::try_from(time.unix_timestamp()).ok())
     }
 }
 

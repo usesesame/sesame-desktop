@@ -53,8 +53,11 @@ impl Reply {
     }
 
     pub fn with_date(self, unix_seconds: u64) -> Self {
-        let moment = chrono::DateTime::from_timestamp(unix_seconds as i64, 0).unwrap();
-        self.with_header("Date", &moment.to_rfc2822())
+        let moment = time::OffsetDateTime::from_unix_timestamp(unix_seconds as i64).unwrap();
+        let date = moment
+            .format(&time::format_description::well_known::Rfc2822)
+            .unwrap();
+        self.with_header("Date", &date)
     }
 }
 

@@ -70,6 +70,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
       - run: npm ci
 
       - name: Type check and unit test the desktop app
@@ -100,6 +102,8 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
 
       - run: npm ci
 

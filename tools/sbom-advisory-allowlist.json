@@ -197,9 +197,9 @@
       "expires": "2027-02-11"
     },
     {
-      "id": "RUSTSEC-2026-0543",
-      "package": "chrono",
-      "reason": "The crate is marked unmaintained and the advisory names no vulnerability. Sesame uses chrono to read and format timestamps, and no fixed version exists, so the way out is a move to another time crate.",
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "No fixed version exists. picomatch is a development dependency that matches the file patterns in Sesame's own build and lint settings. It is not part of the shipped app, and no pattern from outside reaches it.",
       "reviewed": "2026-11-17",
       "expires": "2027-02-15"
     }

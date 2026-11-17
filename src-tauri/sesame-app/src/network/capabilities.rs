@@ -72,19 +72,18 @@ pub(crate) async fn fetch_signed_document(
     let body = read_limited(response, MAX_CAPABILITY_BYTES)
         .await
         .ok_or_else(|| CapabilityError::Unavailable(CAPABILITY_INVALID.to_string()))?;
-    verify_capability_envelope(&body, key, expected_key_id, chrono::Utc::now())
+    verify_capability_envelope(&body, key, expected_key_id, time::OffsetDateTime::now_utc())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::network::test_server::{FakeSesame, Reply, TestServer};
-    use chrono::{TimeZone, Utc};
 
     const CLIENT: &str = "0.3.0";
 
-    fn now() -> chrono::DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 10, 12, 0, 0).unwrap()
+    fn now() -> time::OffsetDateTime {
+        time::OffsetDateTime::from_unix_timestamp(1_791_633_600).unwrap()
     }
 
     fn body(value: &serde_json::Value) -> Vec<u8> {

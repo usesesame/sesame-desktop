@@ -584,10 +584,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -3975,7 +3973,6 @@ dependencies = [
  "argon2",
  "base64 0.23.1",
  "chacha20poly1305",
- "chrono",
  "csv",
  "curve25519-dalek",
  "ed25519-dalek",
@@ -4007,6 +4004,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "time",
  "totp-rs",
  "ts-rs",
  "unicode-security",
@@ -4025,7 +4023,6 @@ name = "sesame-app"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
- "chrono",
  "ed25519-dalek",
  "idna",
  "psl",
@@ -4037,6 +4034,7 @@ dependencies = [
  "sesame-core",
  "sesame-sync",
  "sha1",
+ "time",
  "tokio",
  "ts-rs",
  "unicode-security",
@@ -4051,7 +4049,6 @@ dependencies = [
  "argon2",
  "base64 0.23.1",
  "chacha20poly1305",
- "chrono",
  "csv",
  "ed25519-dalek",
  "hkdf",
@@ -4063,6 +4060,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2 0.11.1",
+ "time",
  "totp-rs",
  "ts-rs",
  "unicode-normalization",
@@ -4078,7 +4076,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305",
- "chrono",
  "curve25519-dalek",
  "ed25519-dalek",
  "hkdf",
@@ -4090,6 +4087,7 @@ dependencies = [
  "sha2 0.11.1",
  "sha3",
  "shake",
+ "time",
  "url",
  "x25519-dalek",
  "zeroize",

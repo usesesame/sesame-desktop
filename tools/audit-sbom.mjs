@@ -110,6 +110,13 @@ export const queryOsv = async (purl) => {
 
 const purlType = (purl) => purl.slice('pkg:'.length).split('/')[0]
 const hasPurl = (component) => typeof component.purl === 'string' && component.purl.length > 0
+const neverCompiled = (component) =>
+  typeof component.purl === 'string' &&
+  component.purl.startsWith('pkg:cargo/') &&
+  (component.properties ?? []).some(
+    (property) => property.name === 'sesame:cargo-build' && property.value === 'never-compiled',
+  )
+const audited = (component) => hasPurl(component) && !neverCompiled(component)
 
 const ecosystemCounts = (components) => {
   const counts = {}
@@ -156,12 +163,13 @@ const publicAdvisory = (entry) => ({
 
 export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8 } = {}) => {
   const components = Array.isArray(bom.components) ? bom.components : []
-  const queried = components.filter(hasPurl)
+  const queried = components.filter(audited)
   const results = await queryComponents(queried.map((component) => ({ component })), { query, concurrency })
   return {
     total: components.length,
     queried: queried.length,
-    skipped: components.length - queried.length,
+    skipped: components.filter((component) => !hasPurl(component)).length,
+    neverCompiled: components.filter(neverCompiled).length,
     byEcosystem: ecosystemCounts(queried),
     vulnerable: advisoryList(results),
   }
@@ -186,12 +194,13 @@ export const collectSbomAdvisories = async (
   const summaries = []
   for (const [index, source] of sources.entries()) {
     const components = Array.isArray(source.bom?.components) ? source.bom.components : []
-    const queried = components.filter(hasPurl)
+    const queried = components.filter(audited)
     summaries.push({
       label: source.label ?? null,
       total: components.length,
       queried: queried.length,
-      skipped: components.length - queried.length,
+      skipped: components.filter((component) => !hasPurl(component)).length,
+      neverCompiled: components.filter(neverCompiled).length,
       byEcosystem: ecosystemCounts(queried),
     })
     for (const component of queried) entries.push({ sourceIndex: index, component })
@@ -252,6 +261,7 @@ export const collectSbomAdvisories = async (
     total: summaries.reduce((sum, summary) => sum + summary.total, 0),
     queried: summaries.reduce((sum, summary) => sum + summary.queried, 0),
     skipped: summaries.reduce((sum, summary) => sum + summary.skipped, 0),
+    neverCompiled: summaries.reduce((sum, summary) => sum + summary.neverCompiled, 0),
     byEcosystem,
     vulnerable: fatal.map(publicAdvisory),
     allowed: allowed.map(publicAdvisory),
@@ -323,6 +333,11 @@ const main = async () => {
     process.stdout.write(
       `Queried ${source.queried} of ${source.total} components (${source.skipped} without a purl; ${formatEcosystems(source.byEcosystem)}).\n`,
     )
+    if (source.neverCompiled > 0) {
+      process.stdout.write(
+        `Left out ${source.neverCompiled} crates that the lock file lists and no build compiles.\n`,
+      )
+    }
   }
   if (report.sources.length > 1) {
     process.stdout.write(
