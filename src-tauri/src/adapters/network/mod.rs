@@ -4,6 +4,7 @@ pub(crate) mod account_api;
 pub(crate) mod account_service;
 pub(crate) mod breach;
 pub(crate) mod capabilities;
+pub(crate) mod email_alias;
 pub(crate) mod public_updates;
 pub(crate) mod server_address;
 pub(crate) mod server_trust;

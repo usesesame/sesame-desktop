@@ -135,6 +135,7 @@ fn empty_payload(vault_name: &str) -> VaultPayload {
         vault_id: Some(fresh_vault_id()),
         revision: 1,
         never_save_sites: Vec::new(),
+        email_aliases: None,
     }
 }
 

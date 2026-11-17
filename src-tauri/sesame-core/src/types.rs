@@ -847,6 +847,7 @@ pub struct VaultPayload {
     pub vault_id: Option<String>,
     pub revision: u64,
     pub never_save_sites: Vec<String>,
+    pub email_aliases: Option<crate::email_aliases::EmailAliasSettings>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1892,6 +1893,8 @@ struct PersistedVaultPayloadV8<'a> {
     revision: u64,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     never_save_sites: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email_aliases: &'a Option<crate::email_aliases::EmailAliasSettings>,
 }
 
 impl Drop for PersistedVaultPayloadV8<'_> {
@@ -1937,6 +1940,8 @@ struct StoredVaultPayload {
     revision: u64,
     #[serde(default)]
     never_save_sites: Vec<String>,
+    #[serde(default)]
+    email_aliases: Option<crate::email_aliases::EmailAliasSettings>,
 }
 
 impl VaultPayload {
@@ -2205,6 +2210,7 @@ impl VaultPayload {
             vault_id: stored.vault_id,
             revision: stored.revision,
             never_save_sites: stored.never_save_sites,
+            email_aliases: stored.email_aliases,
         };
         let Some(items) = stored.items else {
             return Ok(payload);
@@ -2309,6 +2315,7 @@ impl Serialize for VaultPayload {
             vault_id: &self.vault_id,
             revision: self.revision,
             never_save_sites: &self.never_save_sites,
+            email_aliases: &self.email_aliases,
         }
         .serialize(serializer)
     }
@@ -2597,6 +2604,10 @@ impl Zeroize for VaultPayload {
         self.vault_id.zeroize();
         self.revision.zeroize();
         self.never_save_sites.zeroize();
+        if let Some(settings) = self.email_aliases.as_mut() {
+            settings.zeroize();
+        }
+        self.email_aliases = None;
     }
 }
 

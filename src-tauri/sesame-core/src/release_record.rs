@@ -66,6 +66,7 @@ pub enum EntryKind {
     RecoveryKitSaved,
     AttachmentSaved,
     DevicePaired,
+    EmailAlias,
     Cleared,
     RetentionShortened,
     Unreadable,

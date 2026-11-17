@@ -14,6 +14,7 @@ pub mod breach_scan;
 pub mod browser_fill;
 pub mod browser_fill_broker;
 pub mod browser_replies;
+pub mod email_aliases;
 pub mod file_choices;
 pub mod history;
 pub mod imports;
