@@ -299,7 +299,7 @@ pub fn run() {
         adapters::platform::webview_sandbox::refuse(context, unavailable);
         return;
     }
-    let approval_slot = application::approval_slot::ApprovalSlot::default();
+    let (browser_approvals, terminal_approvals) = approval_states();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
@@ -323,10 +323,8 @@ pub fn run() {
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
         .manage(commands::FileSelectionState::default())
-        .manage(browser_fill::BrowserFillState::sharing(
-            approval_slot.clone(),
-        ))
-        .manage(terminal::CliApprovalState::sharing(approval_slot))
+        .manage(browser_approvals)
+        .manage(terminal_approvals)
         .manage(terminal::TerminalAllowances::default())
         .manage(release::ReleasePresence::default())
         .manage(rollback_guard::RollbackGuard::default())
@@ -391,6 +389,14 @@ pub fn run() {
                 clipboard::release(&app.state::<clipboard::ClipboardGuard>());
             }
         });
+}
+
+fn approval_states() -> (browser_fill::BrowserFillState, terminal::CliApprovalState) {
+    let slot = application::approval_slot::ApprovalSlot::default();
+    (
+        browser_fill::BrowserFillState::sharing(slot.clone()),
+        terminal::CliApprovalState::sharing(slot),
+    )
 }
 
 #[cfg(target_os = "linux")]

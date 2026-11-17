@@ -377,7 +377,7 @@ fn finish(reply: &CliReply, streams: &mut Streams<'_>) -> i32 {
                 | CliErrorCode::NoField
                 | CliErrorCode::EmptyField
                 | CliErrorCode::NoTotp => (EXIT_MISSING, sesame_message),
-                CliErrorCode::Busy => (EXIT_BUSY, code.message()),
+                CliErrorCode::Busy => (EXIT_BUSY, sesame_message),
                 CliErrorCode::UnsupportedVersion => (EXIT_OUTDATED, code.message()),
                 CliErrorCode::Invalid | CliErrorCode::TooLarge | CliErrorCode::Unavailable => {
                     (EXIT_FAILED, sesame_message)

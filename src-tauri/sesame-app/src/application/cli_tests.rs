@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use zeroize::Zeroizing;
+
 use crate::application::broker_tests::FakeClock;
 use crate::application::tests::{Effect, FakeEffects};
 use crate::browser_protocol::BrowserRequest;
@@ -19,10 +21,10 @@ use super::browser_fill::NormalizedOrigin;
 use super::browser_fill_broker::{ApprovalRequest, BrowserFillState};
 use super::cli_broker::{
     CliApprovalRequestEvent, CliApprovalState, CliDecisionInput, CliDecisionKind,
-    CliUnlockRequestEvent,
+    CliUnlockRequestEvent, COOLING_FIRST, COOLING_MESSAGE,
 };
 use super::cli_requests::{serve_cli_request, CliContext, CliHost};
-use super::lifecycle::lock_and_notify;
+use super::lifecycle::{lock_and_notify, unlock_vault_in_state};
 use super::release_record::{release_record_page_in_state, ReleaseRecordQuery};
 use super::terminal_allowances::{
     TerminalAllowances, TerminalKey, TerminalOrigin, UnverifiedProgram, ALLOWANCE_TTL,
@@ -688,6 +690,7 @@ fn not_found_arrives_only_after_the_person_saw_it() {
             .expect("dismissed");
     });
     assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    harness.clock.advance(COOLING_FIRST);
 
     allow_terminal_for_five_minutes(&harness, &origin);
     let missing = request(21, serde_json::json!({ "type": "get", "item": "Northwnd" }));
@@ -729,6 +732,7 @@ fn several_matches_open_the_chooser_and_refuse_an_item_it_did_not_offer() {
         );
     });
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
+    harness.clock.advance(COOLING_FIRST);
 
     let (replies, _) = harness.run_with(&get(23, Some("username"), false), &origin, |_, _| {
         let event = harness.pending();
@@ -793,49 +797,237 @@ fn an_unanswered_approval_times_out() {
     assert!(events.contains(&"approvalCancelled:expired".to_string()));
 }
 
+fn browser_origin() -> NormalizedOrigin {
+    NormalizedOrigin::from_request("https://northwind.example").expect("origin")
+}
+
+fn error_message(replies: &[CliReply]) -> Option<String> {
+    replies.last().and_then(|reply| reply.message.clone())
+}
+
+fn finished_or_shown(harness: &Harness, host: &FakeHost) {
+    let until = Instant::now() + Duration::from_secs(5);
+    while harness.approvals.pending_request().is_none()
+        && !host
+            .sent()
+            .iter()
+            .any(|reply| reply.reply_type == CliReplyType::Error)
+    {
+        assert!(
+            Instant::now() < until,
+            "the request neither ended nor asked"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
 #[test]
-fn a_browser_approval_makes_the_tool_busy_and_a_tool_approval_makes_the_browser_wait() {
+fn a_browser_approval_makes_the_tool_busy_and_takes_the_slot_from_a_tool_approval() {
     let harness = Harness::new();
     let browser = BrowserFillState::sharing(harness.slot.clone());
-    let origin = NormalizedOrigin::from_request("https://northwind.example").expect("origin");
+    let epoch = harness.vault.state.session_epoch();
     let held = browser
-        .begin(
-            "fill-1",
-            origin.clone(),
-            harness.vault.state.session_epoch(),
-            ApprovalRequest::Create,
-        )
+        .begin("fill-1", browser_origin(), epoch, ApprovalRequest::Create)
         .expect("a browser approval");
 
-    let replies = harness.run(&get(26, Some("username"), false), &terminal(100));
+    let (replies, events) =
+        harness.run_with(&get(26, Some("username"), false), &terminal(100), |_, _| {});
     assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+    assert!(!events.contains(&"approvalRequested".to_string()));
     browser.revoke(&held.0);
 
-    let (replies, _) =
+    let mut browser_wait = Duration::ZERO;
+    let (replies, events) =
         harness.run_with(&get(27, Some("username"), false), &terminal(100), |_, _| {
-            harness.pending();
+            let shown = harness.pending();
+            let started = Instant::now();
+            let preempting = browser
+                .begin("fill-2", browser_origin(), epoch, ApprovalRequest::Create)
+                .expect("the browser goes first");
+            browser_wait = started.elapsed();
+            assert!(harness.approvals.pending_request().is_none());
             assert_eq!(
-                browser
-                    .begin(
-                        "fill-2",
-                        origin.clone(),
-                        harness.vault.state.session_epoch(),
-                        ApprovalRequest::Create
-                    )
-                    .err(),
-                Some("approvalUnavailable")
+                harness.decide(&shown, CliDecisionKind::Allow, None, false),
+                Err("approvalExpired")
             );
-            harness.deny();
+            browser.revoke(&preempting.0);
         });
+    assert!(
+        browser_wait < Duration::from_millis(100),
+        "{browser_wait:?}"
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+    assert_eq!(
+        error_message(&replies).as_deref(),
+        Some("Sesame set this request aside to answer your browser. Try again in a moment.")
+    );
+    assert!(events.contains(&"approvalCancelled:preempted".to_string()));
+    assert!(!wire(&replies).contains("casey@northwind.example"));
+    assert!(!harness.slot.is_taken());
+}
+
+#[test]
+fn a_loop_of_tool_requests_never_holds_up_the_browser_and_stops_raising_the_window() {
+    let harness = Harness::new();
+    let browser = BrowserFillState::sharing(harness.slot.clone());
+    let epoch = harness.vault.state.session_epoch();
+    let mut shown = 0;
+    let mut turned_away = 0;
+    for n in 0..30_u8 {
+        let mut browser_wait = Duration::ZERO;
+        let (replies, events) = harness.run_with(
+            &get(120 + n, Some("username"), false),
+            &terminal(100),
+            |host, _| {
+                finished_or_shown(&harness, host);
+                let started = Instant::now();
+                let held = browser
+                    .begin(
+                        &format!("fill-loop-{n}"),
+                        browser_origin(),
+                        epoch,
+                        ApprovalRequest::Create,
+                    )
+                    .expect("the browser is never turned away");
+                browser_wait = started.elapsed();
+                browser.revoke(&held.0);
+            },
+        );
+        assert!(
+            browser_wait < Duration::from_millis(100),
+            "{browser_wait:?}"
+        );
+        assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+        if events.contains(&"approvalRequested".to_string()) {
+            shown += 1;
+        }
+        if error_message(&replies).as_deref() == Some(COOLING_MESSAGE) {
+            turned_away += 1;
+            assert_eq!(replies.len(), 1);
+            assert!(events.is_empty());
+        }
+    }
+    assert_eq!(shown, 1);
+    assert_eq!(turned_away, 29);
+}
+
+#[test]
+fn a_loop_while_locked_stops_raising_the_window_after_a_hang_up() {
+    let harness = Harness::new();
+    harness.lock(&harness.effects());
+    let (_, events) = harness.run_with(
+        &get(160, Some("username"), false),
+        &terminal(100),
+        |host, _| {
+            wait_for(host, "unlockRequested");
+            host.gone.store(true, Ordering::SeqCst);
+        },
+    );
+    assert!(events.contains(&"unlockEnded:connectionClosed".to_string()));
+
+    for n in 161..170_u8 {
+        let (replies, events) =
+            harness.run_with(&get(n, Some("username"), false), &terminal(100), |_, _| {});
+        assert_eq!(replies.len(), 1);
+        assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+        assert!(events.is_empty());
+    }
+}
+
+#[test]
+fn a_denial_turns_requests_away_until_the_cooling_off_ends_and_an_approval_resets_it() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let ask = |n: u8| harness.run_with(&get(n, Some("username"), false), &origin, |_, _| {});
+    let (replies, _) = harness.run_with(&get(170, Some("username"), false), &origin, |_, _| {
+        harness.deny()
+    });
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
-    assert!(browser
-        .begin(
-            "fill-3",
-            origin,
-            harness.vault.state.session_epoch(),
-            ApprovalRequest::Create
-        )
-        .is_ok());
+
+    let (replies, events) = ask(171);
+    assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+    assert!(events.is_empty());
+
+    harness.clock.advance(COOLING_FIRST);
+    let (replies, _) = harness.run_with(&get(172, Some("username"), false), &origin, |_, _| {
+        harness.deny()
+    });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
+    harness.clock.advance(COOLING_FIRST);
+    let (replies, events) = ask(173);
+    assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+    assert!(events.is_empty());
+
+    harness.clock.advance(COOLING_FIRST);
+    let (replies, events) =
+        harness.run_with(&get(174, Some("username"), false), &origin, |_, _| {
+            harness.allow(false)
+        });
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+
+    let (replies, _) = harness.run_with(&get(175, Some("username"), false), &origin, |_, _| {
+        harness.deny()
+    });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
+    harness.clock.advance(COOLING_FIRST);
+    let (replies, _) = harness.run_with(&get(176, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+}
+
+#[test]
+fn a_failed_unlock_while_a_request_waits_answers_nothing_and_the_real_unlock_still_asks() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.lock(&harness.effects());
+
+    let (replies, events) = harness.run_with(
+        &get(180, Some("username"), false),
+        &origin,
+        |host, effects| {
+            wait_for(host, "unlockRequested");
+            assert!(unlock_vault_in_state(
+                &harness.vault.state,
+                &harness.presence,
+                effects,
+                Zeroizing::new("fictional wrong password".to_string()),
+            )
+            .is_err());
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(harness.approvals.pending_request().is_none());
+            assert_eq!(
+                host.sent(),
+                vec![CliReply::waiting(&id(180), WaitReason::Unlock)]
+            );
+            unlock_vault_in_state(
+                &harness.vault.state,
+                &harness.presence,
+                effects,
+                Zeroizing::new("fictional master password".to_string()),
+            )
+            .expect("unlocked");
+            let event = harness.pending();
+            assert!(!event.allowed);
+            harness.deny();
+        },
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
+    assert!(events.contains(&"unlockEnded:unlocked".to_string()));
+    assert!(!wire(&replies).contains("casey@northwind.example"));
 }
 
 #[test]

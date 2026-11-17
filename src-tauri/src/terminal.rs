@@ -167,3 +167,65 @@ pub(crate) use listener::start;
 pub(crate) fn start(_app: AppHandle) -> std::io::Result<()> {
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::application::browser_fill::NormalizedOrigin;
+    use crate::application::browser_fill_broker::ApprovalRequest;
+    use crate::application::cli_broker::{
+        ApprovalSubject, CliApprovalRequestEvent, CliCommandKind, CliDecision,
+    };
+    use crate::cli_protocol::CliErrorCode;
+    use std::time::Duration;
+
+    fn subject(request_id: &str) -> ApprovalSubject {
+        ApprovalSubject {
+            request_id: request_id.to_string(),
+            epoch: 1,
+            offered: Vec::new(),
+            not_found: false,
+            terminal_allowed: false,
+            event: CliApprovalRequestEvent {
+                approval_id: String::new(),
+                command: CliCommandKind::List,
+                field: None,
+                field_hidden: false,
+                copy: false,
+                candidates: Vec::new(),
+                not_found: None,
+                terminal: None,
+                program: None,
+                remote: false,
+                can_allow_terminal: false,
+                needs_presence: false,
+                allowed: false,
+                expires_in_ms: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn the_desktop_gives_the_browser_and_the_terminal_one_approval_slot() {
+        let (browser, terminal) = crate::approval_states();
+        let origin = NormalizedOrigin::from_request("https://northwind.example").expect("origin");
+        let held = browser
+            .begin("fill-wiring-1", origin.clone(), 1, ApprovalRequest::Create)
+            .expect("a browser approval");
+        assert_eq!(
+            terminal.begin(subject("wiring-a")).err(),
+            Some(CliErrorCode::Busy)
+        );
+        browser.revoke(&held.0);
+
+        let offer = terminal.begin(subject("wiring-b")).expect("a free slot");
+        let preempting = browser
+            .begin("fill-wiring-2", origin, 1, ApprovalRequest::Create)
+            .expect("the browser goes first");
+        assert_eq!(
+            offer.receiver.recv_timeout(Duration::from_secs(1)),
+            Ok(CliDecision::Preempted)
+        );
+        assert!(terminal.pending_request().is_none());
+        browser.revoke(&preempting.0);
+    }
+}

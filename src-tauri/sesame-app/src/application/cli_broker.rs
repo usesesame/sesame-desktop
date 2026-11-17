@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::approval_slot::{ApprovalSlot, SlotClaim};
 use super::browser_fill::APPROVAL_TOO_SOON;
 use super::browser_fill_broker::{Clock, FocusDelay};
-use super::terminal_allowances::UnverifiedProgram;
+use super::terminal_allowances::{SystemClock, UnverifiedProgram};
 use crate::cli_protocol::CliErrorCode;
 use crate::vault::random_id;
 
@@ -20,6 +20,9 @@ pub const CLI_APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 pub const CLI_UNLOCK_TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_CLEAR_AFTER_SECONDS: u64 = 30;
 pub const CLEAR_AFTER_CHOICES: [u64; 3] = [10, 30, 60];
+pub const COOLING_FIRST: Duration = Duration::from_secs(15);
+pub const COOLING_LONGEST: Duration = Duration::from_secs(5 * 60);
+pub const COOLING_MESSAGE: &str = "Sesame is turning away terminal requests for a short while because the last one was denied or not answered. Try again shortly.";
 const REPLAY_CACHE_SIZE: usize = 128;
 const APPROVAL_EXPIRED: &str = "approvalExpired";
 const SELECTION_NOT_OFFERED: &str = "selectionNotOffered";
@@ -126,6 +129,13 @@ pub enum CliDecision {
     Dismiss,
     InvalidSelection,
     Withdrawn,
+    Preempted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartRefusal {
+    Code(CliErrorCode),
+    CoolingOff,
 }
 
 struct CliPending {
@@ -146,21 +156,39 @@ struct CliInner {
     pending: Option<CliPending>,
     recent_request_ids: VecDeque<String>,
     focus: FocusDelay,
+    clock: Arc<dyn Clock>,
+    unanswered: u32,
+    cooling_until: Option<Instant>,
     clear_after_seconds: u64,
     approval_timeout: Duration,
 }
 
 impl CliInner {
-    fn new(focus: FocusDelay) -> Self {
+    fn new(clock: Arc<dyn Clock>) -> Self {
         Self {
             in_flight: false,
             pending: None,
             recent_request_ids: VecDeque::new(),
-            focus,
+            focus: FocusDelay::new(Arc::clone(&clock)),
+            clock,
+            unanswered: 0,
+            cooling_until: None,
             clear_after_seconds: DEFAULT_CLEAR_AFTER_SECONDS,
             approval_timeout: CLI_APPROVAL_TIMEOUT,
         }
     }
+
+    fn cooling(&self) -> bool {
+        self.cooling_until
+            .is_some_and(|until| self.clock.now() < until)
+    }
+}
+
+fn cooling_period(unanswered: u32) -> Duration {
+    let doublings = unanswered.saturating_sub(1).min(16);
+    COOLING_FIRST
+        .saturating_mul(1 << doublings)
+        .min(COOLING_LONGEST)
 }
 
 pub struct CliApprovalState {
@@ -206,15 +234,12 @@ pub struct ApprovalSubject {
 
 impl CliApprovalState {
     pub fn sharing(slot: ApprovalSlot) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(CliInner::new(FocusDelay::default()))),
-            slot,
-        }
+        Self::with_clock(slot, Arc::new(SystemClock))
     }
 
     pub fn with_clock(slot: ApprovalSlot, clock: Arc<dyn Clock>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(CliInner::new(FocusDelay::new(clock)))),
+            inner: Arc::new(Mutex::new(CliInner::new(clock))),
             slot,
         }
     }
@@ -225,21 +250,24 @@ impl CliApprovalState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn start(&self, request_id: &str) -> Result<InFlight, CliErrorCode> {
+    pub fn start(&self, request_id: &str) -> Result<InFlight, StartRefusal> {
         let mut inner = self.lock();
         if inner
             .recent_request_ids
             .iter()
             .any(|recent| recent == request_id)
         {
-            return Err(CliErrorCode::Stale);
+            return Err(StartRefusal::Code(CliErrorCode::Stale));
         }
         inner.recent_request_ids.push_back(request_id.to_string());
         while inner.recent_request_ids.len() > REPLAY_CACHE_SIZE {
             inner.recent_request_ids.pop_front();
         }
         if inner.in_flight {
-            return Err(CliErrorCode::Busy);
+            return Err(StartRefusal::Code(CliErrorCode::Busy));
+        }
+        if inner.cooling() {
+            return Err(StartRefusal::CoolingOff);
         }
         inner.in_flight = true;
         Ok(InFlight {
@@ -252,8 +280,29 @@ impl CliApprovalState {
         if inner.pending.is_some() {
             return Err(CliErrorCode::Busy);
         }
-        let claim = self.slot.claim().ok_or(CliErrorCode::Busy)?;
         let approval_id = random_id();
+        let preempted = Arc::downgrade(&self.inner);
+        let preempted_id = approval_id.clone();
+        let claim = self
+            .slot
+            .claim_for_terminal(move || {
+                let Some(inner) = preempted.upgrade() else {
+                    return;
+                };
+                let mut inner = inner
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if inner
+                    .pending
+                    .as_ref()
+                    .is_some_and(|pending| pending.approval_id == preempted_id)
+                {
+                    if let Some(pending) = inner.pending.take() {
+                        let _ = pending.sender.send(CliDecision::Preempted);
+                    }
+                }
+            })
+            .ok_or(CliErrorCode::Busy)?;
         inner.focus.approval_shown();
         let (sender, receiver) = mpsc::sync_channel(1);
         let deadline = Instant::now() + inner.approval_timeout;
@@ -354,6 +403,19 @@ impl CliApprovalState {
         }
         let pending = inner.pending.take().ok_or(APPROVAL_EXPIRED)?;
         pending.sender.send(decision).map_err(|_| APPROVAL_EXPIRED)
+    }
+
+    pub fn note_unanswered(&self) {
+        let mut inner = self.lock();
+        inner.unanswered = inner.unanswered.saturating_add(1);
+        let until = inner.clock.now() + cooling_period(inner.unanswered);
+        inner.cooling_until = Some(until);
+    }
+
+    pub fn note_approved(&self) {
+        let mut inner = self.lock();
+        inner.unanswered = 0;
+        inner.cooling_until = None;
     }
 
     pub fn revoke(&self, approval_id: &str) {

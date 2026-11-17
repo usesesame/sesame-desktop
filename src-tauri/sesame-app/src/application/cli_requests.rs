@@ -8,7 +8,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use super::cli_broker::{
     ApprovalSubject, CliApprovalRequestEvent, CliApprovalState, CliCandidate, CliCommandKind,
-    CliDecision, CliUnlockRequestEvent, CLI_UNLOCK_TIMEOUT,
+    CliDecision, CliUnlockRequestEvent, StartRefusal, CLI_UNLOCK_TIMEOUT, COOLING_MESSAGE,
 };
 use super::logins::terminal_totp_in_state;
 use super::reveal::{
@@ -29,6 +29,8 @@ const FRAME_MARGIN_BYTES: usize = 512;
 const PRESENCE_MESSAGE: &str =
     "Sesame needs your master password before it releases this value. Try again and enter it in Sesame.";
 const EMPTY_FIELD_ERROR: &str = "Nothing is saved in that field for this item.";
+const PREEMPTED_MESSAGE: &str =
+    "Sesame set this request aside to answer your browser. Try again in a moment.";
 
 pub trait CliHost {
     fn peer_connected(&self) -> bool;
@@ -92,8 +94,16 @@ pub fn serve_cli_request(context: &CliContext<'_>, payload: &[u8], origin: &Term
     };
     let flight = match context.approvals.start(&request_id) {
         Ok(flight) => flight,
-        Err(code) => {
+        Err(StartRefusal::Code(code)) => {
             context.host.send(&CliReply::error(Some(&request_id), code));
+            return;
+        }
+        Err(StartRefusal::CoolingOff) => {
+            context.host.send(&CliReply::error_with(
+                Some(&request_id),
+                CliErrorCode::Busy,
+                COOLING_MESSAGE,
+            ));
             return;
         }
     };
@@ -177,10 +187,12 @@ fn wait_for_unlock(
         }
         if !context.host.peer_connected() {
             context.host.unlock_ended("connectionClosed");
+            context.approvals.note_unanswered();
             return Err(Stop::Gone);
         }
         if Instant::now() >= deadline {
             context.host.unlock_ended("expired");
+            context.approvals.note_unanswered();
             return Err(Stop::Reply(CliErrorCode::Timeout));
         }
     }
@@ -318,6 +330,11 @@ fn answer(
     };
     let chosen = if prompt_needed {
         let decision = prompt(context, request_id, epoch, event, &subject, not_found)?;
+        if matches!(decision, CliDecision::Allow { .. }) {
+            context.approvals.note_approved();
+        } else if decision != CliDecision::Withdrawn {
+            context.approvals.note_unanswered();
+        }
         match decision {
             CliDecision::Allow {
                 item_id,
@@ -344,6 +361,9 @@ fn answer(
                 return Err(Stop::Reply(CliErrorCode::Cancelled))
             }
             CliDecision::Withdrawn => return Err(Stop::Reply(CliErrorCode::Stale)),
+            CliDecision::Preempted => {
+                return Err(Stop::ReplyWith(CliErrorCode::Busy, PREEMPTED_MESSAGE))
+            }
         }
     } else {
         let chosen = subject.candidates.first().cloned();
@@ -413,6 +433,10 @@ fn prompt(
         context.host.approval_cancelled(&approval_id, reason);
         Err(result)
     };
+    let unanswered = |reason: &'static str, result: Stop| {
+        context.approvals.note_unanswered();
+        stop(reason, result)
+    };
     loop {
         let remaining = offer.deadline.saturating_duration_since(Instant::now());
         match offer
@@ -422,20 +446,28 @@ fn prompt(
             Ok(CliDecision::Withdrawn) | Err(RecvTimeoutError::Disconnected) => {
                 return stop("vaultChanged", Stop::Reply(CliErrorCode::Stale));
             }
+            Ok(CliDecision::Preempted) => {
+                return unanswered(
+                    "preempted",
+                    Stop::ReplyWith(CliErrorCode::Busy, PREEMPTED_MESSAGE),
+                );
+            }
             Ok(decision) => return Ok(decision),
             Err(RecvTimeoutError::Timeout) => {}
         }
         if !context.host.peer_connected() {
-            return stop("connectionClosed", Stop::Gone);
+            return unanswered("connectionClosed", Stop::Gone);
         }
         if Instant::now() >= offer.deadline {
-            return stop("expired", Stop::Reply(CliErrorCode::Timeout));
+            return unanswered("expired", Stop::Reply(CliErrorCode::Timeout));
         }
         if context.vault.session_epoch() != epoch
             || !context.approvals.is_bound(&approval_id, request_id, epoch)
         {
             if let Ok(decision) = offer.receiver.try_recv() {
-                if context.vault.session_epoch() == epoch && decision != CliDecision::Withdrawn {
+                if context.vault.session_epoch() == epoch
+                    && !matches!(decision, CliDecision::Withdrawn | CliDecision::Preempted)
+                {
                     return Ok(decision);
                 }
             }

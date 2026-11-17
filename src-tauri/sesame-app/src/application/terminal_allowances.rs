@@ -120,7 +120,7 @@ impl Default for AllowanceInner {
     }
 }
 
-struct SystemClock;
+pub(super) struct SystemClock;
 
 impl Clock for SystemClock {
     fn now(&self) -> Instant {

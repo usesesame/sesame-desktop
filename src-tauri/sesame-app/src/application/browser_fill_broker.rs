@@ -338,7 +338,7 @@ impl BrowserFillState {
         if inner.pending.is_some() {
             return Err("approvalUnavailable");
         }
-        let claim = self.slot.claim().ok_or("approvalUnavailable")?;
+        let claim = self.slot.claim_for_browser().ok_or("approvalUnavailable")?;
         let approval_id = random_id();
         inner.focus.approval_shown();
         let (sender, receiver) = mpsc::sync_channel(1);
