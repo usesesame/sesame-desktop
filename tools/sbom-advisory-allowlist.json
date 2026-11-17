@@ -195,6 +195,13 @@
       "reason": "The fix is in minimatch 11, and eslint, @eslint/config-array and typescript-estree still require 10. minimatch is a development dependency that matches the file patterns in Sesame's own lint configuration. It is not part of the shipped app, and no outside input reaches it.",
       "reviewed": "2026-11-13",
       "expires": "2027-02-11"
+    },
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "No fixed version exists. picomatch is a development dependency that matches the file patterns in Sesame's own build and lint settings. It is not part of the shipped app, and no pattern from outside reaches it.",
+      "reviewed": "2026-11-17",
+      "expires": "2027-02-15"
     }
   ]
 }
