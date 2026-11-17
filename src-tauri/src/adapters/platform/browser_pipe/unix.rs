@@ -337,12 +337,21 @@ fn open_terminal_request_at(
     })
 }
 
-pub fn serve_terminal<F>(expected_client: &Path, handler: F) -> io::Result<()>
+pub fn serve_terminal<F>(
+    expected_client: &Path,
+    listening: impl FnOnce(),
+    handler: F,
+) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
 {
     let expected_client = PeerIdentity::of_executable(expected_client)?;
-    serve_terminal_at(&socket_path_on(&TERMINAL)?, expected_client, handler)
+    serve_terminal_at(
+        &socket_path_on(&TERMINAL)?,
+        expected_client,
+        listening,
+        handler,
+    )
 }
 
 struct OpenConnection(std::sync::Arc<std::sync::atomic::AtomicUsize>);
@@ -353,12 +362,18 @@ impl Drop for OpenConnection {
     }
 }
 
-fn serve_terminal_at<F>(path: &Path, expected_client: PeerIdentity, handler: F) -> io::Result<()>
+fn serve_terminal_at<F>(
+    path: &Path,
+    expected_client: PeerIdentity,
+    listening: impl FnOnce(),
+    handler: F,
+) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
 {
     let listener = bind_exclusive_on(&TERMINAL, path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))?;
+    listening();
     let expected_client = std::sync::Arc::new(expected_client);
     let handler = std::sync::Arc::new(handler);
     let open = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -865,10 +880,15 @@ mod terminal_tests {
     fn serve_echo(socket: &Path, expected_client: PeerIdentity) {
         let served = socket.to_path_buf();
         std::thread::spawn(move || {
-            let _ = serve_terminal_at(&served, expected_client, |request, connection| {
-                let _ = connection.send(b"waiting");
-                let _ = connection.send(&request);
-            });
+            let _ = serve_terminal_at(
+                &served,
+                expected_client,
+                || {},
+                |request, connection| {
+                    let _ = connection.send(b"waiting");
+                    let _ = connection.send(&request);
+                },
+            );
         });
         wait_for(socket);
     }
@@ -995,13 +1015,18 @@ mod terminal_tests {
         let release = std::sync::Arc::new(AtomicBool::new(false));
         let held = std::sync::Arc::clone(&release);
         std::thread::spawn(move || {
-            let _ = serve_terminal_at(&served, this_executable(), move |_request, connection| {
-                let _ = connection.send(b"waiting");
-                while !held.load(Ordering::SeqCst) {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                let _ = connection.send(b"done");
-            });
+            let _ = serve_terminal_at(
+                &served,
+                this_executable(),
+                || {},
+                move |_request, connection| {
+                    let _ = connection.send(b"waiting");
+                    while !held.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    let _ = connection.send(b"done");
+                },
+            );
         });
         wait_for(&socket);
 
@@ -1027,12 +1052,17 @@ mod terminal_tests {
         let served = socket.clone();
         std::thread::spawn(move || {
             let panicked = AtomicBool::new(false);
-            let _ = serve_terminal_at(&served, this_executable(), move |request, connection| {
-                if !panicked.swap(true, Ordering::SeqCst) {
-                    panic!("fictional handler panic");
-                }
-                let _ = connection.send(&request);
-            });
+            let _ = serve_terminal_at(
+                &served,
+                this_executable(),
+                || {},
+                move |request, connection| {
+                    if !panicked.swap(true, Ordering::SeqCst) {
+                        panic!("fictional handler panic");
+                    }
+                    let _ = connection.send(&request);
+                },
+            );
         });
         wait_for(&socket);
 

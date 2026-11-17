@@ -3,7 +3,7 @@ use tauri::{AppHandle, State};
 use crate::application::browser_fill::{APPROVAL_TOO_SOON, APPROVAL_TOO_SOON_MESSAGE};
 use crate::application::cli_broker::{CliApprovalRequestEvent, CliDecisionInput};
 use crate::application::terminal_allowances::TerminalAllowanceList;
-use crate::terminal::{CliApprovalState, TerminalAllowances};
+use crate::terminal::{CliApprovalState, TerminalAllowances, TerminalListener, TerminalToolStatus};
 use crate::vault::{VaultResult, VaultState};
 
 #[tauri::command]
@@ -41,4 +41,9 @@ pub fn list_terminal_permissions(
 #[tauri::command]
 pub fn forget_terminal_permissions(app: AppHandle) {
     crate::terminal::forget_permissions(&app);
+}
+
+#[tauri::command]
+pub fn get_terminal_status(listener: State<'_, TerminalListener>) -> TerminalToolStatus {
+    listener.status()
 }

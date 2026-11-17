@@ -6,14 +6,14 @@ use std::{
     os::windows::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
     ptr,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, GetLastError, LocalFree, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING,
-        ERROR_PIPE_CONNECTED, ERROR_TIMEOUT, GENERIC_READ, GENERIC_WRITE, HANDLE,
-        INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
+        CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER,
+        ERROR_IO_PENDING, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_TIMEOUT, GENERIC_READ,
+        GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
     },
     Security::{
         Authorization::{
@@ -28,7 +28,7 @@ use windows_sys::Win32::{
     },
     System::{
         Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId,
+            ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
             GetNamedPipeServerProcessId, PeekNamedPipe, WaitNamedPipeW, PIPE_READMODE_BYTE,
             PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
         },
@@ -41,7 +41,7 @@ use windows_sys::Win32::{
     },
 };
 
-use super::MAX_PIPE_MESSAGE_BYTES;
+use super::{MAX_PIPE_MESSAGE_BYTES, TERMINAL_SERVED_ELSEWHERE};
 use crate::cli_protocol::{MAX_CLI_REPLY_BYTES, MAX_CLI_REQUEST_BYTES};
 use zeroize::Zeroizing;
 
@@ -67,6 +67,8 @@ pub struct Channel {
 
 const TERMINAL_REPLY_TIMEOUT: Duration = Duration::from_secs(200);
 pub const MAX_TERMINAL_CONNECTIONS: u32 = 4;
+const TERMINAL_PIPE_INSTANCES: u32 = MAX_TERMINAL_CONNECTIONS + 1;
+const REPLACE_AFTER_CONNECT_ERRORS: u32 = 3;
 
 pub const TERMINAL: Channel = Channel {
     label: "terminal",
@@ -327,25 +329,16 @@ impl TerminalConnection {
 pub struct TerminalClient {
     pipe: OwnedHandle,
     _server: OwnedHandle,
-    deadline: std::time::Instant,
+    deadline: Instant,
 }
 
 impl TerminalClient {
     pub fn next_frame(&mut self) -> io::Result<Zeroizing<Vec<u8>>> {
-        let remaining = self
-            .deadline
-            .saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() {
-            return Err(io::Error::new(
-                ErrorKind::TimedOut,
-                "terminal pipe reply deadline exceeded",
-            ));
-        }
-        read_frame_on(
+        read_frame_until(
             &TERMINAL,
             self.pipe.raw(),
             TERMINAL.max_reply_bytes,
-            remaining,
+            self.deadline,
         )
         .map(Zeroizing::new)
     }
@@ -362,7 +355,7 @@ pub fn open_terminal_request(payload: &[u8]) -> io::Result<TerminalClient> {
     Ok(TerminalClient {
         pipe,
         _server: server,
-        deadline: std::time::Instant::now() + TERMINAL.reply_deadline,
+        deadline: Instant::now() + TERMINAL.reply_deadline,
     })
 }
 
@@ -374,7 +367,88 @@ impl Drop for OpenConnection {
     }
 }
 
-pub fn serve_terminal<F>(expected_client: &Path, handler: F) -> io::Result<()>
+fn create_terminal_instance(identity: &UserIdentity, first: bool) -> io::Result<OwnedHandle> {
+    let channel = &TERMINAL;
+    let descriptor = security_descriptor_for_sid(&identity.sid)?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor.0,
+        bInheritHandle: 0,
+    };
+    let first_flag = if first {
+        FILE_FLAG_FIRST_PIPE_INSTANCE
+    } else {
+        0
+    };
+    let created = OwnedHandle::new(unsafe {
+        CreateNamedPipeW(
+            identity.pipe_name.as_ptr(),
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | first_flag,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            TERMINAL_PIPE_INSTANCES,
+            channel.buffer_bytes(channel.max_reply_bytes),
+            channel.buffer_bytes(channel.max_request_bytes),
+            millis(channel.request_deadline),
+            &attributes,
+        )
+    });
+    drop(descriptor);
+    created
+}
+
+fn first_terminal_instance(identity: &UserIdentity) -> io::Result<OwnedHandle> {
+    let mut failures = 0_u32;
+    loop {
+        match create_terminal_instance(identity, true) {
+            Ok(pipe) => return Ok(pipe),
+            Err(error) => {
+                failures += 1;
+                if failures > MAX_CREATE_RETRIES {
+                    let held = error.raw_os_error().is_some_and(|code| {
+                        code == ERROR_ACCESS_DENIED as i32 || code == ERROR_PIPE_BUSY as i32
+                    });
+                    if held {
+                        TERMINAL_SERVED_ELSEWHERE.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    return Err(error);
+                }
+                std::thread::sleep(CREATE_RETRY_DELAY);
+            }
+        }
+    }
+}
+
+fn next_terminal_instance(
+    identity: &UserIdentity,
+    failures: &mut u32,
+) -> io::Result<Option<OwnedHandle>> {
+    match create_terminal_instance(identity, false) {
+        Ok(pipe) => {
+            *failures = 0;
+            Ok(Some(pipe))
+        }
+        Err(error) => {
+            *failures += 1;
+            if *failures > MAX_CREATE_RETRIES {
+                return Err(error);
+            }
+            std::thread::sleep(CREATE_RETRY_DELAY);
+            Ok(None)
+        }
+    }
+}
+
+fn disconnect(pipe: &OwnedHandle) {
+    unsafe {
+        DisconnectNamedPipe(pipe.raw());
+    }
+}
+
+pub fn serve_terminal<F>(
+    expected_client: &Path,
+    listening: impl FnOnce(),
+    handler: F,
+) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
 {
@@ -384,55 +458,35 @@ where
     let expected_client = std::sync::Arc::new(fs::canonicalize(expected_client)?);
     let handler = std::sync::Arc::new(handler);
     let open = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let mut first_instance = true;
-    let mut consecutive_create_failures = 0_u32;
+    let mut waiting = first_terminal_instance(&identity)?;
+    listening();
+    let mut create_failures = 0_u32;
+    let mut connect_errors = 0_u32;
     loop {
-        if open.load(Ordering::Acquire) >= MAX_TERMINAL_CONNECTIONS {
-            std::thread::sleep(CREATE_RETRY_DELAY);
-            continue;
-        }
-        let descriptor = security_descriptor_for_sid(&identity.sid)?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor.0,
-            bInheritHandle: 0,
-        };
-        let first_flag = if first_instance {
-            FILE_FLAG_FIRST_PIPE_INSTANCE
-        } else {
-            0
-        };
-        let created = OwnedHandle::new(unsafe {
-            CreateNamedPipeW(
-                identity.pipe_name.as_ptr(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | first_flag,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                MAX_TERMINAL_CONNECTIONS,
-                channel.buffer_bytes(channel.max_reply_bytes),
-                channel.buffer_bytes(channel.max_request_bytes),
-                millis(channel.request_deadline),
-                &attributes,
-            )
-        });
-        drop(descriptor);
-        let pipe = match created {
-            Ok(pipe) => {
-                consecutive_create_failures = 0;
-                first_instance = false;
-                pipe
-            }
-            Err(error) => {
-                consecutive_create_failures += 1;
-                if first_instance && consecutive_create_failures > MAX_CREATE_RETRIES {
-                    return Err(error);
+        match connect_with_timeout(waiting.raw(), Duration::MAX) {
+            Ok(true) => connect_errors = 0,
+            Ok(false) => continue,
+            Err(_) => {
+                disconnect(&waiting);
+                connect_errors += 1;
+                if connect_errors >= REPLACE_AFTER_CONNECT_ERRORS {
+                    if let Some(fresh) = next_terminal_instance(&identity, &mut create_failures)? {
+                        waiting = fresh;
+                        connect_errors = 0;
+                    }
                 }
-                std::thread::sleep(CREATE_RETRY_DELAY);
                 continue;
             }
-        };
-        if !connect_with_timeout(pipe.raw(), channel.connect_deadline)? {
+        }
+        if open.load(Ordering::Acquire) >= MAX_TERMINAL_CONNECTIONS {
+            disconnect(&waiting);
             continue;
         }
+        let Some(next) = next_terminal_instance(&identity, &mut create_failures)? else {
+            disconnect(&waiting);
+            continue;
+        };
+        let pipe = std::mem::replace(&mut waiting, next);
         open.fetch_add(1, Ordering::AcqRel);
         let slot = OpenConnection(std::sync::Arc::clone(&open));
         let expected_client = std::sync::Arc::clone(&expected_client);
@@ -444,11 +498,11 @@ where
                 let Ok(peer) = verified_peer(channel, pipe.raw(), &expected_client) else {
                     return;
                 };
-                let Ok(request) = read_frame_on(
+                let Ok(request) = read_frame_until(
                     channel,
                     pipe.raw(),
                     channel.max_request_bytes,
-                    channel.request_deadline,
+                    Instant::now() + channel.request_deadline,
                 ) else {
                     return;
                 };
@@ -587,6 +641,52 @@ pub(super) fn read_frame_on(
     let mut payload = vec![0_u8; size];
     read_exact(channel, pipe, &mut payload, timeout)?;
     Ok(payload)
+}
+
+pub(super) fn read_frame_until(
+    channel: &Channel,
+    pipe: HANDLE,
+    max_bytes: usize,
+    deadline: Instant,
+) -> io::Result<Vec<u8>> {
+    let mut header = [0_u8; 4];
+    read_exact_until(channel, pipe, &mut header, deadline)?;
+    let size = u32::from_le_bytes(header) as usize;
+    if size == 0 || size > max_bytes {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("invalid {} pipe message size", channel.label),
+        ));
+    }
+    let mut payload = vec![0_u8; size];
+    read_exact_until(channel, pipe, &mut payload, deadline)?;
+    Ok(payload)
+}
+
+fn read_exact_until(
+    channel: &Channel,
+    pipe: HANDLE,
+    mut buffer: &mut [u8],
+    deadline: Instant,
+) -> io::Result<()> {
+    while !buffer.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                ErrorKind::TimedOut,
+                format!("{} pipe frame deadline exceeded", channel.label),
+            ));
+        }
+        let count = read_once(pipe, buffer, remaining)?;
+        if count == 0 {
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                format!("{} pipe closed", channel.label),
+            ));
+        }
+        buffer = &mut buffer[count..];
+    }
+    Ok(())
 }
 
 pub(super) fn write_frame_on(

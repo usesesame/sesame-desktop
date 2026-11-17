@@ -194,6 +194,7 @@ macro_rules! sesame_invoke_handler {
             commands::resolve_terminal_request,
             commands::list_terminal_permissions,
             commands::forget_terminal_permissions,
+            commands::get_terminal_status,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
@@ -325,6 +326,7 @@ pub fn run() {
         .manage(commands::FileSelectionState::default())
         .manage(browser_approvals)
         .manage(terminal_approvals)
+        .manage(terminal::TerminalListener::default())
         .manage(terminal::TerminalAllowances::default())
         .manage(release::ReleasePresence::default())
         .manage(rollback_guard::RollbackGuard::default())

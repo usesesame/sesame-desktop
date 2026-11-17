@@ -208,6 +208,7 @@ commands.allow = [
   "resolve_terminal_request",
   "list_terminal_permissions",
   "forget_terminal_permissions",
+  "get_terminal_status",
 ]
 
 [[permission]]

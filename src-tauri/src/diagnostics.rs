@@ -203,7 +203,8 @@ fn severity(code: &str) -> &'static str {
         | "create_never_site"
         | "create_timeout"
         | "create_connection_closed"
-        | "create_vault_changed" => "warn",
+        | "create_vault_changed"
+        | "pipe_served_elsewhere" => "warn",
         "started"
         | "registration_ok"
         | "host_started"
@@ -257,6 +258,18 @@ pub fn record_browser_host_registration(app: &AppHandle, code: &'static str) {
     }
     if let Ok(path) = diagnostic_path(app) {
         let _ = append_event(&path, "browser_host", code);
+    }
+}
+
+pub fn record_terminal_listener(app: &AppHandle, code: &'static str) {
+    if !matches!(
+        code,
+        "pipe_server_started" | "pipe_server_failed" | "pipe_served_elsewhere"
+    ) {
+        return;
+    }
+    if let Ok(path) = diagnostic_path(app) {
+        let _ = append_event(&path, "terminal", code);
     }
 }
 
