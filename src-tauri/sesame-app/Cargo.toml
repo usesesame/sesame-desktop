@@ -10,9 +10,6 @@ edition = "2021"
 test-support = ["dep:tokio"]
 wdio = []
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
-
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "warn"
