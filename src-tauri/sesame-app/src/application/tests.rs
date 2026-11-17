@@ -23,6 +23,7 @@ use super::records::{
 use super::reveal::{copy_item_field_in_state, item_field_in_state};
 use super::search::search_items_in_state;
 use super::sync::SyncStore;
+use super::terminal_allowances::TerminalAllowances;
 use super::DesktopEffects;
 
 pub(super) use crate::test_support::grant;
@@ -46,6 +47,7 @@ pub(super) enum Effect {
         clear_after_ms: Option<u64>,
     },
     RevokePresence,
+    ForgetTerminalAllowances,
     CancelBreachScan,
     EmitVaultLocked,
     RecordRecoveryExport {
@@ -91,6 +93,7 @@ pub(super) enum Effect {
 pub(super) struct FakeEffects<'a> {
     path: PathBuf,
     presence: Option<&'a ReleasePresence>,
+    allowances: Option<&'a TerminalAllowances>,
     fail_emit: bool,
     fail_copy: bool,
     copy_epoch: u64,
@@ -106,6 +109,7 @@ impl<'a> FakeEffects<'a> {
         Self {
             path,
             presence: None,
+            allowances: None,
             fail_emit: false,
             fail_copy: false,
             copy_epoch: COPY_EPOCH,
@@ -134,6 +138,18 @@ impl<'a> FakeEffects<'a> {
     pub(super) fn with_presence(path: PathBuf, presence: &'a ReleasePresence) -> Self {
         Self {
             presence: Some(presence),
+            ..Self::new(path)
+        }
+    }
+
+    pub(super) fn with_allowances(
+        path: PathBuf,
+        presence: &'a ReleasePresence,
+        allowances: &'a TerminalAllowances,
+    ) -> Self {
+        Self {
+            presence: Some(presence),
+            allowances: Some(allowances),
             ..Self::new(path)
         }
     }
@@ -227,6 +243,13 @@ impl DesktopEffects for FakeEffects<'_> {
         self.record(Effect::RevokePresence);
         if let Some(presence) = self.presence {
             presence.revoke();
+        }
+    }
+
+    fn forget_terminal_allowances(&self) {
+        self.record(Effect::ForgetTerminalAllowances);
+        if let Some(allowances) = self.allowances {
+            allowances.forget_all();
         }
     }
 
@@ -783,6 +806,7 @@ fn locking_observes_before_clearing_and_records_every_effect_in_order() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]
@@ -808,6 +832,7 @@ fn locking_an_already_locked_vault_keeps_the_existing_behavior() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]
@@ -1108,6 +1133,7 @@ fn an_emit_failure_returns_the_existing_error_and_still_clears_the_session() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]

@@ -9,11 +9,14 @@ use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::throttle::{PersistedPinThrottle, PinAttemptGuard};
 use crate::vault::{UnlockedVault, VaultResult, VaultSnapshot, VaultState};
 
+pub mod approval_slot;
 pub mod backups;
 pub mod breach_scan;
 pub mod browser_fill;
 pub mod browser_fill_broker;
 pub mod browser_replies;
+pub mod cli_broker;
+pub mod cli_requests;
 pub mod file_choices;
 pub mod history;
 pub mod imports;
@@ -34,6 +37,7 @@ pub mod sync_join;
 pub mod sync_pairing;
 pub mod sync_recovery;
 pub mod sync_transfer;
+pub mod terminal_allowances;
 pub mod unlock;
 pub mod updater;
 
@@ -51,6 +55,9 @@ pub mod browser_replies_tests;
 
 #[cfg(test)]
 pub mod browser_url_rules_tests;
+
+#[cfg(test)]
+pub mod cli_tests;
 
 #[cfg(test)]
 pub mod imports_tests;
@@ -97,6 +104,7 @@ pub trait DesktopEffects: Sync {
         clear_after_ms: Option<u64>,
     ) -> VaultResult<u64>;
     fn revoke_presence(&self);
+    fn forget_terminal_allowances(&self);
     fn cancel_breach_scan(&self);
     #[allow(clippy::result_unit_err)]
     fn emit_vault_locked(&self) -> Result<(), ()>;

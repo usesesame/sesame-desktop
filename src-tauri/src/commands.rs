@@ -27,6 +27,7 @@ pub mod sync;
 pub mod sync_adopt;
 pub mod sync_pairing;
 pub mod sync_transfer;
+mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod tools;
@@ -57,6 +58,7 @@ pub use secure_notes::*;
 pub use software_licenses::*;
 pub use ssh_keys::*;
 pub use support::*;
+pub use terminal::*;
 pub use tools::*;
 pub use trash::*;
 pub use updater::*;

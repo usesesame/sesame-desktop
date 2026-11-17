@@ -249,6 +249,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'diagnostics',
     'external-navigation',
     'browser-approval',
+    'terminal-approval',
     'release-record',
     'desktop-settings',
     'website-icons',
@@ -1780,6 +1781,36 @@ test('the Activity record is reachable only from the main window', () => {
   const emit = read('src-tauri', 'src', 'commands', 'release_record.rs')
   assert.match(emit, /emit_to\("main", RELEASE_RECORD_CHANGED/, 'the record status is not sent to the main window only')
   assert.doesNotMatch(emit, /\.emit\(/, 'the record status is broadcast to every window')
+})
+
+test('the command line tool releases hidden values only behind the presence check', () => {
+  const requests = read('src-tauri', 'sesame-app', 'src', 'application', 'cli_requests.rs')
+  assert.doesNotMatch(requests, /secret_value|visit_secrets|open_payload|(?<![a-z_])(?:copy_)?item_field_in_state\(/, 'the tool reads a hidden value around the presence check')
+  assert.match(requests, /terminal_item_field_in_state\(/)
+  assert.match(requests, /terminal_copy_item_field_in_state\(/)
+  assert.match(requests, /let present = redact\(&mut redacted\);/, 'the tool builds visible fields from an item that still holds its secrets')
+  assert.match(requests, /match &mut redacted \{/)
+  assert.match(requests, /entry\.totp\.zeroize\(\);/, 'a whole-item reply can carry the one-time code seed')
+  assert.match(requests, /entry\.backup_codes\.zeroize\(\);/, 'a whole-item reply can carry the backup codes')
+  const reveal = read('src-tauri', 'sesame-app', 'src', 'application', 'reveal.rs')
+  for (const name of ['terminal_item_field_in_state', 'terminal_copy_item_field_in_state']) {
+    const body = reveal.match(new RegExp(`pub fn ${name}\\([\\s\\S]*?\\n\\}`))
+    assert.ok(body, `${name} moved`)
+    assert.match(body[0], /let value = item_field_in_state\(state, presence, id, kind, field\)\?;/, `${name} skips the presence check`)
+  }
+  const browserSide = [
+    read('src-tauri', 'src', 'browser_fill.rs'),
+    read('src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'),
+    read('src-tauri', 'sesame-app', 'src', 'application', 'browser_replies.rs'),
+    ...readdirSync(join(root, 'src-tauri', 'src', 'adapters', 'platform', 'browser_host')).map((name) => read('src-tauri', 'src', 'adapters', 'platform', 'browser_host', name)),
+  ]
+  for (const source of browserSide) {
+    assert.doesNotMatch(source, /cli_protocol|CliRequest|CliReply|serve_cli_request|cli_requests/, 'the browser side names the command line protocol')
+  }
+  const tool = [read('src-tauri', 'sesame-app', 'src', 'cli_protocol.rs'), requests]
+  for (const source of tool) {
+    assert.doesNotMatch(source, /BrowserRequest|BrowserResponse|browser_replies/, 'the command line side names the browser protocol')
+  }
 })
 
 test('no native messaging message type can reach the Activity record', () => {

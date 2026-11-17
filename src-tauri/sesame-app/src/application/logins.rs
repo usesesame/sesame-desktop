@@ -405,6 +405,26 @@ pub fn copy_totp_code_in_state(
     Ok(copied)
 }
 
+pub fn terminal_totp_in_state(
+    state: &VaultState,
+    id: &str,
+) -> VaultResult<Option<(Zeroizing<String>, u64)>> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+    let session = session.as_ref().ok_or("Unlock your vault first.")?;
+    let item = session.open_item(id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Ok(None);
+    };
+    Ok(entry
+        .totp
+        .as_deref()
+        .and_then(current_totp)
+        .map(|(code, remaining, _)| (Zeroizing::new(code), remaining)))
+}
+
 pub fn merge_duplicate_logins_in_state(
     state: &VaultState,
     request: MergeDuplicateLoginsRequest,

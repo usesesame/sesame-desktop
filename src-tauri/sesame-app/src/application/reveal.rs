@@ -9,6 +9,7 @@ use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::{TaggedItem, VaultResult, VaultState};
 
 const BACKUP_CODES: &str = "backupCodes";
+pub const TERMINAL_SOURCE: &str = "terminal";
 
 fn record_item(state: &VaultState, id: &str, kind: &str) -> VaultResult<TaggedItem> {
     let session = state
@@ -53,6 +54,22 @@ fn record_field(state: &VaultState, entry: EntryKind, id: &str, kind: &str, fiel
     );
 }
 
+pub fn record_terminal_release(
+    state: &VaultState,
+    entry: EntryKind,
+    id: &str,
+    kind: &str,
+    field: &str,
+) {
+    record(
+        state,
+        ReleaseDraft::new(entry, Outcome::Released)
+            .item(id.trim(), kind)
+            .field(field)
+            .host(TERMINAL_SOURCE),
+    );
+}
+
 pub fn reveal_item_field_in_state(
     state: &VaultState,
     presence: &ReleasePresence,
@@ -77,5 +94,36 @@ pub fn copy_item_field_in_state(
     let value = item_field_in_state(state, presence, id, kind, field)?;
     let copied = effects.copy_secret(value, clear_after_ms)?;
     record_field(state, EntryKind::Copy, id, kind, field);
+    Ok(copied)
+}
+
+pub fn terminal_item_field_in_state(
+    state: &VaultState,
+    presence: &ReleasePresence,
+    id: &str,
+    kind: &str,
+    field: &str,
+    fits: &dyn Fn(&str) -> bool,
+) -> VaultResult<Option<Zeroizing<String>>> {
+    let value = item_field_in_state(state, presence, id, kind, field)?;
+    if !fits(&value) {
+        return Ok(None);
+    }
+    record_terminal_release(state, EntryKind::Reveal, id, kind, field);
+    Ok(Some(value))
+}
+
+pub fn terminal_copy_item_field_in_state(
+    state: &VaultState,
+    presence: &ReleasePresence,
+    effects: &dyn DesktopEffects,
+    id: &str,
+    kind: &str,
+    field: &str,
+    clear_after_ms: Option<u64>,
+) -> VaultResult<u64> {
+    let value = item_field_in_state(state, presence, id, kind, field)?;
+    let copied = effects.copy_secret(value, clear_after_ms)?;
+    record_terminal_release(state, EntryKind::Copy, id, kind, field);
     Ok(copied)
 }

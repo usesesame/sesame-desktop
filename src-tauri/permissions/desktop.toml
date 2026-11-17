@@ -200,6 +200,17 @@ commands.allow = [
 ]
 
 [[permission]]
+identifier = "terminal-approval"
+description = "Approvals, item choices and remembered terminal permissions for command line requests, for the main window only."
+commands.allow = [
+  "get_pending_terminal_request",
+  "get_terminal_approval_wait",
+  "resolve_terminal_request",
+  "list_terminal_permissions",
+  "forget_terminal_permissions",
+]
+
+[[permission]]
 identifier = "release-record"
 description = "The Activity record of secret releases and browser decisions, for the main window only."
 commands.allow = [

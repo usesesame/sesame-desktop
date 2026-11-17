@@ -10,6 +10,7 @@ mod diagnostics;
 #[cfg(test)]
 mod record_writes_tests;
 mod rollback_guard;
+mod terminal;
 mod vault;
 
 pub(crate) use sesame_app::{application, browser_protocol, release, sync};
@@ -187,6 +188,11 @@ macro_rules! sesame_invoke_handler {
             commands::get_release_record_hint,
             commands::set_release_record_retention,
             commands::clear_release_record,
+            commands::get_pending_terminal_request,
+            commands::get_terminal_approval_wait,
+            commands::resolve_terminal_request,
+            commands::list_terminal_permissions,
+            commands::forget_terminal_permissions,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
@@ -292,6 +298,7 @@ pub fn run() {
         adapters::platform::webview_sandbox::refuse(context, unavailable);
         return;
     }
+    let approval_slot = application::approval_slot::ApprovalSlot::default();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
@@ -315,7 +322,11 @@ pub fn run() {
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
         .manage(commands::FileSelectionState::default())
-        .manage(browser_fill::BrowserFillState::default())
+        .manage(browser_fill::BrowserFillState::sharing(
+            approval_slot.clone(),
+        ))
+        .manage(terminal::CliApprovalState::sharing(approval_slot))
+        .manage(terminal::TerminalAllowances::default())
         .manage(release::ReleasePresence::default())
         .manage(rollback_guard::RollbackGuard::default())
         .manage(desktop_shell::DesktopShellState::default())

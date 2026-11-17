@@ -44,6 +44,7 @@ struct BrowserApprovalCancelledEvent {
 
 pub fn cancel_pending_approvals(app: &tauri::AppHandle) {
     app.state::<BrowserFillState>().cancel_pending();
+    crate::terminal::cancel_pending_approval(app);
 }
 
 #[allow(clippy::too_many_arguments)]
