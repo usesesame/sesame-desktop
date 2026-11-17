@@ -1,12 +1,124 @@
 {
+  "awaitingUbuntuFix": {
+    "release": "Ubuntu:24.04:LTS",
+    "libraries": [
+      {
+        "package": "cairo",
+        "reason": "Cairo draws what GTK and the webview ask for. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The only outside image is a website icon, which Sesame decodes in Rust and hands to the webview as its own PNG of at most 256 pixels. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "dbus",
+        "reason": "The AppImage bundles only the libdbus-1 client library. Sesame talks to the computer's own bus, whose daemon runs outside the AppImage, so a flaw in dbus-daemon or its tools is not in the shipped code. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "elfutils",
+        "reason": "libdw and libelf are bundled as a GStreamer dependency for reading the program's own debug information. Sesame gives them no file from outside. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "gdk-pixbuf",
+        "reason": "GTK uses gdk-pixbuf to load Sesame's own window and tray icons and the icon theme installed on the computer. Sesame gives it no image from outside. The only outside image is a website icon, which Sesame decodes in Rust and hands to the webview as its own PNG of at most 256 pixels. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "gst-plugins-base1.0",
+        "reason": "Sesame plays no media. Its webview has media, media streams, WebAudio and WebRTC turned off and its content security policy sets media-src 'none', so no media from outside reaches GStreamer. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "gstreamer1.0",
+        "reason": "Sesame plays no media. Its webview has media, media streams, WebAudio and WebRTC turned off and its content security policy sets media-src 'none', so no media or caps text from outside reaches GStreamer. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "harfbuzz",
+        "reason": "HarfBuzz shapes the text of Sesame's own interface with the fonts installed on the computer. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The policy leaves no font source but the app itself. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "icu",
+        "reason": "ICU handles text and locale data for the webview. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "krb5",
+        "reason": "The AppImage bundles the krb5 client libraries only as a dependency of libsoup. Sesame runs no Kerberos service and never authenticates with Kerberos, because its webview loads only its own origin and its network requests go through Rust. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libjpeg-turbo",
+        "reason": "The JPEG decoder is bundled for the webview and GTK. Sesame ships no JPEG and accepts none. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The only outside image is a website icon, which Sesame decodes in Rust and hands to the webview as its own PNG of at most 256 pixels. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libsoup3",
+        "reason": "libsoup is the HTTP library of WebKitGTK. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The policy limits connections to the app itself, and Sesame's own network requests go through Rust, so libsoup talks to no outside server. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libxi",
+        "reason": "libXi is the X11 input client library. Its flaws need a malicious X server, which already controls the session's input and display. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libxml2",
+        "reason": "libxml2 is bundled as a WebKitGTK dependency and parses XML only for pages the webview loads. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libxrender",
+        "reason": "libXrender is an X11 client library. Its flaws need a malicious X server, which already controls the session's input and display. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "libxslt",
+        "reason": "libxslt is bundled as a WebKitGTK dependency and runs only for pages the webview loads. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "pixman",
+        "reason": "Pixman composites what Cairo draws for GTK and the webview. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The only outside image is a website icon, which Sesame decodes in Rust and hands to the webview as its own PNG of at most 256 pixels. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "sqlite3",
+        "reason": "Sesame does not use SQLite, which is bundled as a WebKitGTK dependency. Its flaws need attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "systemd",
+        "reason": "The AppImage bundles only the libsystemd and libudev client libraries. It ships no systemd daemon, generator or command, and Sesame mounts nothing and runs no unit. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      },
+      {
+        "package": "webkit2gtk",
+        "reason": "The flaws are reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page, script or stylesheet reaches it. The only outside image is a website icon, which Sesame decodes in Rust and hands to the webview as its own PNG of at most 256 pixels. Ubuntu has published no fix for 24.04 and rates the advisory below high.",
+        "reviewed": "2026-11-17",
+        "expires": "2027-02-15"
+      }
+    ]
+  },
   "entries": [
-    {
-      "id": "UBUNTU-CVE-2026-40228",
-      "package": "systemd",
-      "reason": "The advisory is in systemd-journald. The AppImage bundles the systemd shared libraries, not the journald daemon, and Ubuntu 24.04 noble has no fixed systemd version. Every other advisory still fails the gate.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
     {
       "id": "GHSA-wrw7-89jp-8q8g",
       "package": "glib",
@@ -50,366 +162,9 @@
       "expires": "2027-01-18"
     },
     {
-      "id": "UBUNTU-CVE-2017-7475",
-      "package": "cairo",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2018-18064",
-      "package": "cairo",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-50422",
-      "package": "cairo",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-1352",
-      "package": "elfutils",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-1376",
-      "package": "elfutils",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-16768",
-      "package": "gdk-pixbuf",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-18090",
-      "package": "gdk-pixbuf",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-81893",
-      "package": "gdk-pixbuf",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-85150",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-86476",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-22693",
-      "package": "harfbuzz",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
       "id": "USN-7214-1",
       "package": "harfbuzz",
       "reason": "OSV lists a fixed version only for a newer Ubuntu release than 24.04, which the AppImage is built on. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-5222",
-      "package": "icu",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-107708",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-107778",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2018-10126",
-      "package": "libjpeg-turbo",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-75466",
-      "package": "libjpeg-turbo",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-14523",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-32049",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-4035",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-9901",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-0716",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-0719",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15709",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15711",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15712",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15713",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15714",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-1760",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-1761",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-2369",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-2436",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-2443",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-2708",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3099",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3632",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3633",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3634",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-66337",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-66338",
-      "package": "libsoup3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-93541",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-93542",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-93543",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-93544",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-93545",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-94281",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-94282",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-11979",
-      "package": "libxml2",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-88807",
-      "package": "libxrender",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-10911",
-      "package": "libxslt",
-      "reason": "OSV lists a fixed version only for a newer Ubuntu release than 24.04, which the AppImage is built on. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-11731",
-      "package": "libxslt",
-      "reason": "OSV lists a fixed version only for a newer Ubuntu release than 24.04, which the AppImage is built on. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-7425",
-      "package": "libxslt",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
       "reviewed": "2026-10-20",
       "expires": "2027-01-18"
     },
@@ -421,382 +176,11 @@
       "expires": "2027-01-18"
     },
     {
-      "id": "UBUNTU-CVE-2023-37769",
-      "package": "pixman",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2024-43091",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2024-43767",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2024-8193",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-0444",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-48622",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-54627",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-66286",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-10018",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-10019",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-15109",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-78376",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-20",
-      "expires": "2027-01-18"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-113679",
-      "package": "harfbuzz",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-24",
-      "expires": "2027-01-22"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-113680",
-      "package": "harfbuzz",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-10-24",
-      "expires": "2027-01-22"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-111183",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in a GStreamer media or subtitle parser and needs crafted media to be played. Sesame plays no media and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119729",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in a GStreamer media or subtitle parser and needs crafted media to be played. Sesame plays no media and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119842",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in a GStreamer media or subtitle parser and needs crafted media to be played. Sesame plays no media and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-109089",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw needs a malicious X server, which already controls the session's input and display. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-109090",
-      "package": "libxi",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw needs a malicious X server, which already controls the session's input and display. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119371",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119372",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119373",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119374",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119375",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119376",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119377",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119378",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119379",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119586",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119591",
-      "package": "sqlite3",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. Sesame does not use SQLite; the library is bundled as a WebKitGTK dependency. The flaw needs attacker-controlled SQL, a crafted database file or the sqlite3 command-line shell, and Sesame's webview runs only its bundled pages. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2024-43768",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2024-8198",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2025-0436",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3536",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3538",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
       "id": "UBUNTU-CVE-2026-3909",
       "package": "webkit2gtk",
       "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
       "reviewed": "2026-11-08",
       "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-3931",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-43670",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-5283",
-      "package": "webkit2gtk",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in WebKitGTK's Skia, ANGLE or CSP handling and is reached through crafted web content. Sesame's webview loads only its bundled pages under a content security policy of default-src 'self', so no remote page reaches it. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-120749",
-      "package": "dbus",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in dbus-daemon, which aborts when a privileged monitor is attached and a driver broadcast cannot be delivered. The AppImage bundles only the libdbus-1 client library, and Sesame talks to the host's own bus, whose daemon runs outside the AppImage. Every other advisory still fails the gate.",
-      "reviewed": "2026-11-08",
-      "expires": "2027-02-05"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-125040",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in a GStreamer media or subtitle parser and needs crafted media to be played. Sesame plays no media and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112314",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a memory leak in GSS-RPC client programs, and Sesame makes no GSS-RPC calls. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112315",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112316",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112317",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112318",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112319",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112320",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112321",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112322",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-112323",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-119079",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is a denial of service in the Kerberos KDC or kadmind server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-11",
-      "expires": "2027-02-09"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-125712",
-      "package": "gst-plugins-base1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in the RTCP packet parser and needs a live RTP media session. Sesame plays no media, its webview has media and WebRTC turned off and its content security policy sets media-src 'none'. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-13",
-      "expires": "2027-02-11"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-125704",
-      "package": "gstreamer1.0",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in GStreamer core when it deserializes untrusted caps or structure text, such as from a GStreamer Data Protocol receiver. Sesame plays no media, its webview has media and WebRTC turned off and its content security policy sets media-src 'none', so no caps from outside reach GStreamer. The AppImage bundles this library from its build image.",
-      "reviewed": "2026-11-13",
-      "expires": "2027-02-11"
     },
     {
       "id": "GHSA-gcqx-w48m-w2h4",
@@ -811,55 +195,6 @@
       "reason": "The fix is in minimatch 11, and eslint, @eslint/config-array and typescript-estree still require 10. minimatch is a development dependency that matches the file patterns in Sesame's own lint configuration. It is not part of the shipped app, and no outside input reaches it.",
       "reviewed": "2026-11-13",
       "expires": "2027-02-11"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-111423",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in how Kerberos services and the KDC check PAC server checksums, and Sesame is not a Kerberos service. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-71199",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in how Kerberos services validate CAMMAC verifiers, and Sesame is not a Kerberos service. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-107884",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in kadmind, the Kerberos admin server, which Sesame does not run. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-118380",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. The flaw is in the RPCSEC_GSS server side of libgssrpc, and Sesame makes no GSS-RPC calls. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-107364",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. It is one of the denial of service bugs MIT lists for the KDC, kadmind, application servers and client programs. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-71200",
-      "package": "krb5",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. MIT fixed it in krb5 1.22.3 on 9 November 2026. It is one of the denial of service bugs MIT lists for the KDC, kadmind, application servers and client programs. The AppImage bundles the krb5 client libraries only as a dependency of libsoup, and Sesame never authenticates with Kerberos because its webview loads only its own origin and its network requests go through Rust.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
-    },
-    {
-      "id": "UBUNTU-CVE-2026-121876",
-      "package": "systemd",
-      "reason": "OSV lists no fixed version for Ubuntu 24.04. The flaw is in systemd-gpt-auto-generator, which mounts GPT partitions at boot in confidential computing guest images. The AppImage bundles only the libsystemd client library, and Sesame never runs the generator or mounts anything.",
-      "reviewed": "2026-11-14",
-      "expires": "2027-02-12"
     }
   ]
 }

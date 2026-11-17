@@ -18,28 +18,63 @@ export const allowlistPath = path.join(root, 'tools', 'sbom-advisory-allowlist.j
 
 const MAX_ALLOWLIST_DAYS = 90
 const isoDate = /^\d{4}-\d{2}-\d{2}$/
+const ubuntuRelease = /^Ubuntu:\d{2}\.\d{2}(:LTS)?$/
+const waitingPriorities = new Set(['negligible', 'low', 'medium'])
 const dayNumber = (value) => Date.parse(`${value}T00:00:00Z`) / 86_400_000
+
+const requireReviewWindow = (entry, kind) => {
+  if (!isoDate.test(entry.reviewed ?? '') || !isoDate.test(entry.expires ?? '')) {
+    throw new Error(`Every ${kind} needs a reviewed date and an expiry date as YYYY-MM-DD: ${JSON.stringify(entry)}`)
+  }
+  const days = dayNumber(entry.expires) - dayNumber(entry.reviewed)
+  if (!(days > 0 && days <= MAX_ALLOWLIST_DAYS)) {
+    throw new Error(`Every ${kind} must expire within ${MAX_ALLOWLIST_DAYS} days after it was reviewed: ${JSON.stringify(entry)}`)
+  }
+}
+
+const requireText = (entry, fields, kind) => {
+  for (const field of fields) {
+    if (typeof entry[field] !== 'string' || entry[field].length === 0) {
+      throw new Error(`Every ${kind} needs ${fields.join(', ')}: ${JSON.stringify(entry)}`)
+    }
+  }
+}
 
 export const loadAllowlist = (file = allowlistPath) => {
   const parsed = JSON.parse(readFileSync(file, 'utf8'))
   const entries = Array.isArray(parsed.entries) ? parsed.entries : []
   for (const entry of entries) {
-    for (const field of ['id', 'package', 'reason', 'reviewed']) {
-      if (typeof entry[field] !== 'string' || entry[field].length === 0) {
-        throw new Error(
-          `Every allowlist entry needs an id, a package, a reason and a reviewed date: ${JSON.stringify(entry)}`,
-        )
-      }
-    }
-    if (!isoDate.test(entry.reviewed) || !isoDate.test(entry.expires ?? '')) {
-      throw new Error(`Every allowlist entry needs a reviewed date and an expiry date as YYYY-MM-DD: ${JSON.stringify(entry)}`)
-    }
-    const days = dayNumber(entry.expires) - dayNumber(entry.reviewed)
-    if (!(days > 0 && days <= MAX_ALLOWLIST_DAYS)) {
-      throw new Error(`An allowlist entry must expire within ${MAX_ALLOWLIST_DAYS} days after it was reviewed: ${JSON.stringify(entry)}`)
-    }
+    requireText(entry, ['id', 'package', 'reason', 'reviewed'], 'allowlist entry')
+    requireReviewWindow(entry, 'allowlist entry')
   }
   return entries
+}
+
+export const loadUnfixedLibraryRules = (file = allowlistPath) => {
+  const section = JSON.parse(readFileSync(file, 'utf8')).awaitingUbuntuFix
+  if (section === undefined) return { release: null, libraries: [] }
+  const libraries = Array.isArray(section.libraries) ? section.libraries : []
+  if (!ubuntuRelease.test(section.release ?? '')) {
+    throw new Error('The libraries that wait on an Ubuntu fix need the Ubuntu release the AppImage is built on.')
+  }
+  for (const library of libraries) {
+    requireText(library, ['package', 'reason', 'reviewed'], 'library rule')
+    requireReviewWindow(library, 'library rule')
+  }
+  return { release: section.release, libraries }
+}
+
+const hasFix = (affected) =>
+  (affected.ranges ?? []).some((range) => (range.events ?? []).some((event) => 'fixed' in event))
+
+export const awaitsUbuntuFix = (vulnerability, component, release) => {
+  if (!component.purl.startsWith('pkg:deb/ubuntu/')) return false
+  const priority = (vulnerability.severity ?? []).find((severity) => severity.type === 'Ubuntu')?.score
+  if (!waitingPriorities.has(priority)) return false
+  const affected = (vulnerability.affected ?? []).filter(
+    (entry) => entry.package?.ecosystem === release && entry.package?.name === component.name,
+  )
+  return affected.length > 0 && !affected.some(hasFix)
 }
 
 export const queryOsv = async (purl) => {
@@ -129,10 +164,19 @@ export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8
 
 export const collectSbomAdvisories = async (
   sources,
-  { query = queryOsv, concurrency = 8, allowlist: configured = [], today = new Date().toISOString().slice(0, 10) } = {},
+  {
+    query = queryOsv,
+    concurrency = 8,
+    allowlist: configured = [],
+    unfixed = { release: null, libraries: [] },
+    today = new Date().toISOString().slice(0, 10),
+  } = {},
 ) => {
-  const expired = configured.filter((rule) => typeof rule.expires === 'string' && rule.expires < today)
-  const allowlist = configured.filter((rule) => !expired.includes(rule))
+  const lapsed = (rule) => typeof rule.expires === 'string' && rule.expires < today
+  const expired = configured.filter(lapsed)
+  const allowlist = configured.filter((rule) => !lapsed(rule))
+  const expiredLibraries = unfixed.libraries.filter(lapsed)
+  const libraries = unfixed.libraries.filter((rule) => !lapsed(rule))
   const entries = []
   const summaries = []
   for (const [index, source] of sources.entries()) {
@@ -148,29 +192,51 @@ export const collectSbomAdvisories = async (
     for (const component of queried) entries.push({ sourceIndex: index, component })
   }
   const results = await queryComponents(entries, { query, concurrency })
+  const usedRules = new Set()
+  const usedLibraries = new Set()
+  const coverage = (component, vulnerability) => {
+    const rule = allowlist.find((entry) => entry.id === vulnerability.id && entry.package === component.name)
+    if (rule) {
+      usedRules.add(rule)
+      return 'reviewed'
+    }
+    const library = libraries.find((entry) => entry.package === component.name)
+    if (library && awaitsUbuntuFix(vulnerability, component, unfixed.release)) {
+      usedLibraries.add(library)
+      return 'waiting'
+    }
+    return null
+  }
   const vulnerable = results
     .filter((entry) => entry.vulnerabilities.length > 0)
-    .map((entry) => ({
-      sourceIndex: entry.sourceIndex,
-      label: summaries[entry.sourceIndex].label,
-      name: entry.component.name,
-      version: entry.component.version,
-      purl: entry.component.purl,
-      ids: entry.vulnerabilities.map((vulnerability) => vulnerability.id).filter(Boolean),
-    }))
+    .map((entry) => {
+      const identified = entry.vulnerabilities.filter((vulnerability) => vulnerability.id)
+      const covered = identified.map((vulnerability) => coverage(entry.component, vulnerability))
+      return {
+        sourceIndex: entry.sourceIndex,
+        label: summaries[entry.sourceIndex].label,
+        name: entry.component.name,
+        version: entry.component.version,
+        purl: entry.component.purl,
+        ids: identified.map((vulnerability) => vulnerability.id),
+        waitingIds: identified.filter((_, index) => covered[index] === 'waiting').map((vulnerability) => vulnerability.id),
+        cleared: covered.length > 0 && covered.every(Boolean),
+      }
+    })
   const byEcosystem = {}
   for (const summary of summaries) {
     for (const [type, count] of Object.entries(summary.byEcosystem)) {
       byEcosystem[type] = (byEcosystem[type] ?? 0) + count
     }
   }
-  const allowedByRule = (entry) =>
-    entry.ids.length > 0 &&
-    entry.ids.every((id) => allowlist.some((rule) => rule.id === id && rule.package === entry.name))
-  const allowed = vulnerable.filter(allowedByRule)
-  const fatal = vulnerable.filter((entry) => !allowedByRule(entry))
-  const usedRules = new Set(allowed.flatMap((entry) => entry.ids.map((id) => `${entry.name}|${id}`)))
-  const unused = allowlist.filter((rule) => !usedRules.has(`${rule.package}|${rule.id}`))
+  const allowed = vulnerable.filter((entry) => entry.cleared)
+  const fatal = vulnerable.filter((entry) => !entry.cleared)
+  const unused = allowlist.filter((rule) => !usedRules.has(rule))
+  const unusedLibraries = libraries.filter((rule) => !usedLibraries.has(rule))
+  const withIds = (entries, pick) =>
+    entries.map((entry) => ({ ...publicAdvisory(entry), ids: pick(entry) })).filter((entry) => entry.ids.length > 0)
+  const waiting = withIds(allowed, (entry) => entry.waitingIds)
+  const reviewed = withIds(allowed, (entry) => entry.ids.filter((id) => !entry.waitingIds.includes(id)))
   return {
     sources: summaries.map((summary, index) => ({
       ...summary,
@@ -184,8 +250,12 @@ export const collectSbomAdvisories = async (
     byEcosystem,
     vulnerable: fatal.map(publicAdvisory),
     allowed: allowed.map(publicAdvisory),
+    reviewed,
+    waiting,
     unused,
+    unusedLibraries,
     expired,
+    expiredLibraries,
   }
 }
 
@@ -203,7 +273,11 @@ export const auditSbom = async (bom, options) => {
 }
 
 export const auditSboms = async (sources, options = {}) => {
-  const report = await collectSbomAdvisories(sources, { allowlist: loadAllowlist(), ...options })
+  const report = await collectSbomAdvisories(sources, {
+    allowlist: loadAllowlist(),
+    unfixed: loadUnfixedLibraryRules(),
+    ...options,
+  })
   if (report.vulnerable.length > 0) {
     const lines = report.vulnerable.map(
       (component) =>
@@ -235,7 +309,10 @@ const main = async () => {
     const resolved = path.resolve(sbomPath)
     sources.push({ label: resolved, bom: JSON.parse(await readFile(resolved, 'utf8')) })
   }
-  const report = await collectSbomAdvisories(sources, { allowlist: loadAllowlist() })
+  const report = await collectSbomAdvisories(sources, {
+    allowlist: loadAllowlist(),
+    unfixed: loadUnfixedLibraryRules(),
+  })
   for (const source of report.sources) {
     process.stdout.write(`Audited ${source.label}\n`)
     process.stdout.write(
@@ -247,10 +324,23 @@ const main = async () => {
       `Combined: queried ${report.queried} of ${report.total} components against OSV (${report.skipped} without a purl; ${formatEcosystems(report.byEcosystem)}).\n`,
     )
   }
-  for (const component of report.allowed) {
+  for (const component of report.reviewed) {
     process.stdout.write(
       `Allowed by review: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
     )
+  }
+  for (const component of report.waiting) {
+    process.stdout.write(
+      `Waiting on an Ubuntu fix: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+    )
+  }
+  for (const rule of report.expiredLibraries) {
+    process.stdout.write(
+      `Expired library rule: ${rule.package} expired on ${rule.expires}, review it again.\n`,
+    )
+  }
+  for (const rule of report.unusedLibraries) {
+    process.stdout.write(`Unused library rule: ${rule.package}, remove it or say why it stays.\n`)
   }
   for (const rule of report.expired) {
     process.stdout.write(

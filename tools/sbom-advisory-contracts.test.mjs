@@ -10,7 +10,9 @@ import {
   collectAdvisories,
   collectSbomAdvisories,
   defaultSbomPath,
+  awaitsUbuntuFix,
   loadAllowlist,
+  loadUnfixedLibraryRules,
   queryOsv,
 } from './audit-sbom.mjs'
 
@@ -238,10 +240,10 @@ test('an allowlist entry without a reason is rejected', () => {
   }
 })
 
-test('the shipped allowlist names the systemd advisory with a reason and a review date', () => {
-  const entry = loadAllowlist().find((rule) => rule.id === 'UBUNTU-CVE-2026-40228')
-  assert.ok(entry, 'the systemd advisory entry is gone from the allowlist')
-  assert.equal(entry.package, 'systemd')
+test('the shipped allowlist keeps a reason and a review date on the high priority WebKitGTK advisory', () => {
+  const entry = loadAllowlist().find((rule) => rule.id === 'UBUNTU-CVE-2026-3909')
+  assert.ok(entry, 'the high priority WebKitGTK advisory entry is gone from the allowlist')
+  assert.equal(entry.package, 'webkit2gtk')
   assert.ok(entry.reason.length > 20, 'the entry needs a reason a reviewer can check')
   assert.match(entry.reviewed, /^\d{4}-\d{2}-\d{2}$/)
 })
@@ -332,4 +334,131 @@ test('a repeated OSV continuation token refuses the audit', async (t) => {
   })
   await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0'), /repeated continuation token/)
   assert.equal(calls, 2)
+})
+
+const noble = 'Ubuntu:24.04:LTS'
+const ubuntuAdvisory = ({ id = 'UBUNTU-CVE-fictional-1', priority = 'medium', name = 'fictional-lib', release = noble, fixed } = {}) => ({
+  id,
+  ...(priority ? { severity: [{ type: 'Ubuntu', score: priority }] } : {}),
+  affected: [
+    {
+      package: { ecosystem: release, name },
+      ranges: [{ type: 'ECOSYSTEM', events: fixed ? [{ introduced: '0' }, { fixed }] : [{ introduced: '0' }] }],
+    },
+  ],
+})
+const bundledSource = () => [
+  { bom: { components: [component('fictional-lib', '1.0-1ubuntu1', 'pkg:deb/ubuntu/fictional-lib@1.0-1ubuntu1')] } },
+]
+const libraryRules = (overrides = {}) => ({
+  release: noble,
+  libraries: [
+    {
+      package: 'fictional-lib',
+      reason: 'Sesame gives the library nothing from outside.',
+      reviewed: '2026-11-17',
+      expires: '2027-02-15',
+      ...overrides,
+    },
+  ],
+})
+const auditBundled = (advisories, unfixed = libraryRules()) =>
+  collectSbomAdvisories(bundledSource(), { query: async () => advisories, unfixed, today: '2026-11-17' })
+
+test('an unfixed Ubuntu advisory below high priority waits under its library rule', async () => {
+  const report = await auditBundled([ubuntuAdvisory(), ubuntuAdvisory({ id: 'UBUNTU-CVE-fictional-2', priority: 'low' })])
+  assert.equal(report.vulnerable.length, 0)
+  assert.deepEqual(report.waiting.map((entry) => entry.ids), [['UBUNTU-CVE-fictional-1', 'UBUNTU-CVE-fictional-2']])
+  assert.deepEqual(report.reviewed, [])
+  assert.deepEqual(report.unusedLibraries, [])
+})
+
+test('an advisory Ubuntu has fixed for the build release fails until the bundle is rebuilt', async () => {
+  const report = await auditBundled([ubuntuAdvisory({ fixed: '1.0-1ubuntu2' })])
+  assert.deepEqual(report.vulnerable.map((entry) => entry.ids), [['UBUNTU-CVE-fictional-1']])
+  assert.deepEqual(report.waiting, [])
+})
+
+test('a high, critical or unrated advisory still needs its own entry', async () => {
+  for (const priority of ['high', 'critical', 'unknown', null]) {
+    const report = await auditBundled([ubuntuAdvisory({ priority })])
+    assert.equal(report.vulnerable.length, 1, String(priority))
+  }
+})
+
+test('an advisory that names only another Ubuntu release or another package does not wait', async () => {
+  const other = await auditBundled([ubuntuAdvisory({ release: 'Ubuntu:26.04:LTS' })])
+  assert.equal(other.vulnerable.length, 1)
+  const pro = await auditBundled([ubuntuAdvisory({ release: 'Ubuntu:Pro:24.04:LTS' })])
+  assert.equal(pro.vulnerable.length, 1)
+  const renamed = await auditBundled([ubuntuAdvisory({ name: 'another-lib' })])
+  assert.equal(renamed.vulnerable.length, 1)
+})
+
+test('a fix listed for the build release wins over an unfixed entry for the same package', async () => {
+  const advisory = ubuntuAdvisory()
+  advisory.affected.push(ubuntuAdvisory({ fixed: '1.0-1ubuntu2' }).affected[0])
+  const report = await auditBundled([advisory])
+  assert.equal(report.vulnerable.length, 1)
+})
+
+test('a library without a rule, an expired rule and a package outside Ubuntu do not wait', async () => {
+  const missing = await auditBundled([ubuntuAdvisory()], { release: noble, libraries: [] })
+  assert.equal(missing.vulnerable.length, 1)
+  const lapsed = await auditBundled([ubuntuAdvisory()], libraryRules({ reviewed: '2026-08-01', expires: '2026-10-01' }))
+  assert.equal(lapsed.vulnerable.length, 1)
+  assert.deepEqual(lapsed.expiredLibraries.map((rule) => rule.package), ['fictional-lib'])
+  assert.equal(
+    awaitsUbuntuFix(ubuntuAdvisory(), { name: 'fictional-lib', purl: 'pkg:npm/fictional-lib@1.0.0' }, noble),
+    false,
+  )
+})
+
+test('one advisory outside the rule fails the library even when the others wait', async () => {
+  const report = await auditBundled([ubuntuAdvisory(), ubuntuAdvisory({ id: 'UBUNTU-CVE-fictional-9', priority: 'high' })])
+  assert.deepEqual(report.vulnerable.map((entry) => entry.ids), [['UBUNTU-CVE-fictional-1', 'UBUNTU-CVE-fictional-9']])
+})
+
+test('a reviewed entry is counted as used even when its library still fails', async () => {
+  const rule = { id: 'UBUNTU-CVE-fictional-9', package: 'fictional-lib', reason: 'checked', reviewed: '2026-11-17', expires: '2027-02-15' }
+  const report = await collectSbomAdvisories(bundledSource(), {
+    query: async () => [{ id: 'UBUNTU-CVE-fictional-9' }, { id: 'UBUNTU-CVE-fictional-10' }],
+    allowlist: [rule],
+    today: '2026-11-17',
+  })
+  assert.equal(report.vulnerable.length, 1)
+  assert.deepEqual(report.unused, [])
+})
+
+test('a library rule needs a release, a reason and an expiry within ninety days', () => {
+  const write = (section) => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'library-rules-')), 'allowlist.json')
+    writeFileSync(file, JSON.stringify({ awaitingUbuntuFix: section, entries: [] }))
+    return file
+  }
+  const rule = libraryRules().libraries[0]
+  assert.equal(loadUnfixedLibraryRules(write({ release: noble, libraries: [rule] })).libraries.length, 1)
+  assert.throws(() => loadUnfixedLibraryRules(write({ libraries: [rule] })), /Ubuntu release/)
+  assert.throws(() => loadUnfixedLibraryRules(write({ release: 'noble', libraries: [rule] })), /Ubuntu release/)
+  assert.throws(() => loadUnfixedLibraryRules(write({ release: noble, libraries: [{ ...rule, reason: '' }] })), /reason/)
+  assert.throws(
+    () => loadUnfixedLibraryRules(write({ release: noble, libraries: [{ ...rule, expires: '2027-06-01' }] })),
+    /within 90 days/,
+  )
+})
+
+test('the shipped library rules name the Ubuntu release that builds the AppImage', () => {
+  const { release, libraries } = loadUnfixedLibraryRules()
+  const runner = `ubuntu-${release.split(':')[1]}`
+  const jobRunner = (file, job) => {
+    const workflow = readFileSync(path.join(root, '.github', 'workflows', file), 'utf8')
+    const body = workflow.slice(workflow.indexOf(`\n  ${job}:\n`))
+    return body.match(/runs-on: (\S+)/)[1]
+  }
+  assert.equal(jobRunner('ci.yml', 'linux-bundles'), runner)
+  const releaseWorkflow = readFileSync(path.join(root, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
+  assert.deepEqual([...new Set([...releaseWorkflow.matchAll(/runs-on: (\S+)/g)].map((match) => match[1]))], [runner])
+  assert.ok(libraries.length > 0)
+  assert.equal(new Set(libraries.map((rule) => rule.package)).size, libraries.length)
+  for (const rule of libraries) assert.ok(rule.reason.length > 40, rule.package)
 })
