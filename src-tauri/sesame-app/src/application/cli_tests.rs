@@ -1106,3 +1106,80 @@ fn a_long_list_arrives_in_frames_that_each_fit() {
         Some(CliReplyType::Done)
     );
 }
+
+#[test]
+fn labels_with_control_characters_reach_the_tool_readable_distinct_and_matchable() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.vault.seed(|payload| {
+        payload.entries[0].custom_fields = [
+            ("Gate\tcode", "fictional-gate-tab"),
+            ("Gate code", "fictional-gate-space"),
+            ("Locker\u{1b}[31m", "fictional-locker"),
+            ("Bad\u{2409}twin", "fictional-literal-picture"),
+            ("Bad\ttwin", "fictional-real-tab"),
+            ("Trailing\u{7f}", "fictional-delete"),
+            ("Wide\u{9b}", "fictional-c1"),
+        ]
+        .into_iter()
+        .map(|(label, value)| CustomFieldEntry {
+            label: label.to_string(),
+            value: value.to_string(),
+            kind: "text".to_string(),
+        })
+        .collect();
+    });
+
+    let whole = get(210, None, false);
+    let (replies, _) = harness.run_with(&whole, &origin, |_, _| harness.allow(false));
+    let reply = replies.last().expect("an item reply").clone();
+    let (request_id, command) = parse_request(&whole).expect("a valid request");
+    let bytes = reply.to_bytes().expect("encodes");
+    assert!(crate::cli_protocol::parse_reply(&bytes)
+        .is_some_and(|parsed| parsed.answers(&request_id, &command)));
+    let names: Vec<String> = reply
+        .fields
+        .as_ref()
+        .expect("fields")
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    for expected in [
+        "Gate\u{2409}code",
+        "Gate code",
+        "Locker\u{241b}[31m",
+        "Bad\u{2409}twin",
+        "field:4",
+        "Trailing\u{2421}",
+        "Wide\u{fffd}",
+    ] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "{expected} in {names:?}"
+        );
+    }
+    let mut unique = names.clone();
+    unique.sort_by_key(|name| name.to_lowercase());
+    unique.dedup_by_key(|name| name.to_lowercase());
+    assert_eq!(unique.len(), names.len());
+
+    for (n, field, expected) in [
+        (211, "Gate\u{2409}code", "fictional-gate-tab"),
+        (212, "gate code", "fictional-gate-space"),
+        (213, "Locker\u{241b}[31m", "fictional-locker"),
+        (214, "Bad\u{2409}twin", "fictional-literal-picture"),
+        (215, "field:4", "fictional-real-tab"),
+    ] {
+        let (replies, _) = harness.run_with(&get(n, Some(field), false), &origin, |_, _| {
+            harness.allow(false)
+        });
+        assert_eq!(
+            replies
+                .last()
+                .and_then(|reply| reply.value.clone())
+                .as_deref(),
+            Some(expected),
+            "{field}"
+        );
+    }
+}

@@ -421,6 +421,56 @@
       }
     },
     {
+      "name": "whole item with a control picture in a field name",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "Gate\u2409code",
+            "hidden": false,
+            "value": "fictional-gate-4471"
+          }
+        ]
+      }
+    },
+    {
+      "name": "whole item with a raw tab in a field name is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "Gate\tcode",
+            "hidden": false,
+            "value": "fictional-gate-4471"
+          }
+        ]
+      }
+    },
+    {
       "name": "value of a hidden field",
       "valid": true,
       "request": {

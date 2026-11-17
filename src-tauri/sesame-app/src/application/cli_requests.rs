@@ -18,7 +18,7 @@ use super::terminal_allowances::{allowed_request, TerminalAllowances, TerminalOr
 use super::DesktopEffects;
 use crate::cli_protocol::{
     bounded_title_text, parse_request, CliCommand, CliErrorCode, CliField, CliItemSummary,
-    CliReply, WaitReason, MAX_CLI_REPLY_BYTES, MAX_TOTP_REMAINING_SECONDS,
+    CliReply, WaitReason, MAX_CLI_REPLY_BYTES, MAX_FIELD_CHARS, MAX_TOTP_REMAINING_SECONDS,
 };
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::vault::release_record::EntryKind;
@@ -482,6 +482,7 @@ struct DescribedField {
     hidden: bool,
     present: bool,
     value: Option<Zeroizing<String>>,
+    altered: bool,
 }
 
 fn visible(name: &str, value: &str) -> DescribedField {
@@ -491,6 +492,7 @@ fn visible(name: &str, value: &str) -> DescribedField {
         hidden: false,
         present: !value.trim().is_empty(),
         value: Some(Zeroizing::new(value.to_string())),
+        altered: false,
     }
 }
 
@@ -501,15 +503,59 @@ fn hidden(name: &str, key: &str, present: bool) -> DescribedField {
         hidden: true,
         present,
         value: None,
+        altered: false,
     }
 }
 
-fn labelled(label: &str, key: &str) -> String {
-    if label.trim().is_empty() {
-        key.to_string()
-    } else {
-        label.trim().to_string()
+fn control_picture(character: char) -> char {
+    match u32::from(character) {
+        code @ 0x00..=0x1f => char::from_u32(0x2400 + code).unwrap_or('\u{fffd}'),
+        0x7f => '\u{2421}',
+        _ if character.is_control() => '\u{fffd}',
+        _ => character,
     }
+}
+
+fn labelled(label: &str, key: &str) -> (String, bool) {
+    let trimmed =
+        label.trim_matches(|character: char| character.is_whitespace() && !character.is_control());
+    if trimmed.is_empty() {
+        return (key.to_string(), false);
+    }
+    let shown: String = trimmed
+        .chars()
+        .map(control_picture)
+        .take(MAX_FIELD_CHARS)
+        .collect();
+    let altered = shown != trimmed;
+    (shown, altered)
+}
+
+fn labelled_field(field: DescribedField, label: &str) -> DescribedField {
+    let (name, altered) = labelled(label, &field.key);
+    DescribedField {
+        name,
+        altered,
+        ..field
+    }
+}
+
+fn name_clashes(fields: &[DescribedField], index: usize) -> bool {
+    let name = fields[index].name.to_lowercase();
+    fields
+        .iter()
+        .enumerate()
+        .any(|(other, field)| other != index && field.name.to_lowercase() == name)
+}
+
+fn unconfusable(mut fields: Vec<DescribedField>) -> Vec<DescribedField> {
+    let clashing: Vec<usize> = (0..fields.len())
+        .filter(|index| fields[*index].altered && name_clashes(&fields, *index))
+        .collect();
+    for index in clashing {
+        fields[index].name = fields[index].key.clone();
+    }
+    fields
 }
 
 fn described_fields(item: &TaggedItem) -> Vec<DescribedField> {
@@ -618,29 +664,29 @@ fn described_fields(item: &TaggedItem) -> Vec<DescribedField> {
     }
     for (index, field) in custom.iter().enumerate() {
         let key = format!("field:{index}");
-        let name = labelled(&field.label, &key);
-        if field.kind == "secret" {
-            fields.push(hidden(&name, &key, is_present(&key)));
+        let described = if field.kind == "secret" {
+            hidden(&key, &key, is_present(&key))
         } else {
-            fields.push(DescribedField {
-                key,
-                ..visible(&name, &field.value)
-            });
-        }
+            DescribedField {
+                key: key.clone(),
+                ..visible(&key, &field.value)
+            }
+        };
+        fields.push(labelled_field(described, &field.label));
     }
     for (index, field) in legacy.iter().enumerate() {
         let key = format!("legacy:{index}");
-        let name = labelled(&field.label, &key);
-        if field.secret {
-            fields.push(hidden(&name, &key, is_present(&key)));
+        let described = if field.secret {
+            hidden(&key, &key, is_present(&key))
         } else {
-            fields.push(DescribedField {
-                key,
-                ..visible(&name, &field.value)
-            });
-        }
+            DescribedField {
+                key: key.clone(),
+                ..visible(&key, &field.value)
+            }
+        };
+        fields.push(labelled_field(described, &field.label));
     }
-    fields
+    unconfusable(fields)
 }
 
 fn find_field<'a>(fields: &'a [DescribedField], wanted: &str) -> Option<&'a DescribedField> {
@@ -700,7 +746,7 @@ fn release(
                 .iter()
                 .filter(|field| field.present)
                 .map(|field| CliField {
-                    name: field.name.chars().take(128).collect(),
+                    name: field.name.clone(),
                     hidden: field.hidden,
                     value: if field.hidden {
                         None
