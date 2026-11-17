@@ -15,11 +15,6 @@ pub fn served_elsewhere() -> bool {
     SERVED_ELSEWHERE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(target_os = "linux")]
-fn note_served_elsewhere() {
-    SERVED_ELSEWHERE.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

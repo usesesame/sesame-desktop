@@ -50,12 +50,37 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const PROCESS_SYNCHRONIZE: u32 = 0x0010_0000;
 // The app can wait up to 30 seconds for approval; this transport deadline is slightly longer.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(32);
-const PIPE_BUFFER_BYTES: u32 = MAX_PIPE_MESSAGE_BYTES as u32 + 4;
 // Long enough for a transient name collision, short enough to report a name held indefinitely.
 const MAX_CREATE_RETRIES: u32 = 150;
 const CREATE_RETRY_DELAY: Duration = Duration::from_millis(200);
 
-struct OwnedHandle(HANDLE);
+pub struct Channel {
+    pub(super) label: &'static str,
+    pub(super) pipe_prefix: &'static str,
+    pub(super) max_request_bytes: usize,
+    pub(super) max_reply_bytes: usize,
+    pub(super) connect_deadline: Duration,
+    pub(super) request_deadline: Duration,
+    pub(super) reply_deadline: Duration,
+}
+
+pub const BROWSER: Channel = Channel {
+    label: "browser",
+    pipe_prefix: "Sesame.Browser",
+    max_request_bytes: MAX_PIPE_MESSAGE_BYTES,
+    max_reply_bytes: MAX_PIPE_MESSAGE_BYTES,
+    connect_deadline: CONNECT_TIMEOUT,
+    request_deadline: IO_TIMEOUT,
+    reply_deadline: RESPONSE_TIMEOUT,
+};
+
+impl Channel {
+    fn buffer_bytes(&self, max_bytes: usize) -> u32 {
+        (max_bytes + 4).min(u32::MAX as usize) as u32
+    }
+}
+
+pub(super) struct OwnedHandle(HANDLE);
 
 impl OwnedHandle {
     fn new(handle: HANDLE) -> io::Result<Self> {
@@ -66,7 +91,7 @@ impl OwnedHandle {
         }
     }
 
-    fn raw(&self) -> HANDLE {
+    pub(super) fn raw(&self) -> HANDLE {
         self.0
     }
 }
@@ -79,7 +104,7 @@ impl Drop for OwnedHandle {
     }
 }
 
-struct LocalAllocation(*mut c_void);
+pub(super) struct LocalAllocation(pub(super) *mut c_void);
 
 impl Drop for LocalAllocation {
     fn drop(&mut self) {
@@ -91,9 +116,9 @@ impl Drop for LocalAllocation {
     }
 }
 
-struct UserIdentity {
-    sid: String,
-    pipe_name: Vec<u16>,
+pub(super) struct UserIdentity {
+    pub(super) sid: String,
+    pub(super) pipe_name: Vec<u16>,
 }
 
 pub struct PipePeer {
@@ -122,9 +147,31 @@ impl PipePeer {
 }
 
 pub fn request(payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {
-    validate_payload_size(payload)?;
-    let identity = current_user_identity()?;
-    if unsafe { WaitNamedPipeW(identity.pipe_name.as_ptr(), millis(CONNECT_TIMEOUT)) } == 0 {
+    let expected_server = fs::canonicalize(std::env::current_exe()?.with_file_name("sesame.exe"))?;
+    let (pipe, _server) = connect_verified(&BROWSER, &expected_server, payload)?;
+    read_frame_on(
+        &BROWSER,
+        pipe.raw(),
+        BROWSER.max_reply_bytes,
+        BROWSER.reply_deadline,
+    )
+    .map(Zeroizing::new)
+}
+
+pub(super) fn connect_verified(
+    channel: &Channel,
+    expected_server: &Path,
+    payload: &[u8],
+) -> io::Result<(OwnedHandle, OwnedHandle)> {
+    validate_size_on(channel, payload, channel.max_request_bytes)?;
+    let identity = current_user_identity(channel)?;
+    if unsafe {
+        WaitNamedPipeW(
+            identity.pipe_name.as_ptr(),
+            millis(channel.connect_deadline),
+        )
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
     let pipe = OwnedHandle::new(unsafe {
@@ -138,19 +185,25 @@ pub fn request(payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {
             ptr::null_mut(),
         )
     })?;
-    let expected_server = fs::canonicalize(std::env::current_exe()?.with_file_name("sesame.exe"))?;
     // Verified handle kept alive for the exchange; a same-name squatter is rejected up front.
-    let _server = verified_server(pipe.raw(), &expected_server)?;
+    let server = verified_server(channel, pipe.raw(), expected_server)?;
 
-    write_frame(pipe.raw(), payload, IO_TIMEOUT)?;
-    read_frame(pipe.raw(), RESPONSE_TIMEOUT).map(Zeroizing::new)
+    write_frame_on(
+        channel,
+        pipe.raw(),
+        payload,
+        channel.max_request_bytes,
+        channel.request_deadline,
+    )?;
+    Ok((pipe, server))
 }
 
 pub fn serve_forever<F>(expected_client: &Path, handler: F) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &PipePeer) -> Zeroizing<Vec<u8>>,
 {
-    let identity = current_user_identity()?;
+    let channel = &BROWSER;
+    let identity = current_user_identity(channel)?;
     let expected_client = fs::canonicalize(expected_client)?;
     let mut consecutive_create_failures = 0_u32;
     loop {
@@ -167,9 +220,9 @@ where
                 PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 1,
-                PIPE_BUFFER_BYTES,
-                PIPE_BUFFER_BYTES,
-                millis(IO_TIMEOUT),
+                channel.buffer_bytes(channel.max_reply_bytes),
+                channel.buffer_bytes(channel.max_request_bytes),
+                millis(channel.request_deadline),
                 &attributes,
             )
         });
@@ -190,50 +243,73 @@ where
             }
         };
 
-        if !connect_with_timeout(pipe.raw(), CONNECT_TIMEOUT)? {
+        if !connect_with_timeout(pipe.raw(), channel.connect_deadline)? {
             continue;
         }
-        let peer = match verified_peer(pipe.raw(), &expected_client) {
+        let peer = match verified_peer(channel, pipe.raw(), &expected_client) {
             Ok(peer) => peer,
             Err(_) => continue,
         };
-        let request = match read_frame(pipe.raw(), IO_TIMEOUT) {
+        let request = match read_frame_on(
+            channel,
+            pipe.raw(),
+            channel.max_request_bytes,
+            channel.request_deadline,
+        ) {
             Ok(request) => request,
             Err(_) => continue,
         };
         let response = handler(request, &peer);
-        if validate_payload_size(&response).is_err() {
+        if validate_size_on(channel, &response, channel.max_reply_bytes).is_err() {
             continue;
         }
-        let _ = write_frame(pipe.raw(), &response, IO_TIMEOUT);
+        let _ = write_frame_on(
+            channel,
+            pipe.raw(),
+            &response,
+            channel.max_reply_bytes,
+            channel.request_deadline,
+        );
         // Dropping the server handle ends this one request; the next gets a fresh instance.
     }
 }
 
-fn verified_peer(pipe: HANDLE, expected_client: &Path) -> io::Result<PipePeer> {
+pub(super) fn verified_peer(
+    channel: &Channel,
+    pipe: HANDLE,
+    expected_client: &Path,
+) -> io::Result<PipePeer> {
     let mut process_id = 0_u32;
     if unsafe { GetNamedPipeClientProcessId(pipe, &mut process_id) } == 0 || process_id == 0 {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser pipe client identity unavailable",
+            format!("{} pipe client identity unavailable", channel.label),
         ));
     }
-    let process = verified_process(process_id, expected_client)?;
+    let process = verified_process(channel, process_id, expected_client)?;
     Ok(PipePeer { pipe, process })
 }
 
-fn verified_server(pipe: HANDLE, expected_server: &Path) -> io::Result<OwnedHandle> {
+fn verified_server(
+    channel: &Channel,
+    pipe: HANDLE,
+    expected_server: &Path,
+) -> io::Result<OwnedHandle> {
     let mut process_id = 0_u32;
     if unsafe { GetNamedPipeServerProcessId(pipe, &mut process_id) } == 0 || process_id == 0 {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser pipe server identity unavailable",
+            format!("{} pipe server identity unavailable", channel.label),
         ));
     }
-    verified_process(process_id, expected_server)
+    verified_process(channel, process_id, expected_server)
 }
 
-fn verified_process(process_id: u32, expected: &Path) -> io::Result<OwnedHandle> {
+fn verified_process(
+    channel: &Channel,
+    process_id: u32,
+    expected: &Path,
+) -> io::Result<OwnedHandle> {
     let process = OwnedHandle::new(unsafe {
         OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -256,7 +332,7 @@ fn verified_process(process_id: u32, expected: &Path) -> io::Result<OwnedHandle>
     {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser pipe client executable rejected",
+            format!("{} pipe client executable rejected", channel.label),
         ));
     }
     let mut peer_session_id = 0_u32;
@@ -265,13 +341,13 @@ fn verified_process(process_id: u32, expected: &Path) -> io::Result<OwnedHandle>
     {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser pipe peer session rejected",
+            format!("{} pipe peer session rejected", channel.label),
         ));
     }
     Ok(process)
 }
 
-fn current_session_id() -> io::Result<u32> {
+pub(super) fn current_session_id() -> io::Result<u32> {
     let mut session_id = 0_u32;
     if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id) } == 0 {
         return Err(io::Error::last_os_error());
@@ -279,7 +355,7 @@ fn current_session_id() -> io::Result<u32> {
     Ok(session_id)
 }
 
-fn connect_with_timeout(pipe: HANDLE, timeout: Duration) -> io::Result<bool> {
+pub(super) fn connect_with_timeout(pipe: HANDLE, timeout: Duration) -> io::Result<bool> {
     let event = OwnedHandle::new(unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) })?;
     let mut overlapped = OVERLAPPED {
         hEvent: event.raw(),
@@ -299,46 +375,66 @@ fn connect_with_timeout(pipe: HANDLE, timeout: Duration) -> io::Result<bool> {
     }
 }
 
-fn read_frame(pipe: HANDLE, timeout: Duration) -> io::Result<Vec<u8>> {
+pub(super) fn read_frame_on(
+    channel: &Channel,
+    pipe: HANDLE,
+    max_bytes: usize,
+    timeout: Duration,
+) -> io::Result<Vec<u8>> {
     let mut header = [0_u8; 4];
-    read_exact(pipe, &mut header, timeout)?;
+    read_exact(channel, pipe, &mut header, timeout)?;
     let size = u32::from_le_bytes(header) as usize;
-    if size == 0 || size > MAX_PIPE_MESSAGE_BYTES {
+    if size == 0 || size > max_bytes {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
-            "invalid browser pipe message size",
+            format!("invalid {} pipe message size", channel.label),
         ));
     }
     let mut payload = vec![0_u8; size];
-    read_exact(pipe, &mut payload, timeout)?;
+    read_exact(channel, pipe, &mut payload, timeout)?;
     Ok(payload)
 }
 
-fn write_frame(pipe: HANDLE, payload: &[u8], timeout: Duration) -> io::Result<()> {
-    validate_payload_size(payload)?;
+pub(super) fn write_frame_on(
+    channel: &Channel,
+    pipe: HANDLE,
+    payload: &[u8],
+    max_bytes: usize,
+    timeout: Duration,
+) -> io::Result<()> {
+    validate_size_on(channel, payload, max_bytes)?;
     let header = (payload.len() as u32).to_le_bytes();
-    write_all(pipe, &header, timeout)?;
-    write_all(pipe, payload, timeout)
+    write_all(channel, pipe, &header, timeout)?;
+    write_all(channel, pipe, payload, timeout)
 }
 
-fn validate_payload_size(payload: &[u8]) -> io::Result<()> {
-    if payload.is_empty() || payload.len() > MAX_PIPE_MESSAGE_BYTES {
+pub(super) fn validate_size_on(
+    channel: &Channel,
+    payload: &[u8],
+    max_bytes: usize,
+) -> io::Result<()> {
+    if payload.is_empty() || payload.len() > max_bytes {
         Err(io::Error::new(
             ErrorKind::InvalidInput,
-            "invalid browser pipe payload size",
+            format!("invalid {} pipe payload size", channel.label),
         ))
     } else {
         Ok(())
     }
 }
 
-fn read_exact(pipe: HANDLE, mut buffer: &mut [u8], timeout: Duration) -> io::Result<()> {
+fn read_exact(
+    channel: &Channel,
+    pipe: HANDLE,
+    mut buffer: &mut [u8],
+    timeout: Duration,
+) -> io::Result<()> {
     while !buffer.is_empty() {
         let count = read_once(pipe, buffer, timeout)?;
         if count == 0 {
             return Err(io::Error::new(
                 ErrorKind::UnexpectedEof,
-                "browser pipe closed",
+                format!("{} pipe closed", channel.label),
             ));
         }
         buffer = &mut buffer[count..];
@@ -346,11 +442,19 @@ fn read_exact(pipe: HANDLE, mut buffer: &mut [u8], timeout: Duration) -> io::Res
     Ok(())
 }
 
-fn write_all(pipe: HANDLE, mut buffer: &[u8], timeout: Duration) -> io::Result<()> {
+fn write_all(
+    channel: &Channel,
+    pipe: HANDLE,
+    mut buffer: &[u8],
+    timeout: Duration,
+) -> io::Result<()> {
     while !buffer.is_empty() {
         let count = write_once(pipe, buffer, timeout)?;
         if count == 0 {
-            return Err(io::Error::new(ErrorKind::WriteZero, "browser pipe closed"));
+            return Err(io::Error::new(
+                ErrorKind::WriteZero,
+                format!("{} pipe closed", channel.label),
+            ));
         }
         buffer = &buffer[count..];
     }
@@ -434,7 +538,7 @@ fn finish_overlapped(
     ))
 }
 
-fn current_user_identity() -> io::Result<UserIdentity> {
+pub(super) fn current_user_identity(channel: &Channel) -> io::Result<UserIdentity> {
     let mut token = ptr::null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err(io::Error::last_os_error());
@@ -479,11 +583,14 @@ fn current_user_identity() -> io::Result<UserIdentity> {
     drop(sid_allocation);
 
     let session_id = current_session_id()?;
-    let pipe_name = wide(&format!(r"\\.\pipe\Sesame.Browser.{sid}.{session_id}"));
+    let pipe_name = wide(&format!(
+        r"\\.\pipe\{}.{sid}.{session_id}",
+        channel.pipe_prefix
+    ));
     Ok(UserIdentity { sid, pipe_name })
 }
 
-fn security_descriptor_for_sid(sid: &str) -> io::Result<LocalAllocation> {
+pub(super) fn security_descriptor_for_sid(sid: &str) -> io::Result<LocalAllocation> {
     // Protected DACL: only this logon user and LocalSystem have access.
     let sddl = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid})"));
     let mut descriptor = ptr::null_mut();
@@ -505,6 +612,6 @@ fn wide(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }
 
-fn millis(duration: Duration) -> u32 {
+pub(super) fn millis(duration: Duration) -> u32 {
     duration.as_millis().min(u32::MAX as u128) as u32
 }

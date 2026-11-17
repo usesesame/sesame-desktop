@@ -5,12 +5,13 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
-use super::MAX_PIPE_MESSAGE_BYTES;
+use super::{MAX_PIPE_MESSAGE_BYTES, SERVED_ELSEWHERE};
 use crate::browser_host::appimage::{self, ExecutableIdentity};
 
 const IO_TIMEOUT: Duration = Duration::from_millis(1_500);
@@ -20,10 +21,40 @@ const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(200);
 const SOCKET_DIRECTORY_MODE: u32 = 0o700;
 const SOCKET_MODE: u32 = 0o600;
 
-enum PeerIdentity {
+pub struct Channel {
+    pub(super) label: &'static str,
+    pub(super) socket_file: &'static str,
+    pub(super) max_request_bytes: usize,
+    pub(super) max_reply_bytes: usize,
+    pub(super) request_deadline: Duration,
+    pub(super) reply_deadline: Duration,
+    pub(super) served_elsewhere: &'static AtomicBool,
+}
+
+pub const BROWSER: Channel = Channel {
+    label: "browser",
+    socket_file: "browser.sock",
+    max_request_bytes: MAX_PIPE_MESSAGE_BYTES,
+    max_reply_bytes: MAX_PIPE_MESSAGE_BYTES,
+    request_deadline: IO_TIMEOUT,
+    reply_deadline: RESPONSE_TIMEOUT,
+    served_elsewhere: &SERVED_ELSEWHERE,
+};
+
+pub(super) enum PeerIdentity {
     SameUser,
     Path(PathBuf),
     Contents(ExecutableIdentity),
+}
+
+impl PeerIdentity {
+    pub(super) fn of_executable(path: &Path) -> io::Result<Self> {
+        if appimage::running_from_appimage() {
+            Ok(Self::Contents(ExecutableIdentity::of_file(path)?))
+        } else {
+            Ok(Self::Path(fs::canonicalize(path)?))
+        }
+    }
 }
 
 type VerifiedProcess = (u32, u64, u64, u64, u64, [u8; 32]);
@@ -50,25 +81,37 @@ fn request_at(
     expected_server: &PeerIdentity,
     payload: &[u8],
 ) -> io::Result<Zeroizing<Vec<u8>>> {
-    validate_payload_size(payload)?;
+    let mut stream = connect_verified(&BROWSER, path, expected_server, payload)?;
+    read_frame_on(
+        &BROWSER,
+        &mut stream,
+        BROWSER.max_reply_bytes,
+        Instant::now() + BROWSER.reply_deadline,
+    )
+    .map(Zeroizing::new)
+}
+
+pub(super) fn connect_verified(
+    channel: &Channel,
+    path: &Path,
+    expected_server: &PeerIdentity,
+    payload: &[u8],
+) -> io::Result<UnixStream> {
+    validate_size_on(channel, payload, channel.max_request_bytes)?;
     let mut stream = UnixStream::connect(path)?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(channel.request_deadline))?;
 
-    verify_peer(&stream, expected_server)?;
+    verify_peer_on(channel, &stream, expected_server)?;
 
-    write_frame(&mut stream, payload)?;
-    read_frame(&mut stream, Instant::now() + RESPONSE_TIMEOUT).map(Zeroizing::new)
+    write_frame_on(channel, &mut stream, payload, channel.max_request_bytes)?;
+    Ok(stream)
 }
 
 pub fn serve_forever<F>(expected_client: &Path, handler: F) -> io::Result<()>
 where
     F: Fn(Vec<u8>, &PipePeer) -> Zeroizing<Vec<u8>>,
 {
-    let expected_client = if appimage::running_from_appimage() {
-        PeerIdentity::Contents(ExecutableIdentity::of_file(expected_client)?)
-    } else {
-        PeerIdentity::Path(fs::canonicalize(expected_client)?)
-    };
+    let expected_client = PeerIdentity::of_executable(expected_client)?;
     serve_at(&socket_path()?, &expected_client, handler)
 }
 
@@ -81,21 +124,9 @@ where
 
     let mut consecutive_accept_failures = 0_u32;
     loop {
-        // Exhausted descriptors fail every accept; without the delay this
-        // would spin instead of letting whatever leaked them recover.
-        let mut stream = match listener.accept() {
-            Ok((stream, _)) => {
-                consecutive_accept_failures = 0;
-                stream
-            }
-            Err(error) => {
-                consecutive_accept_failures += 1;
-                if consecutive_accept_failures > MAX_ACCEPT_RETRIES {
-                    return Err(error);
-                }
-                std::thread::sleep(ACCEPT_RETRY_DELAY);
-                continue;
-            }
+        let mut stream = match accept_with_retry(&listener, &mut consecutive_accept_failures)? {
+            Some(stream) => stream,
+            None => continue,
         };
         if stream.set_read_timeout(Some(IO_TIMEOUT)).is_err()
             || stream.set_write_timeout(Some(IO_TIMEOUT)).is_err()
@@ -120,7 +151,33 @@ where
     }
 }
 
+pub(super) fn accept_with_retry(
+    listener: &UnixListener,
+    consecutive_failures: &mut u32,
+) -> io::Result<Option<UnixStream>> {
+    // Exhausted descriptors fail every accept; without the delay this
+    // would spin instead of letting whatever leaked them recover.
+    match listener.accept() {
+        Ok((stream, _)) => {
+            *consecutive_failures = 0;
+            Ok(Some(stream))
+        }
+        Err(error) => {
+            *consecutive_failures += 1;
+            if *consecutive_failures > MAX_ACCEPT_RETRIES {
+                return Err(error);
+            }
+            std::thread::sleep(ACCEPT_RETRY_DELAY);
+            Ok(None)
+        }
+    }
+}
+
 fn bind_exclusive(path: &Path) -> io::Result<UnixListener> {
+    bind_exclusive_on(&BROWSER, path)
+}
+
+pub(super) fn bind_exclusive_on(channel: &Channel, path: &Path) -> io::Result<UnixListener> {
     if let Some(directory) = path.parent() {
         fs::DirBuilder::new()
             .recursive(true)
@@ -132,10 +189,10 @@ fn bind_exclusive(path: &Path) -> io::Result<UnixListener> {
         Ok(listener) => Ok(listener),
         Err(error) if error.kind() == ErrorKind::AddrInUse => {
             if UnixStream::connect(path).is_ok() {
-                super::note_served_elsewhere();
+                channel.served_elsewhere.store(true, Ordering::Relaxed);
                 return Err(io::Error::new(
                     ErrorKind::AddrInUse,
-                    "another Sesame already serves the browser socket",
+                    format!("another Sesame already serves the {} socket", channel.label),
                 ));
             }
             fs::remove_file(path)?;
@@ -146,33 +203,46 @@ fn bind_exclusive(path: &Path) -> io::Result<UnixListener> {
 }
 
 fn socket_path() -> io::Result<PathBuf> {
+    socket_path_on(&BROWSER)
+}
+
+pub(super) fn socket_path_on(channel: &Channel) -> io::Result<PathBuf> {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no per-user runtime directory"))?;
-    Ok(base.join("sesame").join("browser.sock"))
+    Ok(base.join("sesame").join(channel.socket_file))
 }
 
 fn verify_peer(stream: &UnixStream, expected: &PeerIdentity) -> io::Result<PipePeer> {
+    verify_peer_on(&BROWSER, stream, expected)
+}
+
+pub(super) fn verify_peer_on(
+    channel: &Channel,
+    stream: &UnixStream,
+    expected: &PeerIdentity,
+) -> io::Result<PipePeer> {
+    let label = channel.label;
     let (uid, pid) = peer_credentials(stream)?;
     // SAFETY: geteuid cannot fail and touches no memory.
     if uid != unsafe { libc::geteuid() } {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser socket peer belongs to another user",
+            format!("{label} socket peer belongs to another user"),
         ));
     }
     if pid == 0 {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser socket peer identity unavailable",
+            format!("{label} socket peer identity unavailable"),
         ));
     }
 
     let start_time = process_start_time(pid).ok_or_else(|| {
         io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser socket peer is no longer running",
+            format!("{label} socket peer is no longer running"),
         )
     })?;
     let accepted = match expected {
@@ -183,7 +253,7 @@ fn verify_peer(stream: &UnixStream, expected: &PeerIdentity) -> io::Result<PipeP
     if !accepted {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "browser socket peer executable rejected",
+            format!("{label} socket peer executable rejected"),
         ));
     }
     Ok(PipePeer { pid, start_time })
@@ -240,17 +310,21 @@ fn peer_credentials(stream: &UnixStream) -> io::Result<(u32, u32)> {
 
 /// Counted from after the comm field: the process name is unquoted and may
 /// itself contain spaces and brackets.
-fn process_start_time(pid: u32) -> Option<u64> {
+pub(super) fn process_start_time(pid: u32) -> Option<u64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_comm = stat.rsplit_once(')')?.1;
     after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 fn validate_payload_size(payload: &[u8]) -> io::Result<()> {
-    if payload.is_empty() || payload.len() > MAX_PIPE_MESSAGE_BYTES {
+    validate_size_on(&BROWSER, payload, MAX_PIPE_MESSAGE_BYTES)
+}
+
+fn validate_size_on(channel: &Channel, payload: &[u8], max_bytes: usize) -> io::Result<()> {
+    if payload.is_empty() || payload.len() > max_bytes {
         Err(io::Error::new(
             ErrorKind::InvalidInput,
-            "invalid browser pipe payload size",
+            format!("invalid {} pipe payload size", channel.label),
         ))
     } else {
         Ok(())
@@ -258,28 +332,47 @@ fn validate_payload_size(payload: &[u8]) -> io::Result<()> {
 }
 
 fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> io::Result<()> {
-    validate_payload_size(payload)?;
+    write_frame_on(&BROWSER, stream, payload, MAX_PIPE_MESSAGE_BYTES)
+}
+
+pub(super) fn write_frame_on(
+    channel: &Channel,
+    stream: &mut UnixStream,
+    payload: &[u8],
+    max_bytes: usize,
+) -> io::Result<()> {
+    validate_size_on(channel, payload, max_bytes)?;
     stream.write_all(&(payload.len() as u32).to_le_bytes())?;
     stream.write_all(payload)?;
     stream.flush()
 }
 
 fn read_frame(stream: &mut UnixStream, deadline: Instant) -> io::Result<Vec<u8>> {
+    read_frame_on(&BROWSER, stream, MAX_PIPE_MESSAGE_BYTES, deadline)
+}
+
+pub(super) fn read_frame_on(
+    channel: &Channel,
+    stream: &mut UnixStream,
+    max_bytes: usize,
+    deadline: Instant,
+) -> io::Result<Vec<u8>> {
     let mut header = [0_u8; 4];
-    read_exact_until(stream, &mut header, deadline)?;
+    read_exact_until(channel, stream, &mut header, deadline)?;
     let size = u32::from_le_bytes(header) as usize;
-    if size == 0 || size > MAX_PIPE_MESSAGE_BYTES {
+    if size == 0 || size > max_bytes {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
-            "invalid browser pipe message size",
+            format!("invalid {} pipe message size", channel.label),
         ));
     }
     let mut payload = vec![0_u8; size];
-    read_exact_until(stream, &mut payload, deadline)?;
+    read_exact_until(channel, stream, &mut payload, deadline)?;
     Ok(payload)
 }
 
 fn read_exact_until(
+    channel: &Channel,
     stream: &mut UnixStream,
     buffer: &mut [u8],
     deadline: Instant,
@@ -290,7 +383,7 @@ fn read_exact_until(
         if remaining.is_zero() {
             return Err(io::Error::new(
                 ErrorKind::TimedOut,
-                "browser pipe frame deadline exceeded",
+                format!("{} pipe frame deadline exceeded", channel.label),
             ));
         }
         stream.set_read_timeout(Some(remaining))?;
@@ -298,7 +391,7 @@ fn read_exact_until(
             Ok(0) => {
                 return Err(io::Error::new(
                     ErrorKind::UnexpectedEof,
-                    "browser pipe closed",
+                    format!("{} pipe closed", channel.label),
                 ));
             }
             Ok(count) => filled += count,
