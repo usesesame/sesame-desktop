@@ -28,9 +28,23 @@ test('aliases start off and the token form opens from the switch', async () => {
 
   await fireEvent.click(toggle)
 
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  expect(toggle.classList.contains('active')).toBe(false)
+  expect(toggle.getAttribute('aria-controls')).toBe('alias-form')
+  expect(document.getElementById('alias-form')).toBeTruthy()
+  const tokenField = screen.getByLabelText('API token')
+  await waitFor(() => expect(document.activeElement).toBe(tokenField))
+  expect(tokenField.getAttribute('aria-describedby')).toBe('alias-token-help')
+  expect(document.getElementById('alias-token-help')?.textContent).toBe('Create an API key in your addy.io account under Settings, then API Keys.')
   expect(screen.getByLabelText('API token').getAttribute('type')).toBe('password')
   expect((screen.getByLabelText('Alias domain') as HTMLInputElement).value).toBe('anonaddy.me')
   expect(screen.queryByRole('switch', { name: 'Name the site in alias descriptions' })).toBeNull()
+
+  await fireEvent.click(toggle)
+
+  expect(screen.queryByLabelText('API token')).toBeNull()
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  expect(toggle.hasAttribute('aria-controls')).toBe(false)
 })
 
 test('saving sends the pasted token once and the field is emptied straight away', async () => {
@@ -61,12 +75,14 @@ test('naming the site is a separate switch that never resends a token', async ()
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Name the site in alias descriptions' }).getAttribute('aria-checked')).toBe('true'))
 })
 
-test('turning aliases off forgets the token', async () => {
+test('turning aliases off removes the token and says where copies remain', async () => {
   vault.getEmailAliasSettings.mockResolvedValue({ service: 'addy', domain: 'anonaddy.me', nameSite: true })
   vault.removeEmailAliasSettings.mockResolvedValue({ nameSite: false })
   render(EmailAliasesSetting)
   const toggle = await screen.findByRole('switch', { name: 'Email aliases' })
   await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('true'))
+  expect(document.body.textContent).toContain('Turning this off removes the token from your vault, but older backups and synced versions keep it, so revoke it at addy.io to stop it working.')
+  expect(document.body.textContent).not.toMatch(/forget|delete/i)
 
   await fireEvent.click(toggle)
 
@@ -84,5 +100,9 @@ test('a refused token shows the backend message inside the form', async () => {
   await fireEvent.click(screen.getByRole('button', { name: 'Save token' }))
 
   expect((await screen.findByRole('alert')).textContent).toBe('That does not look like an API token. Copy it again from your alias service.')
-  expect((screen.getByLabelText('API token') as HTMLInputElement).value).toBe('')
+  const tokenField = screen.getByLabelText('API token') as HTMLInputElement
+  expect(tokenField.value).toBe('')
+  expect(tokenField.getAttribute('aria-describedby')).toBe('alias-token-help alias-form-error')
+  expect(tokenField.getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByRole('switch', { name: 'Email aliases' }).getAttribute('aria-checked')).toBe('false')
 })

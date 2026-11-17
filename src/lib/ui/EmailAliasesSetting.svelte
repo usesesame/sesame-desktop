@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { emailAliases, loadEmailAliases, removeEmailAliases, saveEmailAliases, serviceNames } from '../email-aliases'
   import { messageFor } from '../controllers/feedback-controller'
   import SelectMenu from './SelectMenu.svelte'
@@ -21,6 +21,7 @@
   let domain = DEFAULT_ADDY_DOMAIN
   let working = false
   let errorMessage = ''
+  let tokenInput: HTMLInputElement | undefined
 
   $: status = $emailAliases
   $: enabled = Boolean(status?.service)
@@ -35,6 +36,7 @@
     token = ''
     errorMessage = ''
     formOpen = true
+    void tick().then(() => tokenInput?.focus())
   }
 
   function closeForm() {
@@ -88,25 +90,25 @@
     <article>
       <div class="setting-copy">
         <strong>{status?.service ? serviceNames[status.service] : 'Create aliases from the login editor'}</strong>
-        <p>{#if status?.service}{status.service === 'addy' ? `New aliases use ${status.domain ?? DEFAULT_ADDY_DOMAIN}. ` : ''}Your API token is kept in your vault, and Sesame sends it only to {serviceNames[status.service]} when you ask for an alias. Turning this off forgets the token.{:else}Sesame asks addy.io or SimpleLogin for a new forwarding address and puts it in the email field. It needs an API token from your account there.{/if}</p>
+        <p>{#if status?.service}{status.service === 'addy' ? `New aliases use ${status.domain ?? DEFAULT_ADDY_DOMAIN}. ` : ''}Your API token is kept in your vault, and Sesame sends it only to {serviceNames[status.service]} when you ask for an alias. Turning this off removes the token from your vault, but older backups and synced versions keep it, so revoke it at {serviceNames[status.service]} to stop it working.{:else}Sesame asks addy.io or SimpleLogin for a new forwarding address and puts it in the email field. It needs an API token from your account there.{/if}</p>
         {#if enabled && !formOpen}<button type="button" class="text-button replace-token" disabled={working} on:click={openForm}>Replace token</button>{/if}
         {#if errorMessage && !formOpen}<p class="form-error" role="alert">{errorMessage}</p>{/if}
       </div>
-      <button type="button" class="switch" class:active={enabled || formOpen} role="switch" aria-checked={enabled || formOpen} aria-label="Email aliases" disabled={working} on:click={toggle}><span></span></button>
+      <button type="button" class="switch" class:active={enabled} role="switch" aria-checked={enabled} aria-controls={formOpen ? 'alias-form' : undefined} aria-label="Email aliases" disabled={working} on:click={toggle}><span></span></button>
     </article>
     {#if formOpen}
       <article class="settings-server-row">
-        <form class="setting-copy server-form alias-form" on:submit|preventDefault={save}>
+        <form id="alias-form" class="setting-copy server-form alias-form" on:submit|preventDefault={save}>
           <label for="alias-service">Service</label>
           <SelectMenu id="alias-service" label="Service" value={service} options={serviceOptions} disabled={working} onChange={(value) => (service = value as EmailAliasService)} />
           <label for="alias-token">API token</label>
-          <input id="alias-token" name="alias-token" type="password" bind:value={token} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
-          <p>{tokenHelp[service]}</p>
+          <input id="alias-token" name="alias-token" type="password" bind:this={tokenInput} bind:value={token} aria-describedby={errorMessage ? 'alias-token-help alias-form-error' : 'alias-token-help'} aria-invalid={errorMessage ? 'true' : undefined} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
+          <p id="alias-token-help">{tokenHelp[service]}</p>
           {#if service === 'addy'}
             <label for="alias-domain">Alias domain</label>
             <input id="alias-domain" name="alias-domain" bind:value={domain} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
           {/if}
-          {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
+          {#if errorMessage}<p id="alias-form-error" class="form-error" role="alert">{errorMessage}</p>{/if}
           <div class="settings-service-actions">
             <button type="submit" class="secondary-button settings-manage" disabled={working || !token.trim()}>{working ? 'Saving…' : 'Save token'}</button>
             <button type="button" class="text-button" disabled={working} on:click={closeForm}>Cancel</button>
