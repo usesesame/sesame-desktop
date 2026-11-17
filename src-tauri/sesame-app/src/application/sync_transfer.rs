@@ -4,10 +4,11 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 use crate::application::sync::{
-    local_payload_bytes, prepare_recovery, present, present_proof, refresh, require_activated,
-    require_sync_size, signed_revision, too_large_message, transfer_result, unix_now,
-    vault_has_local_changes, vault_id_of, verify_master_password, Refreshed, SyncStore,
-    SyncTransferResult, BUSY_PREFIX, NOT_ACTIVATED, SEAL_OVERHEAD_BYTES, TOO_LARGE_PREFIX,
+    local_payload_bytes, prepare_recovery, present, present_proof, refresh,
+    release_claim_after_failure, require_activated, require_sync_size, signed_revision,
+    too_large_message, transfer_result, unix_now, vault_has_local_changes, vault_id_of,
+    verify_master_password, Refreshed, SyncStore, SyncTransferResult, BUSY_PREFIX, NOT_ACTIVATED,
+    SEAL_OVERHEAD_BYTES, TOO_LARGE_PREFIX,
 };
 use crate::application::sync_adopt::{adopt_with, digest_after_commit, KeptThroughAdoption};
 use crate::application::sync_recovery::backup_stamp;
@@ -1098,6 +1099,21 @@ pub fn classify_transfer_failure(message: &str) -> crate::sync::coordinator::Out
         return Outcome::Halt(Halt::Incompatible);
     }
     Outcome::Transient
+}
+
+pub fn finish_run_in_state(
+    state: &VaultState,
+    store: Option<&SyncStore>,
+    coordinator: &crate::sync::coordinator::Coordinator,
+    result: Result<crate::sync::coordinator::Outcome, String>,
+) -> bool {
+    match (result, store) {
+        (Ok(outcome), _) => coordinator.finish(outcome),
+        (Err(message), None) => coordinator.finish(classify_transfer_failure(&message)),
+        (Err(message), Some(store)) => release_claim_after_failure(state, store, || {
+            coordinator.finish(classify_transfer_failure(&message))
+        }),
+    }
 }
 
 pub async fn record_checkpoint_if_due_in_state(

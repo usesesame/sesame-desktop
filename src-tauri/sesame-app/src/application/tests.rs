@@ -439,19 +439,49 @@ impl SyncDigestCase {
 
     fn unlock(&self, coordinator: &Coordinator) -> VaultState {
         let state = VaultState::default();
+        self.unlock_into(&state, coordinator);
+        state
+    }
+
+    fn unlock_into(&self, state: &VaultState, coordinator: &Coordinator) {
         let effects = FakeEffects::with_sync(
             self.vault.path().to_path_buf(),
             self.data_dir.clone(),
             coordinator.clone(),
         );
         unlock_vault_in_state(
-            &state,
+            state,
             &ReleasePresence::default(),
             &effects,
             Zeroizing::new(MASTER_PASSWORD.to_string()),
         )
         .expect("unlocked");
-        state
+    }
+
+    fn store(&self) -> SyncStore {
+        SyncStore::new(self.data_dir.clone())
+    }
+
+    fn change_digest_of(state: &VaultState) -> String {
+        let session = state.session.lock().expect("session lock");
+        let payload = session
+            .as_ref()
+            .expect("unlocked")
+            .open_payload()
+            .expect("payload");
+        crate::sync::state::change_digest(&payload).expect("change digest")
+    }
+
+    fn use_reads_as_a_change(&self, state: &VaultState) -> bool {
+        super::logins::record_item_use_in_state(state, "fictional-login").expect("recorded use");
+        let local = self
+            .store()
+            .load_state()
+            .expect("Sync state")
+            .expect("saved Sync state");
+        let session = state.session.lock().expect("session lock");
+        super::sync::vault_has_local_changes(&local, session.as_ref().expect("unlocked"))
+            .expect("compared")
     }
 }
 
@@ -521,6 +551,156 @@ fn unlocking_leaves_the_sync_digest_to_a_run_already_in_progress() {
     case.unlock(&coordinator);
 
     assert_eq!(case.stored_digest(), before);
+}
+
+#[test]
+fn a_run_stopped_by_the_lock_upgrades_the_digest_the_unlock_left_to_it() {
+    use crate::sync::coordinator::{Outcome, Phase};
+
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let legacy = case.stored_digest();
+    let coordinator = Coordinator::new();
+    let state = VaultState::default();
+    assert!(coordinator.begin());
+    let run = Err("sync_locked".to_string());
+
+    case.unlock_into(&state, &coordinator);
+    assert_eq!(
+        case.stored_digest(),
+        legacy,
+        "the unlock leaves it to the run"
+    );
+
+    super::sync_transfer::finish_run_in_state(&state, Some(&case.store()), &coordinator, run);
+
+    assert_eq!(coordinator.status().phase, Phase::Paused);
+    assert_eq!(
+        case.stored_digest(),
+        SyncDigestCase::change_digest_of(&state)
+    );
+    assert!(!case.use_reads_as_a_change(&state));
+    assert!(coordinator.begin(), "the run released its claim");
+    coordinator.finish(Outcome::AlreadyCurrent);
+}
+
+#[test]
+fn a_run_stopped_by_the_lock_before_the_unlock_leaves_the_upgrade_to_the_unlock() {
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let legacy = case.stored_digest();
+    let coordinator = Coordinator::new();
+    let state = VaultState::default();
+    assert!(coordinator.begin());
+
+    super::sync_transfer::finish_run_in_state(
+        &state,
+        Some(&case.store()),
+        &coordinator,
+        Err("sync_locked".to_string()),
+    );
+    assert_eq!(
+        case.stored_digest(),
+        legacy,
+        "a locked vault proves nothing"
+    );
+
+    case.unlock_into(&state, &coordinator);
+
+    assert_eq!(
+        case.stored_digest(),
+        SyncDigestCase::change_digest_of(&state)
+    );
+    assert!(!case.use_reads_as_a_change(&state));
+}
+
+#[test]
+fn a_failed_run_keeps_an_older_digest_that_does_not_match_the_vault() {
+    let case = SyncDigestCase::with_stored_digest(|payload| {
+        let mut edited = payload.clone();
+        edited.entries[0].username = "fictional-user-edited".into();
+        legacy_digest(&edited)
+    });
+    let before = case.stored_digest();
+    let coordinator = Coordinator::new();
+    assert!(coordinator.begin());
+    let state = case.unlock(&coordinator);
+
+    super::sync_transfer::finish_run_in_state(
+        &state,
+        Some(&case.store()),
+        &coordinator,
+        Err("sync_locked".to_string()),
+    );
+
+    assert_eq!(case.stored_digest(), before);
+    assert!(case.use_reads_as_a_change(&state));
+}
+
+#[test]
+fn a_failed_run_never_upgrades_once_a_use_has_changed_the_vault() {
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let legacy = case.stored_digest();
+    let coordinator = Coordinator::new();
+    assert!(coordinator.begin());
+    let state = case.unlock(&coordinator);
+    super::logins::record_item_use_in_state(&state, "fictional-login").expect("recorded use");
+
+    super::sync_transfer::finish_run_in_state(
+        &state,
+        Some(&case.store()),
+        &coordinator,
+        Err("The Sync server could not be reached.".to_string()),
+    );
+
+    assert_eq!(case.stored_digest(), legacy);
+    assert!(coordinator.begin(), "the run released its claim");
+}
+
+#[test]
+fn a_finished_run_leaves_the_digest_alone_and_a_run_without_a_store_still_releases() {
+    use crate::sync::coordinator::Outcome;
+
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let legacy = case.stored_digest();
+    let coordinator = Coordinator::new();
+    assert!(coordinator.begin());
+    let state = case.unlock(&coordinator);
+
+    super::sync_transfer::finish_run_in_state(
+        &state,
+        Some(&case.store()),
+        &coordinator,
+        Ok(Outcome::AlreadyCurrent),
+    );
+    assert_eq!(case.stored_digest(), legacy);
+
+    assert!(coordinator.begin());
+    super::sync_transfer::finish_run_in_state(
+        &state,
+        None,
+        &coordinator,
+        Err("sync_locked".to_string()),
+    );
+    assert_eq!(case.stored_digest(), legacy);
+    assert!(coordinator.begin(), "the run released its claim");
+}
+
+#[test]
+fn a_manual_run_stopped_by_the_lock_upgrades_before_it_lets_go() {
+    let case = SyncDigestCase::with_stored_digest(legacy_digest);
+    let coordinator = Coordinator::new();
+    let run = coordinator.begin_manual().expect("manual run");
+    let state = case.unlock(&coordinator);
+
+    super::sync::release_claim_after_failure(&state, &case.store(), || drop(run));
+
+    assert_eq!(
+        case.stored_digest(),
+        SyncDigestCase::change_digest_of(&state)
+    );
+    assert!(
+        coordinator.begin_manual().is_some(),
+        "the run released its claim"
+    );
 }
 
 #[test]

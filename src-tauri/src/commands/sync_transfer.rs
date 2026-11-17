@@ -4,7 +4,6 @@ use super::sync::local_data_dir;
 use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::adapters::network::sync::connect;
 use crate::application::sync::SyncStore;
-use crate::application::sync_transfer::classify_transfer_failure;
 use crate::sync::key_change::PreparedKeyChange;
 use crate::vault::VaultState;
 
@@ -15,6 +14,22 @@ pub use crate::application::sync_transfer::{
 };
 
 const ALREADY_SYNCING: &str = "Sesame is already syncing. Try again in a moment.";
+
+fn release_manual_run(
+    app: &AppHandle,
+    state: &VaultState,
+    run: crate::sync::coordinator::ManualRun,
+    failed: bool,
+) {
+    match local_data_dir(app) {
+        Ok(data_dir) if failed => crate::application::sync::release_claim_after_failure(
+            state,
+            &SyncStore::new(data_dir),
+            || drop(run),
+        ),
+        _ => drop(run),
+    }
+}
 
 async fn upload_vault(
     app: AppHandle,
@@ -32,10 +47,12 @@ pub async fn sync_upload_vault(
     state: tauri::State<'_, VaultState>,
     coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
 ) -> Result<SyncTransferResult, String> {
-    let _run = coordinator
+    let run = coordinator
         .begin_manual()
         .ok_or_else(|| ALREADY_SYNCING.to_string())?;
-    upload_vault(app, state).await
+    let result = upload_vault(app.clone(), state.clone()).await;
+    release_manual_run(&app, &state, run, result.is_err());
+    result
 }
 
 async fn download_vault(
@@ -60,10 +77,12 @@ pub async fn sync_download_vault(
     state: tauri::State<'_, VaultState>,
     coordinator: tauri::State<'_, crate::sync::coordinator::Coordinator>,
 ) -> Result<SyncTransferResult, String> {
-    let _run = coordinator
+    let run = coordinator
         .begin_manual()
         .ok_or_else(|| ALREADY_SYNCING.to_string())?;
-    download_vault(app, state).await
+    let result = download_vault(app.clone(), state.clone()).await;
+    release_manual_run(&app, &state, run, result.is_err());
+    result
 }
 
 #[tauri::command]
@@ -248,11 +267,14 @@ pub async fn sync_now(
     if !coordinator.begin() {
         return sync_coordinator_status(coordinator).await;
     }
-    let outcome = match run_one_transfer(&app, &state).await {
-        Ok(outcome) => outcome,
-        Err(message) => classify_transfer_failure(&message),
-    };
-    coordinator.finish(outcome);
+    let result = run_one_transfer(&app, &state).await;
+    let store = local_data_dir(&app).ok().map(SyncStore::new);
+    crate::application::sync_transfer::finish_run_in_state(
+        &state,
+        store.as_ref(),
+        &coordinator,
+        result,
+    );
     sync_coordinator_status(coordinator).await
 }
 

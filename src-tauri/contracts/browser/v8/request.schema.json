@@ -64,6 +64,36 @@
           "maximum": 64
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "style": {
+                "const": "characters"
+              }
+            },
+            "required": [
+              "style"
+            ]
+          },
+          "then": {
+            "properties": {
+              "size": {
+                "minimum": 16,
+                "maximum": 64
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "size": {
+                "minimum": 5,
+                "maximum": 10
+              }
+            }
+          }
+        }
+      ],
       "description": "size is 16 to 64 characters, or 5 to 10 words for a passphrase."
     },
     "create": {
@@ -102,6 +132,36 @@
           "maximum": 64
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "style": {
+                "const": "characters"
+              }
+            },
+            "required": [
+              "style"
+            ]
+          },
+          "then": {
+            "properties": {
+              "size": {
+                "minimum": 16,
+                "maximum": 64
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "size": {
+                "minimum": 5,
+                "maximum": 10
+              }
+            }
+          }
+        }
+      ],
       "description": "size is 16 to 64 characters, or 5 to 10 words for a passphrase."
     },
     "pending": {
@@ -143,7 +203,23 @@
           "maxLength": 4096,
           "description": "Only with accepted."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "username"
+            ]
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "const": "accepted"
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }
