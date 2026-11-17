@@ -2,6 +2,9 @@ use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::application::document_attachments::attachment_for_save;
+use crate::application::record_writes::{
+    check_note_length, check_tag_lengths, normalised_tags, record_title, MAX_RECORD_NOTE_CHARS,
+};
 use crate::commands::file_selection::path_from_file;
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
@@ -12,13 +15,11 @@ use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::{VaultResult, VaultState};
 
 fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMetadata> {
-    let title = input.title.trim();
-    if title.is_empty() {
-        return Err("Give this document a name so you can find it again.".into());
-    }
-    if title.chars().count() > 160 {
-        return Err("That document name is too long.".into());
-    }
+    let title = record_title(
+        &input.title,
+        "Give this document a name so you can find it again.",
+        "That document name is too long.",
+    )?;
     for (value, limit, message) in [
         (&input.document_type, 64, "That document type is too long."),
         (
@@ -33,17 +34,13 @@ fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMeta
         ),
         (&input.issue_date, 32, "That issue date is too long."),
         (&input.expiry_date, 32, "That expiry date is too long."),
-        (&input.notes, 4_000, "That note is too long."),
     ] {
         if value.chars().count() > limit {
             return Err(message.into());
         }
     }
-    for tag in &input.tags {
-        if tag.chars().count() > 64 {
-            return Err("A tag is too long.".into());
-        }
-    }
+    check_note_length(&input.notes, MAX_RECORD_NOTE_CHARS)?;
+    check_tag_lengths(&input.tags)?;
     let now = unix_timestamp();
     Ok(DocumentMetadata {
         id: input
@@ -57,12 +54,7 @@ fn document_from_input(input: DocumentMetadataInput) -> VaultResult<DocumentMeta
         issue_date: input.issue_date.trim().to_string(),
         expiry_date: input.expiry_date.trim().to_string(),
         notes: input.notes.trim().to_string(),
-        tags: input
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .collect(),
+        tags: normalised_tags(input.tags),
         folder_id: None,
         favourite: false,
         last_used_at: None,
