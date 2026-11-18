@@ -49,9 +49,13 @@
     if (!$emailAliases) loadEmailAliases().catch(() => {})
   })
 
+  let aliasRequest = 0
+  onDestroy(() => (aliasRequest += 1))
+
   async function createAlias() {
     const service = aliasService
     if (aliasWorking || !service) return
+    const request = ++aliasRequest
     aliasWorking = true
     aliasNote = ''
     aliasError = ''
@@ -59,6 +63,7 @@
     const emailBefore = loginDraft.email
     try {
       const alias = await createEmailAlias(loginDraft.url || undefined)
+      if (request !== aliasRequest) return
       if (loginDraft.email === emailBefore) {
         useAlias(alias, service)
       } else {
@@ -67,7 +72,7 @@
         offeredService = service
       }
     } catch (error) {
-      aliasError = messageFor(error)
+      if (request === aliasRequest) aliasError = messageFor(error)
     } finally {
       aliasWorking = false
     }

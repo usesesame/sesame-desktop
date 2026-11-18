@@ -5,6 +5,7 @@ import { APP_STORES, createAppStores } from '../stores/app-stores'
 import type { LoginInput } from '../types'
 import { clearEmailAliases, emailAliases, refreshEmailAliases } from '../email-aliases'
 import LoginEditor from './LoginEditor.svelte'
+import LoginEditorAliasHost from './LoginEditorAliasHost.test.svelte'
 
 const vault = vi.hoisted(() => ({
   createEmailAlias: vi.fn(),
@@ -229,4 +230,32 @@ test('the result of a started request stays visible after aliases are turned off
   failure.fail(new Error('The alias service is having trouble. Try again later.'))
 
   expect((await screen.findByRole('alert')).textContent).toBe('The alias service is having trouble. Try again later.')
+})
+
+test('an alias that arrives after the editor was left never reaches the next login', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const request = pendingAlias()
+  const onSubmit = vi.fn()
+  const host = render(LoginEditorAliasHost, {
+    props: { draft: draft({ title: 'Northwind' }), onSubmit },
+    context: new Map([[APP_STORES, createAppStores()]]),
+  } as never).component as unknown as { reopen: (next: LoginInput) => void, current: () => LoginInput }
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Close login editor' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Leave' })).toBeNull())
+
+  host.reopen(draft({ title: 'Contoso', url: 'https://contoso.example.test/' }))
+  await screen.findByRole('button', { name: 'Create alias' })
+  request.finish('quiet.harbor@anonaddy.me')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  expect(host.current().title).toBe('Contoso')
+  expect(host.current().email).toBe('')
+  expect((screen.getByLabelText(/^Email/) as HTMLInputElement).value).toBe('')
+  expect(screen.queryByRole('status')).toBeNull()
+  await fireEvent.submit(screen.getByRole('button', { name: 'Save login' }).closest('form') as HTMLFormElement)
+  expect(onSubmit).toHaveBeenCalledOnce()
+  expect(host.current().email).toBe('')
 })
