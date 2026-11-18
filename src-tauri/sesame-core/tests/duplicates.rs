@@ -1,17 +1,10 @@
+mod support;
+
 use sesame_core::snapshot::{
     duplicate_key, entries_by_duplicate_key, entry_contents_match, is_duplicate_key_eligible,
     should_skip_exact_duplicate,
 };
-use sesame_core::types::VaultEntry;
-
-fn login(url: &str, username: &str, password: &str) -> VaultEntry {
-    let mut entry = VaultEntry::default();
-    entry.title = "Example".into();
-    entry.url = url.into();
-    entry.username = username.into();
-    entry.password = password.into();
-    entry
-}
+use support::login;
 
 #[test]
 fn the_same_account_written_differently_gets_the_same_key() {

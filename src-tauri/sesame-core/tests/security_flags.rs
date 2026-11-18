@@ -1,14 +1,8 @@
+mod support;
+
 use sesame_core::snapshot::{duplicate_key_counts, issue_kinds_for, password_counts};
 use sesame_core::types::{VaultEntry, VaultPayload};
-
-fn login(url: &str, username: &str, password: &str) -> VaultEntry {
-    let mut entry = VaultEntry::default();
-    entry.title = "Example".into();
-    entry.url = url.into();
-    entry.username = username.into();
-    entry.password = password.into();
-    entry
-}
+use support::login;
 
 fn payload(entries: Vec<VaultEntry>) -> VaultPayload {
     let mut payload = VaultPayload::default();

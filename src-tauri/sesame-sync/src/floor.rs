@@ -253,7 +253,7 @@ pub fn require_allowed_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TestProtector;
+    use crate::test_support::{scratch_dir, TestProtector};
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
@@ -347,11 +347,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("sesame-sync-floor-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        floor_path(&dir)
+        floor_path(&scratch_dir("sesame-sync-floor", name))
     }
 
     #[test]

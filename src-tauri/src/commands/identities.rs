@@ -1,18 +1,17 @@
 //! Saved identities: the person behind several accounts, kept once so signup forms are not retyped.
 
+use crate::application::record_writes::{check_tag_lengths, normalised_tags, record_title};
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{DeleteIdentityResult, Identity, IdentityInput, SaveIdentityResult};
 use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::VaultResult;
 
 fn identity_from_input(input: IdentityInput) -> VaultResult<Identity> {
-    let label = input.label.trim();
-    if label.is_empty() {
-        return Err("Give this identity a name so you can find it again.".into());
-    }
-    if label.chars().count() > 160 {
-        return Err("That identity name is too long.".into());
-    }
+    let label = record_title(
+        &input.label,
+        "Give this identity a name so you can find it again.",
+        "That identity name is too long.",
+    )?;
     for (value, limit, message) in [
         (&input.full_name, 256, "The name is too long."),
         (&input.email, 320, "The email is too long."),
@@ -28,11 +27,7 @@ fn identity_from_input(input: IdentityInput) -> VaultResult<Identity> {
             return Err(message.into());
         }
     }
-    for tag in &input.tags {
-        if tag.chars().count() > 64 {
-            return Err("A tag is too long.".into());
-        }
-    }
+    check_tag_lengths(&input.tags)?;
     let now = unix_timestamp();
     Ok(Identity {
         id: input
@@ -49,12 +44,7 @@ fn identity_from_input(input: IdentityInput) -> VaultResult<Identity> {
         region: input.region.trim().to_string(),
         postal_code: input.postal_code.trim().to_string(),
         country: input.country.trim().to_string(),
-        tags: input
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .collect(),
+        tags: normalised_tags(input.tags),
         legacy_fields: Vec::new(),
         folder_id: None,
         favourite: false,
