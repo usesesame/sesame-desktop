@@ -337,6 +337,8 @@ describe('terminal approvals in the window', () => {
     const { modal, stop } = await started()
     handlers.request(request('approval-1'))
     expect(modal.open({ kind: 'import' })).toBe(false)
+    expect(modal.open({ kind: 'login-editor' })).toBe(false)
+    expect(modal.state.value().active).toBeNull()
     stop()
   })
 
