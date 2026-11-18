@@ -10,6 +10,8 @@
     { value: 'addy', label: serviceNames.addy },
     { value: 'simpleLogin', label: serviceNames.simpleLogin },
   ]
+  const DOMAIN_ERROR = 'Enter the domain your aliases use'
+  const TOKEN_ERRORS = ['Paste the API token', 'That does not look like an API token']
   const tokenHelp: Record<EmailAliasService, string> = {
     addy: 'Create an API key in your addy.io account under Settings, then API Keys.',
     simpleLogin: 'Create an API key in your SimpleLogin account under API Keys.',
@@ -22,15 +24,29 @@
   let working = false
   let errorMessage = ''
   let tokenInput: HTMLInputElement | undefined
+  let switchButton: HTMLButtonElement | undefined
+  let replaceButton: HTMLButtonElement | undefined
+  let openedFrom: 'switch' | 'replace' = 'switch'
+  let loadFailed = false
 
   $: status = $emailAliases
+  $: known = status !== null
   $: enabled = Boolean(status?.service)
+  $: errorField = errorMessage.startsWith(DOMAIN_ERROR) ? 'domain' : TOKEN_ERRORS.some((start) => errorMessage.startsWith(start)) ? 'token' : null
 
-  onMount(() => {
-    loadEmailAliases().catch((error) => (errorMessage = messageFor(error)))
-  })
+  onMount(load)
 
-  function openForm() {
+  function load() {
+    loadFailed = false
+    errorMessage = ''
+    loadEmailAliases().catch((error) => {
+      errorMessage = messageFor(error)
+      loadFailed = true
+    })
+  }
+
+  function openForm(from: 'switch' | 'replace') {
+    openedFrom = from
     service = status?.service ?? 'addy'
     domain = status?.domain ?? DEFAULT_ADDY_DOMAIN
     token = ''
@@ -43,6 +59,7 @@
     formOpen = false
     token = ''
     errorMessage = ''
+    void tick().then(() => (openedFrom === 'replace' && replaceButton ? replaceButton : switchButton)?.focus())
   }
 
   async function run(action: () => Promise<unknown>): Promise<boolean> {
@@ -68,12 +85,13 @@
   }
 
   function toggle() {
+    if (!known) return
     if (enabled) {
       void run(removeEmailAliases).then((removed) => { if (removed) closeForm() })
     } else if (formOpen) {
       closeForm()
     } else {
-      openForm()
+      openForm('switch')
     }
   }
 
@@ -89,10 +107,11 @@
     <div class="setting-copy">
       <strong>{status?.service ? serviceNames[status.service] : 'Create aliases from the login editor'}</strong>
       <p>{#if status?.service}{status.service === 'addy' ? `New aliases use ${status.domain ?? DEFAULT_ADDY_DOMAIN}. ` : ''}Your API token is kept in your vault, and Sesame sends it only to {serviceNames[status.service]} when you ask for an alias. Turning this off removes the token from your vault, but older backups and synced versions keep it, so revoke it at {serviceNames[status.service]} to stop it working.{:else}Sesame asks addy.io or SimpleLogin for a new forwarding address and puts it in the email field. It needs an API token from your account there.{/if}</p>
-      {#if enabled && !formOpen}<button type="button" class="text-button replace-token" disabled={working} on:click={openForm}>Replace token</button>{/if}
+      {#if enabled && !formOpen}<button type="button" class="text-button replace-token" bind:this={replaceButton} disabled={working} on:click={() => openForm('replace')}>Replace token</button>{/if}
       {#if errorMessage && !formOpen}<p class="form-error" role="alert">{errorMessage}</p>{/if}
+      {#if loadFailed && !known}<button type="button" class="text-button replace-token" on:click={load}>Try again</button>{/if}
     </div>
-    <button type="button" class="switch" class:active={enabled} role="switch" aria-checked={enabled} aria-controls={formOpen ? 'alias-form' : undefined} aria-label="Email aliases" disabled={working} on:click={toggle}><span></span></button>
+    <button type="button" class="switch" class:active={enabled} role="switch" aria-checked={enabled} aria-controls={formOpen ? 'alias-form' : undefined} aria-label="Email aliases" bind:this={switchButton} disabled={working || !known} on:click={toggle}><span></span></button>
   </article>
   {#if formOpen}
     <article class="settings-server-row">
@@ -100,11 +119,11 @@
         <label for="alias-service">Service</label>
         <SelectMenu id="alias-service" label="Service" value={service} options={serviceOptions} disabled={working} onChange={(value) => (service = value as EmailAliasService)} />
         <label for="alias-token">API token</label>
-        <input id="alias-token" name="alias-token" type="password" bind:this={tokenInput} bind:value={token} aria-describedby={errorMessage ? 'alias-token-help alias-form-error' : 'alias-token-help'} aria-invalid={errorMessage ? 'true' : undefined} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
+        <input id="alias-token" name="alias-token" type="password" bind:this={tokenInput} bind:value={token} aria-describedby={errorField === 'token' ? 'alias-token-help alias-form-error' : 'alias-token-help'} aria-invalid={errorField === 'token' ? 'true' : undefined} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
         <p id="alias-token-help">{tokenHelp[service]}</p>
         {#if service === 'addy'}
           <label for="alias-domain">Alias domain</label>
-          <input id="alias-domain" name="alias-domain" bind:value={domain} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
+          <input id="alias-domain" name="alias-domain" bind:value={domain} aria-describedby={errorField === 'domain' ? 'alias-form-error' : undefined} aria-invalid={errorField === 'domain' ? 'true' : undefined} autocomplete="off" autocapitalize="off" spellcheck="false" disabled={working} />
         {/if}
         {#if errorMessage}<p id="alias-form-error" class="form-error" role="alert">{errorMessage}</p>{/if}
         <div class="settings-service-actions">
