@@ -23,7 +23,10 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
-  assert.doesNotMatch(hook, /HKLM|vault\.sesame|backups|recovery|RmDir|DeleteRegKey/i)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
+  for (const line of hook.split('\n').filter((entry) => /HKLM/.test(entry))) {
+    assert.match(line, /^\s*(?:ReadRegStr \$R0|WriteRegExpandStr) HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
+  }
 
   const scriptLines = read('src-tauri', 'linux', 'pre-remove.sh')
     .split('\n')

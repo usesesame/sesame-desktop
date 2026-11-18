@@ -9,7 +9,7 @@ const workspace = dirname(dirname(fileURLToPath(import.meta.url)))
 // the one cargo command that has no reason to need the staged browser host.
 // Without this a fresh clone has to build the sidecar before it can generate
 // a type.
-const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[]}}' }
+const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}' }
 
 const args = ['test', '--manifest-path', join(workspace, 'src-tauri', 'Cargo.toml'), '-p', 'sesame', '-p', 'sesame-app', '--lib', 'export_bindings']
 const run = spawnSync('cargo', args, { stdio: 'inherit', env: environment, shell: false })

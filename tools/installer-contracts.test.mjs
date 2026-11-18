@@ -147,7 +147,10 @@ test('the Windows uninstaller removes only Sesame native-host registration', () 
   assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
-  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|HKLM|RmDir|DeleteRegKey/i)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
+  for (const line of hook.split('\n').filter((entry) => /HKLM/.test(entry))) {
+    assert.match(line, /^\s*(?:ReadRegStr \$R0|WriteRegExpandStr) HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
+  }
 })
 
 test('installer lifecycle evidence scripts emit and compare file rows', { timeout: 30_000 }, (t) => {
@@ -259,4 +262,50 @@ test('Windows CI builds the installer and runs its install lifecycle', () => {
   assert.match(lifecycle, /nothing is removed from the old directory/)
   assert.match(lifecycle, /the old uninstaller inside Program Files runs/)
   assert.match(lifecycle, /a traversal path into Program Files does not run the old uninstaller/)
+})
+
+test('the Windows installer puts only the cli folder on the system Path and never cuts Path short', () => {
+  const hook = read('src-tauri', 'nsis', 'native-host-uninstall.nsh')
+  const windowsConfig = JSON.parse(read('src-tauri', 'tauri.windows.conf.json'))
+  assert.deepEqual(windowsConfig.bundle.resources, { 'binaries/cli/sesame.exe': 'cli/sesame.exe' })
+  assert.match(hook, /!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"/)
+  assert.match(hook, /!define SESAME_TERMINAL_FOLDER "\$INSTDIR\\cli"/)
+  assert.doesNotMatch(hook, /"\$INSTDIR"\s*$|Path" "\$INSTDIR"|;\$INSTDIR"/m, 'the install folder itself must never go on Path, because sesame.exe there is the desktop app')
+
+  const macro = (name) => {
+    const match = hook.match(new RegExp(`!macro ${name}\\b[\\s\\S]*?!macroend`))
+    assert.ok(match, `the hook has no ${name} macro`)
+    return match[0]
+  }
+  const add = macro('SESAME_ADD_TERMINAL_PATH')
+  assert.match(add, /ClearErrors\s+ReadRegStr \$R0 HKLM/)
+  assert.match(add, /\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
+  assert.match(add, /\$\{If\} \$R3 >= \$\{NSIS_MAX_STRLEN\}\s+DetailPrint/)
+  assert.match(add, /\$\{If\} \$R2 <> 1/)
+  assert.equal((add.match(/WriteRegExpandStr/g) ?? []).length, 2)
+  assert.match(add, /SendMessage \$\{HWND_BROADCAST\} \$\{WM_SETTINGCHANGE\} 0 "STR:Environment"/)
+
+  const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
+  assert.match(remove, /\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
+  assert.match(remove, /\$\{If\} \$R2 = 1\s+WriteRegExpandStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$R1"/)
+
+  const scan = macro('SESAME_SCAN_PATH')
+  assert.match(scan, /\$R5 == "\$\{SESAME_TERMINAL_FOLDER\}"/)
+  assert.doesNotMatch(scan, /WriteReg|DeleteReg/)
+
+  assert.match(macro('NSIS_HOOK_POSTINSTALL'), /!insertmacro SESAME_ADD_TERMINAL_PATH/)
+  assert.match(macro('NSIS_HOOK_PREUNINSTALL'), /\$\{If\} \$UpdateMode <> 1[\s\S]*!insertmacro SESAME_REMOVE_TERMINAL_PATH[\s\S]*\$\{EndIf\}/)
+})
+
+test('the Windows command line program is staged before the bundle needs it', () => {
+  const stage = read('tools', 'stage-browser-host.mjs')
+  assert.match(stage, /if \(process\.platform === 'win32'\) \{\s+buildTerminalClient\(/)
+  assert.match(stage, /join\(stageDirectory, 'cli'\)/)
+  assert.match(stage, /'sesame\.exe'/)
+  const helper = read('tools', 'browser-host.mjs')
+  assert.match(helper, /UNSTAGED_TAURI_CONFIG = '\{"bundle":\{"externalBin":\[\],"resources":\[\]\}\}'/)
+  assert.match(helper, /feature: 'terminal-client', bin: 'sesame-cli'/)
+  for (const file of ['generate-types.mjs', 'test-extension-native-host.mjs', 'test-browser-host-pipe.mjs', 'test-extension-native-host.ps1']) {
+    assert.match(read('tools', file), /"externalBin":\[\],"resources":\[\]/, `${file} must build without the staged Windows resource`)
+  }
 })
