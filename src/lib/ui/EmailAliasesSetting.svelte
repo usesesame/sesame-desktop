@@ -144,6 +144,7 @@
 <style>
   .alias-form :global(.sort-control) { display: block; }
   .alias-form :global(.sort-select-trigger) { width: 100%; height: auto; border: 1px solid var(--field-border); border-radius: var(--radius-sm); padding: 0 var(--space-3); min-height: 34px; color: var(--text); background: var(--field-bg); font-size: var(--type-2); font-weight: inherit; }
+  .form-error { color: var(--danger); }
   .alias-form .form-error { margin: 0; }
   .replace-token { margin: var(--space-1) 0 0 calc(var(--space-1) * -1); }
 </style>
