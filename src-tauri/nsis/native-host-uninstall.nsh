@@ -10,9 +10,10 @@
 
 Var SesameOwnsTerminalPath
 
-!macro SESAME_SCAN_PATH PATH KEPT FOUND
+!macro SESAME_SCAN_PATH PATH KEPT FOUND EXACT
   StrCpy ${KEPT} ""
   StrCpy ${FOUND} 0
+  StrCpy ${EXACT} 0
   StrCpy $R5 ""
   StrCpy $R6 0
   StrCpy $R8 0
@@ -26,7 +27,10 @@ Var SesameOwnsTerminalPath
     ${If} $R9 == ";"
       ${If} $R5 == "${SESAME_TERMINAL_FOLDER}"
       ${OrIf} $R5 == "${SESAME_TERMINAL_FOLDER}\"
-        StrCpy ${FOUND} 1
+        IntOp ${FOUND} ${FOUND} + 1
+        ${If} $R5 S== "${SESAME_TERMINAL_FOLDER}"
+          IntOp ${EXACT} ${EXACT} + 1
+        ${EndIf}
       ${Else}
         ${If} $R8 > 0
           StrCpy ${KEPT} "${KEPT};"
@@ -84,21 +88,22 @@ Var SesameOwnsTerminalPath
 
 !macro SESAME_WRITE_PATH VALUE FAILED
   StrCpy $R6 0
+  StrCpy $R4 0
+  StrCpy $R5 -1
+  System::Call 'advapi32::RegGetValueW(p 0x80000002, w "${SESAME_ENVIRONMENT_KEY}", w "Path", i 0x1000ffff, *i .R4, p 0, p 0) i .R5'
+  StrCpy $R7 $R4
   ClearErrors
   ReadRegStr $R4 HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"
   ${If} ${Errors}
   ${OrIf} $R4 S!= $R0
     DetailPrint "Another program changed the system Path while Sesame was working, so Sesame left it as it was. ${FAILED}"
   ${Else}
-    StrCpy $R4 0
-    StrCpy $R5 -1
-    System::Call 'advapi32::RegGetValueW(p 0x80000002, w "${SESAME_ENVIRONMENT_KEY}", w "Path", i 0x1000ffff, *i .R4, p 0, p 0) i .R5'
     ClearErrors
     ${If} $R5 = 0
-    ${AndIf} $R4 = 1
+    ${AndIf} $R7 = 1
       WriteRegStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
     ${ElseIf} $R5 = 0
-    ${AndIf} $R4 = 2
+    ${AndIf} $R7 = 2
       WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
     ${Else}
       SetErrors
@@ -119,8 +124,8 @@ Var SesameOwnsTerminalPath
   ${OrIf} $R0 == ""
     DetailPrint "Sesame left the system Path as it was because it could not read all of it. Add ${SESAME_TERMINAL_FOLDER} to Path to use the sesame command."
   ${Else}
-    !insertmacro SESAME_SCAN_PATH $R0 $R1 $R2
-    ${If} $R2 <> 1
+    !insertmacro SESAME_SCAN_PATH $R0 $R1 $R2 $R4
+    ${If} $R2 = 0
       StrLen $R3 $R0
       StrLen $R4 "${SESAME_TERMINAL_FOLDER}"
       IntOp $R3 $R3 + $R4
@@ -136,7 +141,7 @@ Var SesameOwnsTerminalPath
         ${EndIf}
         !insertmacro SESAME_WRITE_PATH $R1 "Sesame could not add ${SESAME_TERMINAL_FOLDER} to the system Path. Add it by hand to use the sesame command."
         ${If} $R6 = 1
-          WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}" "1"
+          WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}" "${SESAME_TERMINAL_FOLDER}"
         ${EndIf}
       ${EndIf}
     ${EndIf}
@@ -151,9 +156,12 @@ Var SesameOwnsTerminalPath
   ${OrIf} $R0 == ""
     DetailPrint "Sesame left the system Path as it was because it could not read all of it. Remove ${SESAME_TERMINAL_FOLDER} from Path if it is there."
   ${Else}
-    !insertmacro SESAME_SCAN_PATH $R0 $R1 $R2
+    !insertmacro SESAME_SCAN_PATH $R0 $R1 $R2 $R4
     ${If} $R2 = 1
+    ${AndIf} $R4 = 1
       !insertmacro SESAME_WRITE_PATH $R1 "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path. Remove it by hand."
+    ${ElseIf} $R2 > 0
+      DetailPrint "The system Path holds ${SESAME_TERMINAL_FOLDER} in a form Sesame did not add, so Sesame left it. Remove the entries you no longer need by hand."
     ${EndIf}
   ${EndIf}
   !insertmacro SESAME_RESTORE_REGISTERS
@@ -172,7 +180,7 @@ Var SesameOwnsTerminalPath
 
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
-  ${AndIf} $SesameOwnsTerminalPath == "1"
+  ${AndIf} $SesameOwnsTerminalPath S== "${SESAME_TERMINAL_FOLDER}"
     !insertmacro SESAME_REMOVE_TERMINAL_PATH
   ${EndIf}
 !macroend
