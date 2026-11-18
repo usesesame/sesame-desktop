@@ -706,6 +706,7 @@
     bind:errorMessage={$feedbackState.errorMessage}
     isWorking={$unlockState.isWorking}
     restoreMessage={$unlockState.restoreMessage}
+    terminalWaiting={$terminalApproval.unlock}
     onUnlockWithPin={unlockController.unlockUsingPin}
     onUnlockWithHello={unlockController.unlockUsingHello}
     onSubmitMasterPassword={unlockController.submitMasterPassword}

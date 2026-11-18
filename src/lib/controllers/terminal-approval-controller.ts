@@ -2,14 +2,16 @@ import type { AppStores, TerminalApprovalStoreState } from '../stores/app-stores
 import {
   getPendingTerminalRequest,
   previewTerminalRequest,
+  previewTerminalUnlock,
   resolveTerminalRequest,
   subscribeTerminalApproval,
+  subscribeTerminalUnlock,
   type CliApprovalCancelledEvent,
   type CliApprovalRequestEvent,
   type CliDecisionInput,
 } from '../terminal-api'
 import { cancelledLine } from '../terminal-text'
-import { grantPresence } from '../vault'
+import { grantPresence, previewMode, recordDiagnostic } from '../vault'
 import { approvalLoop } from './approval-loop'
 import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
@@ -239,9 +241,29 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       const current = store.value().request
       if (state.request && current) closeQuietly(current.approvalId)
     }))
+    const stopUnlockedWatch = stores.vault.subscribe((state) => {
+      if (state.status.unlocked && store.value().unlock) store.patch({ unlock: null })
+    })
+    let disposed = false
+    let stopUnlock: () => void = () => {}
+    if (previewMode) {
+      const preview = previewTerminalUnlock()
+      if (preview && !stores.vault.value().status.unlocked) store.patch({ unlock: preview })
+    } else {
+      void subscribeTerminalUnlock({
+        request: (payload) => { if (!stores.vault.value().status.unlocked) store.patch({ unlock: payload }) },
+        ended: () => store.patch({ unlock: null }),
+      }).then((stop) => {
+        if (disposed) stop()
+        else stopUnlock = stop
+      }).catch(() => void recordDiagnostic('renderer', 'terminal_listener_failed'))
+    }
     return () => {
+      disposed = true
       stopLoop()
+      stopUnlock()
       for (const stop of stopBrowserWatch) stop()
+      stopUnlockedWatch()
     }
   }
 
@@ -249,7 +271,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const current = store.value().request
     if (current) closedQuietly = current.approvalId
     loop.clearSecrets()
-    store.patch(freshFields(null))
+    store.patch({ ...freshFields(null), unlock: store.value().unlock })
   }
 
   return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }

@@ -78,3 +78,10 @@ test('submitting a short PIN does nothing', async () => {
   await fireEvent.submit(field.form as HTMLFormElement)
   expect(onUnlockWithPin).not.toHaveBeenCalled()
 })
+
+test('says which command a waiting terminal wants and clears when the wait ends', async () => {
+  const rendered = render(UnlockScreen, { props: { status, onUnlockWithPin: vi.fn(), onUnlockWithHello: vi.fn(), onSubmitMasterPassword: vi.fn(), terminalWaiting: { command: 'totp', terminal: 'pts/3', remote: true } } } as never)
+  expect(screen.getByRole('status').textContent).toBe('A terminal is waiting to read a one-time code. Sesame asks you about it after you unlock. It came through a remote login.')
+  await rendered.rerender({ terminalWaiting: null })
+  expect(screen.queryByText(/A terminal is waiting/)).toBeNull()
+})

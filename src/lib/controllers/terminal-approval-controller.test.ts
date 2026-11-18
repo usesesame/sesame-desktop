@@ -10,7 +10,9 @@ const terminalApi = vi.hoisted(() => ({
   getPendingTerminalRequest: vi.fn(),
   resolveTerminalRequest: vi.fn(),
   subscribeTerminalApproval: vi.fn(),
+  subscribeTerminalUnlock: vi.fn(),
   previewTerminalRequest: vi.fn(() => null),
+  previewTerminalUnlock: vi.fn(() => null),
 }))
 
 const vaultApi = vi.hoisted(() => ({
@@ -47,6 +49,7 @@ describe('terminal approvals in the window', () => {
   let stores: ReturnType<typeof createAppStores>
   let feedback: ReturnType<typeof createFeedbackController>
   let handlers: { request: (payload: CliApprovalRequestEvent) => void; cancelled: (payload: { approvalId: string; reason: string }) => void }
+  let unlockHandlers: { request: (payload: unknown) => void; ended: (payload: unknown) => void }
   let lockHandler: () => void
   let presenceOpen: boolean
 
@@ -60,6 +63,10 @@ describe('terminal approvals in the window', () => {
     presenceOpen = false
     terminalApi.subscribeTerminalApproval.mockImplementation(async (next) => {
       handlers = next
+      return () => {}
+    })
+    terminalApi.subscribeTerminalUnlock.mockImplementation(async (next) => {
+      unlockHandlers = next
       return () => {}
     })
     vaultApi.onVaultLocked.mockImplementation(async (next) => {
@@ -366,6 +373,19 @@ describe('terminal approvals in the window', () => {
     handlers.request(request('approval-1', { copy: true }))
     await controller.allow()
     expect(decisions()[0]).toEqual({ approvalId: 'approval-1', decision: 'allow', itemId: 'northwind', clearAfterSeconds: 10 })
+    stop()
+  })
+
+  it('shows the unlock notice while locked and clears it when the wait ends', async () => {
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: false } })
+    const { stop } = await started()
+    unlockHandlers.request({ command: 'totp', terminal: 'pts/3', remote: false })
+    expect(state().unlock).toMatchObject({ command: 'totp' })
+    unlockHandlers.ended({ reason: 'expired' })
+    expect(state().unlock).toBeNull()
+    unlockHandlers.request({ command: 'list', remote: true })
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
+    expect(state().unlock).toBeNull()
     stop()
   })
 
