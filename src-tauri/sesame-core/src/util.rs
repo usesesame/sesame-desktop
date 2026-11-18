@@ -38,6 +38,11 @@ pub fn require_file_with_limit(
     })
 }
 
+pub fn nfc(value: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    value.nfc().collect()
+}
+
 pub fn random_id() -> String {
     let mut bytes = [0_u8; 12];
     fill_random(&mut bytes);

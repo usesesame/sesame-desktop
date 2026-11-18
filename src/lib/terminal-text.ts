@@ -15,16 +15,24 @@ const BLANK_LOOKING_POINTS = new Set([0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x
 const BLANK_LOOKING = { test: (character: string) => BLANK_LOOKING_POINTS.has(character.codePointAt(0) ?? 0) }
 const READABLE = /[^?\s]/u
 
+export function hidesCharacter(character: string): boolean {
+  return BLANK_LOOKING.test(character) || HIDDEN_FORMATTING.test(character)
+}
+
+export function isMark(character: string): boolean {
+  return MARK.test(character)
+}
+
 function cleaned(value: string): string[] {
   const out: string[] = []
   let marks = 0
   let excess = false
   for (const character of value.normalize('NFC')) {
-    if (BLANK_LOOKING.test(character) || HIDDEN_FORMATTING.test(character)) {
+    if (hidesCharacter(character)) {
       out.push(STAND_IN)
       marks = 0
       excess = false
-    } else if (MARK.test(character)) {
+    } else if (isMark(character)) {
       if (out.length === 0 || out[out.length - 1] === ' ' || out[out.length - 1] === STAND_IN) {
         if (!excess) out.push(STAND_IN)
         excess = true
