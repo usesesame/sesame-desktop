@@ -166,7 +166,10 @@ pub fn site_description(site: &str) -> Option<String> {
     (is_domain_name(&domain) && !PRIVATE_NAME_ENDINGS.contains(&ending)).then_some(domain)
 }
 
-fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<AliasRequest> {
+fn prepare_alias_request(
+    vault: &VaultState,
+    site: Option<&str>,
+) -> VaultResult<(AliasRequest, Option<String>)> {
     let session = vault
         .session
         .lock()
@@ -178,7 +181,7 @@ fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<
         .as_ref()
         .filter(|settings| settings.is_valid())
         .ok_or(NOT_SET_UP)?;
-    Ok(AliasRequest {
+    let request = AliasRequest {
         service: settings.service,
         token: Zeroizing::new(settings.token.as_str().to_string()),
         domain: settings.domain.clone(),
@@ -187,11 +190,13 @@ fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<
         } else {
             None
         },
-    })
+    };
+    Ok((request, session.vault_id().map(str::to_string)))
 }
 
 struct AliasAttempt<'a> {
     vault: &'a VaultState,
+    vault_id: Option<String>,
     host: &'static str,
     outcome: Outcome,
 }
@@ -209,9 +214,13 @@ impl AliasAttempt<'_> {
 
 impl Drop for AliasAttempt<'_> {
     fn drop(&mut self) {
+        let draft = ReleaseDraft::new(EntryKind::EmailAlias, self.outcome).host(self.host);
         record(
             self.vault,
-            ReleaseDraft::new(EntryKind::EmailAlias, self.outcome).host(self.host),
+            match self.vault_id.as_deref() {
+                Some(vault_id) => draft.for_vault(vault_id),
+                None => draft,
+            },
         );
     }
 }
@@ -225,9 +234,10 @@ where
     F: FnOnce(AliasRequest) -> Fut,
     Fut: Future<Output = Result<String, AliasFailure>>,
 {
-    let request = prepare_alias_request(vault, site.as_deref())?;
+    let (request, vault_id) = prepare_alias_request(vault, site.as_deref())?;
     let mut attempt = AliasAttempt {
         vault,
+        vault_id,
         host: api_host(request.service),
         outcome: Outcome::ConnectionClosed,
     };
@@ -626,6 +636,94 @@ mod tests {
                 Some("app.addy.io".to_string())
             )]
         );
+    }
+
+    fn other_vault_session(other: &TestVault) -> crate::vault::UnlockedVault {
+        other
+            .state
+            .session
+            .lock()
+            .expect("session lock")
+            .take()
+            .expect("other session")
+    }
+
+    fn alias_entries(vault: &TestVault) -> usize {
+        recorded(vault)
+            .iter()
+            .filter(|(kind, _, _)| *kind == EntryKind::EmailAlias)
+            .count()
+    }
+
+    #[test]
+    fn an_alias_that_finishes_while_its_vault_is_locked_is_recorded_when_it_reopens() {
+        let vault = vault_with_addy(false);
+        let result = block_on(create_email_alias_in_state(
+            &vault.state,
+            None,
+            |_request: AliasRequest| {
+                vault.state.lock_for_lifecycle().expect("locked");
+                async { Err::<String, AliasFailure>(AliasFailure::Unreachable) }
+            },
+        ));
+        assert!(result.is_err());
+        vault.reopen();
+        assert_eq!(
+            recorded(&vault),
+            vec![(
+                EntryKind::EmailAlias,
+                Outcome::ConnectionClosed,
+                Some("app.addy.io".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn an_alias_never_lands_in_a_vault_that_replaced_the_one_that_sent_the_token() {
+        let vault = vault_with_addy(false);
+        let other = TestVault::with_login("login-b", "https://contoso.example");
+        let replacement = other_vault_session(&other);
+        assert_ne!(
+            replacement.vault_id(),
+            vault
+                .state
+                .session
+                .lock()
+                .expect("session lock")
+                .as_ref()
+                .and_then(|session| session.vault_id())
+        );
+        let result = block_on(create_email_alias_in_state(
+            &vault.state,
+            None,
+            |_request: AliasRequest| {
+                vault.state.lock_for_lifecycle().expect("locked");
+                async { Ok::<String, AliasFailure>("fictional.alias@anonaddy.me".to_string()) }
+            },
+        ));
+        assert!(result.is_ok());
+        *vault.state.session.lock().expect("session lock") = Some(replacement);
+        record(
+            &vault.state,
+            ReleaseDraft::new(EntryKind::Copy, Outcome::Released).item("login-b", "login"),
+        );
+        assert_eq!(alias_entries(&vault), 0);
+        assert_eq!(recorded(&vault).len(), 1);
+
+        let open = TestVault::with_login("login-c", "https://fabrikam.example");
+        let unlocked = other_vault_session(&open);
+        let vault = vault_with_addy(false);
+        let result = block_on(create_email_alias_in_state(
+            &vault.state,
+            None,
+            |_request: AliasRequest| {
+                *vault.state.session.lock().expect("session lock") = Some(unlocked);
+                vault.state.advance_session_epoch();
+                async { Ok::<String, AliasFailure>("fictional.alias@anonaddy.me".to_string()) }
+            },
+        ));
+        assert!(result.is_ok());
+        assert_eq!(alias_entries(&vault), 0);
     }
 
     #[test]

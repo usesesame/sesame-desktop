@@ -350,6 +350,7 @@ pub struct ReleaseDraft {
     pub match_kind: Option<MatchKind>,
     pub count: u32,
     pub at: Option<u64>,
+    pub vault_id: Option<String>,
 }
 
 impl ReleaseDraft {
@@ -365,7 +366,13 @@ impl ReleaseDraft {
             match_kind: None,
             count: 1,
             at: None,
+            vault_id: None,
         }
+    }
+
+    pub fn for_vault(mut self, vault_id: &str) -> Self {
+        self.vault_id = Some(vault_id.to_string());
+        self
     }
 
     pub fn item(mut self, id: &str, kind: &str) -> Self {
@@ -451,6 +458,7 @@ impl ReleaseDraft {
             match_kind: None,
             count: self.count.max(1),
             at: Some(self.at.unwrap_or(at)),
+            vault_id: self.vault_id,
         }
     }
 }
@@ -1342,6 +1350,7 @@ impl Inner {
             queued.kind == draft.kind
                 && queued.host == draft.host
                 && queued.outcome == draft.outcome
+                && queued.vault_id == draft.vault_id
         }) {
             existing.count = existing.count.saturating_add(draft.count);
             existing.at = existing.at.max(draft.at);
@@ -1495,6 +1504,13 @@ impl Inner {
                 self.note_lost(now);
                 continue;
             };
+            if draft
+                .vault_id
+                .as_deref()
+                .is_some_and(|vault_id| vault_id != session_vault_id(session))
+            {
+                continue;
+            }
             let Some(open) = self.open.as_mut() else {
                 self.unwritten.push_front((draft, late));
                 self.mark_late();
@@ -2166,6 +2182,48 @@ mod tests {
         assert_eq!(entry.host.as_deref(), Some("app.addy.io"));
         assert_eq!(entry.item_id, None);
         assert!(entry.newer.is_none());
+    }
+
+    #[test]
+    fn an_entry_kept_for_one_vault_is_never_written_into_another() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(1);
+        let own = session_vault_id(&fixture.session);
+        assert!(!own.is_empty());
+        state.append_locked(alias(Outcome::Released).for_vault("fictional-other-vault"));
+        state.append_locked(alias(Outcome::Released).for_vault(&own));
+        state.append_locked(alias(Outcome::Withdrawn).for_vault("fictional-other-vault"));
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        let (_, entries) = fixture.reopen();
+        let aliases: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::EmailAlias)
+            .collect();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].outcome, Outcome::Released);
+        assert_eq!(aliases[0].count, 1);
+        assert!(aliases[0].late);
+        assert_eq!(
+            entries.last().and_then(|entry| entry.item_id.as_deref()),
+            Some("item-after")
+        );
+
+        state.append(
+            &fixture.session,
+            alias(Outcome::Withdrawn).for_vault("fictional-other-vault"),
+        );
+        let (_, entries) = fixture.reopen();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::EmailAlias)
+                .count(),
+            1
+        );
     }
 
     #[test]
