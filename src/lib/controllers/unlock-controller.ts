@@ -198,6 +198,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
     async submitMasterPassword() {
       const current = state.value()
       const status = vault.value().status
+      if (current.isWorking) return
       feedback.clearError()
       if (!status.exists && current.masterPassword.length < 12) return feedback.setErrorMessage('Use at least 12 characters. A memorable passphrase is usually best.')
       if (!status.exists && current.masterPassword !== current.confirmPassword) return feedback.setErrorMessage('Those master passwords do not match.')

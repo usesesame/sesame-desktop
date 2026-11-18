@@ -1,11 +1,13 @@
 use zeroize::Zeroize;
 
-use crate::application::sync::{prepare_recovery, verify_master_password, SyncStore};
+use crate::application::sync::{
+    confirm_master_password, master_password_proof, prepare_recovery, SyncStore,
+};
 use crate::application::sync_recovery::backup_stamp;
 use crate::application::DesktopEffects;
 use crate::sync::state::StateNames;
-use crate::vault::crypto::{derive_key, encrypt_bytes, master_password_kdf_params};
-use crate::vault::{UnlockedVault, VaultPayload, VaultState, WRAP_AAD};
+use crate::vault::key_proof::NewMasterWrap;
+use crate::vault::{UnlockedVault, VaultPayload, VaultState};
 
 pub fn finish_adoption_in_state(
     state: &VaultState,
@@ -16,15 +18,23 @@ pub fn finish_adoption_in_state(
     master_password: &str,
     vault_id: &str,
 ) -> Result<String, String> {
+    const LOCKED: &str = "Unlock Sesame before joining a synced vault.";
+    let proof = master_password_proof(state, master_password, LOCKED)?;
+    {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
+        confirm_master_password(session.as_ref().ok_or(LOCKED)?, &proof)?;
+    }
+    let wraps = AdoptionWraps::seal(key, master_password, None)?;
     let recovery_kit = {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let vault = session
-            .as_mut()
-            .ok_or("Unlock Sesame before joining a synced vault.")?;
-        verify_master_password(vault, master_password)?;
+        let vault = session.as_mut().ok_or(LOCKED)?;
+        confirm_master_password(vault, &proof)?;
         let current = vault.open_payload()?;
         let local = serde_json::to_vec(&*current)
             .map_err(|_| "Sesame could not read the local vault.".to_string())?;
@@ -40,7 +50,8 @@ pub fn finish_adoption_in_state(
         )?;
         crate::application::sync_recovery::prune_and_report(effects, &directory, &[written]);
         let _ = vault_id;
-        let recovery_kit = adopt(vault, key, payload, master_password)?;
+        let recovery_kit = adopt_prepared(vault, wraps, payload)?
+            .ok_or_else(|| "Sesame could not prepare a recovery kit.".to_string())?;
         crate::application::release_record::open_release_record(state, vault);
         effects.report_key_page_fallback(vault);
         state.advance_session_epoch();
@@ -129,26 +140,69 @@ pub fn adopt(
         .ok_or_else(|| "Sesame could not prepare a recovery kit.".to_string())
 }
 
+pub struct AdoptionWraps {
+    key: zeroize::Zeroizing<[u8; 32]>,
+    kdf: crate::vault::KdfParams,
+    key_wrap: crate::vault::CipherBlob,
+    recovery: crate::sync::key_change::PreparedRecovery,
+    shown: Option<String>,
+}
+
+impl AdoptionWraps {
+    pub fn seal(
+        key: [u8; 32],
+        master_password: &str,
+        prepared: Option<crate::sync::key_change::PreparedRecovery>,
+    ) -> Result<Self, String> {
+        let key = zeroize::Zeroizing::new(key);
+        let (kdf, key_wrap) = NewMasterWrap::derive(master_password)?.seal(&key)?;
+        let (shown, recovery) = match prepared {
+            Some(prepared) => (None, prepared),
+            None => {
+                let (kit, recovery) = prepare_recovery(&key)?;
+                (Some(kit), recovery)
+            }
+        };
+        Ok(Self {
+            key,
+            kdf,
+            key_wrap,
+            recovery,
+            shown,
+        })
+    }
+}
+
 /// Old-key wraps are rebuilt or dropped; a stale PIN wrap would unlock a vault this one cannot read.
 /// With a prepared recovery wrap the kit the person already saved stays valid and no new one is made.
 pub fn adopt_with(
     vault: &mut UnlockedVault,
-    mut key: [u8; 32],
+    key: [u8; 32],
     payload: VaultPayload,
     master_password: &str,
     prepared: Option<crate::sync::key_change::PreparedRecovery>,
 ) -> Result<Option<String>, String> {
-    let kdf = master_password_kdf_params();
-    let wrapping_key = zeroize::Zeroizing::new(derive_key(master_password, &kdf)?);
-    let key_wrap = encrypt_bytes(&wrapping_key, &key, WRAP_AAD)?;
+    adopt_prepared(
+        vault,
+        AdoptionWraps::seal(key, master_password, prepared)?,
+        payload,
+    )
+}
 
-    let (shown, recovery_wrap, recovery_kdf) = match prepared {
-        Some(prepared) => (None, prepared.wrap, prepared.kdf),
-        None => {
-            let (kit, recovery) = prepare_recovery(&key)?;
-            (Some(kit), recovery.wrap, recovery.kdf)
-        }
-    };
+pub fn adopt_prepared(
+    vault: &mut UnlockedVault,
+    wraps: AdoptionWraps,
+    payload: VaultPayload,
+) -> Result<Option<String>, String> {
+    let AdoptionWraps {
+        key: sealed_key,
+        kdf,
+        key_wrap,
+        recovery,
+        shown,
+    } = wraps;
+    let mut key = *sealed_key;
+    let (recovery_wrap, recovery_kdf) = (recovery.wrap, recovery.kdf);
 
     let next_pending = crate::vault::pending_change::stage_for_new_key(
         vault,

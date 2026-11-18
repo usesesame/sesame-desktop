@@ -3,14 +3,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::application::lifecycle::key_settings_in_state;
 use crate::application::release::require_release_presence;
 use crate::application::unlock::retire_unlock_methods_after_key_rotation;
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
 use crate::vault::backup::RECOVERY_REPLACEMENT_FILE;
+use crate::vault::key_proof::{NewKeyWraps, SecretProof};
 use crate::vault::storage::{
     atomic_replace, open_recovery_replacement_request, recovery_replacement_ready,
-    replace_recovery_kit_for_session, seal_recovery_replacement_request, VaultKeyRotation,
+    replace_recovery_kit_with, seal_recovery_replacement_request, VaultKeyRotation,
     RECOVERY_REPLACEMENT_DELAY_SECS,
 };
 use crate::vault::types::CipherBlob;
@@ -111,10 +113,27 @@ pub(super) fn write_request(
     atomic_replace(path, &bytes)
 }
 
+#[cfg(test)]
 pub(super) fn complete_request(
     path: &Path,
     session: &mut UnlockedVault,
     master_password: &str,
+    now: u64,
+    prune_backups: bool,
+) -> VaultResult<VaultKeyRotation> {
+    let proof = SecretProof::master_password(
+        &crate::vault::key_proof::KeySettings::of(session),
+        master_password,
+    )?;
+    let wraps = NewKeyWraps::derive(master_password)?;
+    complete_request_with(path, session, &proof, &wraps, now, prune_backups)
+}
+
+pub(super) fn complete_request_with(
+    path: &Path,
+    session: &mut UnlockedVault,
+    proof: &SecretProof,
+    wraps: &NewKeyWraps,
     now: u64,
     prune_backups: bool,
 ) -> VaultResult<VaultKeyRotation> {
@@ -124,10 +143,11 @@ pub(super) fn complete_request(
         return Err("The new recovery kit is not ready yet.".into());
     }
     remove_request(path)?;
-    replace_recovery_kit_for_session(session, master_password, requested_at, now, prune_backups)
-        .inspect_err(|_| {
+    replace_recovery_kit_with(session, proof, wraps, requested_at, now, prune_backups).inspect_err(
+        |_| {
             let _ = atomic_replace(path, &stored);
-        })
+        },
+    )
 }
 
 pub fn pending_recovery_replacement_in_state(
@@ -206,18 +226,32 @@ pub fn complete_recovery_replacement_in_state(
     now: u64,
     prune_backups: bool,
 ) -> VaultResult<RecoveryReplacementResult> {
+    const LOCKED: &str = "Unlock your vault first.";
+    let epoch = state.session_epoch();
+    presence.ready_for_password()?;
+    let settings = key_settings_in_state(state, LOCKED)?;
+    let proof = SecretProof::master_password(&settings, &master_password)?;
+    {
+        let session = state
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not read the vault session.".to_string())?;
+        let session = session.as_ref().ok_or(LOCKED)?;
+        presence.grant_with_proof(session, epoch, &proof)?;
+    }
+    let wraps = NewKeyWraps::derive(&master_password)?;
+    drop(master_password);
     let rotation = {
-        let epoch = state.session_epoch();
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-        let session = session.as_mut().ok_or("Unlock your vault first.")?;
-        presence.grant_with_password(session, epoch, &master_password)?;
-        let rotation = complete_request(
+        let session = session.as_mut().ok_or(LOCKED)?;
+        let rotation = complete_request_with(
             &effects.recovery_replacement_path()?,
             session,
-            &master_password,
+            &proof,
+            &wraps,
             now,
             prune_backups,
         )?;

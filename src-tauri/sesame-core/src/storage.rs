@@ -6,25 +6,23 @@ use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::crypto::{
-    bytes_match, decrypt_bytes, default_kdf_params, derive_key, encrypt_bytes,
-    master_password_kdf_params, serialize_payload, unwrap_with_password,
-};
+use crate::crypto::{decrypt_bytes, derive_key, encrypt_bytes, serialize_payload};
+use crate::key_proof::{KeySettings, NewKeyWraps, NewPinWrap, NewRecoveryKit, SecretProof};
 use crate::platform::{
-    copy_private_file, create_private_dir, ensure_device_protection, open_private_file,
-    protect_for_device, replace_file, unprotect_for_device,
+    copy_private_file, create_private_dir, open_private_file, protect_for_device, replace_file,
+    unprotect_for_device,
 };
 use crate::snapshot::duplicate_key;
 use crate::{
     payload_aad_for_file,
     record_store::VaultRecordStore,
     throttle::{PersistedPinThrottle, PinAttemptGuard},
-    UnlockedVault, VaultResult, MAX_VAULT_FILE_BYTES, PIN_WRAP_AAD, RECOVERY_WRAP_AAD,
-    VAULT_FORMAT_VERSION, VAULT_SIZE_LIMIT_MESSAGE, WRAP_AAD,
+    UnlockedVault, VaultResult, MAX_VAULT_FILE_BYTES, VAULT_FORMAT_VERSION,
+    VAULT_SIZE_LIMIT_MESSAGE,
 };
 use crate::{
     types::*,
-    util::{fill_secret, generate_recovery_kit, random_id, unix_timestamp},
+    util::{fill_secret, random_id, unix_timestamp},
 };
 
 /// A PIN-enabled vault always has one; absence reads as tampering.
@@ -198,6 +196,14 @@ fn pending_setup_is_empty(session: &UnlockedVault) -> VaultResult<bool> {
 
 /// Replaces the abandoned kit; only the new one can finish or recover the pending vault.
 pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultResult<String> {
+    let recovery = NewRecoveryKit::generate()?;
+    resume_recovery_setup_with(session, &recovery)
+}
+
+pub fn resume_recovery_setup_with(
+    session: &mut UnlockedVault,
+    recovery: &NewRecoveryKit,
+) -> VaultResult<String> {
     if session.setup_complete {
         return Err("This vault has already finished recovery setup.".into());
     }
@@ -205,12 +211,7 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
         return Err("This unfinished vault contains data and cannot restart setup safely.".into());
     }
 
-    let recovery_kit = Zeroizing::new(generate_recovery_kit()?);
-    let recovery_kit_for_display = recovery_kit.to_string();
-    let recovery_kdf = default_kdf_params();
-    let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &recovery_kdf)?);
-    let recovery_wrap = session
-        .expose_vault_key(|key| encrypt_bytes(&recovery_wrapping_key, key, RECOVERY_WRAP_AAD))?;
+    let (recovery_kdf, recovery_wrap) = session.expose_vault_key(|key| recovery.seal(key))?;
 
     let previous_kdf = session.recovery_kdf.replace(recovery_kdf);
     let previous_wrap = session.recovery_wrap.replace(recovery_wrap);
@@ -220,42 +221,11 @@ pub fn resume_recovery_setup_for_session(session: &mut UnlockedVault) -> VaultRe
         session.recovery_wrap = previous_wrap;
         return Err(error);
     }
-    Ok(recovery_kit_for_display)
+    Ok(recovery.kit_for_display())
 }
 
-fn verify_recovery_kit(session: &UnlockedVault, recovery_kit: &str) -> VaultResult<()> {
-    let recovery_kdf = session
-        .recovery_kdf
-        .as_ref()
-        .ok_or("This vault does not have a recovery wrapper.")?;
-    let recovery_wrap = session
-        .recovery_wrap
-        .as_ref()
-        .ok_or("This vault does not have a recovery wrapper.")?;
-    let normalized = Zeroizing::new(recovery_kit.trim().to_ascii_uppercase());
-    let recovery_wrapping_key = Zeroizing::new(derive_key(&normalized, recovery_kdf)?);
-    let mut recovered = decrypt_bytes(&recovery_wrapping_key, recovery_wrap, RECOVERY_WRAP_AAD)
-        .map_err(|_| "That recovery kit is not correct.".to_string())?;
-    let matches = session.expose_vault_key(|key| Ok(bytes_match(recovered.as_slice(), key)))?;
-    recovered.zeroize();
-    if !matches {
-        return Err("That recovery kit is not correct.".into());
-    }
-    Ok(())
-}
-
-fn verify_current_password(session: &UnlockedVault, current_password: &str) -> VaultResult<()> {
-    let mut confirmed_key =
-        unwrap_with_password(current_password, &session.kdf, &session.key_wrap, WRAP_AAD)?
-            .ok_or("Your current master password is not correct.")?;
-    let matches_session =
-        session.expose_vault_key(|key| Ok(bytes_match(confirmed_key.as_slice(), key)))?;
-    confirmed_key.zeroize();
-    if !matches_session {
-        return Err("Your current master password is not correct.".into());
-    }
-    Ok(())
-}
+pub const WRONG_RECOVERY_KIT: &str = "That recovery kit is not correct.";
+pub const WRONG_CURRENT_PASSWORD: &str = "Your current master password is not correct.";
 
 pub struct RotationCredentials<'a> {
     pub current_password: Option<&'a str>,
@@ -267,10 +237,18 @@ pub fn complete_recovery_setup_for_session(
     session: &mut UnlockedVault,
     recovery_kit: &str,
 ) -> VaultResult<()> {
+    let proof = SecretProof::recovery_kit(&KeySettings::of(session), recovery_kit)?;
+    complete_recovery_setup_with(session, &proof)
+}
+
+pub fn complete_recovery_setup_with(
+    session: &mut UnlockedVault,
+    proof: &SecretProof,
+) -> VaultResult<()> {
     if session.setup_complete {
         return Err("This vault has already finished recovery setup.".into());
     }
-    verify_recovery_kit(session, recovery_kit)?;
+    proof.require(session, WRONG_RECOVERY_KIT)?;
 
     session.setup_complete = true;
     if let Err(error) = persist_session(session) {
@@ -336,15 +314,29 @@ pub fn replace_recovery_kit_for_session(
     now: u64,
     prune_backups: bool,
 ) -> VaultResult<VaultKeyRotation> {
+    let proof = SecretProof::master_password(&KeySettings::of(session), master_password)?;
+    proof.require(session, WRONG_CURRENT_PASSWORD)?;
+    let wraps = NewKeyWraps::derive(master_password)?;
+    replace_recovery_kit_with(session, &proof, &wraps, requested_at, now, prune_backups)
+}
+
+pub fn replace_recovery_kit_with(
+    session: &mut UnlockedVault,
+    proof: &SecretProof,
+    wraps: &NewKeyWraps,
+    requested_at: u64,
+    now: u64,
+    prune_backups: bool,
+) -> VaultResult<VaultKeyRotation> {
     if !session.setup_complete {
         return Err("Finish recovery setup before replacing the recovery kit.".into());
     }
     if !recovery_replacement_ready(requested_at, now) {
         return Err("The new recovery kit is not ready yet.".into());
     }
-    verify_current_password(session, master_password)?;
+    proof.require(session, WRONG_CURRENT_PASSWORD)?;
 
-    let recovery_kit = rotate_vault_key(session, master_password)?;
+    let recovery_kit = rotate_vault_key_with(session, wraps)?;
     let backups_remaining = prune_backups
         .then(|| prune_local_backups(session))
         .flatten();
@@ -354,12 +346,28 @@ pub fn replace_recovery_kit_for_session(
     })
 }
 
-/// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
-pub fn rotate_master_password_for_session(
-    session: &mut UnlockedVault,
+pub struct RotationProofs {
+    current: Option<SecretProof>,
+    recovery_kit: Option<SecretProof>,
+}
+
+impl RotationProofs {
+    pub fn confirm(&self, session: &UnlockedVault) -> VaultResult<()> {
+        if let Some(current) = self.current.as_ref() {
+            current.require(session, WRONG_CURRENT_PASSWORD)?;
+        }
+        if let Some(recovery_kit) = self.recovery_kit.as_ref() {
+            recovery_kit.require(session, WRONG_RECOVERY_KIT)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn prove_rotation_credentials(
+    settings: &KeySettings,
     credentials: RotationCredentials<'_>,
     new_password: &str,
-) -> VaultResult<VaultKeyRotation> {
+) -> VaultResult<RotationProofs> {
     crate::password_analysis::check_new_master_password(new_password)?;
 
     let current_password = credentials
@@ -368,41 +376,58 @@ pub fn rotate_master_password_for_session(
     let recovery_kit = credentials
         .recovery_kit
         .filter(|kit| !kit.trim().is_empty());
-    if session.recovery_wrap.is_some() {
+    if settings.has_recovery() {
         let recovery_kit =
             recovery_kit.ok_or("Enter your recovery kit to change the master password.")?;
-        if let Some(current_password) = current_password {
-            verify_current_password(session, current_password)?;
-        }
-        verify_recovery_kit(session, recovery_kit)?;
+        let current = current_password
+            .map(|password| SecretProof::master_password(settings, password))
+            .transpose()?;
+        Ok(RotationProofs {
+            current,
+            recovery_kit: Some(SecretProof::recovery_kit(settings, recovery_kit)?),
+        })
     } else {
         let current_password =
             current_password.ok_or("Enter your current master password to change it.")?;
-        verify_current_password(session, current_password)?;
+        Ok(RotationProofs {
+            current: Some(SecretProof::master_password(settings, current_password)?),
+            recovery_kit: None,
+        })
     }
+}
 
-    let recovery_kit = rotate_vault_key(session, new_password)?;
+/// Atomic rotation of password, kit, and data key; PIN and Hello wraps are dropped because they protect the retired key.
+pub fn rotate_master_password_for_session(
+    session: &mut UnlockedVault,
+    credentials: RotationCredentials<'_>,
+    new_password: &str,
+) -> VaultResult<VaultKeyRotation> {
+    let proofs = prove_rotation_credentials(&KeySettings::of(session), credentials, new_password)?;
+    proofs.confirm(session)?;
+    let wraps = NewKeyWraps::derive(new_password)?;
+    commit_master_password_rotation(session, &proofs, &wraps)
+}
+
+pub fn commit_master_password_rotation(
+    session: &mut UnlockedVault,
+    proofs: &RotationProofs,
+    wraps: &NewKeyWraps,
+) -> VaultResult<VaultKeyRotation> {
+    proofs.confirm(session)?;
+    let recovery_kit = rotate_vault_key_with(session, wraps)?;
     Ok(VaultKeyRotation {
         recovery_kit,
         backups_remaining: prune_local_backups(session),
     })
 }
 
-fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<String> {
+fn rotate_vault_key_with(session: &mut UnlockedVault, wraps: &NewKeyWraps) -> VaultResult<String> {
     let mut new_vault_key = Zeroizing::new([0_u8; 32]);
     fill_secret(&mut *new_vault_key)?;
 
-    let new_kdf = master_password_kdf_params();
-    let new_wrapping_key = Zeroizing::new(derive_key(password, &new_kdf)?);
-    let new_key_wrap = encrypt_bytes(&new_wrapping_key, &*new_vault_key, WRAP_AAD)?;
-
-    let mut recovery_kit = generate_recovery_kit()?;
-    let recovery_kit_for_display = recovery_kit.clone();
-    let new_recovery_kdf = default_kdf_params();
-    let recovery_wrapping_key = Zeroizing::new(derive_key(&recovery_kit, &new_recovery_kdf)?);
-    recovery_kit.zeroize();
-    let new_recovery_wrap =
-        encrypt_bytes(&recovery_wrapping_key, &*new_vault_key, RECOVERY_WRAP_AAD)?;
+    let (new_kdf, new_key_wrap) = wraps.master().seal(&new_vault_key)?;
+    let (new_recovery_kdf, new_recovery_wrap) = wraps.recovery().seal(&new_vault_key)?;
+    let recovery_kit_for_display = wraps.recovery().kit_for_display();
 
     let vault_id = session.vault_id().unwrap_or_default().to_string();
     let next_pending =
@@ -435,24 +460,13 @@ fn rotate_vault_key(session: &mut UnlockedVault, password: &str) -> VaultResult<
 }
 
 pub fn set_pin_for_session(session: &mut UnlockedVault, pin: &str) -> VaultResult<()> {
-    validate_new_unlock_pin(pin)?;
+    let wrap = NewPinWrap::prepare(pin)?;
+    set_pin_with(session, &wrap)
+}
 
-    let mut pepper = [0_u8; 32];
-    fill_secret(&mut pepper)?;
-    ensure_device_protection()?;
-    let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&pepper)?);
-    let kdf = default_kdf_params();
-    let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(pepper)));
-    pepper.zeroize();
-    let wrapping_key = Zeroizing::new(derive_key(secret.as_str(), &kdf)?);
-    let key_wrap =
-        session.expose_vault_key(|key| encrypt_bytes(&wrapping_key, key, PIN_WRAP_AAD))?;
-
-    let previous = session.pin_wrap.replace(PinWrap {
-        kdf,
-        protected_pepper,
-        key_wrap,
-    });
+pub fn set_pin_with(session: &mut UnlockedVault, wrap: &NewPinWrap) -> VaultResult<()> {
+    let pin_wrap = session.expose_vault_key(|key| wrap.seal(key))?;
+    let previous = session.pin_wrap.replace(pin_wrap);
     if let Err(error) = persist_session_without_previous(session) {
         session.pin_wrap = previous;
         return Err(error);

@@ -166,3 +166,24 @@ describe('locking the vault', () => {
     expect(stores.selection.value()).toMatchObject({ searchQuery: '', securityFilter: null, collectionFilter: null, activeView: 'vault' })
   })
 })
+
+describe('unlocking with the master password', () => {
+  it('shows the busy state while the key is derived and ignores a second press meanwhile', async () => {
+    const { controller, stores } = harness({ unlocked: false })
+    stores.vault.patch({ status: { ...stores.vault.value().status, exists: true, unlocked: false } })
+    controller.state.patch({ isWorking: false, masterPassword: 'fictional master password' })
+    let finish: (snapshot: VaultSnapshot) => void = () => {}
+    vaultApi.unlockVault.mockReturnValue(new Promise<VaultSnapshot>((resolve) => { finish = resolve }))
+
+    const first = controller.submitMasterPassword()
+    expect(controller.state.value().isWorking).toBe(true)
+    await controller.submitMasterPassword()
+    await vi.waitFor(() => expect(vaultApi.unlockVault).toHaveBeenCalledTimes(1))
+    expect(controller.state.value().isWorking).toBe(true)
+
+    finish(snapshotOf(['first']))
+    await first
+    expect(vaultApi.unlockVault).toHaveBeenCalledTimes(1)
+    expect(controller.state.value().isWorking).toBe(false)
+  })
+})

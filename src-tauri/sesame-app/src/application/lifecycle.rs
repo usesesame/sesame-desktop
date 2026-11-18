@@ -1,9 +1,11 @@
 use std::path::PathBuf;
+use std::sync::MutexGuard;
 
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
+use crate::vault::key_proof::KeySettings;
 use crate::vault::storage::persist_session;
 use crate::vault::{UnlockedVault, VaultFile, VaultResult, VaultSnapshot, VaultState};
 
@@ -46,27 +48,99 @@ pub fn install_unlocked_session(
     Ok((snapshot, epoch))
 }
 
+pub const LOCKED_DURING_UNLOCK: &str =
+    "Sesame locked or replaced the vault before the unlock finished. Try again.";
+
+fn same_key_settings(read: &VaultFile, current: &VaultFile) -> bool {
+    fn json<T: serde::Serialize>(value: &T) -> Option<Vec<u8>> {
+        serde_json::to_vec(value).ok()
+    }
+    json(&read.kdf).is_some_and(|kdf| Some(kdf) == json(&current.kdf))
+        && json(&read.key_wrap).is_some_and(|wrap| Some(wrap) == json(&current.key_wrap))
+        && json(&read.recovery_kdf) == json(&current.recovery_kdf)
+        && json(&read.recovery_wrap) == json(&current.recovery_wrap)
+        && json(&read.pin_wrap) == json(&current.pin_wrap)
+}
+
+pub struct UnlockTurn<'a> {
+    _gate: MutexGuard<'a, ()>,
+}
+
+pub fn begin_unlock(state: &VaultState) -> UnlockTurn<'_> {
+    UnlockTurn {
+        _gate: state
+            .unlock_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    }
+}
+
+pub fn unlock_with_derived_key(
+    state: &VaultState,
+    effects: &dyn DesktopEffects,
+    _turn: &UnlockTurn<'_>,
+    derive: impl FnOnce(&VaultFile) -> VaultResult<[u8; 32]>,
+) -> VaultResult<(VaultSnapshot, u64)> {
+    let epoch = state.session_epoch();
+    let path = effects.vault_path()?;
+    let read = sesame_core::loader::VaultLoader::read(&path)?;
+    let key = Zeroizing::new(derive(&read)?);
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
+    if state.session_epoch() != epoch {
+        return Err(LOCKED_DURING_UNLOCK.into());
+    }
+    let current = sesame_core::loader::VaultLoader::read(&path)?;
+    if !same_key_settings(&read, &current) {
+        return Err(LOCKED_DURING_UNLOCK.into());
+    }
+    let installed = install_unlocked_session(state, &mut session, path, *key, current, effects);
+    drop(session);
+    installed
+}
+
+pub fn key_settings_in_state(state: &VaultState, locked: &str) -> VaultResult<KeySettings> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the unlocked vault session.".to_string())?;
+    session
+        .as_ref()
+        .map(KeySettings::of)
+        .ok_or(locked.to_string())
+}
+
+pub fn confirm_unlock_survived(state: &VaultState) -> VaultResult<()> {
+    let unlocked = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not open the vault session.".to_string())?
+        .is_some();
+    if unlocked {
+        Ok(())
+    } else {
+        Err(LOCKED_DURING_UNLOCK.into())
+    }
+}
+
 pub fn unlock_vault_in_state(
     state: &VaultState,
     presence: &ReleasePresence,
     effects: &dyn DesktopEffects,
     master_password: Zeroizing<String>,
 ) -> VaultResult<VaultSnapshot> {
-    // One lifecycle critical section from file read to install.
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
-    let path = effects.vault_path()?;
-    let file = sesame_core::loader::VaultLoader::read(&path)?;
-    let key_array = sesame_core::api::unwrap_key_with_password(&file, &master_password)?;
-    let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
-    drop(session);
-    if let Ok((_, epoch)) = &result {
-        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
-        presence.grant_after_unlock(*epoch);
-    }
-    result.map(|(snapshot, _)| snapshot)
+    let turn = begin_unlock(state);
+    let (snapshot, epoch) = unlock_with_derived_key(state, effects, &turn, |file| {
+        sesame_core::api::unwrap_key_with_password(file, &master_password)
+    })?;
+    drop(turn);
+    drop(master_password);
+    let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
+    presence.grant_after_unlock(epoch);
+    confirm_unlock_survived(state)?;
+    Ok(snapshot)
 }
 
 /// The event half of locking; every lock entry point calls this so behavior cannot drift.

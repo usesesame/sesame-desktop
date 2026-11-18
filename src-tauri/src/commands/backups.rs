@@ -1,4 +1,5 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use zeroize::Zeroizing;
 
 use crate::adapters::desktop_effects::DesktopHostEffects;
 use crate::application::backups::{
@@ -8,6 +9,7 @@ use crate::application::backups::{
     verify_backup_in_state,
 };
 use crate::commands::file_selection::FileSelectionState;
+use crate::commands::lifecycle::off_window_thread;
 use crate::release::ReleasePresence;
 use crate::vault::recovery_health;
 use crate::vault::{
@@ -106,12 +108,16 @@ pub fn export_recovery_kit(
 }
 
 #[tauri::command]
-pub fn delete_local_vault(
-    app: AppHandle,
-    master_password: String,
-    state: State<'_, VaultState>,
-) -> VaultResult<()> {
-    delete_local_vault_in_state(&state, &DesktopHostEffects::new(&app), master_password)
+pub async fn delete_local_vault(app: AppHandle, master_password: String) -> VaultResult<()> {
+    let mut master_password = Zeroizing::new(master_password);
+    off_window_thread(app, move |app| {
+        delete_local_vault_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            std::mem::take(&mut *master_password),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -132,30 +138,36 @@ pub fn inspect_backup(
 }
 
 #[tauri::command]
-pub fn verify_backup(
+pub async fn verify_backup(
     app: AppHandle,
     request: RestoreBackupRequest,
-    state: State<'_, VaultState>,
-    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<BackupVerification> {
-    verify_backup_in_state(&state, &DesktopHostEffects::new(&app), &selection, request)
+    off_window_thread(app, move |app| {
+        verify_backup_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            &app.state::<FileSelectionState>(),
+            request,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn restore_backup(
+pub async fn restore_backup(
     app: AppHandle,
     request: RestoreBackupRequest,
-    state: State<'_, VaultState>,
-    presence: State<'_, ReleasePresence>,
-    selection: State<'_, FileSelectionState>,
 ) -> VaultResult<RestoreBackupResult> {
-    restore_backup_in_state(
-        &state,
-        &presence,
-        &DesktopHostEffects::new(&app),
-        &selection,
-        request,
-    )
+    off_window_thread(app, move |app| {
+        restore_backup_in_state(
+            &app.state::<VaultState>(),
+            &app.state::<ReleasePresence>(),
+            &DesktopHostEffects::new(app),
+            &app.state::<FileSelectionState>(),
+            request,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

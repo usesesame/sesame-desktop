@@ -11,6 +11,7 @@ pub mod ffi;
 pub mod generator;
 pub mod history;
 pub mod imports;
+pub mod key_proof;
 pub mod loader;
 pub mod migration;
 pub mod password_analysis;
@@ -132,6 +133,7 @@ pub fn payload_aad_for_file(
 
 pub struct VaultState {
     pub session: Mutex<Option<UnlockedVault>>,
+    pub unlock_gate: Mutex<()>,
     /// Parsed import entries; never reach the interface, dropped on lock.
     pub pending_import: Mutex<Option<pending_import::PendingImport>>,
     pub pin_guard: Mutex<throttle::PinAttemptGuard>,
@@ -149,6 +151,7 @@ impl Default for VaultState {
     fn default() -> Self {
         Self {
             session: Mutex::new(None),
+            unlock_gate: Mutex::new(()),
             pending_import: Mutex::new(None),
             pin_guard: Mutex::new(throttle::PinAttemptGuard::default()),
             pin_status_loaded: AtomicBool::new(false),
