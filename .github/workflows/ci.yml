@@ -226,6 +226,21 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
           ./tools/test-windows-installer.ps1 -InstallerPath $installers[0].FullName
 
+      - name: Check the command line tool on the machine Path
+        shell: powershell
+        timeout-minutes: 20
+        run: |
+          $installers = @(Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
+          ./tools/test-windows-command-line-install.ps1 -InstallerPath $installers[0].FullName -EvidenceRoot (Join-Path $env:RUNNER_TEMP 'command-line-install-evidence')
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-command-line-install-evidence
+          path: ${{ runner.temp }}/command-line-install-evidence
+          if-no-files-found: warn
+          retention-days: 30
+
   desktop:
     needs: [windows-js, windows-rust-lint, windows-rust-test, windows-installer]
     if: always()

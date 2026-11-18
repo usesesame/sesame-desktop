@@ -177,6 +177,10 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
   assert.match(collector, /relativePath\s*=/)
   assert.match(collector, /sha256\s*=/)
   assert.match(comparer, /missing required column/)
+  assert.match(collector, /GetValue\('Path', \$null, \[Microsoft\.Win32\.RegistryValueOptions\]::DoNotExpandEnvironmentNames\)/, 'the collector must record the machine Path as stored, without expanding it')
+  assert.match(collector, /GetValueKind\('Path'\)/)
+  assert.match(collector, /'machine-path\.json'/)
+  assert.match(collector, /-Name 'TerminalPathAdded'/)
   assert.match(comparer, /\$changes = @\(foreach/)
 
   if (process.platform !== 'win32') {
@@ -276,6 +280,84 @@ test('Windows CI builds the installer and runs its install lifecycle', () => {
   assert.match(lifecycle, /nothing is removed from the old directory/)
   assert.match(lifecycle, /the old uninstaller inside Program Files runs/)
   assert.match(lifecycle, /a traversal path into Program Files does not run the old uninstaller/)
+
+  const steps = windows.indexOf('./tools/test-windows-installer.ps1')
+  const commandLine = windows.indexOf('./tools/test-windows-command-line-install.ps1 -InstallerPath')
+  assert.ok(commandLine > steps, 'CI no longer checks the command line tool on the machine Path after the install lifecycle')
+  assert.match(windows.slice(commandLine), /-EvidenceRoot \(Join-Path \$env:RUNNER_TEMP 'command-line-install-evidence'\)/)
+  assert.match(windows, /name: Check the command line tool on the machine Path\s+shell: powershell\s+timeout-minutes: \d+/)
+  assert.match(windows, /uses: actions\/upload-artifact@[0-9a-f]{40} # v[\d.]+\s+with:\s+name: windows-command-line-install-evidence\s+path: \$\{\{ runner\.temp \}\}\/command-line-install-evidence/)
+})
+
+test('the command line install test guards the machine Path and checks what the hook claims', () => {
+  const script = read('tools', 'test-windows-command-line-install.ps1')
+  const client = read('src-tauri', 'src', 'terminal_client.rs')
+  const protocol = read('src-tauri', 'sesame-app', 'src', 'cli_protocol.rs')
+  const broker = read('src-tauri', 'sesame-app', 'src', 'application', 'cli_broker.rs')
+  const pipe = read('src-tauri', 'src', 'adapters', 'platform', 'browser_pipe', 'windows.rs')
+
+  const refusal = script.indexOf("$env:GITHUB_ACTIONS -ne 'true' -and -not $AllowMachinePathChanges")
+  const saved = script.indexOf('$originalPath = Get-MachinePath')
+  const firstWrite = script.search(/^\s*Set-MachinePath \$/m)
+  assert.ok(refusal > 0, 'the test must refuse to run outside CI without a flag')
+  assert.ok(saved > refusal, 'the original Path is not saved right after the CI check')
+  assert.ok(firstWrite > saved, 'the test writes the machine Path before it saves the original')
+  assert.match(script, /\} finally \{\s+\$script:scenario = 'final restore'[\s\S]*Set-MachinePath \$originalPath\.Value \$originalPath\.Kind/, 'a failed run does not restore the runner Path')
+  assert.match(script, /function Invoke-Scenario[\s\S]*?\} finally \{[\s\S]*?Set-MachinePath \$originalPath\.Value \$originalPath\.Kind/, 'a failed scenario does not restore the runner Path')
+  assert.match(script, /OpenSubKey\(\$environmentKeyPath, \$true\)/)
+  assert.equal((script.match(/OpenSubKey\([^)]*\$true\)/g) ?? []).length, 1, 'the test opens a registry key for writing outside the one machine Path helper')
+  assert.doesNotMatch(script, /SetEnvironmentVariable|HKCU:\\Environment|setx/i, 'the test must never write the user Path')
+  assert.match(script, /Confirm-That 'the user Path is untouched'/)
+
+  const constant = (source, name) => {
+    const match = source.match(new RegExp(`const ${name}: [^=]+= ([^;]+);`))
+    assert.ok(match, `${name} is no longer defined`)
+    return match[1].trim()
+  }
+  const quoted = (value) => value.replace(/^"|"$/g, '')
+  assert.match(script, new RegExp(`\\$exitUnreachable = ${constant(client, 'EXIT_UNREACHABLE')}\\b`))
+  assert.match(script, new RegExp(`\\$exitTimeout = ${constant(client, 'EXIT_TIMEOUT')}\\b`))
+  assert.ok(script.includes(`$notRunningMessage = '${quoted(constant(client, 'NOT_RUNNING'))}'`), 'the not running message no longer matches the tool')
+  assert.ok(client.includes(`"Unlock Sesame to continue."`) && script.includes(`$unlockWaitingMessage = 'Unlock Sesame to continue.'`))
+  assert.match(protocol, /Self::Timeout => "Nobody answered in Sesame\."/)
+  assert.ok(script.includes(`$timeoutMessage = 'Nobody answered in Sesame.'`))
+  const unlockSeconds = Number(broker.match(/CLI_UNLOCK_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/)[1])
+  const clientSeconds = Number(pipe.match(/const TERMINAL_REPLY_TIMEOUT: Duration = Duration::from_secs\((\d+)\)/)[1])
+  assert.match(script, new RegExp(`\\$unlockWaitSeconds = ${unlockSeconds}\\b`))
+  assert.match(script, new RegExp(`\\$clientDeadlineSeconds = ${clientSeconds}\\b`))
+  const limit = Number(script.match(/\$requestLimitSeconds = (\d+)/)[1])
+  assert.ok(limit > clientSeconds && limit < clientSeconds + 60, 'the bounded wait for sesame list must outlast the tool deadline by a little')
+  assert.ok(script.includes(String.raw`'\\.\pipe\'`) && script.includes(String.raw`'*\Sesame.Cli.*'`), 'the test no longer waits for the terminal pipe the desktop opens')
+  assert.match(pipe, /pipe_prefix: "Sesame\.Cli"/)
+
+  assert.match(script, /\$info\.EnvironmentVariables\['Path'\] = \$PathValue/, 'the tool must run with a Path rebuilt from the registry, not the stale one of this process')
+  assert.match(script, /Invoke-SessionCommand 'where sesame'/)
+  for (const command of ['sesame --help', 'sesame --version', 'sesame list']) {
+    assert.ok(script.includes(`Invoke-SessionCommand '${command}'`), `the test no longer runs ${command}`)
+  }
+  assert.match(script, /'console'[\s\S]*'windows'/)
+  for (const scenario of [
+    'Passive install and passive uninstall',
+    "Invoke-ExistingEntryScenario 'in the same form' $terminalFolder",
+    "Invoke-ExistingEntryScenario 'with a trailing backslash' \"$terminalFolder\\\"",
+    "Invoke-ExistingEntryScenario 'in different letter case' $terminalFolder.ToUpperInvariant()",
+    'Path holds the entry twice at uninstall',
+    "Path of type REG_SZ' $basePath 'String'",
+    'Path that ends with a semicolon',
+    "Uninstall-Sesame @('/S', '/UPDATE')",
+    "Install-Sesame @('/S', '/UPDATE')",
+    "Install-Sesame @('/P')",
+    "($limit - $folderLength - 3) $true",
+    "($limit - $folderLength - 2) $false",
+    "($limit - 2) $false",
+    "($limit - 1) $false",
+    "($limit * 4) $false",
+    "The runner's own Path",
+  ]) {
+    assert.ok(script.includes(scenario), `the test no longer covers ${scenario}`)
+  }
+  assert.match(script, /makensis[\s\S]*-HDRINFO[\s\S]*NSIS_MAX_STRLEN=\(\\d\+\)/, 'the long Path cases must use the limit of the makensis that built the installer')
+  assert.match(script, /\$basePath = '%SystemRoot%\\system32;%SystemRoot%;/)
 })
 
 test('the Windows installer puts only the cli folder on the system Path and never cuts Path short', () => {
@@ -338,6 +420,31 @@ test('the Windows installer puts only the cli folder on the system Path and neve
   assert.ok(running >= 0, 'the uninstaller no longer checks for a running Sesame')
   assert.ok(cleanup >= 0, 'the uninstaller no longer runs the Path cleanup hook')
   assert.ok(cleanup > running, 'the Path cleanup runs before the uninstaller checks for a running Sesame')
+})
+
+test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
+  const hook = read('src-tauri', 'nsis', 'native-host-uninstall.nsh')
+  const code = read('src-tauri', 'nsis', 'installer.nsi')
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+
+  assert.equal((hook.match(/!insertmacro SESAME_REMOVE_TERMINAL_PATH\b/g) ?? []).length, 1, 'the Path cleanup runs from more than one place')
+  const post = hook.match(/!macro NSIS_HOOK_POSTUNINSTALL\b[\s\S]*?!macroend/)
+  assert.ok(post, 'the hook has no NSIS_HOOK_POSTUNINSTALL macro')
+  assert.match(post[0], /!insertmacro SESAME_REMOVE_TERMINAL_PATH/)
+
+  assert.equal((code.match(/!insertmacro NSIS_HOOK_POSTUNINSTALL\b/g) ?? []).length, 1, 'the template runs the uninstall cleanup hook more than once')
+  const section = code.match(/Section Uninstall\b([\s\S]*?)\nSectionEnd/)
+  assert.ok(section, 'the template has no uninstall section')
+  const cleanup = section[1].indexOf('!insertmacro NSIS_HOOK_POSTUNINSTALL')
+  assert.ok(cleanup >= 0, 'the uninstall section no longer runs the cleanup hook')
+  assert.ok(section[1].indexOf('!insertmacro CheckIfAppIsRunning') < cleanup, 'the running app check, where a person can cancel, comes after the Path cleanup')
+  assert.doesNotMatch(section[1].slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox|SetErrorLevel/, 'something after the Path cleanup can still cancel the uninstall')
+
+  for (const [, name, body] of code.matchAll(/Function (un\.[\w.]+)\b([\s\S]*?)FunctionEnd/g)) {
+    assert.doesNotMatch(body, /SESAME_|NSIS_HOOK_POSTUNINSTALL/, `${name} touches the Path before the uninstall has started`)
+  }
 })
 
 test('the Windows command line program is staged before the bundle needs it', () => {

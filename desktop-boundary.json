@@ -96,6 +96,7 @@
     "tools/collect-installer-lifecycle-evidence.ps1",
     "tools/compare-installer-lifecycle-evidence.ps1",
     "tools/test-windows-installer.ps1",
+    "tools/test-windows-command-line-install.ps1",
     "tools/browser-host.mjs",
     "tools/build-browser-host.mjs",
     "tools/check-linux-prerequisites.mjs",

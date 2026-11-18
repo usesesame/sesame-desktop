@@ -110,6 +110,25 @@ $installed = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\U
   Select-Object DisplayName, DisplayVersion, InstallLocation, UninstallString
 $installed | ConvertTo-Json -Depth 3 | Set-Content -Encoding utf8 (Join-Path $output 'installed-product.json')
 
+$machinePath = [ordered]@{ exists = $false; kind = ''; length = 0; value = ''; terminalPathAdded = $null }
+$environmentKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $false)
+if ($environmentKey) {
+  try {
+    if ($environmentKey.GetValueNames() -contains 'Path') {
+      $pathValue = [string]$environmentKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      $machinePath.exists = $true
+      $machinePath.kind = $environmentKey.GetValueKind('Path').ToString()
+      $machinePath.length = $pathValue.Length
+      $machinePath.value = $pathValue
+    }
+  } finally {
+    $environmentKey.Close()
+  }
+}
+$machinePath.terminalPathAdded = @(Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\*\Sesame', 'HKLM:\SOFTWARE\*\Sesame' -Name 'TerminalPathAdded' -ErrorAction SilentlyContinue |
+  ForEach-Object { $_.TerminalPathAdded })
+$machinePath | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $output 'machine-path.json')
+
 $nativeHost = [ordered]@{
   chromeRegistered = Test-Path 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser'
   edgeRegistered = Test-Path 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\app.usesesame.browser'

@@ -1,0 +1,788 @@
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$InstallerPath,
+
+  [string]$EvidenceRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'sesame-command-line-install-evidence'),
+
+  [switch]$AllowMachinePathChanges
+)
+
+$ErrorActionPreference = 'Stop'
+
+if ($env:GITHUB_ACTIONS -ne 'true' -and -not $AllowMachinePathChanges) {
+  throw 'This test rewrites the machine Path many times. Run it in CI, or on a throwaway machine with -AllowMachinePathChanges.'
+}
+$principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  throw 'This test installs Sesame for the whole machine, so it must run as an administrator.'
+}
+
+$environmentKeyPath = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+
+function Read-PathValue {
+  param([Microsoft.Win32.RegistryKey]$Hive, [string]$KeyPath)
+  $key = $Hive.OpenSubKey($KeyPath, $false)
+  if ($null -eq $key) {
+    return [pscustomobject][ordered]@{ Exists = $false; Kind = ''; Length = 0; Value = '' }
+  }
+  try {
+    if (-not ($key.GetValueNames() -contains 'Path')) {
+      return [pscustomobject][ordered]@{ Exists = $false; Kind = ''; Length = 0; Value = '' }
+    }
+    $value = [string]$key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    return [pscustomobject][ordered]@{ Exists = $true; Kind = $key.GetValueKind('Path').ToString(); Length = $value.Length; Value = $value }
+  } finally {
+    $key.Close()
+  }
+}
+
+function Get-MachinePath { Read-PathValue ([Microsoft.Win32.Registry]::LocalMachine) $environmentKeyPath }
+function Get-UserPath { Read-PathValue ([Microsoft.Win32.Registry]::CurrentUser) 'Environment' }
+
+function Set-MachinePath {
+  param([string]$Value, [string]$Kind)
+  $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($environmentKeyPath, $true)
+  try {
+    $key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind)
+  } finally {
+    $key.Close()
+  }
+  $written = Get-MachinePath
+  if ($written.Kind -ne $Kind -or -not [string]::Equals($written.Value, $Value, [StringComparison]::Ordinal)) {
+    throw "The machine Path could not be set. Expected $Kind with $($Value.Length) characters, found $($written.Kind) with $($written.Length) characters."
+  }
+}
+
+$originalPath = Get-MachinePath
+$originalUserPath = Get-UserPath
+if (-not $originalPath.Exists) {
+  throw 'The machine has no Path value, so this test would have nothing to restore.'
+}
+if ($originalPath.Kind -ne 'String' -and $originalPath.Kind -ne 'ExpandString') {
+  throw "The machine Path is of type $($originalPath.Kind), which this test cannot restore safely."
+}
+
+$productName = 'Sesame'
+$installer = (Resolve-Path -LiteralPath $InstallerPath).Path
+$installDirectory = Join-Path $env:ProgramFiles $productName
+$terminalFolder = Join-Path $installDirectory 'cli'
+$terminalProgram = Join-Path $terminalFolder 'sesame.exe'
+$desktopProgram = Join-Path $installDirectory 'sesame.exe'
+$uninstaller = Join-Path $installDirectory 'uninstall.exe'
+$commandShell = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$ownerValueName = 'TerminalPathAdded'
+$uninstallKeys = @(
+  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$productName",
+  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$productName"
+)
+$diagnosticsFile = Join-Path $env:LOCALAPPDATA 'app.usesesame.desktop\logs\sesame-diagnostics.jsonl'
+$collector = Join-Path $PSScriptRoot 'collect-installer-lifecycle-evidence.ps1'
+
+$exitOk = 0
+$exitUnreachable = 3
+$exitTimeout = 4
+$notRunningMessage = 'Sesame is not running. Open Sesame and try again.'
+$unlockWaitingMessage = 'Unlock Sesame to continue.'
+$timeoutMessage = 'Nobody answered in Sesame.'
+$unlockWaitSeconds = 120
+$clientDeadlineSeconds = 200
+$requestLimitSeconds = 215
+$listenerWaitSeconds = 90
+$basePath = '%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0\;C:\Fictional Tools\bin'
+
+New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
+$workDirectory = Join-Path $EvidenceRoot 'empty-working-folder'
+New-Item -ItemType Directory -Force -Path $workDirectory | Out-Null
+
+$script:failures = New-Object 'System.Collections.Generic.List[string]'
+$script:scenario = 'setup'
+$script:evidenceIndex = 0
+$script:scenarioCount = 0
+
+function Save-Evidence {
+  param([string]$Name, $Data)
+  $slug = ("$script:scenario $Name" -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLowerInvariant()
+  if ($slug.Length -gt 120) { $slug = $slug.Substring(0, 120) }
+  $file = Join-Path $EvidenceRoot ('{0:D3}-{1}.json' -f $script:evidenceIndex, $slug)
+  $script:evidenceIndex++
+  $Data | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $file -Encoding UTF8
+}
+
+Save-Evidence 'original paths' ([ordered]@{ machinePath = $originalPath; userPath = $originalUserPath })
+
+function Format-PathValue {
+  param($State)
+  if (-not $State.Exists) { return 'no Path value' }
+  return "$($State.Kind) with $($State.Length) characters [$($State.Value)]"
+}
+
+function Confirm-That {
+  param([string]$What, [bool]$Condition, [string]$Expected, [string]$Found)
+  if ($Condition) {
+    Write-Host "ok: $What"
+    return
+  }
+  $message = "[$script:scenario] $What. Expected $Expected, found $Found."
+  Write-Host "::error::$message"
+  $script:failures.Add($message)
+}
+
+function Add-Failure {
+  param([string]$Message)
+  $line = "[$script:scenario] $Message"
+  Write-Host "::error::$line"
+  $script:failures.Add($line)
+}
+
+function Invoke-Installer {
+  param([string]$Path, [string[]]$Arguments)
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
+  $null = $process.Handle
+  if (-not $process.WaitForExit(300000)) {
+    $process.Kill()
+    throw "$Path $Arguments did not finish within 5 minutes."
+  }
+  Write-Host ("ran: {0} {1} in {2:N1} seconds, exit code {3}" -f (Split-Path -Leaf $Path), ($Arguments -join ' '), $watch.Elapsed.TotalSeconds, $process.ExitCode)
+  return $process.ExitCode
+}
+
+function Install-Sesame {
+  param([string[]]$Arguments)
+  $code = Invoke-Installer $installer $Arguments
+  Confirm-That "the installer with $($Arguments -join ' ') exits 0" ($code -eq 0) '0' "$code"
+}
+
+function Uninstall-Sesame {
+  param([string[]]$Arguments)
+  $code = Invoke-Installer $uninstaller (@($Arguments) + "_?=$installDirectory")
+  Confirm-That "the uninstaller with $($Arguments -join ' ') exits 0" ($code -eq 0) '0' "$code"
+}
+
+function Get-UninstallKey {
+  foreach ($key in $uninstallKeys) {
+    if (Test-Path -LiteralPath $key) { return $key }
+  }
+  return $null
+}
+
+function Get-PathRecord {
+  foreach ($root in 'HKLM:\SOFTWARE\WOW6432Node', 'HKLM:\SOFTWARE') {
+    foreach ($vendor in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {
+      $candidate = Join-Path $vendor.PSPath $productName
+      if (-not (Test-Path -LiteralPath $candidate)) { continue }
+      $value = (Get-Item -LiteralPath $candidate).GetValue($ownerValueName)
+      if ($null -ne $value) {
+        return [pscustomobject][ordered]@{ Key = $candidate; Value = [string]$value }
+      }
+    }
+  }
+  return $null
+}
+
+function Get-InstalledProcesses {
+  $prefix = $installDirectory + '\'
+  @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+      $path = $null
+      try { $path = $_.Path } catch { $path = $null }
+      $path -and $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+    })
+}
+
+function Get-DesktopProcesses {
+  @(Get-InstalledProcesses | Where-Object { $_.Path -ieq $desktopProgram })
+}
+
+function Stop-InstalledProcesses {
+  foreach ($process in Get-InstalledProcesses) {
+    Write-Host "stopping $($process.Path) with id $($process.Id)"
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    $null = $process.WaitForExit(15000)
+  }
+}
+
+function Test-TerminalEntry {
+  param([string]$Entry)
+  return ($Entry -ieq $terminalFolder) -or ($Entry -ieq "$terminalFolder\")
+}
+
+function Get-PathEntries {
+  param([string]$Value)
+  return , ([string[]]$Value.Split([char]';'))
+}
+
+function Test-SameEntries {
+  param([string[]]$Expected, [string[]]$Actual)
+  if ($Expected.Count -ne $Actual.Count) { return $false }
+  for ($index = 0; $index -lt $Expected.Count; $index++) {
+    if (-not [string]::Equals($Expected[$index], $Actual[$index], [StringComparison]::Ordinal)) { return $false }
+  }
+  return $true
+}
+
+function Get-PathWithTerminal {
+  param([string]$Value)
+  if ($Value.EndsWith(';')) { return "$Value$terminalFolder;" }
+  return "$Value;$terminalFolder"
+}
+
+function Get-State {
+  param([string]$Step)
+  $state = [pscustomobject][ordered]@{
+    step = $Step
+    machinePath = Get-MachinePath
+    userPath = Get-UserPath
+    terminalPathRecord = Get-PathRecord
+    uninstallKey = Get-UninstallKey
+    terminalProgramExists = Test-Path -LiteralPath $terminalProgram
+    terminalFolderExists = Test-Path -LiteralPath $terminalFolder
+  }
+  Write-Host "state $Step"
+  Write-Host "  machine Path: $(Format-PathValue $state.machinePath)"
+  if ($state.terminalPathRecord) {
+    Write-Host "  record of the added entry: $($state.terminalPathRecord.Value) under $($state.terminalPathRecord.Key)"
+  } else {
+    Write-Host '  record of the added entry: none'
+  }
+  Write-Host "  cli\sesame.exe present: $($state.terminalProgramExists), cli folder present: $($state.terminalFolderExists)"
+  Save-Evidence $Step $state
+  return $state
+}
+
+function Save-LifecycleEvidence {
+  param([string]$Label)
+  try {
+    $output = & $collector -Label $Label -OutputRoot (Join-Path $EvidenceRoot 'lifecycle') -InstallerPath $installer
+    Write-Host "lifecycle evidence: $output"
+  } catch {
+    Add-Failure "the lifecycle evidence collector failed at $Label with $($_.Exception.Message)"
+  }
+}
+
+function Confirm-PathUnchanged {
+  param([string]$What, $Expected, $Actual)
+  Confirm-That "$What keeps the Path type" ($Actual.Kind -eq $Expected.Kind) $Expected.Kind $Actual.Kind
+  $same = $Actual.Exists -and [string]::Equals($Expected.Value, $Actual.Value, [StringComparison]::Ordinal)
+  Confirm-That "$What leaves Path byte for byte as it was" $same (Format-PathValue $Expected) (Format-PathValue $Actual)
+}
+
+function Confirm-TerminalAdded {
+  param([string]$What, $Before, $After)
+  $entries = Get-PathEntries $After.Value
+  $matching = @($entries | Where-Object { Test-TerminalEntry $_ })
+  Confirm-That "$What leaves exactly one Path entry for $terminalFolder" ($matching.Count -eq 1) '1 entry' "$($matching.Count) entries [$($matching -join ' | ')]"
+  Confirm-That "$What adds the entry as $terminalFolder" ($entries -ccontains $terminalFolder) $terminalFolder ($matching -join ' | ')
+  $others = [string[]]@($entries | Where-Object { -not (Test-TerminalEntry $_) })
+  $earlier = [string[]]@((Get-PathEntries $Before.Value) | Where-Object { -not (Test-TerminalEntry $_) })
+  Confirm-That "$What keeps every other Path entry byte for byte and in order" (Test-SameEntries $earlier $others) "[$($earlier -join ';')]" "[$($others -join ';')]"
+  $expected = Get-PathWithTerminal $Before.Value
+  Confirm-That "$What appends the entry and changes nothing else" ([string]::Equals($expected, $After.Value, [StringComparison]::Ordinal)) "[$expected]" "[$($After.Value)]"
+  Confirm-That "$What keeps the Path type" ($After.Kind -eq $Before.Kind) $Before.Kind $After.Kind
+}
+
+function Confirm-RecordAdded {
+  param([string]$What, $State)
+  $found = if ($State.terminalPathRecord) { $State.terminalPathRecord.Value } else { 'no record' }
+  Confirm-That "$What records the entry Sesame added" ($found -ceq $terminalFolder) $terminalFolder $found
+}
+
+function Confirm-NoRecord {
+  param([string]$What, $State)
+  $found = if ($State.terminalPathRecord) { $State.terminalPathRecord.Value } else { 'no record' }
+  Confirm-That "$What records no Path entry as added by Sesame" ($null -eq $State.terminalPathRecord) 'no record' $found
+}
+
+function Confirm-Unexpanded {
+  param([string]$What, $State)
+  Confirm-That "$What keeps %SystemRoot% unexpanded in Path" ($State.machinePath.Value.Contains('%SystemRoot%\system32;%SystemRoot%;')) '%SystemRoot%\system32;%SystemRoot%;' (Format-PathValue $State.machinePath)
+}
+
+function Confirm-TerminalRemoved {
+  param([string]$What, $State)
+  Confirm-That "$What removes cli\sesame.exe" (-not $State.terminalProgramExists) 'no file' $terminalProgram
+  Confirm-That "$What removes the cli folder" (-not $State.terminalFolderExists) 'no folder' $terminalFolder
+  Confirm-That "$What removes the uninstall key" ($null -eq $State.uninstallKey) 'no key' "$($State.uninstallKey)"
+  Confirm-NoRecord $What $State
+}
+
+function Get-PeSubsystem {
+  param([string]$Path)
+  $bytes = [IO.File]::ReadAllBytes($Path)
+  $offset = [BitConverter]::ToInt32($bytes, 0x3C)
+  if ($offset -lt 0 -or $offset + 96 -gt $bytes.Length -or $bytes[$offset] -ne 0x50 -or $bytes[$offset + 1] -ne 0x45 -or $bytes[$offset + 2] -ne 0 -or $bytes[$offset + 3] -ne 0) {
+    return 'not a Windows executable'
+  }
+  switch ([BitConverter]::ToUInt16($bytes, $offset + 24 + 68)) {
+    2 { return 'windows' }
+    3 { return 'console' }
+    default { return "subsystem $_" }
+  }
+}
+
+function Confirm-InstalledPrograms {
+  Confirm-That 'cli\sesame.exe is installed under the install folder' (Test-Path -LiteralPath $terminalProgram) $terminalProgram 'no file'
+  Confirm-That 'the desktop sesame.exe is installed' (Test-Path -LiteralPath $desktopProgram) $desktopProgram 'no file'
+  if (-not (Test-Path -LiteralPath $terminalProgram) -or -not (Test-Path -LiteralPath $desktopProgram)) { return }
+  $terminalKind = Get-PeSubsystem $terminalProgram
+  $desktopKind = Get-PeSubsystem $desktopProgram
+  $terminalHash = (Get-FileHash -LiteralPath $terminalProgram -Algorithm SHA256).Hash
+  $desktopHash = (Get-FileHash -LiteralPath $desktopProgram -Algorithm SHA256).Hash
+  Write-Host "cli\sesame.exe: $terminalKind program, SHA256 $terminalHash, $((Get-Item -LiteralPath $terminalProgram).Length) bytes"
+  Write-Host "sesame.exe: $desktopKind program, SHA256 $desktopHash, $((Get-Item -LiteralPath $desktopProgram).Length) bytes"
+  Save-Evidence 'installed programs' ([ordered]@{
+      terminalProgram = $terminalProgram; terminalSubsystem = $terminalKind; terminalSha256 = $terminalHash
+      desktopProgram = $desktopProgram; desktopSubsystem = $desktopKind; desktopSha256 = $desktopHash
+    })
+  Confirm-That 'cli\sesame.exe is a console program' ($terminalKind -eq 'console') 'console' $terminalKind
+  Confirm-That 'the desktop sesame.exe is a windowed program' ($desktopKind -eq 'windows') 'windows' $desktopKind
+  Confirm-That 'cli\sesame.exe is a different file from the desktop' ($terminalHash -ne $desktopHash) 'two different hashes' "both $terminalHash"
+}
+
+function Get-NewSessionPath {
+  $parts = @()
+  foreach ($state in @((Get-MachinePath), (Get-UserPath))) {
+    if (-not $state.Exists -or $state.Value -eq '') { continue }
+    if ($state.Kind -eq 'ExpandString') {
+      $parts += [Environment]::ExpandEnvironmentVariables($state.Value)
+    } else {
+      $parts += $state.Value
+    }
+  }
+  return ($parts -join ';')
+}
+
+function Stop-TerminalPrograms {
+  foreach ($process in @(Get-InstalledProcesses | Where-Object { $_.Path -ieq $terminalProgram })) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Invoke-Captured {
+  param([string]$FilePath, [string]$Arguments, [int]$TimeoutSeconds, [string]$PathValue)
+  $info = New-Object System.Diagnostics.ProcessStartInfo
+  $info.FileName = $FilePath
+  $info.Arguments = $Arguments
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.RedirectStandardInput = $true
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.StandardOutputEncoding = [Text.Encoding]::UTF8
+  $info.StandardErrorEncoding = [Text.Encoding]::UTF8
+  $info.WorkingDirectory = $workDirectory
+  if ($PSBoundParameters.ContainsKey('PathValue')) {
+    $info.EnvironmentVariables['Path'] = $PathValue
+  }
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  $process = [Diagnostics.Process]::Start($info)
+  $process.StandardInput.Close()
+  $output = $process.StandardOutput.ReadToEndAsync()
+  $errors = $process.StandardError.ReadToEndAsync()
+  $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+  if ($finished) {
+    $process.WaitForExit()
+  } else {
+    try { $process.Kill() } catch { Write-Host "could not stop $FilePath $($_.Exception.Message)" }
+    Stop-TerminalPrograms
+  }
+  $watch.Stop()
+  $exitCode = $null
+  if ($finished) { $exitCode = $process.ExitCode }
+  $outputText = ''
+  if ($output.Wait(15000)) { $outputText = $output.Result }
+  $errorText = ''
+  if ($errors.Wait(15000)) { $errorText = $errors.Result }
+  $result = [pscustomobject][ordered]@{
+    command = "$FilePath $Arguments"
+    finished = $finished
+    exitCode = $exitCode
+    seconds = [math]::Round($watch.Elapsed.TotalSeconds, 1)
+    output = $outputText
+    errors = $errorText
+  }
+  Write-Host "ran: $($result.command) in $($result.seconds) seconds, finished $finished, exit code $exitCode"
+  Write-Host "  standard output: [$outputText]"
+  Write-Host "  standard error: [$errorText]"
+  return $result
+}
+
+function Invoke-SessionCommand {
+  param([string]$Command, [int]$TimeoutSeconds, [string]$SessionPath)
+  $result = Invoke-Captured $commandShell "/d /c $Command" $TimeoutSeconds $SessionPath
+  Save-Evidence "ran $Command" $result
+  return $result
+}
+
+function Confirm-ToolFromNewSession {
+  param([string]$Version)
+  $sessionPath = Get-NewSessionPath
+  Write-Host "Path of a new session built from the registry: [$sessionPath]"
+  Save-Evidence 'new session path' ([ordered]@{ path = $sessionPath })
+  Confirm-That 'no Sesame desktop runs before the command runs' ((Get-DesktopProcesses).Count -eq 0) 'no desktop process' "$((Get-DesktopProcesses).Count) processes"
+
+  $where = Invoke-SessionCommand 'where sesame' 30 $sessionPath
+  $found = @($where.output -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() })
+  $first = if ($found.Count -gt 0) { $found[0] } else { 'nothing' }
+  Confirm-That 'a new session finds cli\sesame.exe first on Path' ($first -ieq $terminalProgram) $terminalProgram $first
+  Confirm-That 'a new session never finds the desktop sesame.exe on Path' (-not ($found -icontains $desktopProgram)) 'no desktop match' ($found -join ' | ')
+
+  $help = Invoke-SessionCommand 'sesame --help' 30 $sessionPath
+  Confirm-That 'sesame --help exits 0' ($help.exitCode -eq $exitOk) "$exitOk" "$($help.exitCode)"
+  $usage = $help.output.Contains('Usage:') -and $help.output.Contains('sesame list') -and $help.output.Contains('Exit codes:') -and $help.output.Contains('On Windows every request asks in the Sesame window')
+  Confirm-That 'sesame --help prints the Windows usage and exit codes' $usage 'Usage:, sesame list, Exit codes: and the Windows line' "[$($help.output)]"
+
+  $versionRun = Invoke-SessionCommand 'sesame --version' 30 $sessionPath
+  Confirm-That 'sesame --version exits 0' ($versionRun.exitCode -eq $exitOk) "$exitOk" "$($versionRun.exitCode)"
+  Confirm-That 'sesame --version prints the installed version' ($versionRun.output.Trim() -ceq "sesame $Version") "sesame $Version" "[$($versionRun.output.Trim())]"
+
+  $list = Invoke-SessionCommand 'sesame list' 60 $sessionPath
+  Confirm-That 'sesame list without the desktop exits with the unreachable code' ($list.exitCode -eq $exitUnreachable) "$exitUnreachable" "$($list.exitCode)"
+  Confirm-That 'sesame list without the desktop says Sesame is not running' ($list.errors.Contains($notRunningMessage)) $notRunningMessage "[$($list.errors)]"
+  Start-Sleep -Seconds 2
+  Confirm-That 'sesame list does not start the desktop' ((Get-DesktopProcesses).Count -eq 0) 'no desktop process' "$((Get-DesktopProcesses).Count) processes"
+  return $sessionPath
+}
+
+function Test-TerminalPipe {
+  try {
+    return @([IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { $_ -like '*\Sesame.Cli.*' }).Count -gt 0
+  } catch {
+    return $false
+  }
+}
+
+function Get-ListenerEvents {
+  param([string]$Code)
+  if (-not (Test-Path -LiteralPath $diagnosticsFile)) { return 0 }
+  try {
+    return @(Get-Content -LiteralPath $diagnosticsFile | Where-Object { $_.Contains('"operation":"terminal"') -and $_.Contains("`"code`":`"$Code`"") }).Count
+  } catch {
+    return 0
+  }
+}
+
+function Save-Diagnostics {
+  if (Test-Path -LiteralPath $diagnosticsFile) {
+    $text = ''
+    try { $text = Get-Content -LiteralPath $diagnosticsFile -Raw } catch { $text = "unreadable: $($_.Exception.Message)" }
+    Write-Host "desktop diagnostics: [$text]"
+    Save-Evidence 'desktop diagnostics' ([ordered]@{ file = $diagnosticsFile; content = $text })
+  } else {
+    Write-Host "desktop diagnostics: no file at $diagnosticsFile"
+  }
+}
+
+function Confirm-ToolReachesDesktop {
+  param([string]$SessionPath)
+  if (Test-TerminalPipe) {
+    Add-Failure 'a Sesame.Cli pipe already exists before the installed desktop starts'
+    return
+  }
+  $startedBefore = Get-ListenerEvents 'pipe_server_started'
+  $failedBefore = (Get-ListenerEvents 'pipe_server_failed') + (Get-ListenerEvents 'pipe_served_elsewhere')
+  $desktop = Start-Process -FilePath $desktopProgram -WorkingDirectory $installDirectory -PassThru
+  $null = $desktop.Handle
+  try {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $listening = $false
+    $signal = ''
+    while ($watch.Elapsed.TotalSeconds -lt $listenerWaitSeconds) {
+      if (Test-TerminalPipe) { $listening = $true; $signal = 'the Sesame.Cli pipe is listed'; break }
+      if ((Get-ListenerEvents 'pipe_server_started') -gt $startedBefore) { $listening = $true; $signal = 'the desktop logged pipe_server_started'; break }
+      if (((Get-ListenerEvents 'pipe_server_failed') + (Get-ListenerEvents 'pipe_served_elsewhere')) -gt $failedBefore) { $signal = 'the desktop logged that its terminal listener failed'; break }
+      if ($desktop.HasExited) { $signal = "the desktop exited with code $($desktop.ExitCode)"; break }
+      Start-Sleep -Milliseconds 500
+    }
+    if ($signal -eq '') { $signal = "no listener after $listenerWaitSeconds seconds" }
+    $found = "$signal after $([math]::Round($watch.Elapsed.TotalSeconds, 1)) seconds"
+    Write-Host "desktop listener: $found"
+    Confirm-That 'the installed desktop starts and opens its terminal pipe' $listening 'a Sesame.Cli pipe' $found
+    if (-not $listening) { return }
+
+    $list = Invoke-SessionCommand 'sesame list' $requestLimitSeconds $SessionPath
+    Confirm-That 'sesame list ends within the bounded wait' $list.finished "an exit within $requestLimitSeconds seconds" 'a process that was still waiting'
+    Confirm-That 'sesame list with a locked desktop ends with the timeout code' ($list.exitCode -eq $exitTimeout) "$exitTimeout" "$($list.exitCode)"
+    Confirm-That 'sesame list reaches the desktop and waits for an unlock' ($list.errors.Contains($unlockWaitingMessage)) $unlockWaitingMessage "[$($list.errors)]"
+    Confirm-That 'sesame list says nobody answered' ($list.errors.Contains($timeoutMessage)) $timeoutMessage "[$($list.errors)]"
+    $waitedForDesktop = ($list.seconds -ge ($unlockWaitSeconds - 5)) -and ($list.seconds -lt ($clientDeadlineSeconds - 10))
+    Confirm-That 'sesame list waits for the desktop unlock deadline and not its own deadline' $waitedForDesktop "between $($unlockWaitSeconds - 5) and $($clientDeadlineSeconds - 10) seconds" "$($list.seconds) seconds"
+    Confirm-That 'the desktop is still running after the request' (-not $desktop.HasExited) 'a running desktop' "exit code $(if ($desktop.HasExited) { $desktop.ExitCode })"
+  } finally {
+    Save-Diagnostics
+    Stop-InstalledProcesses
+  }
+}
+
+function Reset-Install {
+  Stop-InstalledProcesses
+  if ((Get-UninstallKey) -or (Get-PathRecord)) {
+    if (-not (Get-UninstallKey) -or -not (Test-Path -LiteralPath $uninstaller) -or -not (Test-Path -LiteralPath $desktopProgram)) {
+      $code = Invoke-Installer $installer @('/S')
+      if ($code -ne 0) { Add-Failure "the cleanup install exited $code" }
+    }
+    $code = Invoke-Installer $uninstaller @('/S', "_?=$installDirectory")
+    if ($code -ne 0) { Add-Failure "the cleanup uninstall exited $code" }
+  }
+  Remove-Item -LiteralPath $installDirectory -Recurse -Force -ErrorAction SilentlyContinue
+  $record = Get-PathRecord
+  if ($record) {
+    Add-Failure "the record $($record.Value) was still under $($record.Key) after the cleanup uninstall"
+    Remove-ItemProperty -LiteralPath $record.Key -Name $ownerValueName -ErrorAction SilentlyContinue
+  }
+}
+
+function Invoke-Scenario {
+  param([string]$ScenarioName, [string]$StartValue, [string]$StartKind, [scriptblock]$Body)
+  $script:scenario = $ScenarioName
+  $script:scenarioCount++
+  Write-Host ''
+  Write-Host "== $ScenarioName"
+  try {
+    if (Get-UninstallKey) { throw 'Sesame is still installed from an earlier step, so this scenario cannot start clean.' }
+    if (Get-PathRecord) { throw 'A record of an added Path entry is left from an earlier step, so this scenario cannot start clean.' }
+    if (Test-Path -LiteralPath $terminalFolder) { throw "$terminalFolder is left from an earlier step, so this scenario cannot start clean." }
+    Set-MachinePath $StartValue $StartKind
+    & $Body
+  } catch {
+    Add-Failure "the scenario stopped early: $($_.Exception.Message) $($_.InvocationInfo.PositionMessage)"
+  } finally {
+    try {
+      Reset-Install
+    } catch {
+      Add-Failure "the cleanup failed: $($_.Exception.Message)"
+    }
+    Set-MachinePath $originalPath.Value $originalPath.Kind
+  }
+}
+
+function Invoke-LongPathScenario {
+  param([string]$Description, [int]$Length, [bool]$ExpectAdded)
+  $prefix = "$basePath;C:\Fictional\Long\"
+  $value = $prefix + ('x' * ($Length - $prefix.Length))
+  Invoke-Scenario "Path of $Length characters, $Description" $value 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
+    if ($ExpectAdded) {
+      Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+      Confirm-RecordAdded 'the install' $installed
+    } else {
+      Confirm-PathUnchanged 'an install that must not write Path' $before.machinePath $installed.machinePath
+      Confirm-NoRecord 'an install that must not write Path' $installed
+    }
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall' $after
+  }
+}
+
+function Invoke-ExistingEntryScenario {
+  param([string]$Description, [string]$Entry)
+  Invoke-Scenario "Path already holds the entry $Description" "$basePath;$Entry" 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-PathUnchanged 'an install over an entry Sesame did not add' $before.machinePath $installed.machinePath
+    Confirm-NoRecord 'an install over an entry Sesame did not add' $installed
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'an uninstall that must keep an entry Sesame did not add' $before.machinePath $after.machinePath
+    Confirm-That 'the entry Sesame did not add is still there' ((Get-PathEntries $after.machinePath.Value) -ccontains $Entry) $Entry (Format-PathValue $after.machinePath)
+  }
+}
+
+function Get-NsisStringLimit {
+  $toolRoot = Join-Path $env:LOCALAPPDATA 'tauri\NSIS'
+  foreach ($candidate in @((Join-Path $toolRoot 'makensis.exe'), (Join-Path $toolRoot 'Bin\makensis.exe'))) {
+    if (-not (Test-Path -LiteralPath $candidate)) { continue }
+    $info = Invoke-Captured $candidate '-HDRINFO' 60
+    $match = [regex]::Match("$($info.output)`n$($info.errors)", 'NSIS_MAX_STRLEN=(\d+)')
+    if ($match.Success) {
+      return [pscustomobject][ordered]@{ limit = [int]$match.Groups[1].Value; makensis = $candidate; header = $info.output }
+    }
+  }
+  return $null
+}
+
+try {
+  Write-Host "runner machine Path at the start: $(Format-PathValue $originalPath)"
+  Write-Host "runner user Path at the start: $(Format-PathValue $originalUserPath)"
+  if (Get-UninstallKey) { throw 'Sesame is already installed, so this test cannot start from a clean machine.' }
+  $originalHolds = @((Get-PathEntries $originalPath.Value) | Where-Object { Test-TerminalEntry $_ }).Count
+  Confirm-That 'the runner Path holds no Sesame entry before the test' ($originalHolds -eq 0) '0 entries' "$originalHolds entries"
+
+  $nsis = Get-NsisStringLimit
+  if ($nsis) {
+    $limit = $nsis.limit
+    Write-Host "NSIS_MAX_STRLEN of the makensis that built this installer, $($nsis.makensis): $limit"
+  } else {
+    $limit = 1024
+    Add-Failure "makensis -HDRINFO could not be read under $env:LOCALAPPDATA\tauri\NSIS, so the long Path cases assume the standard limit of 1024"
+  }
+  Save-Evidence 'nsis string limit' ([ordered]@{ found = $nsis; limitUsed = $limit })
+  $folderLength = $terminalFolder.Length
+
+  Invoke-Scenario 'Silent install, the tool from a new session, the running desktop, reinstall, update and silent uninstall' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Save-LifecycleEvidence 'command-line-installed'
+    Confirm-InstalledPrograms
+    Confirm-TerminalAdded 'the silent install' $before.machinePath $installed.machinePath
+    Confirm-RecordAdded 'the silent install' $installed
+    Confirm-Unexpanded 'the silent install' $installed
+    $version = (Get-ItemProperty -LiteralPath $installed.uninstallKey).DisplayVersion
+    $sessionPath = Confirm-ToolFromNewSession $version
+    Confirm-ToolReachesDesktop $sessionPath
+    Save-LifecycleEvidence 'command-line-after-desktop'
+
+    Install-Sesame @('/S')
+    $state = Get-State 'after silent reinstall'
+    Confirm-PathUnchanged 'a silent reinstall' $installed.machinePath $state.machinePath
+    Confirm-RecordAdded 'a silent reinstall' $state
+
+    Install-Sesame @('/P')
+    $state = Get-State 'after passive reinstall'
+    Confirm-PathUnchanged 'a passive reinstall' $installed.machinePath $state.machinePath
+    Confirm-RecordAdded 'a passive reinstall' $state
+
+    Install-Sesame @('/S', '/UPDATE')
+    $state = Get-State 'after update'
+    Confirm-PathUnchanged 'an update' $installed.machinePath $state.machinePath
+    Confirm-RecordAdded 'an update' $state
+
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Save-LifecycleEvidence 'command-line-uninstalled'
+    Confirm-PathUnchanged 'the silent uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the silent uninstall' $after
+    Confirm-Unexpanded 'the silent uninstall' $after
+  }
+
+  Invoke-Scenario 'Passive install and passive uninstall' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/P')
+    $installed = Get-State 'after install'
+    Confirm-TerminalAdded 'the passive install' $before.machinePath $installed.machinePath
+    Confirm-RecordAdded 'the passive install' $installed
+    Uninstall-Sesame @('/P')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the passive uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the passive uninstall' $after
+  }
+
+  Invoke-ExistingEntryScenario 'in the same form' $terminalFolder
+  Invoke-ExistingEntryScenario 'with a trailing backslash' "$terminalFolder\"
+  Invoke-ExistingEntryScenario 'in different letter case' $terminalFolder.ToUpperInvariant()
+
+  Invoke-Scenario 'Path holds the entry twice at uninstall' $basePath 'ExpandString' {
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-RecordAdded 'the install' $installed
+    Set-MachinePath "$($installed.machinePath.Value);$terminalFolder" $installed.machinePath.Kind
+    $doubled = Get-State 'after a second copy of the entry is added'
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'an uninstall that finds the entry twice' $doubled.machinePath $after.machinePath
+  }
+
+  Invoke-Scenario 'Path of type REG_SZ' $basePath 'String' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-TerminalAdded 'the install over REG_SZ' $before.machinePath $installed.machinePath
+    Confirm-RecordAdded 'the install over REG_SZ' $installed
+    Confirm-Unexpanded 'the install over REG_SZ' $installed
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall from REG_SZ' $before.machinePath $after.machinePath
+  }
+
+  Invoke-Scenario 'Path that ends with a semicolon' "$basePath;" 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+  }
+
+  Invoke-Scenario 'Update-mode uninstall keeps the entry' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+    Uninstall-Sesame @('/S', '/UPDATE')
+    $updating = Get-State 'after update-mode uninstall'
+    Confirm-PathUnchanged 'an update-mode uninstall' $installed.machinePath $updating.machinePath
+    Confirm-RecordAdded 'an update-mode uninstall' $updating
+    Install-Sesame @('/S', '/UPDATE')
+    $updated = Get-State 'after update install'
+    Confirm-PathUnchanged 'the update install' $installed.machinePath $updated.machinePath
+    Confirm-RecordAdded 'the update install' $updated
+    Confirm-That 'the update install puts cli\sesame.exe back' $updated.terminalProgramExists $terminalProgram 'no file'
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the final uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the final uninstall' $after
+  }
+
+  Invoke-LongPathScenario 'the longest that leaves room for the entry' ($limit - $folderLength - 3) $true
+  Invoke-LongPathScenario 'one character too long to add the entry' ($limit - $folderLength - 2) $false
+  Invoke-LongPathScenario 'readable but too long to add the entry' ($limit - 2) $false
+  Invoke-LongPathScenario 'long enough to fill the installer string' ($limit - 1) $false
+  Invoke-LongPathScenario 'far over the installer string' ($limit * 4) $false
+
+  $runnerEntries = Get-PathEntries $originalPath.Value
+  if ($originalPath.Length + 1 -ge $limit) {
+    $runnerExpectation = 'unchanged because the installer cannot read all of it'
+  } elseif (@($runnerEntries | Where-Object { Test-TerminalEntry $_ }).Count -gt 0) {
+    $runnerExpectation = 'unchanged because it already holds the entry'
+  } elseif ($originalPath.Length + $folderLength + 2 -ge $limit) {
+    $runnerExpectation = 'unchanged because adding the entry would cut it short'
+  } else {
+    $runnerExpectation = 'added'
+  }
+  Write-Host "The runner Path has $($originalPath.Length) characters, so the expected result on it is: $runnerExpectation"
+  Invoke-Scenario "The runner's own Path, expected $runnerExpectation" $originalPath.Value $originalPath.Kind {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    if ($runnerExpectation -eq 'added') {
+      Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+      Confirm-RecordAdded 'the install' $installed
+    } else {
+      Confirm-PathUnchanged 'the install' $before.machinePath $installed.machinePath
+      Confirm-NoRecord 'the install' $installed
+    }
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+  }
+} finally {
+  $script:scenario = 'final restore'
+  try {
+    Reset-Install
+  } catch {
+    Add-Failure "the final cleanup failed: $($_.Exception.Message)"
+  }
+  Set-MachinePath $originalPath.Value $originalPath.Kind
+  $restored = Get-MachinePath
+  Confirm-PathUnchanged 'restoring the runner Path' $originalPath $restored
+  $userPath = Get-UserPath
+  $userSame = ($userPath.Exists -eq $originalUserPath.Exists) -and ($userPath.Kind -eq $originalUserPath.Kind) -and [string]::Equals($userPath.Value, $originalUserPath.Value, [StringComparison]::Ordinal)
+  Confirm-That 'the user Path is untouched' $userSame (Format-PathValue $originalUserPath) (Format-PathValue $userPath)
+  Save-Evidence 'summary' ([ordered]@{ scenarios = $script:scenarioCount; failures = @($script:failures); restoredMachinePath = $restored; userPath = $userPath })
+}
+
+Write-Host ''
+if ($script:failures.Count -gt 0) {
+  Write-Host "$($script:failures.Count) checks failed in $script:scenarioCount scenarios:"
+  foreach ($failure in $script:failures) { Write-Host "  $failure" }
+  throw "$($script:failures.Count) command line install checks failed."
+}
+Write-Host "Command line install passed $script:scenarioCount scenarios"
