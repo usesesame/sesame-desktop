@@ -28,13 +28,13 @@ test('a stored title, username or site with a direction override is shown with v
     approvalId: 'fill-a',
     origin: 'https://northwind.example',
     hostname: 'northwind.example',
-    candidates: [{ id: 'login-a', title: 'Mallory ‮gnp.exe‬ Item', username: 'casey⁧@evil', email: '', savedOrigin: 'https://north‮elpmaxe.wind', matchKind: 'exact' }],
+    candidates: [{ id: 'login-a', title: 'Mallory \u202Egnp.exe\u202C Item', username: 'casey\u2067@evil', email: '', savedOrigin: 'https://north\u202Eelpmaxe.wind', matchKind: 'exact' }],
     expiresInSeconds: 30,
     expiresAtUnixMs: Date.now() + 30_000,
   }
   stores.browserFill.patch({ request, selectedId: 'login-a' })
   render(BrowserFillApprovalModal, { props: { request, onCancel: vi.fn(), onConfirm: vi.fn() }, context: new Map([[APP_STORES, stores]]) } as never)
   const label = document.querySelector('.browser-fill-candidates label') as HTMLElement
-  expect(label.textContent).not.toMatch(/[‪-‮⁦-⁩]/)
+  expect(label.textContent).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/)
   expect([...label.querySelectorAll('bdi')].map((part) => part.textContent)).toEqual(['Mallory ?gnp.exe? Item', 'casey?@evil', 'https://north?elpmaxe.wind'])
 })

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { vaultText } from '../vault-text'
+  import SecretText from './SecretText.svelte'
+  import { noteText, vaultText } from '../vault-text'
   import ItemReleaseSection from './ItemReleaseSection.svelte'
   import { fly } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
@@ -429,7 +430,7 @@
     <section class="entry-list-panel" aria-label="Saved items">
       <div class="panel-heading">
         <div>
-          <h2>{listHeading}</h2>
+          <h2><bdi>{vaultText(listHeading)}</bdi></h2>
           <p>{visibleItems.length} {visibleItems.length === 1 ? 'item' : 'items'}</p>
         </div>
         <div class="panel-heading-actions">
@@ -484,7 +485,7 @@
         <div class="active-filters">
           {#if activeIssue}<button type="button" class="active-filter" on:click={onClearSecurityFilter}>{issueFilterLabel(activeIssue)} <span aria-hidden="true">×</span></button>{/if}
           {#if $selection.categoryFilter}<button type="button" class="active-filter" on:click={() => onSetCategory(null)}>{itemKindMeta($selection.categoryFilter).plural} <span aria-hidden="true">×</span></button>{/if}
-          {#if $selection.collectionFilter !== null}<button type="button" class="active-filter" on:click={() => onShowCollection(null)}>{collectionHeading} <span aria-hidden="true">×</span></button>{/if}
+          {#if $selection.collectionFilter !== null}<button type="button" class="active-filter" on:click={() => onShowCollection(null)}><bdi>{vaultText(collectionHeading)}</bdi> <span aria-hidden="true">×</span></button>{/if}
         </div>
       {/if}
 
@@ -519,14 +520,14 @@
                 on:click={() => (folderMenuOpen = !folderMenuOpen)}
                 on:keydown={handleFolderTriggerKeydown}
               >
-                <span>{bulkFolderLabel}</span>
+                <span><bdi>{vaultText(bulkFolderLabel)}</bdi></span>
                 <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
               </button>
               {#if folderMenuOpen}
                 <div class="sort-menu" role="listbox" aria-label="Destination collection">
                   <button type="button" class:selected={!bulkFolderId} role="option" aria-selected={!bulkFolderId} tabindex="-1" on:click={() => chooseBulkFolder('')} on:keydown={handleFolderOptionKeydown}>Unfiled</button>
                   {#each folders as folder (folder.id)}
-                    <button type="button" class:selected={bulkFolderId === folder.id} role="option" aria-selected={bulkFolderId === folder.id} tabindex="-1" on:click={() => chooseBulkFolder(folder.id)} on:keydown={handleFolderOptionKeydown}>{folder.name}</button>
+                    <button type="button" class:selected={bulkFolderId === folder.id} role="option" aria-selected={bulkFolderId === folder.id} tabindex="-1" on:click={() => chooseBulkFolder(folder.id)} on:keydown={handleFolderOptionKeydown}><bdi>{vaultText(folder.name)}</bdi></button>
                   {/each}
                 </div>
               {/if}
@@ -639,7 +640,7 @@
         <section class="credentials-panel" aria-label="Login details">
           <div class="credential-row"><div class="credential-label"><Icon name="user" size={16} /><span>Username</span></div><code><bdi>{vaultText(loginCard.username) || 'No username saved'}</bdi></code><button type="button" class="credential-button" aria-label="Copy username" title="Copy username" disabled={!loginCard.username} on:click={() => onCopy(loginCard.username, 'Username')}><Icon name="copy" size={15} /></button></div>
           {#if loginCard.email}<div class="credential-row"><div class="credential-label"><Icon name="mail" size={16} /><span>Email</span></div><code><bdi>{vaultText(loginCard.email)}</bdi></code><button type="button" class="credential-button" aria-label="Copy email" title="Copy email" on:click={() => onCopy(loginCard.email, 'Email')}><Icon name="copy" size={15} /></button></div>{/if}
-          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{passwordVisible ? revealedPassword : '••••••••••••••••'}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" title="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
+          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{#if passwordVisible}<SecretText value={revealedPassword} />{:else}••••••••••••••••{/if}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" title="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
         </section>
 
         {#if breachCheckOpen}
@@ -657,7 +658,7 @@
         {#if loginCard.tags?.length}
           <section class="details-section">
             <div class="section-heading"><h3>Tags</h3></div>
-            <div class="issue-chips">{#each uniqueTags(loginCard.tags) as tag (tag)}<button type="button" class="tag-chip" on:click={() => onShowCollection(tagFilter(tag))}>{tag}</button>{/each}</div>
+            <div class="issue-chips">{#each uniqueTags(loginCard.tags) as tag (tag)}<button type="button" class="tag-chip" on:click={() => onShowCollection(tagFilter(tag))}><bdi>{vaultText(tag)}</bdi></button>{/each}</div>
           </section>
         {/if}
 
@@ -685,7 +686,7 @@
         </section>
         <section class="details-section">
           <div class="section-heading"><h3>Notes</h3></div>
-          <p class="item-notes">{loginCard.notes || 'No notes saved for this account.'}</p>
+          <p class="item-notes" dir="auto">{noteText(loginCard.notes) || 'No notes saved for this account.'}</p>
         </section>
         {#if loginCard.urls && loginCard.urls.length > 1}
           <section class="details-section">

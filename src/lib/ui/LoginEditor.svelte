@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { parseTags } from '../vault-items'
   import { folderToSuggest, hostOf, loginsOnSite, nameFromUrl, tagsToSuggest } from '../login-suggestions'
   import ModalShell from './ModalShell.svelte'
@@ -331,7 +332,7 @@
     <p class="suggestion-note">{matchRuleNote}</p>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
     {#if tagHints.length}
-      <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${tag}`} on:click={() => addTag(tag)}>{tag}</button>{/each}</p>
+      <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${tag}`} on:click={() => addTag(tag)}><bdi>{vaultText(tag)}</bdi></button>{/each}</p>
     {/if}
     <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
       <SelectMenu
@@ -342,7 +343,7 @@
       />
     </label>
     {#if folderHint}
-      <p class="suggestion-note">Your other logins for this site are in {folderHint.name}. <button type="button" class="text-button" on:click={() => setFolder(folderHint.id)}>Put it in {folderHint.name}</button></p>
+      <p class="suggestion-note">Your other logins for this site are in <bdi>{vaultText(folderHint.name)}</bdi>. <button type="button" class="text-button" on:click={() => setFolder(folderHint.id)}>Put it in <bdi>{vaultText(folderHint.name)}</bdi></button></p>
     {/if}
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
@@ -414,7 +415,7 @@
 
   {#if confirmingDelete}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.{aliasWorking ? ' An alias is still being made, and deleting does not stop it.' : ''}</p>
+      <p><strong>Delete <bdi>{vaultText(loginDraft.title) || 'this login'}</bdi>?</strong> It stays in Trash for 30 days.{aliasWorking ? ' An alias is still being made, and deleting does not stop it.' : ''}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDelete = false)}>Keep editing</button>
         <button type="button" class="editor-delete" on:click={onDelete}>Delete login</button>

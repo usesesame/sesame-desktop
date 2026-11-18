@@ -75,7 +75,7 @@
     {#each request.candidates as candidate (candidate.id)}
       <label class:selected={$browserIdentityFill.selectedId === candidate.id}>
         <input type="radio" name="browser-identity-choice" value={candidate.id} checked={$browserIdentityFill.selectedId === candidate.id} on:change={() => browserIdentityFill.patch({ selectedId: candidate.id })} disabled={working} />
-        <span class="entry-avatar">{candidate.label.slice(0, 1).toUpperCase() || '?'}</span>
+        <span class="entry-avatar">{vaultText(candidate.label).slice(0, 1).toUpperCase() || '?'}</span>
         <span><strong><bdi>{vaultText(candidate.label)}</bdi></strong></span>
       </label>
     {/each}

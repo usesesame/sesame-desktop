@@ -73,7 +73,7 @@
       {#each request.candidates as candidate (candidate.id)}
         <label class:selected={$browserSave.selectedId === candidate.id}>
           <input type="radio" name="browser-save-update-target" value={candidate.id} checked={$browserSave.selectedId === candidate.id} on:change={() => browserSave.patch({ selectedId: candidate.id })} disabled={working} />
-          <span class="entry-avatar">{candidate.title.slice(0, 1).toUpperCase() || '?'}</span>
+          <span class="entry-avatar">{vaultText(candidate.title).slice(0, 1).toUpperCase() || '?'}</span>
           <span><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small>{#if candidate.matchKind === 'site'}<small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small>{/if}</span>
           {#if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
         </label>
@@ -81,12 +81,12 @@
     </div>
   {:else if isUpdate && selectedCandidate}
     <div class="browser-save-proposal">
-      <span class="entry-avatar">{selectedCandidate.title.slice(0, 1).toUpperCase() || '?'}</span>
+      <span class="entry-avatar">{vaultText(selectedCandidate.title).slice(0, 1).toUpperCase() || '?'}</span>
       <span><strong><bdi>{vaultText(selectedCandidate.title)}</bdi></strong><small><bdi>{vaultText(selectedCandidate.username || selectedCandidate.email) || 'No username saved'}</bdi></small></span>
     </div>
   {:else}
     <div class="browser-save-proposal">
-      <span class="entry-avatar">{request.title.slice(0, 1).toUpperCase() || '?'}</span>
+      <span class="entry-avatar">{vaultText(request.title).slice(0, 1).toUpperCase() || '?'}</span>
       <span><strong><bdi>{vaultText(request.title)}</bdi></strong><small><bdi>{vaultText(request.username) || 'No username captured'}</bdi></small></span>
     </div>
   {/if}

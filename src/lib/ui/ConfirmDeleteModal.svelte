@@ -34,11 +34,11 @@
     {#if bulk}
       <ul class="confirm-list">
         {#each deleteBatch as target (target.id)}
-          <li><span class="entry-avatar">{target.initials || target.title.slice(0, 1)}</span><div><strong><bdi>{vaultText(target.title)}</bdi></strong><span><bdi>{vaultText(target.site) || 'No website'}</bdi></span></div></li>
+          <li><span class="entry-avatar">{vaultText(target.initials || target.title.slice(0, 1))}</span><div><strong><bdi>{vaultText(target.title)}</bdi></strong><span><bdi>{vaultText(target.site) || 'No website'}</bdi></span></div></li>
         {/each}
       </ul>
     {:else}
-      <div class="confirm-entry"><span class="entry-avatar">{deleteCandidate.initials || deleteCandidate.title.slice(0, 1)}</span><div><strong><bdi>{vaultText(deleteCandidate.title)}</bdi></strong><span><bdi>{vaultText(deleteCandidate.username) || 'No username'}</bdi>{#if deleteCandidate.site} · <bdi>{vaultText(deleteCandidate.site)}</bdi>{/if}</span></div></div>
+      <div class="confirm-entry"><span class="entry-avatar">{vaultText(deleteCandidate.initials || deleteCandidate.title.slice(0, 1))}</span><div><strong><bdi>{vaultText(deleteCandidate.title)}</bdi></strong><span><bdi>{vaultText(deleteCandidate.username) || 'No username'}</bdi>{#if deleteCandidate.site} · <bdi>{vaultText(deleteCandidate.site)}</bdi>{/if}</span></div></div>
     {/if}
     <div class="confirm-actions"><button type="button" class="secondary-button" disabled={cleanupWorking} on:click={cancel}>Cancel</button><button type="button" class="danger-button" disabled={cleanupWorking} on:click={onConfirm}>{cleanupWorking ? 'Deleting…' : bulk ? `Delete ${count} logins` : 'Delete login'}</button></div>
   </ModalShell>

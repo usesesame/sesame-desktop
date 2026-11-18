@@ -21,6 +21,7 @@ import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 import { undoDeleteAction } from './undo-delete'
+import { isolatedVaultText } from '../vault-text'
 
 interface CleanupControllerOptions {
   stores: AppStores
@@ -164,7 +165,7 @@ export function createCleanupController(options: CleanupControllerOptions) {
       feedback.showNotice(
         targets.length === 1 ? 'Login deleted' : 'Logins deleted',
         targets.length === 1
-          ? `${candidate.title} is in Trash for 30 days.`
+          ? `${isolatedVaultText(candidate.title)} is in Trash for 30 days.`
           : `${targets.length} logins are in Trash for 30 days.`,
         undoDeleteAction(targets.map((target) => target.id), { stores, feedback }),
       )

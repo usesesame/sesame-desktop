@@ -139,7 +139,7 @@
           {@const left = secondsLeft(index, now)}
           <li>
             <button type="button" class="authenticator-row" on:click={() => void copy(code)}>
-              <span class="entry-avatar" aria-hidden="true">{code.initials}</span>
+              <span class="entry-avatar" aria-hidden="true">{vaultText(code.initials)}</span>
               <span class="authenticator-names">
                 <strong><bdi>{vaultText(code.title)}</bdi></strong>
                 {#if code.site}<small><bdi>{vaultText(code.site)}</bdi></small>{/if}

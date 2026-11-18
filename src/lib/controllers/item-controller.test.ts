@@ -401,7 +401,7 @@ describe('secret fields', () => {
     await controller.copyField('securityCode', 'Security code')
 
     expect(copyItemField).toHaveBeenCalledWith('card', 'card-1', 'securityCode')
-    expect(get(feedback.state).notice?.title).toBe('Security code copied')
+    expect(get(feedback.state).notice?.title).toBe('\u2068Security code\u2069 copied')
   })
 
   it('asks for the master password before a copy and copies after the grant', async () => {

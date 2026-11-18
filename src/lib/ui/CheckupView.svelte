@@ -165,7 +165,7 @@
         <ul class="checkup-logins breach-check-list" aria-label="Logins with breached passwords">
           {#each visibleBreached as result (result.id)}
             {@const login = savedLogin(result.id)}
-            <li><button type="button" class="checkup-login" disabled={!login} on:click={() => login && onOpenLogin(result.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login?.site ?? ''} initials={login?.initials ?? '?'} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong>{login?.title ?? 'Deleted login'}</strong><small>{login?.site || 'No website saved'}</small></span><Icon name="chevron-right" size={15} /></button></li>
+            <li><button type="button" class="checkup-login" disabled={!login} on:click={() => login && onOpenLogin(result.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login?.site ?? ''} initials={login?.initials ?? '?'} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong><bdi>{login ? vaultText(login.title) : 'Deleted login'}</bdi></strong><small><bdi>{vaultText(login?.site) || 'No website saved'}</bdi></small></span><Icon name="chevron-right" size={15} /></button></li>
           {/each}
         </ul>
         {#if breachedResults.length > DISPLAY_LIMIT}

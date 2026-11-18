@@ -16,12 +16,12 @@
   $: selectedEntries = activeGroup?.entries.filter((entry) => selectedEntryIds.includes(entry.id)) ?? []
 
   function displayInitials(entry: CleanupEntry) {
-    if (entry.initials?.trim()) return entry.initials.slice(0, 2)
-    return entry.title.trim().slice(0, 1).toUpperCase() || '?'
+    if (entry.initials?.trim()) return vaultText(entry.initials).slice(0, 2)
+    return vaultText(entry.title.trim()).slice(0, 1).toUpperCase() || '?'
   }
 
   function groupTitle(group: DuplicateGroup) {
-    return group.label?.trim() || group.site?.trim() || group.entries[0]?.title || 'Duplicate logins'
+    return vaultText(group.label?.trim() || group.site?.trim() || group.entries[0]?.title) || 'Duplicate logins'
   }
 </script>
 
@@ -45,7 +45,7 @@
           >
             <span class="group-icon" aria-hidden="true"><Icon name="copy" size={15} /></span>
             <span class="group-copy">
-              <strong>{groupTitle(group)}</strong>
+              <strong><bdi>{groupTitle(group)}</bdi></strong>
               <small>{group.entries.length} matching {group.entries.length === 1 ? 'login' : 'logins'}</small>
             </span>
             <Icon name="chevron-right" size={15} />
@@ -66,7 +66,7 @@
       <header class="review-header">
         <div>
           <p class="context-label">Reviewing</p>
-          <h2>{groupTitle(activeGroup)}</h2>
+          <h2><bdi>{groupTitle(activeGroup)}</bdi></h2>
           <p>Choose the entries that belong together. You can inspect or remove one before merging.</p>
         </div>
         <span class="selection-count">{selectedEntries.length} selected</span>

@@ -1863,3 +1863,94 @@ test('no native messaging message type can reach the Activity record', () => {
     assert.doesNotMatch(source, /release_record_page_in_state|\.entries\(&|\.clear\(&|set_retention_days/, 'a browser request reads or changes the record')
   }
 })
+
+function svelteFiles(directory) {
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return svelteFiles(path)
+    return entry.name.endsWith('.svelte') ? [path] : []
+  })
+}
+
+function closingBrace(source, start) {
+  let depth = 0
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    else if (source[index] === '}' && --depth === 0) return index
+  }
+  return source.length
+}
+
+function textInterpolations(source) {
+  const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '')
+  const found = []
+  let inTag = false
+  let quote = null
+  for (let index = 0; index < markup.length; index += 1) {
+    const character = markup[index]
+    if (!inTag) {
+      if (character === '<' && /[A-Za-z/!]/.test(markup[index + 1] ?? '')) inTag = true
+      else if (character === '{') {
+        const end = closingBrace(markup, index)
+        const expression = markup.slice(index + 1, end).trim()
+        if (!/^[#/:@]/.test(expression)) found.push(expression)
+        index = end
+      }
+    } else if (quote) {
+      if (character === quote) quote = null
+    } else if (character === '"' || character === "'") quote = character
+    else if (character === '{') index = closingBrace(markup, index)
+    else if (character === '>') inTag = false
+  }
+  return found
+}
+
+const VAULT_WORDS = /\b(title|username|email|site|subtitle|folder|folderName|initials|notes|filename|brand|label|value|name|tag|url|urls|recoveryEmail|recoveryPhone|detail|savedOrigin|revealedPassword|revealed|groupTitle|titleFor|shown|shownValue|displayInitials|listHeading|collectionHeading|bulkFolderLabel|fullName|ssid|cardholderName|selectedLabel)\b/
+const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/
+const NOT_FROM_THE_VAULT = {
+  'src/lib/ui/BackupDrillModal.svelte': ['formatCopy?.label', 'formatCopy?.detail', 'verifiedCopy?.label'],
+  'src/lib/ui/CardEditor.svelte': ['network.name', 'network?.name'],
+  'src/lib/ui/CheckupView.svelte': ['finding.title'],
+  'src/lib/ui/ConfirmMergeModal.svelte': ["revealed?.entryId === option.entryId ? 'Hide' : 'Show'"],
+  'src/lib/ui/CustomServerSetting.svelte': ['inspection.name'],
+  'src/lib/ui/DuplicateReview.svelte': ['groupTitle(group)', 'groupTitle(activeGroup)', 'displayInitials(entry)'],
+  'src/lib/ui/FolderManagerModal.svelte': ['count(folder)', "count(folder) === 1 ? 'login' : 'logins'"],
+  'src/lib/ui/FolderNameModal.svelte': ['title', "working ? 'Saving…' : 'Save folder'"],
+  'src/lib/ui/GeneralSettings.svelte': ['shortcut.label'],
+  'src/lib/ui/ImportAccountingList.svelte': ['group.label', 'reason.label'],
+  'src/lib/ui/ImportModal.svelte': ['importSources.find((source) => source.value === $imports.source)?.label', 'source.label'],
+  'src/lib/ui/ItemDetail.svelte': ["detail.favourite ? '★' : '☆'", "detail.locked ? 'Opening this note asks for your master password.' : 'This note shows whenever Sesame is unlocked.'", "detail.locked ? 'Remove the lock' : 'Lock with master password'"],
+  'src/lib/ui/ItemFilterMenu.svelte': ['folderCount(folder.id)', 'tagCount(tag)'],
+  'src/lib/ui/NeverSaveSitesSetting.svelte': ["$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'"],
+  'src/lib/ui/PassphraseGeneratorView.svelte': ['item.label'],
+  'src/lib/ui/PasswordStrengthView.svelte': ['label'],
+  'src/lib/ui/QuickAccessView.svelte': ["primaryAction(item)?.label ?? 'No action'", "action.label.replace(/^Copy /, '')"],
+  'src/lib/ui/ReleaseRecordRows.svelte': ['entrySentence(entry, titleFor)'],
+  'src/lib/ui/ReleaseRecordView.svelte': ['itemTitle($activityItemFilter, titleFor)', 'day.label'],
+  'src/lib/ui/RestoreModal.svelte': ['formatCopy.label', 'formatCopy.detail'],
+  'src/lib/ui/SecretText.svelte': ['value'],
+  'src/lib/ui/SettingsView.svelte': ['item.label'],
+  'src/lib/ui/Sidebar.svelte': ['group.label', 'item.label'],
+  'src/lib/ui/SyncPanel.svelte': ["device.label || 'Unnamed device'"],
+  'src/lib/ui/TerminalAccessSetting.svelte': ['allowedRequestWords(request.command, request.field, titleFor(request.itemId), request.itemKind)'],
+  'src/lib/ui/TerminalApprovalModal.svelte': ["request.candidates.length > 1 ? 'None of the items with this name has a' : 'The item below has no'", "candidate.fieldHidden ? ', a hidden value' : ''"],
+  'src/lib/ui/Toast.svelte': ['notice.title', 'notice.action.label'],
+  'src/lib/ui/ToolsView.svelte': ['item.value', 'item.label'],
+  'src/lib/ui/VaultView.svelte': ['issueKindLabels[activeIssue].title', "loginCard.matchRule === 'site' ? 'Whole site. Sesame also offers this login on other addresses under the same site, and says so before it fills.' : 'Never fill. Sesame does not offer this login in the browser.'"],
+  'src/lib/ui/ViewHeader.svelte': ['title'],
+  'src/lib/ui/WorkspaceShell.svelte': ['title'],
+}
+
+test('every value from the vault that a component draws goes through the direction helper', () => {
+  const unprotected = []
+  for (const file of svelteFiles('src')) {
+    const allowed = NOT_FROM_THE_VAULT[file.split('\\').join('/')] ?? []
+    for (const expression of textInterpolations(read(file))) {
+      if (VAULT_WORDS.test(expression) && !VAULT_HELPERS.test(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
+    }
+  }
+  assert.deepEqual(unprotected, [], 'a component draws a vault value without vaultText, noteText or SecretText')
+  const secret = read('src', 'lib', 'ui', 'SecretText.svelte')
+  assert.match(secret, /<bdi>\{value\}<\/bdi>/, 'a revealed secret is not isolated or is altered')
+  assert.match(secret, /hasHiddenCharacters\(value\)/, 'a revealed secret with a hidden character is not called out')
+})

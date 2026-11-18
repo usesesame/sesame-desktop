@@ -69,7 +69,7 @@ test('lists allowed terminals with their time and the requests answered without 
   expect(scope).toBe('Covers this terminal and anything started from it. The program that asked named itself bash?.')
   expect(screen.getByText('Remote session')).toBeTruthy()
   expect(screen.getByText('Allowed for 2 more minutes')).toBeTruthy()
-  expect(screen.getByText('Read the username of Northwind mail')).toBeTruthy()
+  expect(screen.getByText('Read the username of \u2068Northwind mail\u2069')).toBeTruthy()
 
   await vi.advanceTimersByTimeAsync(70_000)
   expect(screen.getByText('Allowed for 55 more seconds')).toBeTruthy()
