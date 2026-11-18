@@ -1256,6 +1256,52 @@ fn seal_newer(vault: &TestVault, json: &str) {
 }
 
 #[test]
+fn an_alias_request_is_never_counted_as_a_release_for_a_login() {
+    let vault = TestVault::with_login("login-a", "https://example.com");
+    let (state, _) = state_with_clock();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    for outcome in [Outcome::Released, Outcome::Withdrawn] {
+        record(
+            &vault.state,
+            ReleaseDraft::new(EntryKind::EmailAlias, outcome).host("example.com"),
+        );
+    }
+    let now = crate::vault::util::unix_timestamp();
+
+    let all = entries(&vault.state);
+    assert_eq!(all.len(), 2);
+    assert!(all.iter().all(|entry| entry.kind == EntryKind::EmailAlias));
+    let for_item = release_record_page_in_state(
+        &vault.state,
+        ReleaseRecordQuery {
+            item_id: Some("login-a".to_string()),
+            ..ReleaseRecordQuery::default()
+        },
+    )
+    .expect("item page");
+    assert_eq!(for_item.total, 0);
+
+    let offered = offer(fill_response_in_state(
+        &vault.state,
+        &state,
+        &effects,
+        &fill_request("https://example.com"),
+    ));
+    let hint =
+        release_record_hint_in_state(&vault.state, &state, offered.approval.approval_id(), now)
+            .expect("hint")
+            .expect("pending approval");
+    let item = hint
+        .items
+        .iter()
+        .find(|item| item.item_id == "login-a")
+        .expect("login-a");
+    assert_eq!(item.released_here, 0);
+    assert_eq!(item.last_released_at, None);
+    assert_eq!(hint.denied_recently, 0);
+}
+
+#[test]
 fn an_entry_from_a_newer_version_is_listed_but_never_counted_as_a_release() {
     let vault = TestVault::with_login("login-a", "https://example.com");
     let (state, _) = state_with_clock();
@@ -1278,7 +1324,10 @@ fn an_entry_from_a_newer_version_is_listed_but_never_counted_as_a_release() {
             3,
             r#""kind":"browserFill","outcome":"denied","count":2,"via":"fictional-phone""#,
         ),
-        (4, r#""kind":"emailAlias","outcome":"released","count":1"#),
+        (
+            4,
+            r#""kind":"fictionalLaterKind","outcome":"released","count":1"#,
+        ),
     ] {
         seal_newer(
             &vault,

@@ -497,6 +497,26 @@ mod tests {
         assert!(!serialized.contains(TOKEN));
     }
 
+    #[test]
+    fn an_alias_made_for_a_login_records_no_item() {
+        let vault = vault_with_addy(true);
+        let (result, _) = sent_requests(
+            &vault,
+            Some("https://example.com"),
+            Ok("fictional.alias@anonaddy.me".to_string()),
+        );
+        assert!(result.is_ok());
+        let for_item = release_record_page_in_state(
+            &vault.state,
+            ReleaseRecordQuery {
+                item_id: Some("login-a".to_string()),
+                ..ReleaseRecordQuery::default()
+            },
+        )
+        .expect("item page");
+        assert_eq!(for_item.total, 0);
+    }
+
     fn recorded(vault: &TestVault) -> Vec<(EntryKind, Outcome, Option<String>)> {
         release_record_page_in_state(&vault.state, ReleaseRecordQuery::default())
             .expect("record page")
