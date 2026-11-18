@@ -301,7 +301,7 @@ test('healthy desktop browser plumbing is not shown as extension installation', 
   assert.match(source, />Browser autofill setup</)
   assert.match(source, /Recheck desktop setup/)
   assert.doesNotMatch(source, /\? 'Installed'/)
-  const settings = component('SettingsView.svelte')
+  const settings = component('BrowserSettings.svelte')
   assert.match(settings, /{#if !browserIntegration\?\.ready \|\| browserIntegration\?\.servedElsewhere\}[\s\S]*?<BrowserIntegrationSetting/)
   assert.match(source, /Another Sesame on this computer already serves the browser extension/)
   assert.doesNotMatch(source, /heldElsewhere[^\n]*\? 'No repair needed'/)
@@ -379,7 +379,7 @@ test('the panel resizer is styled globally, not scoped to its component', () => 
 test('every listed shortcut is bound, and every bound shortcut is listed', () => {
   const shortcuts = read(join(projectRoot, 'src', 'lib', 'shortcuts.ts'))
   const shell = component('WorkspaceShell.svelte')
-  const settings = component('SettingsView.svelte')
+  const settings = component('GeneralSettings.svelte')
 
   const listed = [...shortcuts.matchAll(/keys: '([^']+)'/g)].map((match) => match[1])
   assert.ok(listed.length > 0, 'src/lib/shortcuts.ts declares no shortcuts')
