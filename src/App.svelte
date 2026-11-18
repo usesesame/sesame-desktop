@@ -245,13 +245,21 @@
     blockingOverlayActive: () => onboardingState.value().step !== 'none',
   })
 
+  function syncNoticeShows(onboarding: { step: string }, preferences: { betaOnboardingDismissed: boolean; preferenceLoaded: boolean; syncNoticeSeen: boolean }): boolean {
+    return onboarding.step === 'none' && preferences.betaOnboardingDismissed && preferences.preferenceLoaded && !preferences.syncNoticeSeen
+  }
+
+  function firstRunOpen(onboarding: { step: string }, preferences: { betaOnboardingDismissed: boolean; preferenceLoaded: boolean; syncNoticeSeen: boolean }): boolean {
+    return onboarding.step !== 'none' || syncNoticeShows(onboarding, preferences)
+  }
+
   const terminalApprovalController = createTerminalApprovalController({
     stores: appStores,
     feedback: feedbackController,
     modal: modalController,
     blockingOverlayActive: () => onboardingState.value().step !== 'none',
     presenceOpen: () => presenceState.value().open,
-    overlayOpen: () => onboardingState.value().step !== 'none',
+    overlayOpen: () => firstRunOpen(onboardingState.value(), settingsState.value()),
   })
 
   const pendingChangesController = createPendingChangesController({
@@ -520,7 +528,8 @@
   $: if ($vault.status.unlocked && $settingsState.preferenceLoaded) {
     onboardingController.startIfNeeded($settingsState.betaOnboardingDismissed, $vault.status.onboardingRequired ?? false)
   }
-  $: if ($onboardingState.step !== 'none' && $terminalApproval.request) terminalApprovalController.setAside()
+  $: syncNoticeOpen = syncNoticeShows($onboardingState, $settingsState)
+  $: if (firstRunOpen($onboardingState, $settingsState) && $terminalApproval.request) terminalApprovalController.setAside()
 
   const navigation: NavigationGroup[] = [
     { label: 'Workspace', items: [
@@ -1320,7 +1329,7 @@
     {/if}
   </ModalHost>
 
-  {#if $onboardingState.step === 'none' && $settingsState.betaOnboardingDismissed && $settingsState.preferenceLoaded && !$settingsState.syncNoticeSeen}
+  {#if syncNoticeOpen}
     <SyncNotice
       onKeepOff={settingsController.dismissSyncNotice}
       onOpenSettings={() => {
