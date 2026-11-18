@@ -34,6 +34,9 @@ pub const MAX_ITEM_ID_CHARS: usize = 128;
 pub const MAX_FIELDS: usize = 12;
 pub const PLAINTEXT_BYTES: usize = 896;
 pub const MAX_RECORD_FILE_BYTES: u64 = 24 * 1024 * 1024;
+pub const COMPACT_AT_BYTES: u64 = 16 * 1024 * 1024;
+pub const KEEP_BYTES: u64 = 13 * 1024 * 1024;
+pub const MAX_NEWER_PLAINTEXT_BYTES: usize = 8 * 1024;
 
 const FORMAT_NAME: &str = "sesame-release-record";
 const FORMAT_VERSION: u8 = 1;
@@ -240,7 +243,7 @@ pub struct RecordEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NewerEntry {
     seq: u64,
-    json: Zeroizing<Vec<u8>>,
+    json: Option<Zeroizing<Vec<u8>>>,
     size: usize,
 }
 
@@ -264,7 +267,7 @@ impl NewerEntry {
             late: false,
             newer: Some(Self {
                 seq,
-                json: Zeroizing::new(json.to_vec()),
+                json: (size <= MAX_NEWER_PLAINTEXT_BYTES).then(|| Zeroizing::new(json.to_vec())),
                 size,
             }),
         })
@@ -272,14 +275,15 @@ impl NewerEntry {
 
     fn plaintext(&self, seq: u64) -> VaultResult<Zeroizing<Vec<u8>>> {
         let unsealable = || "Sesame could not prepare the activity entry.".to_string();
+        let kept = self.json.as_ref().ok_or_else(unsealable)?;
         let json = if seq == self.seq {
-            self.json.clone()
+            kept.clone()
         } else {
             let renumbered = RawValue::from_string(seq.to_string()).map_err(|_| unsealable())?;
             let mut fields: BTreeMap<String, &RawValue> =
-                serde_json::from_slice(&self.json).map_err(|_| unsealable())?;
+                serde_json::from_slice(kept).map_err(|_| unsealable())?;
             fields.insert("seq".to_string(), &*renumbered);
-            let mut json = Zeroizing::new(Vec::with_capacity(self.json.len() + 32));
+            let mut json = Zeroizing::new(Vec::with_capacity(kept.len() + 32));
             serde_json::to_writer(&mut *json, &fields).map_err(|_| unsealable())?;
             json
         };
@@ -288,6 +292,39 @@ impl NewerEntry {
         plaintext.extend_from_slice(&json);
         plaintext.resize(size, b' ');
         Ok(plaintext)
+    }
+}
+
+fn sealed_line_len(plaintext_len: usize) -> u64 {
+    let ciphertext = ((plaintext_len as u64 + 16) * 4).div_ceil(3);
+    61 + ciphertext
+}
+
+fn entry_bytes(entry: &RecordEntry) -> Option<u64> {
+    let plaintext_len = match entry.newer.as_ref() {
+        None => PLAINTEXT_BYTES,
+        Some(newer) => newer.size.max(newer.json.as_ref()?.len() + 20),
+    };
+    Some(sealed_line_len(plaintext_len))
+}
+
+fn entries_bytes(entries: &[RecordEntry]) -> u64 {
+    entries.iter().filter_map(entry_bytes).sum()
+}
+
+fn evict_over_bytes(entries: &mut Vec<RecordEntry>, budget: u64) {
+    let mut total = entries_bytes(entries);
+    let mut dropped = 0;
+    while total > budget && dropped < entries.len() {
+        total -= entry_bytes(&entries[dropped]).unwrap_or(0);
+        dropped += 1;
+    }
+    entries.drain(..dropped);
+}
+
+fn fit_bytes(entries: &mut Vec<RecordEntry>) {
+    if entries_bytes(entries) > COMPACT_AT_BYTES {
+        evict_over_bytes(entries, KEEP_BYTES);
     }
 }
 
@@ -824,8 +861,22 @@ fn write_fresh(
     path: &Path,
     vault_key: &[u8; 32],
     vault_id: &str,
-    entries: &mut [RecordEntry],
+    entries: &mut Vec<RecordEntry>,
+    now: u64,
 ) -> VaultResult<OpenRecord> {
+    let unsealable = entries
+        .iter()
+        .filter(|entry| entry_bytes(entry).is_none())
+        .count();
+    if unsealable > 0 {
+        entries.retain(|entry| entry_bytes(entry).is_some());
+        entries.push(
+            ReleaseDraft::new(EntryKind::WritesLost, Outcome::Noted)
+                .count(u32::try_from(unsealable).unwrap_or(u32::MAX))
+                .into_entry(0, now, false),
+        );
+    }
+    fit_bytes(entries);
     let mut record_id = [0_u8; 16];
     fill_secret(&mut record_id)?;
     let key = derive_key(vault_key, &record_id)?;
@@ -1020,8 +1071,9 @@ impl RecordState {
             .into_entry(0, now, false)];
         let path = record_path(&session.path);
         let vault_id = session_vault_id(session);
-        let fresh = session
-            .expose_vault_key(|vault_key| write_fresh(&path, vault_key, &vault_id, &mut entries))?;
+        let fresh = session.expose_vault_key(|vault_key| {
+            write_fresh(&path, vault_key, &vault_id, &mut entries, now)
+        })?;
         for damaged in damaged_paths(&session.path) {
             let _ = crate::platform::securely_delete(&damaged);
         }
@@ -1169,8 +1221,9 @@ impl Inner {
             });
             entries.push(draft.into_entry(0, now, false));
         }
-        let fresh = session
-            .expose_vault_key(|vault_key| write_fresh(path, vault_key, vault_id, &mut entries));
+        let fresh = session.expose_vault_key(|vault_key| {
+            write_fresh(path, vault_key, vault_id, &mut entries, now)
+        });
         match fresh {
             Ok(fresh) => {
                 self.open = Some(fresh);
@@ -1202,9 +1255,11 @@ impl Inner {
         };
         let path = record_path(&session.path);
         let vault_id = session_vault_id(session);
+        let now = (self.clock)();
         let mut entries = open.entries.clone();
-        let fresh = session
-            .expose_vault_key(|vault_key| write_fresh(&path, vault_key, &vault_id, &mut entries));
+        let fresh = session.expose_vault_key(|vault_key| {
+            write_fresh(&path, vault_key, &vault_id, &mut entries, now)
+        });
         match fresh {
             Ok(fresh) => {
                 self.open = Some(fresh);
@@ -1232,7 +1287,9 @@ impl Inner {
             .entries
             .iter()
             .any(|entry| entry.at.saturating_add(slack) < cutoff);
-        let over = open.entries.len() >= COMPACT_AT || (force && open.entries.len() > MAX_ENTRIES);
+        let over = open.entries.len() >= COMPACT_AT
+            || (force && open.entries.len() > MAX_ENTRIES)
+            || entries_bytes(&open.entries) > COMPACT_AT_BYTES;
         if !stale && !over {
             return None;
         }
@@ -1243,6 +1300,7 @@ impl Inner {
             .cloned()
             .collect();
         evict_over_cap(&mut kept);
+        fit_bytes(&mut kept);
         let removed = open.entries.len() - kept.len();
         (removed > 0).then_some((kept, removed))
     }
@@ -1421,6 +1479,7 @@ impl Inner {
             return;
         }
         let mut rewrote_after_change = false;
+        let mut compacted_to_fit = false;
         loop {
             let Some((draft, late)) = self.unwritten.pop_front() else {
                 if self.unwritten_lost == 0 {
@@ -1439,6 +1498,26 @@ impl Inner {
                 self.unwritten_lost = self.unwritten_lost.saturating_add(1);
                 continue;
             };
+            if open.file_len.saturating_add(line.len() as u64) > MAX_RECORD_FILE_BYTES {
+                if compacted_to_fit {
+                    let refused = if draft.kind == EntryKind::WritesLost {
+                        draft.count
+                    } else {
+                        1
+                    };
+                    self.unwritten_lost = self.unwritten_lost.saturating_add(refused);
+                    self.mark_late();
+                    break;
+                }
+                compacted_to_fit = true;
+                evict_over_bytes(&mut open.entries, KEEP_BYTES);
+                self.unwritten.push_front((draft, late));
+                if self.rewrite(session).is_err() {
+                    self.mark_late();
+                    return;
+                }
+                continue;
+            }
             match append_line(open, &entry, &line) {
                 Ok(()) => {}
                 Err(error) if error == FILE_CHANGED && !rewrote_after_change => {
@@ -1462,11 +1541,9 @@ impl Inner {
                 }
             }
         }
-        if self
-            .open
-            .as_ref()
-            .is_some_and(|open| open.entries.len() >= COMPACT_AT)
-        {
+        if self.open.as_ref().is_some_and(|open| {
+            open.entries.len() >= COMPACT_AT || entries_bytes(&open.entries) > COMPACT_AT_BYTES
+        }) {
             self.trim(session, true);
         }
     }
@@ -2021,5 +2098,204 @@ mod tests {
             .plaintexts()
             .iter()
             .all(|plaintext| !plaintext.windows(7).any(|window| window == b"\"newer\"")));
+    }
+
+    const LARGE_ENTRIES: u64 = 2_280;
+
+    fn large_json(seq: u64, at: u64, size: usize) -> Vec<u8> {
+        let head = format!(r#"{{"seq":{seq},"at":{at},"kind":"terminalRelease","note":""#);
+        let mut json = head.into_bytes();
+        json.resize(size - 2, b'n');
+        json.extend_from_slice(b"\"}");
+        json
+    }
+
+    fn write_large_record(fixture: &Fixture, count: u64) {
+        let vault_id = session_vault_id(&fixture.session);
+        let mut record_id = [0_u8; 16];
+        fill_secret(&mut record_id).expect("record id");
+        let key = session_key(&fixture.session, &record_id).expect("key");
+        let header = header_line(&key, &record_id, &vault_id).expect("header");
+        let mut prev = line_hash(&header);
+        let mut bytes = header;
+        for seq in 0..count {
+            let plaintext = large_json(seq, START + seq, MAX_NEWER_PLAINTEXT_BYTES);
+            let aad = entry_aad(&record_id, &vault_id, seq, &prev);
+            let blob = encrypt_bytes(&key, &plaintext, &aad).expect("sealed");
+            let mut line = serde_json::to_vec(&blob).expect("line");
+            line.push(b'\n');
+            prev = line_hash(&line);
+            bytes.extend_from_slice(&line);
+        }
+        std::fs::write(fixture.file(), bytes).expect("large record");
+    }
+
+    fn file_len(fixture: &Fixture) -> u64 {
+        std::fs::metadata(fixture.file()).expect("record").len()
+    }
+
+    fn assert_newest_large_entries_survive(entries: &[RecordEntry]) -> usize {
+        let newer: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::Newer)
+            .collect();
+        assert!(!newer.is_empty());
+        let last = newer.last().map_or(0, |entry| entry.at - START);
+        let first = last + 1 - newer.len() as u64;
+        assert!(first > 0);
+        for (index, entry) in newer.iter().enumerate() {
+            assert_newer(entry, index as u64, START + first + index as u64);
+        }
+        newer.len()
+    }
+
+    #[test]
+    fn a_record_of_large_newer_entries_stays_readable_after_many_appends() {
+        let fixture = Fixture::new();
+        write_large_record(&fixture, LARGE_ENTRIES);
+        assert!(file_len(&fixture) <= MAX_RECORD_FILE_BYTES);
+        assert!(file_len(&fixture) + 200 * 1_400 > MAX_RECORD_FILE_BYTES);
+
+        let state = fixture.state();
+        for index in 0..200 {
+            assert_eq!(
+                state.append(&fixture.session, fill(&format!("after-{index}"))),
+                Appended::Written
+            );
+        }
+
+        assert!(file_len(&fixture) <= MAX_RECORD_FILE_BYTES);
+        let (state, entries) = fixture.reopen();
+        assert_eq!(state.status().notice, None);
+        let kept = assert_newest_large_entries_survive(&entries);
+        assert_eq!(entries.len(), kept + 200);
+        assert_eq!(entries[kept].item_id.as_deref(), Some("after-0"));
+        assert_eq!(fixture.plaintexts().len(), entries.len());
+        assert!(fixture.plaintexts()[kept - 1].starts_with(br#"{"at":"#));
+    }
+
+    #[test]
+    fn a_rewrite_of_a_record_over_the_byte_budget_drops_the_oldest_and_fits() {
+        let fixture = Fixture::new();
+        let mut entries: Vec<RecordEntry> = (0..LARGE_ENTRIES + 100)
+            .map(|seq| {
+                let json = large_json(seq, START + seq, MAX_NEWER_PLAINTEXT_BYTES);
+                NewerEntry::open(&json, MAX_NEWER_PLAINTEXT_BYTES).expect("newer entry")
+            })
+            .collect();
+        entries.push(fill("item-last").into_entry(0, START + LARGE_ENTRIES + 100, false));
+        assert!(entries_bytes(&entries) > MAX_RECORD_FILE_BYTES);
+        let vault_id = session_vault_id(&fixture.session);
+
+        fixture
+            .session
+            .expose_vault_key(|vault_key| {
+                write_fresh(&fixture.file(), vault_key, &vault_id, &mut entries, START)
+            })
+            .expect("rewritten");
+
+        assert!(file_len(&fixture) <= KEEP_BYTES + 1_024);
+        let (state, read) = fixture.reopen();
+        assert_eq!(state.status().notice, None);
+        let kept = assert_newest_large_entries_survive(&read);
+        assert_eq!(read.len(), kept + 1);
+        assert_eq!(read[kept].item_id.as_deref(), Some("item-last"));
+        assert_eq!(fixture.plaintexts().len(), read.len());
+    }
+
+    #[test]
+    fn an_append_that_would_pass_the_file_limit_compacts_first() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(3);
+        let padded_len = MAX_RECORD_FILE_BYTES - 100;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(fixture.file())
+            .expect("record")
+            .set_len(padded_len)
+            .expect("padded record");
+        if let Some(open) = recover(state.inner.lock()).open.as_mut() {
+            open.file_len = padded_len;
+        }
+
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        assert!(file_len(&fixture) < 10_000);
+        let (state, entries) = fixture.reopen();
+        assert_eq!(state.status().notice, None);
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[3].item_id.as_deref(), Some("item-after"));
+    }
+
+    #[test]
+    fn a_newer_entry_over_the_size_bound_is_kept_without_its_body_and_counted_on_rewrite() {
+        let mut fixture = Fixture::new();
+        fixture.seed(1);
+        let within = large_json(1, START + 3, MAX_NEWER_PLAINTEXT_BYTES);
+        let over = large_json(2, START + 4, MAX_NEWER_PLAINTEXT_BYTES + 1);
+        fixture.seal(std::str::from_utf8(&within).expect("utf8"));
+        fixture.seal(std::str::from_utf8(&over).expect("utf8"));
+        let state = fixture.state();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        let (_, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 4);
+        assert_newer(&entries[1], 1, START + 3);
+        assert_newer(&entries[2], 2, START + 4);
+        assert_eq!(entries[3].item_id.as_deref(), Some("item-after"));
+
+        fixture.rotate();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-last")),
+            Appended::Written
+        );
+
+        let (state, entries) = fixture.reopen();
+        assert_eq!(state.status().notice, None);
+        let kinds: Vec<EntryKind> = entries.iter().map(|entry| entry.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                EntryKind::BrowserFill,
+                EntryKind::Newer,
+                EntryKind::BrowserFill,
+                EntryKind::WritesLost,
+                EntryKind::BrowserFill,
+            ]
+        );
+        assert_eq!(entries[3].count, 1);
+        assert_eq!(fixture.plaintexts()[1], within);
+    }
+
+    #[test]
+    fn ordinary_entries_still_compact_by_count_and_never_by_bytes() {
+        let key = [3_u8; 32];
+        let line = entry_line(
+            &key,
+            &[4_u8; 16],
+            "vault",
+            &[5_u8; 32],
+            &entry(0, Outcome::Released),
+        )
+        .expect("line");
+        assert_eq!(line.len() as u64, sealed_line_len(PLAINTEXT_BYTES));
+        let json = large_json(0, START, MAX_NEWER_PLAINTEXT_BYTES);
+        let newer = NewerEntry::open(&json, MAX_NEWER_PLAINTEXT_BYTES).expect("newer");
+        let line = entry_line(&key, &[4_u8; 16], "vault", &[5_u8; 32], &newer).expect("line");
+        assert!(line.len() as u64 <= entry_bytes(&newer).expect("bytes"));
+
+        let mut ordinary: Vec<RecordEntry> = (0..COMPACT_AT as u64)
+            .map(|seq| entry(seq, Outcome::Released))
+            .collect();
+        fit_bytes(&mut ordinary);
+        assert_eq!(ordinary.len(), COMPACT_AT);
+        assert!(sealed_line_len(PLAINTEXT_BYTES) * COMPACT_AT as u64 + 1_024 < COMPACT_AT_BYTES);
+        assert!(sealed_line_len(PLAINTEXT_BYTES) * MAX_ENTRIES as u64 + 1_024 < KEEP_BYTES);
     }
 }
