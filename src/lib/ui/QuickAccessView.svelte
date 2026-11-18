@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
@@ -194,7 +195,7 @@
               <span class="entry-avatar" aria-hidden="true">
                 {#if item.kind === 'login'}{item.initials}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
-              <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
+              <span class="quick-access-result-copy"><strong><bdi>{vaultText(item.title)}</bdi></strong><small><bdi>{vaultText(item.subtitle) || itemKindLabel(item.kind)}</bdi></small></span>
               <span class="quick-access-result-state" role={workingId === item.id || doneId === item.id ? 'status' : undefined}>{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
             </button>
             <span class="quick-access-actions">

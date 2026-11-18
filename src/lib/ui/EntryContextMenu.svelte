@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy, onMount, tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import type { Folder, ItemKind, VaultEntry } from '../types'
@@ -125,7 +126,7 @@
 <svelte:window on:mousedown={outside} on:keydown={keydown} />
 
 <div bind:this={menu} class="entry-context-menu" role="menu" aria-label={`Actions for ${entry.title}`} style={`left:${left}px;top:${top}px`}>
-  <div class="context-menu-heading"><span class="entry-avatar">{#if kind === 'login'}{entry.initials}{:else}<Icon name={itemKindIcon(kind)} size={15} />{/if}</span><span><strong>{entry.title}</strong><small>{kind === 'login' ? entry.site : kindLabel}</small></span></div>
+  <div class="context-menu-heading"><span class="entry-avatar">{#if kind === 'login'}{entry.initials}{:else}<Icon name={itemKindIcon(kind)} size={15} />{/if}</span><span><strong><bdi>{vaultText(entry.title)}</bdi></strong><small><bdi>{kind === 'login' ? vaultText(entry.site) : kindLabel}</bdi></small></span></div>
   {#if kind === 'login'}
     <button type="button" role="menuitem" disabled={entry.issueKinds.includes('url') || working} on:click={onOpen}><Icon name="external" size={15} /><span>Open site</span></button>
     <button type="button" role="menuitem" disabled={working} on:click={onCopyUsername}><Icon name="user" size={15} /><span>Copy username</span></button>

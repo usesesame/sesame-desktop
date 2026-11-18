@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
@@ -75,7 +76,7 @@
       <label class:selected={$browserIdentityFill.selectedId === candidate.id}>
         <input type="radio" name="browser-identity-choice" value={candidate.id} checked={$browserIdentityFill.selectedId === candidate.id} on:change={() => browserIdentityFill.patch({ selectedId: candidate.id })} disabled={working} />
         <span class="entry-avatar">{candidate.label.slice(0, 1).toUpperCase() || '?'}</span>
-        <span><strong>{candidate.label}</strong></span>
+        <span><strong><bdi>{vaultText(candidate.label)}</bdi></strong></span>
       </label>
     {/each}
   </div>

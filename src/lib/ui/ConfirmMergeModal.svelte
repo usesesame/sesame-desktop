@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
@@ -146,7 +147,7 @@
     <p id="merge-login-description">Sesame keeps an encrypted copy of the vault first, so this can be undone.</p>
     <div class="keep-options" role="radiogroup" aria-label="Login to keep">
       {#each mergeCandidate.entries as entry (entry.id)}
-        <label class:active={mergeKeepId === entry.id}><input type="radio" name="keep-login" value={entry.id} bind:group={mergeKeepId} /><span class="entry-avatar">{entry.initials || entry.title.slice(0, 1)}</span><span><strong>{entry.title}</strong><small>{entry.username || 'No username'} · {entry.site}</small></span></label>
+        <label class:active={mergeKeepId === entry.id}><input type="radio" name="keep-login" value={entry.id} bind:group={mergeKeepId} /><span class="entry-avatar">{entry.initials || entry.title.slice(0, 1)}</span><span><strong><bdi>{vaultText(entry.title)}</bdi></strong><small><bdi>{vaultText(entry.username) || 'No username'}</bdi> · <bdi>{vaultText(entry.site)}</bdi></small></span></label>
       {/each}
     </div>
 

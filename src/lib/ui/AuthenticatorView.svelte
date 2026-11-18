@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy, onMount } from 'svelte'
   import Icon from '../Icon.svelte'
   import ViewHeader from './ViewHeader.svelte'
@@ -140,8 +141,8 @@
             <button type="button" class="authenticator-row" on:click={() => void copy(code)}>
               <span class="entry-avatar" aria-hidden="true">{code.initials}</span>
               <span class="authenticator-names">
-                <strong>{code.title}</strong>
-                {#if code.site}<small>{code.site}</small>{/if}
+                <strong><bdi>{vaultText(code.title)}</bdi></strong>
+                {#if code.site}<small><bdi>{vaultText(code.site)}</bdi></small>{/if}
               </span>
               <span class="authenticator-code" class:expiring={left <= 5}>{code.code}</span>
               {#if copiedId === code.id}

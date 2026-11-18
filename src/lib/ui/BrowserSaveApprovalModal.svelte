@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
@@ -62,7 +63,7 @@
   {#if isUpdate && selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
-      <p><strong>Matched by site</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code> and set to fill on the whole site, so Sesame offers to update it from <code>{request.origin}</code>.</span></p>
+      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers to update it from <code>{request.origin}</code>.</span></p>
     </div>
   {/if}
 
@@ -73,7 +74,7 @@
         <label class:selected={$browserSave.selectedId === candidate.id}>
           <input type="radio" name="browser-save-update-target" value={candidate.id} checked={$browserSave.selectedId === candidate.id} on:change={() => browserSave.patch({ selectedId: candidate.id })} disabled={working} />
           <span class="entry-avatar">{candidate.title.slice(0, 1).toUpperCase() || '?'}</span>
-          <span><strong>{candidate.title}</strong><small>{candidate.username || candidate.email || 'No username saved'}</small>{#if candidate.matchKind === 'site'}<small class="candidate-origin">{candidate.savedOrigin}</small>{/if}</span>
+          <span><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small>{#if candidate.matchKind === 'site'}<small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small>{/if}</span>
           {#if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
         </label>
       {/each}
@@ -81,12 +82,12 @@
   {:else if isUpdate && selectedCandidate}
     <div class="browser-save-proposal">
       <span class="entry-avatar">{selectedCandidate.title.slice(0, 1).toUpperCase() || '?'}</span>
-      <span><strong>{selectedCandidate.title}</strong><small>{selectedCandidate.username || selectedCandidate.email || 'No username saved'}</small></span>
+      <span><strong><bdi>{vaultText(selectedCandidate.title)}</bdi></strong><small><bdi>{vaultText(selectedCandidate.username || selectedCandidate.email) || 'No username saved'}</bdi></small></span>
     </div>
   {:else}
     <div class="browser-save-proposal">
       <span class="entry-avatar">{request.title.slice(0, 1).toUpperCase() || '?'}</span>
-      <span><strong>{request.title}</strong><small>{request.username || 'No username captured'}</small></span>
+      <span><strong><bdi>{vaultText(request.title)}</bdi></strong><small><bdi>{vaultText(request.username) || 'No username captured'}</bdi></small></span>
     </div>
   {/if}
 

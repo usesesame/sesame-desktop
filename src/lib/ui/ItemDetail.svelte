@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import type { ItemDetail } from '../item-fields'
@@ -51,10 +52,10 @@
 <div class="login-title-row">
   <div class="entry-avatar large-entry"><Icon name={itemKindIcon(kind)} size={20} /></div>
   <div>
-    <h2>{detail.title}</h2>
+    <h2><bdi>{vaultText(detail.title)}</bdi></h2>
     <div class="login-meta">
       <span>{itemKindLabel(kind)}</span>
-      {#if detail.subtitle}<span class="item-subtitle">{detail.subtitle}</span>{/if}
+      {#if detail.subtitle}<span class="item-subtitle"><bdi>{vaultText(detail.subtitle)}</bdi></span>{/if}
     </div>
     {#if uniqueTags(detail.tags).length}
       <div class="issue-chips">

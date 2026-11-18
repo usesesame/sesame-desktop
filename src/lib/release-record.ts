@@ -1,3 +1,4 @@
+import { isolatedVaultText } from './vault-text'
 import { writable } from 'svelte/store'
 import type { EntryKind, FieldKind, MatchKind, Outcome, ReleaseEntryView, ReleaseRecordHint, ReleaseRecordStatus } from './types'
 
@@ -81,7 +82,7 @@ export const activityItemFilter = writable<{ itemId: string; itemKind: string } 
 export function itemTitle(entry: Pick<ReleaseEntryView, 'itemId' | 'itemKind'>, titleFor: TitleLookup): string {
   const kind = entry.itemKind ?? ''
   const found = entry.itemId ? titleFor(kind, entry.itemId) : null
-  if (found) return found
+  if (found) return isolatedVaultText(found)
   return `a removed ${itemNouns[kind] ?? 'item'}`
 }
 

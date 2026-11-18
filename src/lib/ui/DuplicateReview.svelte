@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import type { CleanupEntry, DuplicateGroup } from '../types'
 
@@ -87,8 +88,8 @@
               </span>
               <span class="entry-avatar" aria-hidden="true">{displayInitials(entry)}</span>
               <span class="entry-copy">
-                <strong>{entry.title}</strong>
-                <small>{entry.username || 'No username'}{entry.site ? ` · ${entry.site}` : ''}</small>
+                <strong><bdi>{vaultText(entry.title)}</bdi></strong>
+                <small><bdi>{vaultText(entry.username) || 'No username'}</bdi>{#if entry.site} · <bdi>{vaultText(entry.site)}</bdi>{/if}</small>
                 {#if entry.reason}<span>{entry.reason}</span>{/if}
               </span>
             </button>

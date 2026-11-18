@@ -330,3 +330,14 @@ test('the show control asks the vault again after the password is hidden', async
   await rendered.rerender({ passwordVisible: true, revealedPassword: controller.state.value().revealedPassword })
   expect(screen.getByText('fictional-alpha-rotated')).toBeTruthy()
 })
+
+test('a direction override in a title, site or folder cannot turn the row around', async () => {
+  const items = [item('login-a', 'Mallory ‮gnp.exe‬ Item', { subtitle: 'north‮elpmaxe.wind', folder: 'Work⁧ Notes' })]
+  const { rendered } = renderVault({ allItems: items, visibleItems: items })
+  await Promise.resolve()
+
+  const row = rendered.container.querySelector('.entry-row-main') as HTMLElement
+  expect(row.textContent).not.toMatch(/[‪-‮⁦-⁩]/)
+  const parts = [...row.querySelectorAll('.entry-title bdi')].map((part) => part.textContent)
+  expect(parts).toEqual(['Mallory ?gnp.exe? Item', 'north?elpmaxe.wind', 'Work? Notes'])
+})
