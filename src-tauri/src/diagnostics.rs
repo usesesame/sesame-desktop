@@ -155,6 +155,7 @@ fn severity(code: &str) -> &'static str {
         | "breach_scan_listener_failed"
         | "card_fill_listener_failed"
         | "totp_fill_listener_failed"
+        | "terminal_listener_failed"
         | "web_process_terminated" => "error",
         "key_page_fallback" => "warn",
         "fill_locked"
@@ -624,6 +625,7 @@ fn allowed_code(value: &str) -> bool {
             | "breach_scan_listener_failed"
             | "card_fill_listener_failed"
             | "totp_fill_listener_failed"
+            | "terminal_listener_failed"
             | "platform_capabilities_failed"
             | "picker_opened"
             | "picker_cancelled"

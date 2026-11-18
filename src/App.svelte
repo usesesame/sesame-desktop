@@ -14,6 +14,7 @@
   import { createLoginController } from './lib/controllers/login-controller'
   import { createImportController } from './lib/controllers/import-controller'
   import { createBrowserFillController } from './lib/controllers/browser-fill-controller'
+  import { createTerminalApprovalController } from './lib/controllers/terminal-approval-controller'
   import { createIdentityFillController } from './lib/controllers/identity-fill-controller'
   import { createCardFillController } from './lib/controllers/card-fill-controller'
   import { createTotpFillController } from './lib/controllers/totp-fill-controller'
@@ -81,6 +82,7 @@
   import { syncController } from './lib/sync'
   import { describeSyncForChrome } from './lib/controllers/sync-controller'
   import BrowserFillApprovalModal from './lib/ui/BrowserFillApprovalModal.svelte'
+  import TerminalApprovalModal from './lib/ui/TerminalApprovalModal.svelte'
   import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
   import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
   import BrowserTotpFillApprovalModal from './lib/ui/BrowserTotpFillApprovalModal.svelte'
@@ -95,7 +97,7 @@
 
   const appStores = provideAppStores(createAppStores())
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the import flow reads the store through the controller.
-  const { browserFill, browserIdentityFill, browserCardFill, browserTotpFill, browserSave, browserChange, browserCreate, pendingChanges, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
+  const { browserFill, browserIdentityFill, browserCardFill, browserTotpFill, browserSave, browserChange, browserCreate, terminalApproval, pendingChanges, generator, imports, passphrase, recentGenerations, selection, settings, totp, vault } = appStores
   vault.patch({ status: { exists: false, unlocked: false, preview: previewMode, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 } })
 
   const feedbackController = createFeedbackController()
@@ -240,6 +242,14 @@
     feedback: feedbackController,
     modal: modalController,
     blockingOverlayActive: () => onboardingState.value().step !== 'none',
+  })
+
+  const terminalApprovalController = createTerminalApprovalController({
+    stores: appStores,
+    feedback: feedbackController,
+    modal: modalController,
+    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    presenceOpen: () => presenceState.value().open,
   })
 
   const pendingChangesController = createPendingChangesController({
@@ -424,6 +434,7 @@
     browserSaveController.clearSecrets()
     browserChangeController.clearSecrets()
     browserCreateController.clearSecrets()
+    terminalApprovalController.clearSecrets()
     pendingChangesController.clearSecrets()
     identityController.clearSecrets()
     secureNoteController.clearSecrets()
@@ -477,6 +488,7 @@
       if (browserSave.value().request) await browserSaveController.resolve(false)
       if (browserChange.value().request) await browserChangeController.resolve(null)
       if (browserCreate.value().request) await browserCreateController.resolve(false)
+      if (terminalApproval.value().request) await terminalApprovalController.deny()
     },
     refreshActiveView,
     openPinSetup: settingsController.openPinSetup,
@@ -594,6 +606,7 @@
     const stopBrowserSave = browserSaveController.start()
     const stopBrowserChange = browserChangeController.start()
     const stopBrowserCreate = browserCreateController.start()
+    const stopTerminalApproval = terminalApprovalController.start()
     const stopPendingChanges = pendingChangesController.start()
     const stopActivityReports = startActivityReports()
     void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
@@ -622,6 +635,7 @@
       stopBrowserSave()
       stopBrowserChange()
       stopBrowserCreate()
+      stopTerminalApproval()
       stopPendingChanges()
       idleListenersDisposed = true
       quickAccessListenerDisposed = true
@@ -995,6 +1009,19 @@
     <BrowserChangeApprovalModal request={$browserChange.request} working={$browserChange.working} onCancel={() => void browserChangeController.resolve(null)} onConfirm={() => void browserChangeController.resolve($browserChange.selectedId)} />
   {:else if $browserCreate.request}
     <BrowserCreateApprovalModal request={$browserCreate.request} working={$browserCreate.working} onCancel={() => void browserCreateController.resolve(false)} onConfirm={() => void browserCreateController.resolve(true)} />
+  {:else if $terminalApproval.request}
+    {#key $terminalApproval.request.approvalId}
+      <TerminalApprovalModal
+        request={$terminalApproval.request}
+        onAllow={() => void terminalApprovalController.allow()}
+        onDeny={() => void terminalApprovalController.deny()}
+        onDismiss={() => void terminalApprovalController.dismiss()}
+        onExpire={terminalApprovalController.expire}
+        onSelect={terminalApprovalController.select}
+        onAllowTerminal={terminalApprovalController.setAllowTerminal}
+        onSecret={terminalApprovalController.setSecret}
+      />
+    {/key}
   {/if}
 
   {#if $presenceState.open}
