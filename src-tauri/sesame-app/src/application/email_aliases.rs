@@ -92,7 +92,7 @@ pub fn save_email_alias_settings_in_state(
         let token = if typed.is_empty() {
             match current {
                 Some(saved) if saved.service == input.service => {
-                    Zeroizing::new(saved.token.clone())
+                    Zeroizing::new(saved.token.as_str().to_string())
                 }
                 _ => return Err("Paste the API token from your alias service.".into()),
             }
@@ -172,7 +172,7 @@ fn prepare_alias_request(vault: &VaultState, site: Option<&str>) -> VaultResult<
         .ok_or(NOT_SET_UP)?;
     Ok(AliasRequest {
         service: settings.service,
-        token: Zeroizing::new(settings.token.clone()),
+        token: Zeroizing::new(settings.token.as_str().to_string()),
         domain: settings.domain.clone(),
         description: if settings.name_site {
             site.and_then(site_description)
@@ -234,6 +234,7 @@ mod tests {
     use crate::application::release_record::release_record_page_in_state;
     use crate::application::release_record::ReleaseRecordQuery;
     use crate::test_support::{block_on, TestVault};
+    use crate::vault::AliasToken;
     use std::sync::{Arc, Mutex};
 
     const TOKEN: &str = "fictional-alias-token";
@@ -609,19 +610,19 @@ mod tests {
         for settings in [
             EmailAliasSettings {
                 service: EmailAliasService::Addy,
-                token: "has space".to_string(),
+                token: AliasToken::from("has space"),
                 domain: "anonaddy.me".to_string(),
                 name_site: true,
             },
             EmailAliasSettings {
                 service: EmailAliasService::Addy,
-                token: TOKEN.to_string(),
+                token: AliasToken::from(TOKEN),
                 domain: String::new(),
                 name_site: false,
             },
             EmailAliasSettings {
                 service: EmailAliasService::SimpleLogin,
-                token: TOKEN.to_string(),
+                token: AliasToken::from(TOKEN),
                 domain: "anonaddy.me".to_string(),
                 name_site: false,
             },

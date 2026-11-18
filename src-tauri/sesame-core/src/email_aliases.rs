@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::de::{value::MapAccessDeserializer, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const MAX_ALIAS_TOKEN_CHARS: usize = 512;
@@ -14,19 +15,80 @@ pub enum EmailAliasService {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(transparent)]
+pub struct AliasToken(String);
+
+impl AliasToken {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for AliasToken {
+    fn from(token: &str) -> Self {
+        Self(token.to_string())
+    }
+}
+
+impl Drop for AliasToken {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for AliasToken {}
+
+#[derive(Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct EmailAliasSettings {
     pub service: EmailAliasService,
-    pub token: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub token: AliasToken,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub name_site: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredSettings {
+    service: EmailAliasService,
+    token: AliasToken,
+    #[serde(default)]
+    domain: String,
+    #[serde(default)]
+    name_site: bool,
+}
+
+impl<'de> Deserialize<'de> for EmailAliasSettings {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ObjectOnly;
+
+        impl<'de> Visitor<'de> for ObjectOnly {
+            type Value = StoredSettings;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an email alias settings object")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<StoredSettings, A::Error> {
+                StoredSettings::deserialize(MapAccessDeserializer::new(map))
+            }
+        }
+
+        let stored = deserializer.deserialize_map(ObjectOnly)?;
+        Ok(Self {
+            service: stored.service,
+            token: stored.token,
+            domain: stored.domain,
+            name_site: stored.name_site,
+        })
+    }
 }
 
 impl Zeroize for EmailAliasSettings {
     fn zeroize(&mut self) {
-        self.token.zeroize();
+        self.token.0.zeroize();
         self.domain.zeroize();
         self.name_site = false;
     }
@@ -54,14 +116,14 @@ impl EmailAliasSettings {
         };
         Ok(Self {
             service,
-            token,
+            token: AliasToken::from(token),
             domain,
             name_site,
         })
     }
 
     pub fn is_valid(&self) -> bool {
-        alias_token(&self.token).is_ok_and(|token| token == self.token)
+        alias_token(self.token.as_str()).is_ok_and(|token| token == self.token.as_str())
             && match self.service {
                 EmailAliasService::Addy => {
                     alias_domain(&self.domain).is_ok_and(|domain| domain == self.domain)
@@ -71,7 +133,7 @@ impl EmailAliasSettings {
     }
 }
 
-fn alias_token(token: &str) -> Result<String, String> {
+fn alias_token(token: &str) -> Result<&str, String> {
     let token = token.trim();
     if token.is_empty() {
         return Err("Paste the API token from your alias service.".into());
@@ -83,7 +145,7 @@ fn alias_token(token: &str) -> Result<String, String> {
             "That does not look like an API token. Copy it again from your alias service.".into(),
         );
     }
-    Ok(token.to_string())
+    Ok(token)
 }
 
 pub fn alias_domain(domain: &str) -> Result<String, String> {
@@ -150,7 +212,7 @@ mod tests {
             "",
             true,
         )?;
-        assert_eq!(settings.token, "fictional-token");
+        assert_eq!(settings.token.as_str(), "fictional-token");
         assert!(settings.domain.is_empty());
         for bad in [
             "",
@@ -231,9 +293,11 @@ mod tests {
             "anonaddy.me",
             false,
         )?;
-        settings.token = "has space".into();
+        settings.token = AliasToken::from("has space");
         assert!(!settings.is_valid());
-        settings.token = "fictional-token".into();
+        settings.token = AliasToken::from(" fictional-token");
+        assert!(!settings.is_valid());
+        settings.token = AliasToken::from("fictional-token");
         settings.domain = String::new();
         assert!(!settings.is_valid());
         Ok(())
@@ -265,7 +329,7 @@ mod tests {
         let read: crate::VaultPayload = serde_json::from_str(&written)?;
         let settings = read.email_aliases.as_ref().ok_or("missing settings")?;
         assert_eq!(settings.service, EmailAliasService::Addy);
-        assert_eq!(settings.token, "fictional-token");
+        assert_eq!(settings.token.as_str(), "fictional-token");
         assert_eq!(settings.domain, "anonaddy.me");
         assert!(settings.name_site);
         Ok(())
@@ -278,6 +342,9 @@ mod tests {
             r#","emailAliases":{"service":"other","token":"t"}"#,
             r#","emailAliases":{"service":"simpleLogin"}"#,
             r#","emailAliases":"fictional-token""#,
+            r#","emailAliases":["addy","fictional-token","anonaddy.me",true]"#,
+            r#","emailAliases":["simpleLogin","fictional-token"]"#,
+            r#","emailAliases":{"service":"addy","token":"fictional-token","nameSite":42}"#,
         ] {
             assert!(
                 serde_json::from_str::<crate::VaultPayload>(&payload_json(extra)).is_err(),
@@ -294,6 +361,23 @@ mod tests {
                 .ok_or("missing settings")?
                 .name_site
         );
+        Ok(())
+    }
+
+    fn wiped_on_drop<T: ZeroizeOnDrop>() {}
+
+    #[test]
+    fn a_token_wipes_itself_even_outside_the_settings() {
+        wiped_on_drop::<AliasToken>();
+        wiped_on_drop::<EmailAliasSettings>();
+    }
+
+    #[test]
+    fn checking_a_token_borrows_it_instead_of_copying() -> Outcome {
+        let typed = "  fictional-token ";
+        let checked = alias_token(typed)?;
+        assert_eq!(checked, "fictional-token");
+        assert!(std::ptr::eq(checked.as_ptr(), typed.trim().as_ptr()));
         Ok(())
     }
 
