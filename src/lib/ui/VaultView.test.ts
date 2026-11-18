@@ -347,7 +347,7 @@ test('a revealed password is shown exactly, isolated, and called out when it hid
   await rendered.rerender({ passwordVisible: true, revealedPassword: 'fictional\u202Eterces' })
   const code = rendered.container.querySelector('.credential-row code:not(.concealed) .secret-text bdi') as HTMLElement
   expect(code.textContent).toBe('fictional\u202Eterces')
-  expect(rendered.container.querySelector('.secret-text-note')?.textContent).toBe('Has an invisible or direction-changing character')
+  expect(rendered.container.querySelector('.secret-text-note')?.textContent).toBe('Has a character you cannot see')
 
   await rendered.rerender({ passwordVisible: true, revealedPassword: 'fictional-plain-secret' })
   expect(rendered.container.querySelector('.secret-text bdi')?.textContent).toBe('fictional-plain-secret')
