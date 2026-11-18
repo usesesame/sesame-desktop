@@ -168,3 +168,28 @@ test('a refused alias domain marks the domain field and not the token field', as
   expect(tokenField.hasAttribute('aria-invalid')).toBe(false)
   expect(tokenField.getAttribute('aria-describedby')).toBe('alias-token-help')
 })
+
+test('trying again keeps focus in the alias setting', async () => {
+  let fail: (error: Error) => void = () => {}
+  let finish: (status: unknown) => void = () => {}
+  vault.getEmailAliasSettings.mockRejectedValueOnce(new Error('Sesame could not read the vault session.'))
+  render(EmailAliasesSetting)
+  const retry = await screen.findByRole('button', { name: 'Try again' })
+
+  vault.getEmailAliasSettings.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+  retry.focus()
+  await fireEvent.click(retry)
+  expect(screen.getByRole('button', { name: 'Try again' })).toBe(retry)
+  expect(retry.getAttribute('aria-disabled')).toBe('true')
+  expect(document.activeElement).toBe(retry)
+  fail(new Error('Sesame could not read the vault session.'))
+  await waitFor(() => expect(retry.hasAttribute('aria-disabled')).toBe(false))
+  expect(document.activeElement).toBe(retry)
+
+  vault.getEmailAliasSettings.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+  await fireEvent.click(retry)
+  finish({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const toggle = screen.getByRole('switch', { name: 'Email aliases' })
+  await waitFor(() => expect(document.activeElement).toBe(toggle))
+  expect((toggle as HTMLButtonElement).disabled).toBe(false)
+})

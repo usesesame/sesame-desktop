@@ -28,6 +28,8 @@
   let replaceButton: HTMLButtonElement | undefined
   let openedFrom: 'switch' | 'replace' = 'switch'
   let loadFailed = false
+  let reading = false
+  let retryButton: HTMLButtonElement | undefined
 
   $: status = $emailAliases
   $: known = status !== null
@@ -36,13 +38,22 @@
 
   onMount(load)
 
-  function load() {
-    loadFailed = false
-    errorMessage = ''
-    loadEmailAliases().catch((error) => {
+  async function load() {
+    if (reading) return
+    const fromRetry = Boolean(retryButton) && document.activeElement === retryButton
+    reading = true
+    try {
+      await loadEmailAliases()
+      loadFailed = false
+      errorMessage = ''
+      await tick()
+      if (fromRetry && (document.activeElement === document.body || !document.activeElement)) switchButton?.focus()
+    } catch (error) {
       errorMessage = messageFor(error)
       loadFailed = true
-    })
+    } finally {
+      reading = false
+    }
   }
 
   function openForm(from: 'switch' | 'replace') {
@@ -109,7 +120,7 @@
       <p>{#if status?.service}{status.service === 'addy' ? `New aliases use ${status.domain ?? DEFAULT_ADDY_DOMAIN}. ` : ''}Your API token is kept in your vault, and Sesame sends it only to {serviceNames[status.service]} when you ask for an alias. Turning this off removes the token from your vault, but older backups and synced versions keep it, so revoke it at {serviceNames[status.service]} to stop it working.{:else}Sesame asks addy.io or SimpleLogin for a new forwarding address and puts it in the email field. It needs an API token from your account there.{/if}</p>
       {#if enabled && !formOpen}<button type="button" class="text-button replace-token" bind:this={replaceButton} disabled={working} on:click={() => openForm('replace')}>Replace token</button>{/if}
       {#if errorMessage && !formOpen}<p class="form-error" role="alert">{errorMessage}</p>{/if}
-      {#if loadFailed && !known}<button type="button" class="text-button replace-token" on:click={load}>Try again</button>{/if}
+      {#if loadFailed && !known}<button type="button" class="text-button replace-token" bind:this={retryButton} aria-disabled={reading ? 'true' : undefined} on:click={load}>Try again</button>{/if}
     </div>
     <button type="button" class="switch" class:active={enabled} role="switch" aria-checked={enabled} aria-controls={formOpen ? 'alias-form' : undefined} aria-label="Email aliases" bind:this={switchButton} disabled={working || !known} on:click={toggle}><span></span></button>
   </article>
