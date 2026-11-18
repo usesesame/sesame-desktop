@@ -431,10 +431,14 @@ pub fn duplicate_groups_from_summaries(summaries: Vec<LoginSummary>) -> Vec<Dupl
 
 /// Returns the code, the seconds left in the window, and the window length.
 pub fn current_totp(value: &str) -> Option<(String, u64, u64)> {
+    totp_at(value, unix_timestamp())
+}
+
+pub fn totp_at(value: &str, now: u64) -> Option<(String, u64, u64)> {
     let totp = totp_from_value(value)?;
-    let code = totp.generate_current().to_string();
+    let code = totp.generate(now).to_string();
     let step = totp.step();
-    let remaining = step - (unix_timestamp() % step);
+    let remaining = step - (now % step);
     Some((code, remaining, step))
 }
 
