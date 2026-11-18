@@ -34,6 +34,8 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
   open={true}
   onClose={cancel}
   labelledby="browser-totp-heading"
@@ -76,7 +78,7 @@
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
-      <button type="button" class="primary-button" disabled={!$browserTotpFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>
+      <button type="button" class="primary-button" disabled={!$browserTotpFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>
         {working ? 'Approving…' : 'Fill code'}
       </button>
     </div>

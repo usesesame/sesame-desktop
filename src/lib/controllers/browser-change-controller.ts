@@ -18,13 +18,15 @@ interface BrowserChangeControllerOptions {
   stores: AppStores
   feedback: FeedbackController
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createBrowserChangeController({ stores, feedback, modal, blockingOverlayActive }: BrowserChangeControllerOptions) {
+export function createBrowserChangeController({ stores, feedback, modal, blockingOverlayActive = () => false, held = () => false }: BrowserChangeControllerOptions) {
   const store = stores.browserChange
   const loop = approvalLoop<BrowserChangeRequest>({
     store,
+    held,
     mayShow: modal.browserChangeMayShow,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),
     decline: (approvalId) => resolveBrowserChange(approvalId, null),
@@ -52,10 +54,11 @@ export function createBrowserChangeController({ stores, feedback, modal, blockin
   return { ...loop, resolve }
 }
 
-export function createBrowserCreateController({ stores, feedback, modal, blockingOverlayActive }: BrowserChangeControllerOptions) {
+export function createBrowserCreateController({ stores, feedback, modal, blockingOverlayActive = () => false, held = () => false }: BrowserChangeControllerOptions) {
   const store = stores.browserCreate
   const loop = approvalLoop<BrowserCreateRequest>({
     store,
+    held,
     mayShow: modal.browserCreateMayShow,
     initialSelection: () => '',
     decline: (approvalId) => resolveBrowserCreate(approvalId, false),

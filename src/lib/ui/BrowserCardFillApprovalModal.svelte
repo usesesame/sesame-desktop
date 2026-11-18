@@ -28,7 +28,7 @@
   const cancel = () => { if (!working) onCancel() }
 </script>
 
-<ModalShell open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
+<ModalShell approval let:settled open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
   <h2 id="browser-card-heading">Fill {request.hostname}?</h2>
   <p id="browser-card-description">Choose a saved card. Every card fill needs this confirmation, and Sesame does not submit the form.</p>
@@ -44,7 +44,7 @@
       </label>
     {/each}
   </div>
-  <div class="browser-fill-footer"><span>{approvalFooterText(remaining, $approvalWait)}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
+  <div class="browser-fill-footer"><span>{approvalFooterText(remaining, $approvalWait)}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
 </ModalShell>
 
 <style>

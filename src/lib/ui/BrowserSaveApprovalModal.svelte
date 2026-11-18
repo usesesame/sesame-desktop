@@ -36,6 +36,8 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
   open={true}
   onClose={cancel}
   labelledby="browser-save-heading"
@@ -94,12 +96,12 @@
   <div class="browser-fill-footer">
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
-      <button type="button" class="text-button" disabled={working || remaining === 0 || $approvalWait.ms > 0} on:click={onNeverForSite}>Never for this site</button>
+      <button type="button" class="text-button" disabled={working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onNeverForSite}>Never for this site</button>
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Discard</button>
       <button
         type="button"
         class="primary-button"
-        disabled={working || remaining === 0 || $approvalWait.ms > 0 || (needsChoice && !$browserSave.selectedId)}
+        disabled={working || remaining === 0 || $approvalWait.ms > 0 || !settled || (needsChoice && !$browserSave.selectedId)}
         on:click={onConfirm}
       >
         {working ? (isUpdate ? 'Updating…' : 'Saving…') : isUpdate ? 'Update login' : 'Save login'}

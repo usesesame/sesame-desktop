@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   export let value: string
   export let options: Array<{ value: string; label: string }>
@@ -96,7 +97,7 @@
     <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
   </button>
   {#if open}
-    <div class="sort-menu" id={listId} role="listbox" aria-label={label}>
+    <div use:holdsApprovals class="sort-menu" id={listId} role="listbox" aria-label={label}>
       {#each options as option (option.value)}
         <button
           type="button"

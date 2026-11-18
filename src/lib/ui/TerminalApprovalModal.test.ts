@@ -157,11 +157,31 @@ test('Enter in the master password field does not allow', async () => {
 })
 
 test('Escape and the Deny button both refuse', async () => {
+  vi.useFakeTimers()
   const { props } = show()
+  await armed()
   await fireEvent.keyDown(window, { key: 'Escape' })
   await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
   expect(props.onDeny).toHaveBeenCalledTimes(2)
   expect(props.onAllow).not.toHaveBeenCalled()
+})
+
+test('a key or click meant for what was on screen before does nothing to a dialog that just appeared', async () => {
+  vi.useFakeTimers()
+  terminalApi.getTerminalApprovalWait.mockResolvedValue(0)
+  const { props } = show()
+  await vi.advanceTimersByTimeAsync(300)
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
+  await fireEvent.click(screen.getByRole('checkbox', { name: /Allow this terminal for five minutes/ }))
+  await fireEvent.click(document.querySelector('[data-modal-shell]') as HTMLElement)
+  expect(props.onDeny).not.toHaveBeenCalled()
+  expect(props.onAllowTerminal).not.toHaveBeenCalled()
+  expect(allowButton().disabled).toBe(true)
+  await vi.advanceTimersByTimeAsync(500)
+  expect(allowButton().disabled).toBe(false)
+  await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
+  expect(props.onDeny).toHaveBeenCalledTimes(1)
 })
 
 test('the allow-terminal box is unticked and explains what it allows', () => {
@@ -196,7 +216,9 @@ test('the chooser needs a pick before allow and offers only the items Sesame sen
 })
 
 test('a request for a missing item shows only an OK button', async () => {
+  vi.useFakeTimers()
   const { props } = show({ candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false, fieldHidden: false })
+  await armed()
   expect(screen.getByRole('heading', { name: 'A terminal asked for an item you do not have' })).toBeTruthy()
   expect(screen.getByText('Northwnd mail')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()

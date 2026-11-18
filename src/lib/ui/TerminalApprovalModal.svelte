@@ -1,7 +1,3 @@
-<script module lang="ts">
-  const SHOWN_BEFORE_ARMED_MS = 750
-</script>
-
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import { approvalFooterText, createApprovalWait } from '../approval-wait'
@@ -30,8 +26,6 @@
   const notice = noticeOnly(request)
   const choosing = !notice && request.candidates.length > 1
 
-  let heldLongEnough = false
-  const armTimer = window.setTimeout(() => (heldLongEnough = true), SHOWN_BEFORE_ARMED_MS)
   const remainingSeconds = () => Math.max(0, Math.ceil(($terminalApproval.expiresAt - Date.now()) / 1_000))
   let remaining = remainingSeconds()
   const timer = window.setInterval(() => {
@@ -39,17 +33,14 @@
     if (remaining === 0) onExpire(approvalId)
   }, 1_000)
 
-  onDestroy(() => {
-    window.clearTimeout(armTimer)
-    window.clearInterval(timer)
-  })
+  onDestroy(() => window.clearInterval(timer))
 
   $: state = $terminalApproval
   $: working = state.working
   $: askSecret = secretNeeded(request, state.selectedId, state.presenceGranted)
   $: secret = state.secret
   $: chosenValid = !choosing || request.candidates.some((candidate) => candidate.id === state.selectedId)
-  $: armed = heldLongEnough && $wait.ms === 0
+  $: armed = $wait.ms === 0
   $: lacksField = Boolean(request.field && resolved && !resolved.fieldName)
   $: allowDisabled = working || remaining === 0 || !armed || !chosenValid || lacksField || (askSecret && !secret)
   $: items = vaultItems($vault.snapshot)
@@ -85,6 +76,8 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
   open={true}
   onClose={close}
   labelledby="terminal-approval-heading"
@@ -171,7 +164,7 @@
 
   {#if request.canAllowTerminal && !notice}
     <label class="terminal-allow">
-      <input type="checkbox" checked={state.allowTerminal} disabled={working || !armed} on:change={allowTerminalChanged} />
+      <input type="checkbox" checked={state.allowTerminal} disabled={working || !armed || !settled} on:change={allowTerminalChanged} />
       <span><strong>Allow this terminal for five minutes</strong><small>Sesame answers it and any program started from it without asking, but hidden values still ask for your master password.</small></span>
     </label>
   {/if}
@@ -188,7 +181,7 @@
       <span>{approvalFooterText(remaining, $wait)}</span>
       <div class="confirm-actions">
         <button type="button" class="secondary-button" disabled={working} on:click={close}>Deny</button>
-        <button type="button" class="primary-button" disabled={allowDisabled} on:click={onAllow}>{working ? 'Allowing…' : 'Allow'}</button>
+        <button type="button" class="primary-button" disabled={allowDisabled || !settled} on:click={onAllow}>{working ? 'Allowing…' : 'Allow'}</button>
       </div>
     {/if}
   </div>

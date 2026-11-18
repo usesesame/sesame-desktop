@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
+  import { derived } from 'svelte/store'
   import { autoLockOptions, clipboardClearOptions } from './lib/preferences'
   import { isSortMode } from './lib/vault-collections'
   import { vaultItems } from './lib/vault-items'
@@ -42,6 +43,7 @@
   import { createTrashController } from './lib/controllers/trash-controller'
   import { createHistoryController } from './lib/controllers/history-controller'
   import { createModalController } from './lib/controllers/modal-controller'
+  import { createApprovalGate, type ApprovalKind } from './lib/controllers/approval-gate'
   import { createOnboardingController } from './lib/controllers/onboarding-controller'
   import AppChrome from './lib/ui/AppChrome.svelte'
   import ModalHost from './lib/ui/ModalHost.svelte'
@@ -114,6 +116,7 @@
 
   const presenceController = createPresenceController()
   const presenceState = presenceController.state
+  let approvalHeld = (_kind: ApprovalKind) => true
 
   const modalController = createModalController({
     stores: appStores,
@@ -196,7 +199,7 @@
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserFill'),
   })
 
   const identityFillController = createIdentityFillController({
@@ -204,7 +207,7 @@
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserIdentityFill'),
   })
 
   const cardFillController = createCardFillController({
@@ -212,7 +215,7 @@
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserCardFill'),
   })
 
   const totpFillController = createTotpFillController({
@@ -220,7 +223,7 @@
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserTotpFill'),
   })
 
   const browserSaveController = createBrowserSaveController({
@@ -228,21 +231,21 @@
     feedback: feedbackController,
     onVaultLocked: () => onNativeVaultLocked(),
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserSave'),
   })
 
   const browserChangeController = createBrowserChangeController({
     stores: appStores,
     feedback: feedbackController,
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserChange'),
   })
 
   const browserCreateController = createBrowserCreateController({
     stores: appStores,
     feedback: feedbackController,
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
+    held: () => approvalHeld('browserCreate'),
   })
 
   function syncNoticeShows(onboarding: { step: string }, preferences: { betaOnboardingDismissed: boolean; preferenceLoaded: boolean; syncNoticeSeen: boolean }): boolean {
@@ -257,9 +260,8 @@
     stores: appStores,
     feedback: feedbackController,
     modal: modalController,
-    blockingOverlayActive: () => onboardingState.value().step !== 'none',
     presenceOpen: () => presenceState.value().open,
-    overlayOpen: () => firstRunOpen(onboardingState.value(), settingsState.value()),
+    overlayOpen: () => approvalHeld('terminalApproval'),
   })
 
   const pendingChangesController = createPendingChangesController({
@@ -509,6 +511,17 @@
   const unlockState = unlockController.state
   const rollbackController = createRollbackController()
   const rollbackState = rollbackController.state
+  const answering = derived(
+    [modalState, presenceState, onboardingState, settingsState, rollbackState, loginState, feedbackState],
+    ([modal, presence, onboarding, preferences, rollback, login, feedback]) => modal.active !== null
+      || presence.open
+      || firstRunOpen(onboarding, preferences)
+      || rollback.notice !== null
+      || login.entryMenu !== null
+      || Boolean(feedback.notice?.action),
+  )
+  const approvalGate = createApprovalGate(appStores, answering)
+  approvalHeld = approvalGate.held
   $: vaultUnlocked = $vault.snapshot !== null
   $: if (vaultUnlocked) void rollbackController.refresh()
   $: if (!vaultUnlocked) rollbackController.clear()
@@ -529,7 +542,6 @@
     onboardingController.startIfNeeded($settingsState.betaOnboardingDismissed, $vault.status.onboardingRequired ?? false)
   }
   $: syncNoticeOpen = syncNoticeShows($onboardingState, $settingsState)
-  $: if (firstRunOpen($onboardingState, $settingsState) && $terminalApproval.request) terminalApprovalController.setAside()
 
   const navigation: NavigationGroup[] = [
     { label: 'Workspace', items: [
@@ -620,6 +632,9 @@
     const stopBrowserChange = browserChangeController.start()
     const stopBrowserCreate = browserCreateController.start()
     const stopTerminalApproval = terminalApprovalController.start()
+    const stopApprovalWake = approvalGate.whenClear(() => {
+      for (const controller of [browserFillController, identityFillController, cardFillController, totpFillController, browserSaveController, browserChangeController, browserCreateController, terminalApprovalController]) void controller.syncPending()
+    })
     const stopPendingChanges = pendingChangesController.start()
     const stopActivityReports = startActivityReports()
     void loadPlatformCapabilities().catch(() => void recordDiagnostic('renderer', 'platform_capabilities_failed'))
@@ -649,6 +664,7 @@
       stopBrowserChange()
       stopBrowserCreate()
       stopTerminalApproval()
+      stopApprovalWake()
       stopPendingChanges()
       idleListenersDisposed = true
       quickAccessListenerDisposed = true

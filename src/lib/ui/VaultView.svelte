@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
   import SecretText from './SecretText.svelte'
   import { noteText, vaultText } from '../vault-text'
   import ItemReleaseSection from './ItemReleaseSection.svelte'
@@ -472,7 +473,7 @@
             <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
           </button>
           {#if sortMenuOpen}
-            <div id="sort-control-options" class="sort-menu" role="listbox" aria-labelledby="sort-control-label">
+            <div use:holdsApprovals id="sort-control-options" class="sort-menu" role="listbox" aria-labelledby="sort-control-label">
               {#each SORT_MODES as mode (mode)}
                 <button type="button" class:selected={mode === $selection.sortMode} role="option" aria-selected={mode === $selection.sortMode} tabindex="-1" on:click={() => chooseSortMode(mode)} on:keydown={handleSortOptionKeydown}>{sortModeLabels[mode]}</button>
               {/each}
@@ -524,7 +525,7 @@
                 <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
               </button>
               {#if folderMenuOpen}
-                <div class="sort-menu" role="listbox" aria-label="Destination collection">
+                <div use:holdsApprovals class="sort-menu" role="listbox" aria-label="Destination collection">
                   <button type="button" class:selected={!bulkFolderId} role="option" aria-selected={!bulkFolderId} tabindex="-1" on:click={() => chooseBulkFolder('')} on:keydown={handleFolderOptionKeydown}>Unfiled</button>
                   {#each folders as folder (folder.id)}
                     <button type="button" class:selected={bulkFolderId === folder.id} role="option" aria-selected={bulkFolderId === folder.id} tabindex="-1" on:click={() => chooseBulkFolder(folder.id)} on:keydown={handleFolderOptionKeydown}><bdi>{vaultText(folder.name)}</bdi></button>
