@@ -104,6 +104,10 @@ release cannot be published without saying what changed in it.
 
 - The item list sorts once per change instead of on every redraw.
 - Import and merge backups keep the newest five.
+- A name, address or folder that hides a text direction character can no
+  longer show a file name or a host backwards. Sesame shows the hidden
+  character as a question mark, and a revealed password is still shown
+  exactly, with a line saying when it holds a character you cannot see.
 
 ## 0.5.3
 
