@@ -1683,6 +1683,18 @@ export async function removeNeverSaveSite(origin: string): Promise<string[]> {
 
 let previewEmailAliases: EmailAliasStatus = { nameSite: false }
 
+function previewAliasDomain(input: string | undefined): string | undefined {
+  const domain = (input ?? '').trim().replace(/\.+$/, '').toLowerCase()
+  if (!domain) return undefined
+  const labels = domain.split('.')
+  const valid = domain.length <= 253
+    && labels.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+    && /[a-z]/.test(labels[labels.length - 1])
+  if (!valid) throw new Error('Enter the domain your aliases use, such as anonaddy.me.')
+  return domain
+}
+
 export async function getEmailAliasSettings(): Promise<EmailAliasStatus> {
   if (previewMode) return { ...previewEmailAliases }
   return invoke<EmailAliasStatus>('get_email_alias_settings')
@@ -1691,7 +1703,7 @@ export async function getEmailAliasSettings(): Promise<EmailAliasStatus> {
 export async function saveEmailAliasSettings(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
   if (previewMode) {
     if (!settings.token?.trim() && previewEmailAliases.service !== settings.service) throw new Error('Paste the API token from your alias service.')
-    previewEmailAliases = { service: settings.service, domain: settings.service === 'addy' ? settings.domain?.trim().toLowerCase() || undefined : undefined, nameSite: settings.nameSite }
+    previewEmailAliases = { service: settings.service, domain: settings.service === 'addy' ? previewAliasDomain(settings.domain) : undefined, nameSite: settings.nameSite }
     return { ...previewEmailAliases }
   }
   return invoke<EmailAliasStatus>('save_email_alias_settings', { settings })
