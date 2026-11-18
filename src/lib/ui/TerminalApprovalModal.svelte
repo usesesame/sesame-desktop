@@ -210,7 +210,8 @@
   .terminal-choices label.selected { background: var(--tint); }
   .terminal-choices input { width: 16px; height: 16px; accent-color: var(--accent); }
   .terminal-choices label > span { display: grid; min-width: 0; gap: 2px; overflow: hidden; line-height: 1.7; }
-  .terminal-choices strong, .terminal-choices small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-choices strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-choices small { min-width: 0; overflow-wrap: anywhere; }
   .terminal-choices strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-medium); }
   .terminal-choices small { color: var(--text-muted); font-size: var(--type-2); }
   .terminal-presence { margin-top: var(--space-4); }

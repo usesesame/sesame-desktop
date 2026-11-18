@@ -144,7 +144,7 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
   const fields = fieldList(entry.fields) || 'secret'
   switch (entry.kind) {
     case 'reveal':
-      return fromTerminal(entry) ? `Showed the ${fields} of ${title} in a terminal` : `Showed the ${fields} of ${title}`
+      return fromTerminal(entry) ? `Read the ${fields} of ${title} for a terminal` : `Showed the ${fields} of ${title}`
     case 'copy':
       return fromTerminal(entry) ? `Copied the ${fields} of ${title} for a terminal` : `Copied the ${fields} of ${title}`
     case 'autoType':

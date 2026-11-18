@@ -26,7 +26,7 @@ describe('activity sentences', () => {
 
   test('a release through the command line names the terminal and never treats it as a website', () => {
     const shown = entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)
-    expect(shown).toBe('Showed the password of Northwind in a terminal')
+    expect(shown).toBe('Read the password of Northwind for a terminal')
     const copied = entrySentence(entry({ kind: 'copy', itemId: 'login-a', itemKind: 'login', fields: ['twoFactorCode'], host: 'terminal' }), titleFor)
     expect(copied).toBe('Copied the one-time code of Northwind for a terminal')
     readable(shown)
