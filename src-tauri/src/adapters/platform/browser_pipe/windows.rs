@@ -331,6 +331,10 @@ impl TerminalConnection {
         &self.peer
     }
 
+    pub fn is_connected(&self) -> bool {
+        self.peer.is_connected()
+    }
+
     pub fn send(&self, payload: &[u8]) -> io::Result<()> {
         let _writing = self
             .writing

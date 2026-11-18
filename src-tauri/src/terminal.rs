@@ -112,7 +112,7 @@ mod listener {
 
     impl CliHost for WindowHost<'_> {
         fn peer_connected(&self) -> bool {
-            self.connection.peer().is_connected()
+            self.connection.is_connected()
         }
 
         fn send(&self, reply: &CliReply) -> bool {

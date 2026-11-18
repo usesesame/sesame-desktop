@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -221,6 +221,15 @@ pub(super) fn bind_exclusive_on(channel: &Channel, path: &Path) -> io::Result<Un
                     format!("another Sesame already serves the {} socket", channel.label),
                 ));
             }
+            if !fs::symlink_metadata(path)?.file_type().is_socket() {
+                return Err(io::Error::new(
+                    ErrorKind::AddrInUse,
+                    format!(
+                        "something other than a socket holds the {} socket path",
+                        channel.label
+                    ),
+                ));
+            }
             fs::remove_file(path)?;
             UnixListener::bind(path)
         }
@@ -293,6 +302,26 @@ pub struct TerminalConnection {
 impl TerminalConnection {
     pub fn peer(&self) -> &PipePeer {
         &self.peer
+    }
+
+    pub fn is_connected(&self) -> bool {
+        if !self.peer.is_connected() {
+            return false;
+        }
+        let stream = self
+            .stream
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut watched = libc::pollfd {
+            fd: stream.as_raw_fd(),
+            events: libc::POLLRDHUP,
+            revents: 0,
+        };
+        // SAFETY: poll reads and writes only the one pollfd passed with a count of one.
+        let ready = unsafe { libc::poll(&mut watched, 1, 0) };
+        ready == 0
+            || (ready > 0
+                && watched.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR) == 0)
     }
 
     pub fn send(&self, payload: &[u8]) -> io::Result<()> {
@@ -887,20 +916,45 @@ mod terminal_tests {
         panic!("the test server never bound its socket");
     }
 
-    fn serve_echo(socket: &Path, expected_client: PeerIdentity) {
+    fn serve_terminal_ready<F>(socket: &Path, expected_client: PeerIdentity, handler: F)
+    where
+        F: Fn(Vec<u8>, &TerminalConnection) + Send + Sync + 'static,
+    {
         let served = socket.to_path_buf();
+        let (ready, listening) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = serve_terminal_at(
                 &served,
                 expected_client,
-                || {},
-                |request, connection| {
-                    let _ = connection.send(b"waiting");
-                    let _ = connection.send(&request);
+                move || {
+                    let _ = ready.send(());
                 },
+                handler,
             );
         });
-        wait_for(socket);
+        listening
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the test server never started listening");
+    }
+
+    fn serve_echo(socket: &Path, expected_client: PeerIdentity) {
+        serve_terminal_ready(socket, expected_client, |request, connection| {
+            let _ = connection.send(b"waiting");
+            let _ = connection.send(&request);
+        });
+    }
+
+    fn refused_after_connecting(socket: &Path) {
+        match open_terminal_request_at(socket, &this_executable(), b"fictional") {
+            Ok(mut client) => assert!(client.next_frame().is_err()),
+            Err(error) => assert!(
+                matches!(
+                    error.kind(),
+                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset
+                ),
+                "{error}"
+            ),
+        }
     }
 
     fn dropped(stream: &mut UnixStream) -> bool {
@@ -947,9 +1001,7 @@ mod terminal_tests {
         let socket = scratch_socket("wrong-client");
         serve_echo(&socket, PeerIdentity::Path(PathBuf::from("/bin/sh")));
 
-        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
-            .expect("the request is written");
-        assert!(client.next_frame().is_err());
+        refused_after_connecting(&socket);
     }
 
     #[test]
@@ -958,9 +1010,7 @@ mod terminal_tests {
         let other = ExecutableIdentity::of_file(Path::new("/bin/sh")).expect("an identity");
         serve_echo(&socket, PeerIdentity::Contents(other));
 
-        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
-            .expect("the request is written");
-        assert!(client.next_frame().is_err());
+        refused_after_connecting(&socket);
     }
 
     #[test]
@@ -1021,24 +1071,15 @@ mod terminal_tests {
     #[test]
     fn at_most_four_connections_are_open_at_once() {
         let socket = scratch_socket("limit");
-        let served = socket.clone();
         let release = std::sync::Arc::new(AtomicBool::new(false));
         let held = std::sync::Arc::clone(&release);
-        std::thread::spawn(move || {
-            let _ = serve_terminal_at(
-                &served,
-                this_executable(),
-                || {},
-                move |_request, connection| {
-                    let _ = connection.send(b"waiting");
-                    while !held.load(Ordering::SeqCst) {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    let _ = connection.send(b"done");
-                },
-            );
+        serve_terminal_ready(&socket, this_executable(), move |_request, connection| {
+            let _ = connection.send(b"waiting");
+            while !held.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = connection.send(b"done");
         });
-        wait_for(&socket);
 
         let mut open = Vec::new();
         for _ in 0..MAX_TERMINAL_CONNECTIONS {
@@ -1059,22 +1100,13 @@ mod terminal_tests {
     #[test]
     fn a_panicking_terminal_handler_does_not_end_the_listener() {
         let socket = scratch_socket("panic");
-        let served = socket.clone();
-        std::thread::spawn(move || {
-            let panicked = AtomicBool::new(false);
-            let _ = serve_terminal_at(
-                &served,
-                this_executable(),
-                || {},
-                move |request, connection| {
-                    if !panicked.swap(true, Ordering::SeqCst) {
-                        panic!("fictional handler panic");
-                    }
-                    let _ = connection.send(&request);
-                },
-            );
+        let panicked = AtomicBool::new(false);
+        serve_terminal_ready(&socket, this_executable(), move |request, connection| {
+            if !panicked.swap(true, Ordering::SeqCst) {
+                panic!("fictional handler panic");
+            }
+            let _ = connection.send(&request);
         });
-        wait_for(&socket);
 
         let mut first =
             open_terminal_request_at(&socket, &this_executable(), b"first").expect("written");
@@ -1117,9 +1149,7 @@ mod terminal_tests {
         let socket = scratch_socket("one-byte");
         serve_echo(&socket, PeerIdentity::Contents(expected));
 
-        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
-            .expect("the request is written");
-        assert!(client.next_frame().is_err());
+        refused_after_connecting(&socket);
 
         let unchanged = copy_of_this_executable("same-bytes", false);
         let socket = scratch_socket("same-bytes");
@@ -1206,22 +1236,13 @@ mod terminal_tests {
     #[test]
     fn a_browser_request_on_the_tool_socket_is_refused_there() {
         let socket = scratch_socket("browser-on-tool");
-        let served = socket.clone();
-        std::thread::spawn(move || {
-            let _ = serve_terminal_at(
-                &served,
-                this_executable(),
-                || {},
-                |payload, connection| {
-                    let reply = match crate::application::cli_requests::parse_or_refuse(&payload) {
-                        Ok(_) => b"accepted".to_vec(),
-                        Err(refusal) => refusal.to_bytes().expect("encodes").to_vec(),
-                    };
-                    let _ = connection.send(&reply);
-                },
-            );
+        serve_terminal_ready(&socket, this_executable(), |payload, connection| {
+            let reply = match crate::application::cli_requests::parse_or_refuse(&payload) {
+                Ok(_) => b"accepted".to_vec(),
+                Err(refusal) => refusal.to_bytes().expect("encodes").to_vec(),
+            };
+            let _ = connection.send(&reply);
         });
-        wait_for(&socket);
 
         for (browser_request, refused_as) in [
             (
@@ -1273,5 +1294,62 @@ mod terminal_tests {
         let mut client =
             open_terminal_request_at(&socket, &this_executable(), b"still").expect("still served");
         assert_eq!(client.next_frame().expect("waiting").as_slice(), b"waiting");
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_socket_at_the_terminal_path_is_left_alone() {
+        let socket = scratch_socket("regular-file");
+        if let Some(directory) = socket.parent() {
+            fs::create_dir_all(directory).expect("a scratch directory");
+        }
+        fs::write(&socket, b"fictional notes").expect("a regular file");
+        let refused = bind_exclusive_on(&TERMINAL, &socket).expect_err("a regular file is kept");
+        assert_eq!(refused.kind(), ErrorKind::AddrInUse);
+        assert_eq!(fs::read(&socket).expect("still there"), b"fictional notes");
+
+        let target = socket.with_file_name("elsewhere.sock");
+        let _ = fs::remove_file(&target);
+        drop(UnixListener::bind(&target).expect("a stale socket elsewhere"));
+        fs::remove_file(&socket).expect("the regular file removed");
+        std::os::unix::fs::symlink(&target, &socket).expect("a symlink");
+        assert!(bind_exclusive_on(&TERMINAL, &socket).is_err());
+        assert!(fs::symlink_metadata(&socket)
+            .expect("the link is kept")
+            .file_type()
+            .is_symlink());
+
+        fs::remove_file(&socket).expect("the link removed");
+        drop(UnixListener::bind(&socket).expect("a stale socket"));
+        assert!(bind_exclusive_on(&TERMINAL, &socket).is_ok());
+    }
+
+    #[test]
+    fn a_terminal_that_closed_its_end_reads_as_disconnected_while_its_process_lives() {
+        let socket = scratch_socket("hang-up");
+        let (closed, seen) = std::sync::mpsc::channel();
+        let (opened, open_seen) = std::sync::mpsc::channel();
+        let report = Mutex::new((opened, closed));
+        serve_terminal_ready(&socket, this_executable(), move |_request, connection| {
+            let report = report
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _ = report.0.send(connection.is_connected());
+            let _ = connection.send(b"waiting");
+            let until = Instant::now() + Duration::from_secs(5);
+            while connection.is_connected() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = report.1.send(connection.is_connected());
+        });
+        let mut client = open_terminal_request_at(&socket, &this_executable(), b"fictional")
+            .expect("the request is written");
+        assert!(open_seen
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the handler ran"));
+        assert_eq!(client.next_frame().expect("waiting").as_slice(), b"waiting");
+        drop(client);
+        assert!(!seen
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the handler noticed"));
     }
 }
