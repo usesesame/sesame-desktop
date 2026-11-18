@@ -62,13 +62,21 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     return ended.includes(approvalId) || settling.has(approvalId)
   }
 
-  function keepBackendDeadline(pending: CliApprovalRequestEvent | null) {
-    if (pending && store.value().request?.approvalId === pending.approvalId) store.patch({ expiresAt: Date.now() + pending.expiresInMs })
+  let backendDeadline: { approvalId: string; at: number } | null = null
+
+  function keepBackendDeadline(pending: CliApprovalRequestEvent | null, askedAt: number) {
+    if (!pending || store.value().request?.approvalId !== pending.approvalId) return
+    const at = askedAt + pending.expiresInMs
+    const known = backendDeadline?.approvalId === pending.approvalId ? backendDeadline.at : null
+    if (known !== null && known >= at) return
+    backendDeadline = { approvalId: pending.approvalId, at }
+    store.patch({ expiresAt: at })
   }
 
   async function readBackendDeadline() {
+    const askedAt = Date.now()
     try {
-      keepBackendDeadline(await getPendingTerminalRequest())
+      keepBackendDeadline(await getPendingTerminalRequest(), askedAt)
     } catch {
       return
     }
@@ -109,9 +117,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
 
   async function pendingNow(): Promise<CliApprovalRequestEvent | null> {
     const before = store.value().request?.approvalId
+    const askedAt = Date.now()
     const pending = await getPendingTerminalRequest()
     const shown = store.value().request
-    keepBackendDeadline(pending)
+    keepBackendDeadline(pending, askedAt)
     if (pending && settled(pending.approvalId)) return shown
     if (!pending && shown && shown.approvalId !== before) return shown
     return pending

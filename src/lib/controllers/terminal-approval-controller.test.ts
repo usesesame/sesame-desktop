@@ -332,10 +332,9 @@ describe('terminal approvals in the window', () => {
     await flush()
     expect(state().expiresAt - Date.now()).toBe(54_000)
 
-    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1', { expiresInMs: 41_000 }))
+    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1', { expiresInMs: 52_000 }))
     await vi.advanceTimersByTimeAsync(3_000)
-    expect(state().expiresAt - Date.now()).toBeLessThanOrEqual(41_000)
-    expect(state().expiresAt - Date.now()).toBeGreaterThan(40_000)
+    expect(state().expiresAt - Date.now()).toBe(52_000)
 
     stop()
   })
@@ -375,6 +374,23 @@ describe('terminal approvals in the window', () => {
     await vi.advanceTimersByTimeAsync(3_000)
     expect(state().request?.approvalId).toBe('approval-1')
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('counts the time a reading took and never lets an older reading push the deadline later', async () => {
+    const { stop } = await started()
+    let answer: (value: CliApprovalRequestEvent) => void = () => {}
+    terminalApi.getPendingTerminalRequest.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    const asked = Date.now()
+    handlers.request(request('approval-1', { expiresInMs: 60_000 }))
+    await vi.advanceTimersByTimeAsync(2_000)
+    answer(request('approval-1', { expiresInMs: 10_000 }))
+    await flush()
+    expect(state().expiresAt).toBe(asked + 10_000)
+
+    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1', { expiresInMs: 4_000 }))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().expiresAt).toBe(asked + 10_000)
     stop()
   })
 
