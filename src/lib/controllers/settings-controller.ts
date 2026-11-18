@@ -69,6 +69,7 @@ import type { ModalController } from './modal-controller'
 import { clearCachedWebsiteIcons } from '../website-icons'
 import { isTrivialPin, isValidPinLength, MAX_PIN_DIGITS, MIN_PIN_DIGITS } from '../pin-rules'
 import { noUpdateNotice } from '../update-freshness-text'
+import type { SettingsTabId } from '../settings-tabs'
 
 interface SettingsControllerOptions {
   stores: AppStores
@@ -116,7 +117,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     websiteIconCacheWorking: false,
     websiteIconCache: emptyWebsiteIconCache,
     changeMasterPasswordOpen: false,
-    settingsTab: 'general' as 'general' | 'security' | 'connections' | 'data',
+    settingsTab: 'general' as SettingsTabId,
     recoveryReplacement: null as RecoveryReplacementStatus | null,
     recoveryPresenceIntent: null as 'request-kit' | 'issue-kit' | null,
     recoveryPresencePassword: '',
@@ -351,7 +352,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     dismissSyncNotice,
     openSyncSettings() {
       dismissSyncNotice()
-      state.patch({ settingsTab: 'connections' })
+      state.patch({ settingsTab: 'sync' })
     },
     markRecoveryVerified,
     resetOnboarding() {

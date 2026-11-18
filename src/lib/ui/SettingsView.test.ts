@@ -1,8 +1,9 @@
 /* @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { platformCapabilities } from '../platform'
 import type { DesktopUpdateProgress, DesktopUpdateStatus, PlatformCapabilities } from '../types'
+import { SETTINGS_TABS } from '../settings-tabs'
 import SettingsView from './SettingsView.svelte'
 
 class ResizeObserverStub {
@@ -129,31 +130,143 @@ test('Windows shows no screen lock warning', () => {
   expect(screen.queryByText(/Sesame cannot tell when this desktop locks its screen/)).toBeNull()
 })
 
-test('the Connections tab shows the server connection group once', () => {
-  renderSettings({ tab: 'connections' })
+const registered = { supported: true, hostAvailable: true, manifestReady: true, chromeRegistered: true, edgeRegistered: true, firefoxRegistered: true, ready: true, servedElsewhere: false, code: 'ready' as const }
 
-  expect(screen.getAllByRole('heading', { name: 'Connect to your own server' })).toHaveLength(1)
+function groupHeadings(): string[] {
+  return screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent ?? '')
+}
+
+test.each([
+  ['general', ['Appearance', 'This app', 'Shortcuts']],
+  ['security', ['This device', 'Your vault key']],
+  ['browser', ['Extension', 'Saving']],
+  ['sync', ['Sesame account', 'Sesame Sync', 'Your own server']],
+  ['data', ['Your vault', 'Diagnostics']],
+])('the %s tab shows its own groups and no other tab\'s', (tab, headings) => {
+  renderSettings({ tab })
+
+  expect(groupHeadings()).toEqual(headings)
+})
+
+test('every tab in the list renders a panel with at least one group', () => {
+  for (const item of SETTINGS_TABS) {
+    renderSettings({ tab: item.id })
+    const panel = screen.getByRole('tabpanel')
+    expect(panel.getAttribute('aria-labelledby')).toBe(`settings-tab-${item.id}`)
+    expect(within(panel).getAllByRole('heading', { level: 3 }).length).toBeGreaterThan(0)
+    cleanup()
+  }
+})
+
+test('each setting sits on its own tab', () => {
+  renderSettings({ tab: 'general' })
+  expect(screen.getByText('Theme')).toBeTruthy()
+  expect(screen.getByText('Keyboard shortcuts')).toBeTruthy()
+  expect(screen.queryByText('Sites Sesame never saves')).toBeNull()
+  expect(screen.queryByText('Browser autofill setup')).toBeNull()
+  cleanup()
+
+  renderSettings({ tab: 'browser' })
+  expect(screen.getByText('Browser autofill setup')).toBeTruthy()
+  expect(screen.getByText('Sites Sesame never saves')).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'Sesame Sync' })).toBeNull()
+  expect(screen.queryByText('Pairing link or server address')).toBeNull()
+  cleanup()
+
+  renderSettings({ tab: 'sync' })
+  expect(screen.getAllByText('Pairing link or server address')).toHaveLength(1)
+  expect(screen.queryByText('Sites Sesame never saves')).toBeNull()
+  expect(screen.queryByText('Browser autofill setup')).toBeNull()
+  expect(screen.queryByText('Theme')).toBeNull()
+})
+
+test('the quick access shortcut joins the Shortcuts group where the platform has one', () => {
+  platformCapabilities.set(linux({ quickAccessShortcut: true }))
+  renderSettings({ tab: 'general' })
+
+  const shortcuts = screen.getByRole('heading', { name: 'Shortcuts' }).closest('section') as HTMLElement
+  expect(within(shortcuts).getByText('Quick access shortcut')).toBeTruthy()
+  expect(within(shortcuts).getByText('Keyboard shortcuts')).toBeTruthy()
+})
+
+test('the Sync tab shows the server connection group once', () => {
+  renderSettings({ tab: 'sync' })
+
+  expect(screen.getAllByRole('heading', { name: 'Your own server' })).toHaveLength(1)
   expect(screen.getAllByText('Pairing link or server address')).toHaveLength(1)
 })
 
-const registered = { supported: true, hostAvailable: true, manifestReady: true, chromeRegistered: true, edgeRegistered: true, firefoxRegistered: true, ready: true, servedElsewhere: false, code: 'ready' as const }
+test('a paired server of your own hides the Sesame account group', () => {
+  renderSettings({ tab: 'sync', serviceConnection: { state: 'connected', connected: true, online: true, syncAvailable: true, browserHelperAvailable: false, serverAddress: 'https://sync.example.test', serverName: 'Example server' } })
 
-test('a working browser connection hides the Browser group', () => {
-  renderSettings({ tab: 'connections', browserIntegration: registered })
-
-  expect(screen.queryByRole('heading', { name: 'Browser' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Sesame account' })).toBeNull()
+  expect(screen.getByRole('heading', { name: 'Your own server' })).toBeTruthy()
 })
 
-test('a browser connection that another Sesame holds keeps the Browser group visible', () => {
-  renderSettings({ tab: 'connections', browserIntegration: { ...registered, servedElsewhere: true } })
+test('a working browser connection hides the Extension group and keeps Saving', () => {
+  renderSettings({ tab: 'browser', browserIntegration: registered })
 
-  expect(screen.getByRole('heading', { name: 'Browser' })).toBeTruthy()
+  expect(groupHeadings()).toEqual(['Saving'])
+})
+
+test('a browser connection that another Sesame holds keeps the Extension group visible', () => {
+  renderSettings({ tab: 'browser', browserIntegration: { ...registered, servedElsewhere: true } })
+
+  expect(screen.getByRole('heading', { name: 'Extension' })).toBeTruthy()
   expect(screen.getByText('Used by another Sesame')).toBeTruthy()
 })
 
-test('Sync has its own group on the Connections tab, apart from the account', () => {
-  renderSettings({ tab: 'connections' })
+test('the Sync tab opened by name is selected and labels its panel', () => {
+  renderSettings({ tab: 'sync' })
 
+  const syncTab = screen.getByRole('tab', { name: 'Sync' })
+  expect(syncTab.getAttribute('aria-selected')).toBe('true')
+  expect(syncTab.tabIndex).toBe(0)
+  expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(syncTab.id)
   expect(screen.getByRole('heading', { name: 'Sesame Sync' })).toBeTruthy()
-  expect(screen.getByRole('heading', { name: 'Sesame account' })).toBeTruthy()
+})
+
+test('arrow keys, Home and End move between tabs and focus the new tab', async () => {
+  renderSettings()
+  const names = SETTINGS_TABS.map((item) => item.label)
+  const selected = () => screen.getAllByRole('tab').filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.textContent?.trim())
+
+  expect(screen.getAllByRole('tab').map((tab) => tab.textContent?.trim())).toEqual(names)
+  expect(selected()).toEqual(['General'])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'General' }), { key: 'ArrowRight' })
+  expect(selected()).toEqual(['Security'])
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Security' }))
+  expect(screen.getByRole('heading', { name: 'This device' })).toBeTruthy()
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Security' }), { key: 'ArrowRight' })
+  expect(selected()).toEqual(['Browser'])
+  expect(screen.getByRole('heading', { name: 'Saving' })).toBeTruthy()
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Browser' }), { key: 'ArrowLeft' })
+  expect(selected()).toEqual(['Security'])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Security' }), { key: 'End' })
+  expect(selected()).toEqual([names.at(-1)])
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: names.at(-1) }))
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: names.at(-1) }), { key: 'ArrowRight' })
+  expect(selected()).toEqual(['General'])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'General' }), { key: 'ArrowLeft' })
+  expect(selected()).toEqual([names.at(-1)])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: names.at(-1) }), { key: 'Home' })
+  expect(selected()).toEqual(['General'])
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'General' }))
+})
+
+test('clicking a tab shows its panel', async () => {
+  renderSettings()
+
+  await fireEvent.click(screen.getByRole('tab', { name: 'Sync' }))
+
+  expect(screen.getByRole('tab', { name: 'Sync' }).getAttribute('aria-selected')).toBe('true')
+  expect(screen.getByRole('heading', { name: 'Sesame Sync' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'Appearance' })).toBeNull()
 })
