@@ -14,16 +14,30 @@ export function createApprovalWait(fetchWait: () => Promise<number>): Readable<A
   return readable<ApprovalWait>(unknownWait, (set) => {
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let reading = false
+    let readAgain = false
 
     async function refresh() {
       if (timer) clearTimeout(timer)
+      timer = undefined
+      if (reading) {
+        readAgain = true
+        return
+      }
+      reading = true
       let ms = unknownWait.ms
       try {
         ms = await fetchWait()
       } catch {
         ms = unknownWait.ms
       }
+      reading = false
       if (stopped) return
+      if (readAgain) {
+        readAgain = false
+        void refresh()
+        return
+      }
       set({ ms, windowFocused: document.hasFocus() })
       timer = setTimeout(() => void refresh(), ms > 0 ? WAIT_POLL_MS : READY_POLL_MS)
     }

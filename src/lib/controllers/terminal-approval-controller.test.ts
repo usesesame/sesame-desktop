@@ -411,11 +411,74 @@ describe('terminal approvals in the window', () => {
     stop()
   })
 
+  it('leaves a newer approval working when an older decision comes back', async () => {
+    const { controller, stop } = await started()
+    let answerFirst: () => void = () => {}
+    terminalApi.resolveTerminalRequest.mockReturnValueOnce(new Promise<void>((resolve) => { answerFirst = resolve }))
+    handlers.request(request('approval-1'))
+    const first = controller.allow()
+    handlers.cancelled({ approvalId: 'approval-1', reason: 'expired' })
+    handlers.request(request('approval-2'))
+    let answerSecond: () => void = () => {}
+    terminalApi.resolveTerminalRequest.mockReturnValueOnce(new Promise<void>((resolve) => { answerSecond = resolve }))
+    const second = controller.allow()
+    expect(state()).toMatchObject({ working: true })
+    answerFirst()
+    await first
+    expect(state().request?.approvalId).toBe('approval-2')
+    expect(state().working).toBe(true)
+    answerSecond()
+    await second
+    expect(state().request).toBeNull()
+    stop()
+  })
+
+  it.each(['deny', 'dismiss'] as const)('shows the error and the request again when %s did not reach Sesame', async (decision) => {
+    const { controller, stop } = await started()
+    const shown = decision === 'deny' ? request('approval-1') : request('approval-1', { candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false })
+    handlers.request(shown)
+    terminalApi.resolveTerminalRequest.mockRejectedValueOnce(new Error('Sesame could not reach the request.'))
+    terminalApi.getPendingTerminalRequest.mockResolvedValueOnce(shown)
+    await (decision === 'deny' ? controller.deny() : controller.dismiss())
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(state().error).toBe('Sesame could not reach the request.')
+
+    await (decision === 'deny' ? controller.deny() : controller.dismiss())
+    expect(decisions().at(-1)).toEqual({ approvalId: 'approval-1', decision })
+    expect(state().request).toBeNull()
+    stop()
+  })
+
+  it('keeps a request closed when its failed denial finds it already gone or replaced', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1'))
+    terminalApi.resolveTerminalRequest.mockRejectedValueOnce(new Error('Sesame could not reach the request.'))
+    terminalApi.getPendingTerminalRequest.mockResolvedValueOnce(request('approval-3'))
+    await controller.deny()
+    expect(state().request).toBeNull()
+    expect(state().error).toBe('')
+    stop()
+  })
+
+  it('does not show a request again when its cancellation arrived while a poll was out', async () => {
+    const { stop } = await started()
+    let answerPoll: (value: CliApprovalRequestEvent) => void = () => {}
+    terminalApi.getPendingTerminalRequest.mockReturnValueOnce(new Promise((resolve) => { answerPoll = resolve }))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(terminalApi.getPendingTerminalRequest).toHaveBeenCalledTimes(2)
+    handlers.cancelled({ approvalId: 'approval-1', reason: 'connectionClosed' })
+    answerPoll(request('approval-1'))
+    await flush()
+    expect(state().request).toBeNull()
+    stop()
+  })
+
   it('keeps a request it shows even when a poll that began before it reports nothing', async () => {
     const { stop } = await started()
     let answerPoll: (value: null) => void = () => {}
     terminalApi.getPendingTerminalRequest.mockReturnValueOnce(new Promise((resolve) => { answerPoll = resolve }))
     await vi.advanceTimersByTimeAsync(3_000)
+    expect(terminalApi.getPendingTerminalRequest).toHaveBeenCalledTimes(2)
     handlers.request(request('approval-1'))
     answerPoll(null)
     await flush()

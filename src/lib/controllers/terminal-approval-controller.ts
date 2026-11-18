@@ -19,6 +19,7 @@ import type { ModalController } from './modal-controller'
 export const TOO_SOON_MESSAGE = 'Wait a moment after Sesame comes forward, then approve again.'
 const NOTICE_TITLE = 'Terminal request closed'
 const BROWSER_STORES = ['browserFill', 'browserIdentityFill', 'browserCardFill', 'browserTotpFill', 'browserSave', 'browserChange', 'browserCreate'] as const
+const REMEMBERED_CANCELLATIONS = 32
 
 interface TerminalApprovalControllerOptions {
   stores: AppStores
@@ -46,6 +47,13 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   const store = stores.terminalApproval
   let closedQuietly: string | null = null
   let reported: string | null = null
+  const cancelled: string[] = []
+
+  function rememberCancelled(approvalId: string) {
+    if (cancelled.includes(approvalId)) return
+    cancelled.push(approvalId)
+    if (cancelled.length > REMEMBERED_CANCELLATIONS) cancelled.shift()
+  }
 
   const loopStore = {
     value: store.value,
@@ -83,6 +91,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const before = store.value().request?.approvalId
     const pending = await getPendingTerminalRequest()
     const shown = store.value().request
+    if (pending && cancelled.includes(pending.approvalId)) return shown
     if (!pending && shown && shown.approvalId !== before) return shown
     return pending
   }
@@ -94,7 +103,28 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     } catch {
       return
     }
-    if (pending && !store.value().request) loop.receive(pending)
+    if (pending && !cancelled.includes(pending.approvalId) && !store.value().request) loop.receive(pending)
+  }
+
+  async function reopenIfStillWaiting(approvalId: string, message: string) {
+    let pending: CliApprovalRequestEvent | null
+    try {
+      pending = await getPendingTerminalRequest()
+    } catch {
+      return
+    }
+    if (!pending || pending.approvalId !== approvalId || cancelled.includes(approvalId) || store.value().request) return
+    loop.receive(pending)
+    if (store.value().request?.approvalId === approvalId) store.patch({ error: message })
+  }
+
+  async function closeWith(request: CliApprovalRequestEvent, decision: 'deny' | 'dismiss') {
+    loopStore.patch({ request: null })
+    try {
+      await resolveTerminalRequest({ approvalId: request.approvalId, decision })
+    } catch (error) {
+      await reopenIfStillWaiting(request.approvalId, messageFor(error))
+    }
   }
 
   const loop = approvalLoop<CliApprovalRequestEvent, CliApprovalCancelledEvent>({
@@ -117,6 +147,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       void confirmPending()
     },
     onCancelled: (payload) => {
+      rememberCancelled(payload.approvalId)
       const current = store.value().request
       if (current?.approvalId === payload.approvalId) {
         loopStore.patch({ request: null })
@@ -136,7 +167,6 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
 
   function finish(approvalId: string) {
     if (store.value().request?.approvalId === approvalId) loopStore.patch({ request: null })
-    else store.patch({ working: false })
   }
 
   async function send(request: CliApprovalRequestEvent, decision: CliDecisionInput): Promise<boolean> {
@@ -199,19 +229,13 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const request = state.request
     if (!request) return
     if (request.notFound !== undefined) return dismiss()
-    loopStore.patch({ request: null })
-    await decline(request.approvalId)
+    await closeWith(request, 'deny')
   }
 
   async function dismiss() {
     const request = store.value().request
     if (!request) return
-    loopStore.patch({ request: null })
-    try {
-      await resolveTerminalRequest({ approvalId: request.approvalId, decision: 'dismiss' })
-    } catch {
-      return
-    }
+    await closeWith(request, 'dismiss')
   }
 
   function expire(approvalId: string) {
