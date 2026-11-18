@@ -20,14 +20,27 @@ export async function refreshEmailAliases(): Promise<void> {
   await loadEmailAliases().catch(() => undefined)
 }
 
-export async function saveEmailAliases(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
-  const requested = generation
-  return publish(await saveEmailAliasSettings(settings), requested)
+async function change(action: () => Promise<EmailAliasStatus>): Promise<EmailAliasStatus> {
+  const requested = ++generation
+  try {
+    const status = publish(await action(), requested)
+    if (requested === generation) generation += 1
+    return status
+  } catch (error) {
+    if (requested === generation) {
+      generation += 1
+      void refreshEmailAliases()
+    }
+    throw error
+  }
 }
 
-export async function removeEmailAliases(): Promise<EmailAliasStatus> {
-  const requested = generation
-  return publish(await removeEmailAliasSettings(), requested)
+export function saveEmailAliases(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
+  return change(() => saveEmailAliasSettings(settings))
+}
+
+export function removeEmailAliases(): Promise<EmailAliasStatus> {
+  return change(removeEmailAliasSettings)
 }
 
 export function clearEmailAliases(): void {
