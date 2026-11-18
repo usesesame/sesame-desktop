@@ -13,13 +13,7 @@ pub fn grant_presence(
     presence: State<'_, ReleasePresence>,
 ) -> VaultResult<()> {
     let secret = Zeroizing::new(secret);
-    let epoch = state.session_epoch();
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
-    presence.grant_with_password(session, epoch, &secret)
+    presence.grant_with_password_in(&state, &secret)
 }
 
 #[tauri::command]
