@@ -60,7 +60,7 @@ describe('terminal approvals in the window', () => {
     stores = createAppStores()
     stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
     feedback = createFeedbackController()
-    vi.spyOn(feedback, 'showNotice')
+    vi.spyOn(feedback, 'showRefusal')
     presenceOpen = false
     terminalApi.subscribeTerminalApproval.mockImplementation(async (next) => {
       handlers = next
@@ -203,14 +203,14 @@ describe('terminal approvals in the window', () => {
     handlers.request(request('approval-2'))
     handlers.cancelled({ approvalId: 'approval-1', reason: 'expired' })
     expect(state().request?.approvalId).toBe('approval-2')
-    expect(feedback.showNotice).not.toHaveBeenCalled()
+    expect(feedback.showRefusal).not.toHaveBeenCalled()
 
     handlers.cancelled({ approvalId: 'approval-2', reason: 'connectionClosed' })
     expect(state().request).toBeNull()
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'The terminal stopped waiting, so Sesame closed its request.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'The terminal stopped waiting, so Sesame closed its request.')
 
     handlers.cancelled({ approvalId: 'approval-2', reason: 'connectionClosed' })
-    expect(feedback.showNotice).toHaveBeenCalledTimes(1)
+    expect(feedback.showRefusal).toHaveBeenCalledTimes(1)
     stop()
   })
 
@@ -230,9 +230,9 @@ describe('terminal approvals in the window', () => {
     terminalApi.resolveTerminalRequest.mockRejectedValueOnce(new Error('This terminal request is no longer waiting in Sesame.'))
     await controller.allow()
     expect(state().request).toBeNull()
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'This terminal request is no longer waiting in Sesame.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'This terminal request is no longer waiting in Sesame.')
     handlers.cancelled({ approvalId: 'approval-1', reason: 'vaultChanged' })
-    expect(feedback.showNotice).toHaveBeenCalledTimes(1)
+    expect(feedback.showRefusal).toHaveBeenCalledTimes(1)
     stop()
   })
 
@@ -316,7 +316,7 @@ describe('terminal approvals in the window', () => {
     lockHandler()
     expect(state()).toMatchObject({ request: null, secret: '' })
     handlers.cancelled({ approvalId: 'approval-1', reason: 'vaultChanged' })
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'The vault locked or changed, so Sesame closed the terminal request.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'The vault locked or changed, so Sesame closed the terminal request.')
     await controller.allow()
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
     stop()
@@ -359,7 +359,7 @@ describe('terminal approvals in the window', () => {
     await flush()
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
     handlers.cancelled({ approvalId: 'approval-1', reason: 'vaultChanged' })
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'The vault locked or changed, so Sesame closed the terminal request.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'The vault locked or changed, so Sesame closed the terminal request.')
     stop()
   })
 
@@ -370,7 +370,7 @@ describe('terminal approvals in the window', () => {
     expect(state().request).toBeNull()
     expect(stores.browserFill.value().request?.approvalId).toBe('browser-1')
     handlers.cancelled({ approvalId: 'approval-1', reason: 'preempted' })
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', expect.stringContaining('A browser request needed the window'))
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', expect.stringContaining('A browser request needed the window'))
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
     stop()
   })
@@ -423,9 +423,9 @@ describe('terminal approvals in the window', () => {
     expect(state().request?.approvalId).toBe('approval-1')
     controller.expire('approval-1')
     expect(state().request).toBeNull()
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'The terminal request was not answered in time, so Sesame turned it down.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'The terminal request was not answered in time, so Sesame turned it down.')
     handlers.cancelled({ approvalId: 'approval-1', reason: 'expired' })
-    expect(feedback.showNotice).toHaveBeenCalledTimes(1)
+    expect(feedback.showRefusal).toHaveBeenCalledTimes(1)
     await controller.allow()
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
     stop()
@@ -536,7 +536,7 @@ describe('terminal approvals in the window', () => {
     terminalApi.getPendingTerminalRequest.mockRejectedValueOnce(new Error('unreachable'))
     await controller.deny()
     expect(state().request).toBeNull()
-    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'Sesame could not reach the request.')
+    expect(feedback.showRefusal).toHaveBeenCalledWith('Terminal request closed', 'Sesame could not reach the request.')
     stop()
   })
 

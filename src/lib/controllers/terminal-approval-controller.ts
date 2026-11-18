@@ -89,7 +89,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     if (reported === approvalId) return
     reported = approvalId
     if (closedQuietly === approvalId) closedQuietly = null
-    feedback.showNotice(NOTICE_TITLE, cancelledLine(reason))
+    feedback.showRefusal(NOTICE_TITLE, cancelledLine(reason))
   }
 
   function closeQuietly(approvalId: string) {
@@ -131,7 +131,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     try {
       pending = await getPendingTerminalRequest()
     } catch {
-      feedback.showNotice(NOTICE_TITLE, message)
+      feedback.showRefusal(NOTICE_TITLE, message)
       return
     }
     if (!pending || pending.approvalId !== approvalId || settled(approvalId) || store.value().request) return
@@ -211,7 +211,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       }
       finish(request.approvalId)
       reported = request.approvalId
-      feedback.showNotice(NOTICE_TITLE, message)
+      feedback.showRefusal(NOTICE_TITLE, message)
       return false
     }
   }

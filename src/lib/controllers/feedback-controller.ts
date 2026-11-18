@@ -9,6 +9,7 @@ export interface AppNotice {
   title: string
   message: string
   action?: NoticeAction
+  tone?: 'refused'
 }
 
 const NOTICE_MS = 4_800
@@ -41,6 +42,17 @@ export function createFeedbackController() {
     noticeTimer = window.setTimeout(() => state.patch({ notice: null }), durationMs)
   }
 
+  function show(notice: AppNotice) {
+    const duration = notice.action ? NOTICE_WITH_ACTION_MS : NOTICE_MS
+    state.patch({ notice })
+    if (noticeHeld) {
+      clearNoticeTimer()
+      noticeRemainingMs = duration
+      return
+    }
+    startNoticeTimer(duration)
+  }
+
   return {
     state,
     clearError() {
@@ -53,14 +65,10 @@ export function createFeedbackController() {
       state.patch({ errorMessage })
     },
     showNotice(title: string, message: string, action?: NoticeAction) {
-      const duration = action ? NOTICE_WITH_ACTION_MS : NOTICE_MS
-      state.patch({ notice: action ? { title, message, action } : { title, message } })
-      if (noticeHeld) {
-        clearNoticeTimer()
-        noticeRemainingMs = duration
-        return
-      }
-      startNoticeTimer(duration)
+      show(action ? { title, message, action } : { title, message })
+    },
+    showRefusal(title: string, message: string) {
+      show({ title, message, tone: 'refused' })
     },
     holdNotice() {
       noticeHeld = true

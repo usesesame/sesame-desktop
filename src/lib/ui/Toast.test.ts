@@ -75,4 +75,19 @@ describe('Toast actions', () => {
     expect(onDismissNotice).toHaveBeenCalledOnce()
     expect(run).toHaveBeenCalledOnce()
   })
+
+  it('marks a refusal with the warning icon and tone instead of the check', () => {
+    render(Toast, { notice: { title: 'Terminal request closed', message: 'Fictional refusal', tone: 'refused' }, errorMessage: '', onDismissNotice: vi.fn(), onDismissError: vi.fn() })
+    const toast = screen.getByRole('status')
+    expect(toast.classList.contains('refused')).toBe(true)
+    expect(toast.querySelector('.toast-icon circle')).not.toBeNull()
+    expect(toast.querySelector('.toast-icon path')?.getAttribute('d')).not.toBe('m5 12.5 4.2 4.2L19 7')
+  })
+
+  it('keeps the check for a notice that reports something done', () => {
+    renderToast()
+    const toast = screen.getByRole('status')
+    expect(toast.classList.contains('refused')).toBe(false)
+    expect(toast.querySelector('.toast-icon path')?.getAttribute('d')).toBe('m5 12.5 4.2 4.2L19 7')
+  })
 })
