@@ -20,10 +20,10 @@ use super::approval_slot::ApprovalSlot;
 use super::browser_fill::NormalizedOrigin;
 use super::browser_fill_broker::{ApprovalRequest, BrowserFillState};
 use super::cli_broker::{
-    CliApprovalRequestEvent, CliApprovalState, CliDecisionInput, CliDecisionKind,
+    CliApprovalRequestEvent, CliApprovalState, CliCandidate, CliDecisionInput, CliDecisionKind,
     CliUnlockRequestEvent, COOLING_FIRST, COOLING_MESSAGE,
 };
-use super::cli_requests::{serve_cli_request, CliContext, CliHost};
+use super::cli_requests::{release_at, serve_cli_request, CliContext, CliHost};
 use super::lifecycle::{lock_and_notify, unlock_vault_in_state};
 use super::release_record::{release_record_page_in_state, ReleaseRecordQuery};
 use super::terminal_allowances::{
@@ -85,6 +85,54 @@ impl CliHost for FakeHost {
 
     fn allowances_changed(&self) {
         self.note("allowancesChanged".to_string());
+    }
+}
+
+type Hook<'h> = Mutex<Option<Box<dyn FnOnce() + Send + 'h>>>;
+
+#[derive(Default)]
+struct HookedHost<'h> {
+    inner: FakeHost,
+    on_peer_check: Hook<'h>,
+    on_unlock_request: Hook<'h>,
+}
+
+fn run_hook(hook: &Hook<'_>) {
+    let taken = hook.lock().expect("hook").take();
+    if let Some(hook) = taken {
+        hook();
+    }
+}
+
+impl CliHost for HookedHost<'_> {
+    fn peer_connected(&self) -> bool {
+        run_hook(&self.on_peer_check);
+        self.inner.peer_connected()
+    }
+
+    fn send(&self, reply: &CliReply) -> bool {
+        self.inner.send(reply)
+    }
+
+    fn unlock_requested(&self, event: &CliUnlockRequestEvent) {
+        self.inner.unlock_requested(event);
+        run_hook(&self.on_unlock_request);
+    }
+
+    fn unlock_ended(&self, reason: &'static str) {
+        self.inner.unlock_ended(reason);
+    }
+
+    fn approval_requested(&self, event: &CliApprovalRequestEvent) {
+        self.inner.approval_requested(event);
+    }
+
+    fn approval_cancelled(&self, approval_id: &str, reason: &'static str) {
+        self.inner.approval_cancelled(approval_id, reason);
+    }
+
+    fn allowances_changed(&self) {
+        self.inner.allowances_changed();
     }
 }
 
@@ -155,7 +203,7 @@ impl Harness {
 
     fn serve(
         &self,
-        host: &FakeHost,
+        host: &dyn CliHost,
         effects: &FakeEffects<'_>,
         payload: &[u8],
         origin: &TerminalOrigin,
@@ -195,6 +243,36 @@ impl Harness {
         (host.sent(), host.events())
     }
 
+    fn run_hooked(
+        &self,
+        payload: &[u8],
+        origin: &TerminalOrigin,
+        host: &HookedHost<'_>,
+        act: impl FnOnce(),
+    ) -> (Vec<CliReply>, Vec<String>) {
+        let effects = self.effects();
+        std::thread::scope(|scope| {
+            scope.spawn(|| self.serve(host, &effects, payload, origin));
+            act();
+        });
+        (host.inner.sent(), host.inner.events())
+    }
+
+    fn context<'c>(
+        &'c self,
+        host: &'c dyn CliHost,
+        effects: &'c FakeEffects<'c>,
+    ) -> CliContext<'c> {
+        CliContext::new(
+            &self.vault.state,
+            &self.presence,
+            effects,
+            &self.approvals,
+            &self.allowances,
+            host,
+        )
+    }
+
     fn pending(&self) -> CliApprovalRequestEvent {
         let until = Instant::now() + Duration::from_secs(5);
         loop {
@@ -215,13 +293,16 @@ impl Harness {
     ) -> Result<(), &'static str> {
         self.approvals.window_focus_changed(true);
         self.clock.advance(Duration::from_secs(1));
-        self.approvals.decide(CliDecisionInput {
-            approval_id: event.approval_id.clone(),
-            decision,
-            item_id: item_id.map(str::to_string),
-            allow_terminal: Some(allow_terminal),
-            clear_after_seconds: None,
-        })
+        self.approvals.decide(
+            CliDecisionInput {
+                approval_id: event.approval_id.clone(),
+                decision,
+                item_id: item_id.map(str::to_string),
+                allow_terminal: Some(allow_terminal),
+                clear_after_seconds: None,
+            },
+            self.allowances.revision(),
+        )
     }
 
     fn allow(&self, allow_terminal: bool) {
@@ -661,13 +742,16 @@ fn an_allowance_ends_after_five_minutes_and_with_its_session_leader() {
     let clock = FakeClock::new();
     let allowances = TerminalAllowances::with_clock(clock.clone());
     let origin = terminal(100);
-    assert!(allowances.grant(&origin, 4));
+    assert!(allowances.grant(&origin, 4, allowances.revision()));
     clock.advance(ALLOWANCE_TTL - Duration::from_secs(1));
     assert!(allowances.covers(&origin, 4));
     assert!(!allowances.covers(&terminal(101), 4));
-    assert!(!allowances.covers(&origin, 5));
-    clock.advance(Duration::from_secs(2));
+    clock.advance(Duration::from_secs(1));
     assert!(!allowances.covers(&origin, 4));
+
+    let other_vault = TerminalAllowances::with_clock(clock.clone());
+    assert!(other_vault.grant(&origin, 4, other_vault.revision()));
+    assert!(!other_vault.covers(&origin, 5));
 }
 
 #[test]
@@ -676,7 +760,7 @@ fn a_request_with_no_terminal_never_offers_or_uses_an_allowance() {
     let origin = TerminalOrigin::without_terminal();
     assert!(!harness
         .allowances
-        .grant(&origin, harness.vault.state.session_epoch()));
+        .grant(&origin, harness.vault.state.session_epoch(), 0));
 
     let (replies, _) = harness.run_with(&get(13, Some("username"), false), &origin, |_, _| {
         let event = harness.pending();
@@ -1423,3 +1507,251 @@ fn labels_with_control_characters_reach_the_tool_readable_distinct_and_matchable
         );
     }
 }
+
+const PREEMPTED: &str =
+    "Sesame set this request aside to answer your browser. Try again in a moment.";
+
+fn northwind() -> CliCandidate {
+    CliCandidate {
+        id: "fictional-login".to_string(),
+        kind: "login".to_string(),
+        title: "Northwind mail".to_string(),
+        ..CliCandidate::default()
+    }
+}
+
+fn totp_request(n: u8, copy: bool) -> Vec<u8> {
+    request(
+        n,
+        serde_json::json!({ "type": "totp", "item": "Northwind mail", "copy": copy }),
+    )
+}
+
+#[test]
+fn a_vault_change_after_the_approval_releases_nothing_from_the_newer_vault() {
+    let harness = Harness::new();
+    grant(&harness.vault, &harness.presence);
+    let approved = harness.vault.state.session_epoch();
+    let host = FakeHost::default();
+    let effects = harness.effects();
+    let context = harness.context(&host, &effects);
+    let chosen = northwind();
+    let requests = [
+        get(220, Some("username"), false),
+        get(221, None, false),
+        get(222, Some("username"), true),
+        get(223, Some("password"), false),
+        get(224, Some("password"), true),
+        totp_request(225, false),
+        totp_request(226, true),
+        request(227, serde_json::json!({ "type": "list" })),
+    ];
+    for payload in &requests {
+        assert!(release_at(&context, payload, Some(&chosen), approved).is_ok());
+    }
+    let released = record_entries(&harness).len();
+
+    super::logins::save_login_in_state(
+        &harness.vault.state,
+        crate::test_support::login_input(None, "https://contoso.example", "fictional-other"),
+    )
+    .expect("saved in the window");
+    grant(&harness.vault, &harness.presence);
+    let copies_before = effects.calls().len();
+    for payload in &requests {
+        assert_eq!(
+            release_at(&context, payload, Some(&chosen), approved).err(),
+            Some(CliErrorCode::Stale)
+        );
+    }
+    assert_eq!(effects.calls().len(), copies_before);
+    assert_eq!(record_entries(&harness).len(), released);
+}
+
+#[test]
+fn a_terminal_copy_reaches_the_clipboard_while_the_vault_cannot_lock() {
+    let harness = Harness::new();
+    grant(&harness.vault, &harness.presence);
+    let epoch = harness.vault.state.session_epoch();
+    let host = FakeHost::default();
+    let effects = harness.effects().probing_copies(&harness.vault.state);
+    let context = harness.context(&host, &effects);
+    for payload in [
+        get(230, Some("username"), true),
+        get(231, Some("password"), true),
+        totp_request(232, true),
+    ] {
+        release_at(&context, &payload, Some(&northwind()), epoch).expect("copied");
+    }
+    let probes: Vec<bool> = effects
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            Effect::CopiedWhileSessionHeld(held) => Some(held),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(probes, vec![true, true, true]);
+}
+
+#[test]
+fn an_allowance_decided_before_forget_is_not_kept() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let (replies, _) = harness.run_with(&get(240, Some("username"), false), &origin, |_, _| {
+        let event = harness.pending();
+        let before_forget = harness.allowances.revision();
+        harness.allowances.forget_all();
+        harness.approvals.window_focus_changed(true);
+        harness.clock.advance(Duration::from_secs(1));
+        harness
+            .approvals
+            .decide(
+                CliDecisionInput {
+                    approval_id: event.approval_id.clone(),
+                    decision: CliDecisionKind::Allow,
+                    item_id: None,
+                    allow_terminal: Some(true),
+                    clear_after_seconds: None,
+                },
+                before_forget,
+            )
+            .expect("allowed");
+    });
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+    let epoch = harness.vault.state.session_epoch();
+    assert!(!harness.allowances.covers(&origin, epoch));
+
+    allow_terminal_for_five_minutes(&harness, &origin);
+    assert!(harness.allowances.covers(&origin, epoch));
+}
+
+#[test]
+fn a_decision_after_the_browser_took_the_slot_releases_nothing() {
+    let harness = Harness::new();
+    let (replies, events) = harness.run_with(
+        &get(250, Some("username"), false),
+        &terminal(100),
+        |_, _| {
+            let event = harness.pending();
+            let browser = harness.slot.take_for_browser_before_preempting();
+            assert_eq!(
+                harness.decide(&event, CliDecisionKind::Allow, None, false),
+                Err("approvalExpired")
+            );
+            assert!(harness.slot.held_by_browser());
+            drop(browser);
+        },
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+    assert_eq!(error_message(&replies).as_deref(), Some(PREEMPTED));
+    assert!(events.contains(&"approvalCancelled:preempted".to_string()));
+    assert!(!wire(&replies).contains("casey@northwind.example"));
+}
+
+#[test]
+fn a_preemption_noticed_after_the_wait_still_answers_busy() {
+    let harness = Harness::new();
+    let browser = BrowserFillState::sharing(harness.slot.clone());
+    let epoch = harness.vault.state.session_epoch();
+    let host = HookedHost::default();
+    *host.on_peer_check.lock().expect("hook") = Some(Box::new(|| {
+        let held = browser
+            .begin(
+                "fill-late",
+                browser_origin(),
+                epoch,
+                ApprovalRequest::Create,
+            )
+            .expect("the browser goes first");
+        browser.revoke(&held.0);
+    }));
+    let (replies, events) = harness.run_hooked(
+        &get(233, Some("username"), false),
+        &terminal(100),
+        &host,
+        || {},
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+    assert_eq!(error_message(&replies).as_deref(), Some(PREEMPTED));
+    assert!(events.contains(&"approvalCancelled:preempted".to_string()));
+}
+
+#[test]
+fn an_unlock_noticed_after_the_deadline_opens_no_approval() {
+    let mut harness = Harness::new();
+    harness.unlock_timeout = Duration::ZERO;
+    harness
+        .approvals
+        .shorten_approval_timeout(Duration::from_millis(150));
+    harness.lock(&harness.effects());
+    let host = HookedHost::default();
+    *host.on_unlock_request.lock().expect("hook") = Some(Box::new(|| harness.vault.reopen()));
+    let (replies, events) = harness.run_hooked(
+        &get(234, Some("username"), false),
+        &terminal(100),
+        &host,
+        || {},
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Timeout));
+    assert!(events.contains(&"unlockEnded:expired".to_string()));
+    assert!(!events.contains(&"approvalRequested".to_string()));
+}
+
+#[test]
+fn an_allowed_request_that_fails_is_not_listed_as_answered() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    allow_terminal_for_five_minutes(&harness, &origin);
+    let epoch = harness.vault.state.session_epoch();
+
+    let replies = harness.run(&get(235, Some("Nothing like it"), false), &origin);
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NoField));
+    assert!(harness.allowances.list(epoch).requests.is_empty());
+
+    let replies = harness.run(&get(236, Some("username"), false), &origin);
+    assert_eq!(error_code(&replies), None);
+    assert_eq!(harness.allowances.list(epoch).requests.len(), 1);
+}
+
+#[test]
+fn an_allowed_terminal_copy_uses_the_clipboard_setting() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    allow_terminal_for_five_minutes(&harness, &origin);
+    assert!(!harness.approvals.set_clear_after_seconds(5));
+    assert!(harness.approvals.set_clear_after_seconds(10));
+
+    let host = FakeHost::default();
+    let effects = harness.effects();
+    harness.serve(&host, &effects, &totp_request(237, true), &origin);
+    assert_eq!(
+        host.sent().last(),
+        Some(&CliReply::copied(&id(237), Some(10)))
+    );
+    assert!(effects.calls().iter().any(|call| matches!(
+        call,
+        Effect::CopySecret {
+            clear_after_ms: Some(10_000),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn reading_the_permissions_for_an_older_vault_keeps_a_newer_grant() {
+    let clock = FakeClock::new();
+    let allowances = TerminalAllowances::with_clock(clock);
+    let origin = terminal(100);
+    assert!(allowances.grant(&origin, 5, allowances.revision()));
+    assert!(allowances.list(4).allowances.is_empty());
+    assert!(allowances.covers(&origin, 5));
+    assert_eq!(allowances.list(5).allowances.len(), 1);
+}
+

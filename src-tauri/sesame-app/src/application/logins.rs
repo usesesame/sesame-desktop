@@ -23,7 +23,7 @@ use crate::vault::util::unix_timestamp;
 use crate::vault::{
     DeleteLoginResult, DuplicateGroup, LoginInput, MergeComparison, MergeDuplicateLoginsRequest,
     MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, TotpCodeEntry, TotpRefresh,
-    VaultPayload, VaultResult, VaultSnapshot, VaultState,
+    UnlockedVault, VaultPayload, VaultResult, VaultSnapshot, VaultState,
 };
 
 pub fn save_login_in_state(
@@ -405,15 +405,10 @@ pub fn copy_totp_code_in_state(
     Ok(copied)
 }
 
-pub fn terminal_totp_in_state(
-    state: &VaultState,
+pub fn terminal_totp_in_session(
+    session: &UnlockedVault,
     id: &str,
 ) -> VaultResult<Option<(Zeroizing<String>, u64)>> {
-    let session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session.as_ref().ok_or("Unlock your vault first.")?;
     let item = session.open_item(id)?;
     let TaggedItem::Login(entry) = &*item else {
         return Ok(None);

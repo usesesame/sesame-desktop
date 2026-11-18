@@ -22,12 +22,27 @@ pub fn get_terminal_approval_wait(approvals: State<'_, CliApprovalState>) -> u64
 pub fn resolve_terminal_request(
     decision: CliDecisionInput,
     approvals: State<'_, CliApprovalState>,
+    allowances: State<'_, TerminalAllowances>,
 ) -> VaultResult<()> {
-    approvals.decide(decision).map_err(|error| match error {
-        APPROVAL_TOO_SOON => APPROVAL_TOO_SOON_MESSAGE.to_string(),
-        "selectionNotOffered" => "Choose one of the items Sesame offered.".to_string(),
-        _ => "This terminal request is no longer waiting in Sesame.".to_string(),
-    })
+    approvals
+        .decide(decision, allowances.revision())
+        .map_err(|error| match error {
+            APPROVAL_TOO_SOON => APPROVAL_TOO_SOON_MESSAGE.to_string(),
+            "selectionNotOffered" => "Choose one of the items Sesame offered.".to_string(),
+            _ => "This terminal request is no longer waiting in Sesame.".to_string(),
+        })
+}
+
+#[tauri::command]
+pub fn set_terminal_clipboard_clear_seconds(
+    seconds: u64,
+    approvals: State<'_, CliApprovalState>,
+) -> VaultResult<()> {
+    if approvals.set_clear_after_seconds(seconds) {
+        Ok(())
+    } else {
+        Err("Choose 10, 30 or 60 seconds.".to_string())
+    }
 }
 
 #[tauri::command]

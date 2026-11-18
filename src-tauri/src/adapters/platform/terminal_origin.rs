@@ -354,7 +354,7 @@ mod tests {
             Some("bash")
         );
         let allowances = TerminalAllowances::default();
-        assert!(allowances.grant(&allowed, 7));
+        assert!(allowances.grant(&allowed, 7, allowances.revision()));
         assert!(allowances.covers(&origin_among(&first_shell, 3_150, 180), 7));
 
         let reused = [

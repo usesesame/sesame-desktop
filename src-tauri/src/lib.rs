@@ -196,6 +196,7 @@ macro_rules! sesame_invoke_handler {
             commands::get_pending_terminal_request,
             commands::get_terminal_approval_wait,
             commands::resolve_terminal_request,
+            commands::set_terminal_clipboard_clear_seconds,
             commands::list_terminal_permissions,
             commands::forget_terminal_permissions,
             commands::get_terminal_status,

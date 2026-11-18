@@ -210,6 +210,7 @@ commands.allow = [
   "get_pending_terminal_request",
   "get_terminal_approval_wait",
   "resolve_terminal_request",
+  "set_terminal_clipboard_clear_seconds",
   "list_terminal_permissions",
   "forget_terminal_permissions",
   "get_terminal_status",

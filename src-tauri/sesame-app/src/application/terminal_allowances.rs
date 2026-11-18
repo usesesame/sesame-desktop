@@ -108,6 +108,7 @@ struct AllowanceInner {
     allowances: Vec<Allowance>,
     requests: VecDeque<AllowedTerminalRequest>,
     epoch_checked: bool,
+    revision: u64,
 }
 
 impl Default for AllowanceInner {
@@ -116,6 +117,7 @@ impl Default for AllowanceInner {
             allowances: Vec::new(),
             requests: VecDeque::new(),
             epoch_checked: true,
+            revision: 0,
         }
     }
 }
@@ -156,13 +158,20 @@ impl TerminalAllowances {
         allowances
     }
 
-    pub fn grant(&self, origin: &TerminalOrigin, epoch: u64) -> bool {
+    pub fn revision(&self) -> u64 {
+        self.inner.lock().map_or(u64::MAX, |inner| inner.revision)
+    }
+
+    pub fn grant(&self, origin: &TerminalOrigin, epoch: u64, revision: u64) -> bool {
         let Some(key) = origin.key.clone() else {
             return false;
         };
         let Ok(mut inner) = self.inner.lock() else {
             return false;
         };
+        if inner.revision != revision {
+            return false;
+        }
         let now = self.clock.now();
         inner
             .allowances
@@ -213,6 +222,7 @@ impl TerminalAllowances {
         if let Ok(mut inner) = self.inner.lock() {
             inner.allowances.clear();
             inner.requests.clear();
+            inner.revision = inner.revision.wrapping_add(1);
         }
     }
 
@@ -225,13 +235,14 @@ impl TerminalAllowances {
         };
         let now = self.clock.now();
         let epoch_checked = inner.epoch_checked;
-        inner.allowances.retain(|allowance| {
-            allowance.expires_at > now && (!epoch_checked || allowance.epoch == epoch)
-        });
+        inner
+            .allowances
+            .retain(|allowance| allowance.expires_at > now);
         TerminalAllowanceList {
             allowances: inner
                 .allowances
                 .iter()
+                .filter(|allowance| !epoch_checked || allowance.epoch == epoch)
                 .map(|allowance| TerminalAllowanceView {
                     terminal: allowance.terminal.clone(),
                     program: allowance.program.clone(),

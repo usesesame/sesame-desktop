@@ -27,6 +27,7 @@ let clipboardClearMs = 30_000
 /// Applies from the next copy onward; does not reschedule a clear already in flight.
 export function setClipboardClearSeconds(seconds: number): void {
   clipboardClearMs = Math.max(1, seconds) * 1_000
+  if (!previewMode) void invoke('set_terminal_clipboard_clear_seconds', { seconds }).catch(() => undefined)
 }
 
 export async function onVaultLocked(handler: () => void): Promise<UnlistenFn> {

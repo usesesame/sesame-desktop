@@ -1793,10 +1793,19 @@ test('the command line tool releases hidden values only behind the presence chec
   assert.match(requests, /entry\.totp\.zeroize\(\);/, 'a whole-item reply can carry the one-time code seed')
   assert.match(requests, /entry\.backup_codes\.zeroize\(\);/, 'a whole-item reply can carry the backup codes')
   const reveal = read('src-tauri', 'sesame-app', 'src', 'application', 'reveal.rs')
+  const shared = reveal.match(/fn item_field_in_state\([\s\S]*?\n\}/)
+  assert.ok(shared, 'item_field_in_state moved')
+  assert.match(shared[0], /require_release_presence\(state, presence\)\?;\s*let item = record_item\(state, id, kind\)\?;/, 'the desktop release reads the item before the presence check')
+  const field = reveal.match(/fn terminal_field\([\s\S]*?\n\}/)
+  assert.ok(field, 'terminal_field moved')
+  assert.match(field[0], /\) -> VaultResult<Zeroizing<String>> \{\s*presence\.require\(epoch\)\?;\s*let item = item_in\(session, id, kind\)\?;/, 'the terminal release reads the item before the presence check')
+  const sessionAt = reveal.match(/pub fn with_session_at<T>\([\s\S]*?\n\}/)
+  assert.ok(sessionAt, 'with_session_at moved')
+  assert.match(sessionAt[0], /if state\.session_epoch\(\) != epoch \{\s*return Err\(VAULT_CHANGED\.into\(\)\);\s*\}\s*read\(session\)/, 'the terminal release reads a vault other than the approved one')
   for (const name of ['terminal_item_field_in_state', 'terminal_copy_item_field_in_state']) {
     const body = reveal.match(new RegExp(`pub fn ${name}\\([\\s\\S]*?\\n\\}`))
     assert.ok(body, `${name} moved`)
-    assert.match(body[0], /let value = item_field_in_state\(state, presence, id, kind, field\)\?;/, `${name} skips the presence check`)
+    assert.match(body[0], /with_session_at\(state, wanted\.epoch, \|session\| \{\s*let value = terminal_field\(/, `${name} skips the presence check`)
   }
   const browserSide = [
     read('src-tauri', 'src', 'browser_fill.rs'),

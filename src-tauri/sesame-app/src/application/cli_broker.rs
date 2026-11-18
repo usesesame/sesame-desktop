@@ -126,7 +126,7 @@ pub struct CliDecisionInput {
 pub enum CliDecision {
     Allow {
         item_id: Option<String>,
-        allow_terminal: bool,
+        terminal_grant: Option<u64>,
     },
     Deny,
     Dismiss,
@@ -360,7 +360,19 @@ impl CliApprovalState {
         self.lock().clear_after_seconds
     }
 
-    pub fn decide(&self, input: CliDecisionInput) -> Result<(), &'static str> {
+    pub fn set_clear_after_seconds(&self, seconds: u64) -> bool {
+        if !CLEAR_AFTER_CHOICES.contains(&seconds) {
+            return false;
+        }
+        self.lock().clear_after_seconds = seconds;
+        true
+    }
+
+    pub fn decide(
+        &self,
+        input: CliDecisionInput,
+        allowance_revision: u64,
+    ) -> Result<(), &'static str> {
         let mut inner = self.lock();
         let (offered, not_found, terminal_allowed) = {
             let pending = inner.pending.as_ref().ok_or(APPROVAL_EXPIRED)?;
@@ -395,7 +407,8 @@ impl CliApprovalState {
                 };
                 CliDecision::Allow {
                     item_id,
-                    allow_terminal: terminal_allowed && input.allow_terminal.unwrap_or(false),
+                    terminal_grant: (terminal_allowed && input.allow_terminal.unwrap_or(false))
+                        .then_some(allowance_revision),
                 }
             }
         };
@@ -405,7 +418,17 @@ impl CliApprovalState {
             }
         }
         let pending = inner.pending.take().ok_or(APPROVAL_EXPIRED)?;
-        pending.sender.send(decision).map_err(|_| APPROVAL_EXPIRED)
+        let sent = pending
+            ._slot
+            .while_held(|| pending.sender.send(decision).is_ok());
+        match sent {
+            Some(true) => Ok(()),
+            Some(false) => Err(APPROVAL_EXPIRED),
+            None => {
+                let _ = pending.sender.send(CliDecision::Preempted);
+                Err(APPROVAL_EXPIRED)
+            }
+        }
     }
 
     pub fn note_unanswered(&self) {

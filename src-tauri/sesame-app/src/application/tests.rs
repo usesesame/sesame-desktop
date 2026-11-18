@@ -88,6 +88,7 @@ pub(super) enum Effect {
         total: usize,
     },
     EmitBreachScanFinished,
+    CopiedWhileSessionHeld(bool),
 }
 
 pub(super) struct FakeEffects<'a> {
@@ -100,6 +101,7 @@ pub(super) struct FakeEffects<'a> {
     health: RecoveryHealth,
     throttle: Mutex<Option<PersistedPinThrottle>>,
     epoch_advance_on_pin_write: Option<&'a VaultState>,
+    copy_probe: Option<&'a VaultState>,
     sync: Option<(PathBuf, Coordinator)>,
     calls: Mutex<Vec<Effect>>,
 }
@@ -116,6 +118,7 @@ impl<'a> FakeEffects<'a> {
             health: RecoveryHealth::default(),
             throttle: Mutex::new(None),
             epoch_advance_on_pin_write: None,
+            copy_probe: None,
             sync: None,
             calls: Mutex::new(Vec::new()),
         }
@@ -165,6 +168,13 @@ impl<'a> FakeEffects<'a> {
         Self {
             throttle: Mutex::new(Some(throttle)),
             ..Self::new(path)
+        }
+    }
+
+    pub(super) fn probing_copies(self, state: &'a VaultState) -> Self {
+        Self {
+            copy_probe: Some(state),
+            ..self
         }
     }
 
@@ -231,6 +241,11 @@ impl DesktopEffects for FakeEffects<'_> {
     ) -> VaultResult<u64> {
         if self.fail_copy {
             return Err("Sesame could not copy to the clipboard.".into());
+        }
+        if let Some(state) = self.copy_probe {
+            self.record(Effect::CopiedWhileSessionHeld(
+                state.session.try_lock().is_err(),
+            ));
         }
         self.record(Effect::CopySecret {
             value: value.to_string(),

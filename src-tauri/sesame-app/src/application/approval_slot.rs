@@ -79,8 +79,25 @@ impl ApprovalSlot {
     }
 
     #[cfg(test)]
+    pub fn take_for_browser_before_preempting(&self) -> SlotClaim {
+        let generation = lock(&self.state).take(Holder::Browser);
+        self.claim_with(generation)
+    }
+
+    #[cfg(test)]
     pub fn held_by_browser(&self) -> bool {
         matches!(lock(&self.state).holder, Some((_, Holder::Browser)))
+    }
+}
+
+impl SlotClaim {
+    pub fn while_held<R>(&self, commit: impl FnOnce() -> R) -> Option<R> {
+        let state = lock(&self.state);
+        let held = state
+            .holder
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == self.generation);
+        held.then(commit)
     }
 }
 
