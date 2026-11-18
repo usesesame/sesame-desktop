@@ -61,6 +61,8 @@ In scope:
 - The native-messaging host, local transport, and fill approval path under
   `src-tauri/src/bin/`, `src-tauri/src/adapters/platform/`, and
   `src-tauri/src/browser_fill*.rs`.
+- The `sesame` command line tool and its approval path: `src-tauri/src/terminal*.rs`,
+  `src-tauri/src/bin/sesame-cli.rs` and the terminal approval in the window.
 - Sesame Sync in the desktop app: the signed device list, snapshot headers,
   pairing, key packages, request signatures, and the minimum version check.
   Report server findings in [sesame-server](https://github.com/usesesame/sesame-server).
@@ -150,6 +152,32 @@ good-faith report that turns out to be out of scope is not held against you.
   Sesame window shows the requesting site and is the only check before a fill,
   and it needs the vault to be unlocked. Malware that controls your browser
   profile can do the same.
+- Any program running as you can run the `sesame` command and ask for an
+  item, the same way it can start the browser helper. The approval in the
+  Sesame window is the check, and a hidden value also needs the master
+  password check described above. When a terminal asks for a hidden value
+  while the vault is locked, the window asks for the master password again
+  after you unlock, because the unlock alone does not count for that request. When you allow a terminal for five minutes,
+  every program started from the shell session you approved in that terminal
+  gets what it asks for without a prompt until the five minutes end, and
+  hidden values still need the master password check. The allowance skips
+  only the routine approval, so the window still asks when several items
+  match the name or when a hidden value needs the master password. A new shell
+  session in the same terminal is asked again. The allowance also ends when the vault locks and when almost
+  anything in the vault changes, such as saving, deleting or starring an item,
+  so a terminal you allowed may be asked again before five minutes pass.
+- Windows offers no terminal allowance, because Sesame cannot tell one
+  terminal from another there, so every request from the `sesame` command
+  asks in the window.
+- On Linux the `sesame` command only checks that the program answering on its
+  socket runs as you. A program of yours that answers in Sesame's place, for
+  example in a shell where it changed `XDG_RUNTIME_DIR`, learns which command,
+  item and field you typed and can print values it made up, but it never gets
+  a real value from your vault that way.
+- Anything the `sesame` command prints in a terminal can be read by other
+  programs running as you, through the terminal's scrollback or a pipe. Use
+  `--copy` to keep a value off the screen, and the clipboard is cleared after
+  the time set in Settings.
 - On Linux the browser helper trusts whichever program of yours owns its
   private socket, because Sesame hides its own executable from other
   programs. A program running as you that starts before Sesame could receive

@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { UNSTAGED_TAURI_CONFIG } from './browser-host.mjs'
 
 const workspace = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -9,7 +10,7 @@ const workspace = dirname(dirname(fileURLToPath(import.meta.url)))
 // the one cargo command that has no reason to need the staged browser host.
 // Without this a fresh clone has to build the sidecar before it can generate
 // a type.
-const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[]}}' }
+const environment = { ...process.env, TAURI_CONFIG: UNSTAGED_TAURI_CONFIG }
 
 const args = ['test', '--manifest-path', join(workspace, 'src-tauri', 'Cargo.toml'), '-p', 'sesame', '-p', 'sesame-app', '--lib', 'export_bindings']
 const run = spawnSync('cargo', args, { stdio: 'inherit', env: environment, shell: false })

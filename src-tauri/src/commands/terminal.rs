@@ -1,0 +1,71 @@
+use tauri::{AppHandle, State};
+
+use crate::application::browser_fill::{APPROVAL_TOO_SOON, APPROVAL_TOO_SOON_MESSAGE};
+use crate::application::cli_broker::{CliApprovalRequestEvent, CliDecisionInput, PRESENCE_NEEDED};
+use crate::application::terminal_allowances::TerminalAllowanceList;
+use crate::release::ReleasePresence;
+use crate::terminal::{CliApprovalState, TerminalAllowances, TerminalListener, TerminalToolStatus};
+use crate::vault::{VaultResult, VaultState};
+
+const PRESENCE_NEEDED_MESSAGE: &str = "Enter your master password to send a hidden value.";
+
+#[tauri::command]
+pub fn get_pending_terminal_request(
+    approvals: State<'_, CliApprovalState>,
+) -> Option<CliApprovalRequestEvent> {
+    approvals.pending_request()
+}
+
+#[tauri::command]
+pub fn get_terminal_approval_wait(approvals: State<'_, CliApprovalState>) -> u64 {
+    approvals.approval_wait().as_millis() as u64
+}
+
+#[tauri::command]
+pub fn resolve_terminal_request(
+    decision: CliDecisionInput,
+    approvals: State<'_, CliApprovalState>,
+    allowances: State<'_, TerminalAllowances>,
+    vault: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
+) -> VaultResult<()> {
+    let presence_ready = presence.require(vault.session_epoch()).is_ok();
+    approvals
+        .decide(decision, allowances.revision(), presence_ready)
+        .map_err(|error| match error {
+            APPROVAL_TOO_SOON => APPROVAL_TOO_SOON_MESSAGE.to_string(),
+            PRESENCE_NEEDED => PRESENCE_NEEDED_MESSAGE.to_string(),
+            "selectionNotOffered" => "Choose one of the items Sesame offered.".to_string(),
+            _ => "This terminal request is no longer waiting in Sesame.".to_string(),
+        })
+}
+
+#[tauri::command]
+pub fn set_terminal_clipboard_clear_seconds(
+    seconds: u64,
+    approvals: State<'_, CliApprovalState>,
+) -> VaultResult<()> {
+    if approvals.set_clear_after_seconds(seconds) {
+        Ok(())
+    } else {
+        Err("Choose 10, 30 or 60 seconds.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn list_terminal_permissions(
+    allowances: State<'_, TerminalAllowances>,
+    vault: State<'_, VaultState>,
+) -> TerminalAllowanceList {
+    allowances.list(vault.session_epoch())
+}
+
+#[tauri::command]
+pub fn forget_terminal_permissions(app: AppHandle) {
+    crate::terminal::forget_permissions(&app);
+}
+
+#[tauri::command]
+pub fn get_terminal_status(listener: State<'_, TerminalListener>) -> TerminalToolStatus {
+    listener.status()
+}

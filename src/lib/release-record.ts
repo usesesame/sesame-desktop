@@ -132,15 +132,21 @@ function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+export const TERMINAL_HOST = 'terminal'
+
+function fromTerminal(entry: ReleaseEntryView): boolean {
+  return entry.host === TERMINAL_HOST && (entry.kind === 'reveal' || entry.kind === 'copy')
+}
+
 export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): string {
   if (requestNouns[entry.kind]) return browserSentence(entry, titleFor)
   const title = itemTitle(entry, titleFor)
   const fields = fieldList(entry.fields) || 'secret'
   switch (entry.kind) {
     case 'reveal':
-      return `Showed the ${fields} of ${title}`
+      return fromTerminal(entry) ? `Read the ${fields} of ${title} for a terminal` : `Showed the ${fields} of ${title}`
     case 'copy':
-      return `Copied the ${fields} of ${title}`
+      return fromTerminal(entry) ? `Copied the ${fields} of ${title} for a terminal` : `Copied the ${fields} of ${title}`
     case 'autoType':
       return `Typed the ${fields} of ${title} into another window`
     case 'quickAccess':

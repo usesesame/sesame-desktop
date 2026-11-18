@@ -68,7 +68,7 @@ function Resolve-BrowserExecutable {
 
 $previousTauriConfig = $env:TAURI_CONFIG
 try {
-  $env:TAURI_CONFIG = '{"bundle":{"externalBin":[]}}'
+  $env:TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
   & cargo build --manifest-path $manifest --release --features browser-helper-dev --bin sesame-browser-host
   if ($LASTEXITCODE -ne 0) { throw 'The native host build failed.' }
 } finally {

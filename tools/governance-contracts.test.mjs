@@ -239,6 +239,21 @@ test('the security policy tells a reporter where to send a vulnerability', () =>
 })
 
 
+test('the security policy records the limits of the command line tool', () => {
+  const body = read('.github', 'SECURITY.md').replace(/\s+/g, ' ')
+  assert.match(body, /On Linux the `sesame` command only checks that the program answering on its socket runs as you/)
+  assert.match(body, /can print values it made up, but it never gets a real value from your vault/)
+  assert.match(body, /Windows offers no terminal allowance/)
+  assert.match(body, /while the vault is locked, the window asks for the master password again after you unlock/)
+  assert.match(body, /The allowance also ends when the vault locks and when almost anything in the vault changes/)
+  assert.match(body, /may be asked again before five minutes pass/)
+  assert.doesNotMatch(body, /does not end it/)
+  const tests = read('src-tauri', 'sesame-app', 'src', 'application', 'cli_tests.rs')
+  assert.match(tests, /fn a_save_in_the_window_ends_an_allowance\(\)/)
+  assert.match(tests, /fn a_favourite_change_in_the_window_ends_an_allowance\(\)/)
+  assert.match(body, /Anything the `sesame` command prints in a terminal can be read by other programs running as you/)
+})
+
 const releaseWorkflows = ['release-early-access.yml', 'release-linux-early-access.yml']
 const privateSigningSecret = /secrets\.(?:SESAME_RELEASE_CANDIDATE_SIGNING_KEY|TAURI_SIGNING_PRIVATE_KEY|TAURI_SIGNING_PRIVATE_KEY_PASSWORD)\s*\}\}/
 const jobNames = (body) => [...body.matchAll(/^ {2}([a-z0-9_-]+):$/gm)].map(([, name]) => name)

@@ -13,6 +13,8 @@ pub(crate) mod dll_search;
 pub(crate) mod external_url;
 pub(crate) mod navigation_guard;
 pub(crate) mod session_guard;
+#[cfg(any(target_os = "linux", windows))]
+pub(crate) mod terminal_origin;
 #[cfg(any(
     test,
     all(target_os = "linux", not(debug_assertions), not(feature = "wdio"))

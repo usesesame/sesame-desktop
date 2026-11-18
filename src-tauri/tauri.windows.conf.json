@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "binaries/cli/sesame.exe": "cli/sesame.exe"
+    }
+  }
+}

@@ -16,10 +16,12 @@ export function hostTargetTriple() {
   return line.slice('host:'.length).trim()
 }
 
-export function buildBrowserHost({ manifest, release }) {
+export const UNSTAGED_TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
+
+function buildStandalone({ manifest, release, feature, bin, failure }) {
   // tauri-build validates every declared sidecar, and this is the command that
   // produces the one it would look for.
-  const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[]}}' }
+  const environment = { ...process.env, TAURI_CONFIG: UNSTAGED_TAURI_CONFIG }
 
   // Chromium launches the host directly and a clean Windows machine has no
   // VCRUNTIME140.dll. glibc targets cannot link the C runtime statically.
@@ -32,10 +34,18 @@ export function buildBrowserHost({ manifest, release }) {
 
   const args = ['build', '--locked', '--manifest-path', manifest]
   if (release) args.push('--release')
-  args.push('--features', 'browser-helper-dev', '--bin', 'sesame-browser-host')
+  args.push('--features', feature, '--bin', bin)
 
   const build = spawnSync('cargo', args, { stdio: 'inherit', env: environment, shell: false })
   if (build.status !== 0) {
-    throw new Error('The Sesame browser host build failed.')
+    throw new Error(failure)
   }
+}
+
+export function buildBrowserHost({ manifest, release }) {
+  buildStandalone({ manifest, release, feature: 'browser-helper-dev', bin: 'sesame-browser-host', failure: 'The Sesame browser host build failed.' })
+}
+
+export function buildTerminalClient({ manifest, release }) {
+  buildStandalone({ manifest, release, feature: 'terminal-client', bin: 'sesame-cli', failure: 'The Sesame command line build failed.' })
 }

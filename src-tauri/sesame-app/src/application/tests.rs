@@ -23,6 +23,7 @@ use super::records::{
 use super::reveal::{copy_item_field_in_state, item_field_in_state};
 use super::search::search_items_in_state;
 use super::sync::SyncStore;
+use super::terminal_allowances::TerminalAllowances;
 use super::DesktopEffects;
 
 pub(super) use crate::test_support::grant;
@@ -46,6 +47,7 @@ pub(super) enum Effect {
         clear_after_ms: Option<u64>,
     },
     RevokePresence,
+    ForgetTerminalAllowances,
     CancelBreachScan,
     EmitVaultLocked,
     RecordRecoveryExport {
@@ -86,17 +88,20 @@ pub(super) enum Effect {
         total: usize,
     },
     EmitBreachScanFinished,
+    CopiedWhileSessionHeld(bool),
 }
 
 pub(super) struct FakeEffects<'a> {
     path: PathBuf,
     presence: Option<&'a ReleasePresence>,
+    allowances: Option<&'a TerminalAllowances>,
     fail_emit: bool,
     fail_copy: bool,
     copy_epoch: u64,
     health: RecoveryHealth,
     throttle: Mutex<Option<PersistedPinThrottle>>,
     epoch_advance_on_pin_write: Option<&'a VaultState>,
+    copy_probe: Option<&'a VaultState>,
     sync: Option<(PathBuf, Coordinator)>,
     calls: Mutex<Vec<Effect>>,
 }
@@ -106,12 +111,14 @@ impl<'a> FakeEffects<'a> {
         Self {
             path,
             presence: None,
+            allowances: None,
             fail_emit: false,
             fail_copy: false,
             copy_epoch: COPY_EPOCH,
             health: RecoveryHealth::default(),
             throttle: Mutex::new(None),
             epoch_advance_on_pin_write: None,
+            copy_probe: None,
             sync: None,
             calls: Mutex::new(Vec::new()),
         }
@@ -138,6 +145,18 @@ impl<'a> FakeEffects<'a> {
         }
     }
 
+    pub(super) fn with_allowances(
+        path: PathBuf,
+        presence: &'a ReleasePresence,
+        allowances: &'a TerminalAllowances,
+    ) -> Self {
+        Self {
+            presence: Some(presence),
+            allowances: Some(allowances),
+            ..Self::new(path)
+        }
+    }
+
     pub(super) fn with_recovery_health(path: PathBuf, health: RecoveryHealth) -> Self {
         Self {
             health,
@@ -149,6 +168,13 @@ impl<'a> FakeEffects<'a> {
         Self {
             throttle: Mutex::new(Some(throttle)),
             ..Self::new(path)
+        }
+    }
+
+    pub(super) fn probing_copies(self, state: &'a VaultState) -> Self {
+        Self {
+            copy_probe: Some(state),
+            ..self
         }
     }
 
@@ -216,6 +242,11 @@ impl DesktopEffects for FakeEffects<'_> {
         if self.fail_copy {
             return Err("Sesame could not copy to the clipboard.".into());
         }
+        if let Some(state) = self.copy_probe {
+            self.record(Effect::CopiedWhileSessionHeld(
+                state.session.try_lock().is_err(),
+            ));
+        }
         self.record(Effect::CopySecret {
             value: value.to_string(),
             clear_after_ms,
@@ -227,6 +258,13 @@ impl DesktopEffects for FakeEffects<'_> {
         self.record(Effect::RevokePresence);
         if let Some(presence) = self.presence {
             presence.revoke();
+        }
+    }
+
+    fn forget_terminal_allowances(&self) {
+        self.record(Effect::ForgetTerminalAllowances);
+        if let Some(allowances) = self.allowances {
+            allowances.forget_all();
         }
     }
 
@@ -783,6 +821,7 @@ fn locking_observes_before_clearing_and_records_every_effect_in_order() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]
@@ -808,6 +847,7 @@ fn locking_an_already_locked_vault_keeps_the_existing_behavior() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]
@@ -1108,6 +1148,7 @@ fn an_emit_failure_returns_the_existing_error_and_still_clears_the_session() {
             },
             Effect::ClearArmedClipboard,
             Effect::RevokePresence,
+            Effect::ForgetTerminalAllowances,
             Effect::CancelBreachScan,
             Effect::EmitVaultLocked,
         ]

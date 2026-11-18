@@ -23,7 +23,7 @@ use crate::vault::util::unix_timestamp;
 use crate::vault::{
     DeleteLoginResult, DuplicateGroup, LoginInput, MergeComparison, MergeDuplicateLoginsRequest,
     MergeDuplicateLoginsResult, SaveLoginResult, TaggedItem, TotpCodeEntry, TotpRefresh,
-    VaultPayload, VaultResult, VaultSnapshot, VaultState,
+    UnlockedVault, VaultPayload, VaultResult, VaultSnapshot, VaultState,
 };
 
 pub fn save_login_in_state(
@@ -403,6 +403,21 @@ pub fn copy_totp_code_in_state(
             .field("totp"),
     );
     Ok(copied)
+}
+
+pub fn terminal_totp_in_session(
+    session: &UnlockedVault,
+    id: &str,
+) -> VaultResult<Option<(Zeroizing<String>, u64)>> {
+    let item = session.open_item(id)?;
+    let TaggedItem::Login(entry) = &*item else {
+        return Ok(None);
+    };
+    Ok(entry
+        .totp
+        .as_deref()
+        .and_then(current_totp)
+        .map(|(code, remaining, _)| (Zeroizing::new(code), remaining)))
 }
 
 pub fn merge_duplicate_logins_in_state(

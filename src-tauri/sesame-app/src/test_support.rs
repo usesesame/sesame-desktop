@@ -77,6 +77,19 @@ impl TestVault {
         self.state.advance_session_epoch();
     }
 
+    pub fn reopen_after_holding(&self, hold: std::time::Duration) {
+        let mut guard = self.state.session.lock().expect("session lock");
+        let bytes = std::fs::read(&self.path).expect("vault bytes");
+        let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");
+        let opened = open_vault_with_password(&file, TEST_PASSWORD).expect("opened vault");
+        let mut session =
+            UnlockedVault::from_opened(self.path.clone(), &opened).expect("unlocked vault");
+        session.setup_complete = true;
+        std::thread::sleep(hold);
+        *guard = Some(session);
+        self.state.advance_session_epoch();
+    }
+
     pub fn stored_login(&self, id: &str) -> VaultEntry {
         let bytes = std::fs::read(&self.path).expect("vault bytes");
         let file: VaultFile = serde_json::from_slice(&bytes).expect("vault file");

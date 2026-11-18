@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { unexpectedRegistryOperations } from './installer-registry-allowlist.mjs'
 
 // Salvaged from the former monorepo workspace suite when the products split.
 // These read only files this repository owns.
@@ -147,7 +148,23 @@ test('the Windows uninstaller removes only Sesame native-host registration', () 
   assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
-  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|HKLM|RmDir|DeleteRegKey/i)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
+  assert.deepEqual(unexpectedRegistryOperations(hook), [])
+})
+
+test('the Path allowlist catches every spelling of the machine registry root', () => {
+  const allowed = 'ReadRegStr $R0 HKEY_LOCAL_MACHINE "${SESAME_ENVIRONMENT_KEY}" "Path"'
+  assert.deepEqual(unexpectedRegistryOperations(allowed), [])
+  for (const line of [
+    'WriteRegStr HKEY_LOCAL_MACHINE "Software\\Fictional" "Value" "1"',
+    'WriteRegStr hkey_local_machine "${SESAME_ENVIRONMENT_KEY}" "PATHEXT" "1"',
+    'WriteRegStr HKLM "Software\\Fictional" "Value" "1"',
+    'WriteRegStr SHCTX "${MANUPRODUCTKEY}" "Other" "1"',
+    "System::Call 'advapi32::RegSetValueExW(p 0x80000002, w \"Software\\Fictional\")'",
+    'DeleteRegValue HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"',
+  ]) {
+    assert.equal(unexpectedRegistryOperations(line).length, 1, line)
+  }
 })
 
 test('installer lifecycle evidence scripts emit and compare file rows', { timeout: 30_000 }, (t) => {
@@ -259,4 +276,77 @@ test('Windows CI builds the installer and runs its install lifecycle', () => {
   assert.match(lifecycle, /nothing is removed from the old directory/)
   assert.match(lifecycle, /the old uninstaller inside Program Files runs/)
   assert.match(lifecycle, /a traversal path into Program Files does not run the old uninstaller/)
+})
+
+test('the Windows installer puts only the cli folder on the system Path and never cuts Path short', () => {
+  const hook = read('src-tauri', 'nsis', 'native-host-uninstall.nsh')
+  const windowsConfig = JSON.parse(read('src-tauri', 'tauri.windows.conf.json'))
+  assert.deepEqual(windowsConfig.bundle.resources, { 'binaries/cli/sesame.exe': 'cli/sesame.exe' })
+  assert.match(hook, /!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"/)
+  assert.match(hook, /!define SESAME_TERMINAL_FOLDER "\$INSTDIR\\cli"/)
+  assert.doesNotMatch(hook, /"\$INSTDIR"\s*$|Path" "\$INSTDIR"|;\$INSTDIR"/m, 'the install folder itself must never go on Path, because sesame.exe there is the desktop app')
+
+  const macro = (name) => {
+    const match = hook.match(new RegExp(`!macro ${name}\\b[\\s\\S]*?!macroend`))
+    assert.ok(match, `the hook has no ${name} macro`)
+    return match[0]
+  }
+  const readPath = macro('SESAME_READ_PATH')
+  assert.match(readPath, /ClearErrors\s+ReadRegStr \$R0 HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
+  assert.match(readPath, /\$\{If\} \$\{Errors\}\s+StrCpy \$R3 1/)
+  assert.match(readPath, /StrLen \$R4 \$R0\s+IntOp \$R4 \$R4 \+ 1\s+\$\{If\} \$R4 >= \$\{NSIS_MAX_STRLEN\}\s+StrCpy \$R3 1/, 'a value that fills the string buffer may be cut short and must count as unreadable')
+
+  const write = macro('SESAME_WRITE_PATH')
+  const typed = write.search(/RegGetValueW[^\n]*\n\s*StrCpy \$R7 \$R4/)
+  const reread = write.search(/ClearErrors\s+ReadRegStr \$R4 HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"\s+\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R4 S!= \$R0\s+DetailPrint/)
+  const plain = write.search(/\$\{Else\}\s+ClearErrors\s+\$\{If\} \$R5 = 0\s+\$\{AndIf\} \$R7 = 1\s+WriteRegStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"/)
+  const expanding = write.search(/\$\{ElseIf\} \$R5 = 0\s+\$\{AndIf\} \$R7 = 2\s+WriteRegExpandStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"\s+\$\{Else\}\s+SetErrors/)
+  assert.ok(typed >= 0, 'the Path type is not read before it is replaced')
+  assert.ok(reread > typed, 'the Path is not compared again just before it is replaced')
+  assert.ok(plain > reread && expanding > plain, 'the Path is not written right after the last comparison with the type it had')
+  assert.match(write, /\$\{If\} \$\{Errors\}\s+DetailPrint "\$\{FAILED\}"\s+\$\{Else\}\s+StrCpy \$R6 1\s+SendMessage \$\{HWND_BROADCAST\} \$\{WM_SETTINGCHANGE\} 0 "STR:Environment"/)
+  assert.doesNotMatch(write, /Abort|Quit|SetErrorLevel/, 'a failed Path write must not fail the install')
+  assert.equal((hook.match(/WriteRegExpandStr|WriteRegStr HKLM/g) ?? []).length, 2, 'every Path write goes through the one checked macro')
+
+  const add = macro('SESAME_ADD_TERMINAL_PATH')
+  assert.match(add, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
+  assert.match(add, /\$\{If\} \$R3 >= \$\{NSIS_MAX_STRLEN\}\s+DetailPrint/)
+  assert.match(add, /!insertmacro SESAME_SCAN_PATH \$R0 \$R1 \$R2 \$R4\s+\$\{If\} \$R2 = 0/, 'setup adds the entry again when Path already holds it')
+  assert.match(add, /!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not add[^"]*"\s+\$\{If\} \$R6 = 1\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"/, 'Sesame does not record the exact Path entry it added')
+  assert.equal((hook.match(/WriteRegStr SHCTX/g) ?? []).length, 1, 'Sesame marks the Path entry as its own somewhere other than after adding it')
+
+  const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
+  assert.match(remove, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/, 'an unreadable or cut short Path is never written on uninstall')
+  assert.match(remove, /\$\{If\} \$R2 = 1\s+\$\{AndIf\} \$R4 = 1\s+!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not remove[^"]*"\s+\$\{ElseIf\} \$R2 > 0\s+DetailPrint/, 'uninstall removes more than the one exact entry Sesame added')
+  assert.doesNotMatch(remove, /\$R1 == ""|\$R1 != ""/, 'a Path that held only the Sesame entry is written back empty, which removes only that entry')
+
+  const scan = macro('SESAME_SCAN_PATH')
+  assert.match(scan, /\$R5 == "\$\{SESAME_TERMINAL_FOLDER\}"/)
+  assert.match(scan, /IntOp \$\{FOUND\} \$\{FOUND\} \+ 1\s+\$\{If\} \$R5 S== "\$\{SESAME_TERMINAL_FOLDER\}"\s+IntOp \$\{EXACT\} \$\{EXACT\} \+ 1/, 'the scan does not count each matching entry')
+  assert.doesNotMatch(scan, /WriteReg|DeleteReg/)
+
+  assert.match(macro('NSIS_HOOK_POSTINSTALL'), /!insertmacro SESAME_ADD_TERMINAL_PATH/)
+  const preUninstall = macro('NSIS_HOOK_PREUNINSTALL')
+  assert.match(preUninstall, /ReadRegStr \$SesameOwnsTerminalPath SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/)
+  assert.doesNotMatch(preUninstall, /SESAME_REMOVE_TERMINAL_PATH/, 'a cancelled uninstall would leave sesame installed but off Path')
+  assert.match(macro('NSIS_HOOK_POSTUNINSTALL'), /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"\s+!insertmacro SESAME_REMOVE_TERMINAL_PATH\s+\$\{EndIf\}/, 'uninstall removes a Path entry Sesame did not add')
+  const template = read('src-tauri', 'nsis', 'installer.nsi')
+  const uninstall = template.slice(template.indexOf('Section Uninstall'))
+  const running = uninstall.indexOf('CheckIfAppIsRunning')
+  const cleanup = uninstall.indexOf('NSIS_HOOK_POSTUNINSTALL')
+  assert.ok(running >= 0, 'the uninstaller no longer checks for a running Sesame')
+  assert.ok(cleanup >= 0, 'the uninstaller no longer runs the Path cleanup hook')
+  assert.ok(cleanup > running, 'the Path cleanup runs before the uninstaller checks for a running Sesame')
+})
+
+test('the Windows command line program is staged before the bundle needs it', () => {
+  const stage = read('tools', 'stage-browser-host.mjs')
+  assert.match(stage, /if \(process\.platform === 'win32'\) \{\s+buildTerminalClient\(/)
+  assert.match(stage, /join\(stageDirectory, 'cli'\)/)
+  assert.match(stage, /'sesame\.exe'/)
+  const helper = read('tools', 'browser-host.mjs')
+  assert.match(helper, /UNSTAGED_TAURI_CONFIG = '\{"bundle":\{"externalBin":\[\],"resources":\[\]\}\}'/)
+  assert.match(helper, /feature: 'terminal-client', bin: 'sesame-cli'/)
+  assert.match(read('tools', 'generate-types.mjs'), /import \{ UNSTAGED_TAURI_CONFIG \} from '\.\/browser-host\.mjs'[\s\S]*TAURI_CONFIG: UNSTAGED_TAURI_CONFIG/, 'generate-types.mjs must build without the staged Windows resource')
+  assert.match(read('tools', 'test-browser-host-pipe.mjs'), /"externalBin":\[\],"resources":\[\]/, 'test-browser-host-pipe.mjs must build without the staged Windows resource')
 })

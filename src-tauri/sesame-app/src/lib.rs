@@ -7,6 +7,7 @@
 
 pub mod application;
 pub mod browser_protocol;
+pub mod cli_protocol;
 pub mod network;
 pub mod release;
 pub mod session_activity;

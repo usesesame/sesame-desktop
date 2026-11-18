@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { unexpectedRegistryOperations } from './installer-registry-allowlist.mjs'
 
 const root = process.cwd()
 
@@ -23,7 +24,9 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.match(hook, /NSIS_HOOK_PREUNINSTALL/)
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
-  assert.doesNotMatch(hook, /HKLM|vault\.sesame|backups|recovery|RmDir|DeleteRegKey/i)
+  assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
+  assert.match(hook, /^!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"$/m, 'the Path the hook edits is not the machine environment')
+  assert.deepEqual(unexpectedRegistryOperations(hook), [])
 
   const scriptLines = read('src-tauri', 'linux', 'pre-remove.sh')
     .split('\n')
@@ -36,4 +39,14 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.equal(config.bundle.linux.deb.preRemoveScript, 'linux/pre-remove.sh')
   assert.equal(config.bundle.linux.rpm.preRemoveScript, 'linux/pre-remove.sh')
   assert.equal(config.bundle.windows.nsis.installerHooks, 'nsis/native-host-uninstall.nsh')
+})
+
+test('the extension host tests build without the staged Windows resource', () => {
+  for (const file of ['test-extension-native-host.mjs', 'test-extension-native-host.ps1']) {
+    assert.match(
+      readFileSync(join(root, 'tools', file), 'utf8'),
+      /"externalBin":\[\],"resources":\[\]/,
+      `${file} must build without the staged Windows resource`,
+    )
+  }
 })

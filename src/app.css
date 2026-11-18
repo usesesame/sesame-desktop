@@ -111,6 +111,7 @@ input[type="checkbox"]:disabled { cursor: not-allowed; opacity: var(--control-di
 .cleanup-confirm-modal h2,
 .pin-setup-modal h2,
 .browser-fill-modal h2,
+.terminal-approval-modal h2,
 .change-master-password-modal h2,
 .restore-modal h2,
 .data-controls-modal h2,
@@ -834,7 +835,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .change-master-password-modal form input:focus-visible { box-shadow: var(--field-ring); outline: none; }
 .change-master-password-modal .change-password-forgot { justify-self: start; }
 
-.browser-fill-backdrop { z-index: 120; }
+.browser-fill-backdrop, .terminal-approval-backdrop { z-index: 120; }
 .browser-fill-modal { width: min(100%, 540px); }
 .browser-fill-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.005em; }
 .browser-fill-modal > p:not(.eyebrow) { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
