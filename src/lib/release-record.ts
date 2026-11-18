@@ -1,3 +1,4 @@
+import { isolatedVaultText } from './vault-text'
 import { writable } from 'svelte/store'
 import type { EntryKind, FieldKind, MatchKind, Outcome, ReleaseEntryView, ReleaseRecordHint, ReleaseRecordStatus } from './types'
 
@@ -81,7 +82,7 @@ export const activityItemFilter = writable<{ itemId: string; itemKind: string } 
 export function itemTitle(entry: Pick<ReleaseEntryView, 'itemId' | 'itemKind'>, titleFor: TitleLookup): string {
   const kind = entry.itemKind ?? ''
   const found = entry.itemId ? titleFor(kind, entry.itemId) : null
-  if (found) return found
+  if (found) return isolatedVaultText(found)
   return `a removed ${itemNouns[kind] ?? 'item'}`
 }
 
@@ -272,7 +273,7 @@ export function statusNotice(status: ReleaseRecordStatus | null): string | null 
 }
 
 export const RECORD_SCOPE_TEXT = [
-  'Sesame lists every time a password or other secret leaves your vault, and every browser request it turned down.',
+  'Sesame lists every time a password or other secret leaves your vault, including to a terminal, and every browser request it turned down. Terminal requests it turned down are not listed.',
   'The list is encrypted, stays on this device, and drops entries older than the time you choose above.',
   'It leaves out one-time codes you only look at and breach checks.',
   'Another program on this computer could change or delete the list, so use it as a guide.',

@@ -28,7 +28,7 @@ test('the item section lists recent releases of this item only', async () => {
   const onShowAll = vi.fn()
   render(ItemReleaseSection, { itemId: 'login-a', itemKind: 'login', onShowAll })
 
-  expect(await screen.findByText('Filled this login on example.com')).toBeTruthy()
+  expect(await screen.findByText('Filled \u2068this login\u2069 on example.com')).toBeTruthy()
   expect(getReleaseRecord).toHaveBeenCalledWith({ itemId: 'login-a', limit: 5 })
   await fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
   expect(onShowAll).toHaveBeenCalledWith('login-a', 'login')

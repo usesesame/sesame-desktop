@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { AppNotice } from '../controllers/feedback-controller'
   import { useAppStores } from '../stores/app-stores'
   import type { NavigationGroup, View } from '../types'
   import Sidebar from './Sidebar.svelte'
@@ -8,7 +9,7 @@
   export let preview = false
   export let vaultLabel = 'Local vault'
   export let duplicateReviewOpen = false
-  export let notice: { title: string; message: string } | null = null
+  export let notice: AppNotice | null = null
   export let errorMessage = ''
   export let onNavigate: (view: View) => void
   export let onLock: () => void

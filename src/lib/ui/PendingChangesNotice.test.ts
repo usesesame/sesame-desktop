@@ -37,7 +37,7 @@ test('an older change in a chain offers its history and nothing that rewrites th
   const change = view({ canGoBack: false, superseded: true, fill: 'notFilled' })
   render(PendingChangesNotice, { changes: [change], ...actions })
 
-  expect(screen.getByText('A newer password was saved for Northwind since this one. Open its history to see each version.')).toBeTruthy()
+  expect(screen.getByText('A newer password was saved for \u2068Northwind\u2069 since this one. Open its history to see each version.')).toBeTruthy()
   expect(screen.queryByRole('button', { name: /go back/i })).toBeNull()
   expect(screen.queryByRole('button', { name: /copy password/i })).toBeNull()
   await fireEvent.click(screen.getByRole('button', { name: 'Open history' }))
@@ -58,7 +58,7 @@ test('the newest change still offers to go back', () => {
 test('a change whose login was edited since offers its history instead of a way back', () => {
   render(PendingChangesNotice, { changes: [view({ canGoBack: false, superseded: false, daysLeft: 20 })], ...handlers() })
 
-  expect(screen.getByText('Northwind changed after Sesame saved this password. Open its history to see each version.')).toBeTruthy()
+  expect(screen.getByText('\u2068Northwind\u2069 changed after Sesame saved this password. Open its history to see each version.')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Open history' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: /go back/i })).toBeNull()
 })

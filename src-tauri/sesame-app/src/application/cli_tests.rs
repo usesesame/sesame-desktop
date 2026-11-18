@@ -67,8 +67,13 @@ impl CliHost for FakeHost {
         true
     }
 
-    fn unlock_requested(&self, _event: &CliUnlockRequestEvent) {
+    fn unlock_requested(&self, event: &CliUnlockRequestEvent) {
         self.note("unlockRequested".to_string());
+        self.note(format!(
+            "unlockAsks:{}:{}",
+            event.field.as_deref().unwrap_or_default(),
+            event.copy
+        ));
     }
 
     fn unlock_ended(&self, reason: &'static str) {
@@ -475,6 +480,7 @@ fn a_request_while_locked_waits_for_the_unlock_and_then_still_asks() {
     assert_eq!(replies[1], CliReply::waiting(&id(5), WaitReason::Approval));
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
     assert!(events.contains(&"unlockEnded:unlocked".to_string()));
+    assert!(events.contains(&"unlockAsks:password:false".to_string()));
     assert!(!wire(&replies).contains(CANARY));
 }
 
@@ -646,6 +652,33 @@ fn a_lock_during_a_pending_approval_is_stale_and_its_decision_expires() {
     assert_eq!(
         harness.decide(&late_event, CliDecisionKind::Allow, None, false),
         Err("approvalExpired")
+    );
+}
+
+#[test]
+fn a_denial_sent_after_a_lock_is_a_lock_and_does_not_turn_the_next_request_away() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let (replies, events) =
+        harness.run_with(&get(9, Some("username"), false), &origin, |_, effects| {
+            let event = harness.pending();
+            harness.lock(effects);
+            let _ = harness.decide(&event, CliDecisionKind::Deny, None, false);
+        });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Stale));
+    assert!(events.contains(&"approvalCancelled:vaultChanged".to_string()));
+
+    harness.vault.reopen();
+    let (replies, events) = harness.run_with(&get(10, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
     );
 }
 
@@ -953,6 +986,76 @@ fn not_found_arrives_only_after_the_person_saw_it() {
         error_code(&harness.run(&missing, &origin)),
         Some(CliErrorCode::NotFound)
     );
+}
+
+#[test]
+fn a_field_the_item_does_not_have_offers_only_a_notice() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let (replies, _) = harness.run_with(&get(28, Some("Recovery PIN"), false), &origin, |_, _| {
+        let event = harness.pending();
+        assert!(event.missing_field);
+        assert!(event.not_found.is_none());
+        assert!(!event.can_allow_terminal);
+        assert_eq!(event.candidates.len(), 1);
+        assert!(event.candidates[0].field_name.is_none());
+        harness
+            .decide(&event, CliDecisionKind::Allow, None, true)
+            .expect("only dismissed");
+    });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NoField));
+    assert!(harness
+        .allowances
+        .list(harness.vault.state.session_epoch())
+        .allowances
+        .is_empty());
+
+    let (replies, events) = harness.run_with(&get(29, Some("username"), false), &origin, |_, _| {
+        let event = harness.pending();
+        assert!(!event.missing_field);
+        harness.allow(false);
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+}
+
+#[test]
+fn one_dismissed_name_the_vault_lacks_is_forgiven_but_a_run_of_them_waits() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let missing = |n: u8| request(n, serde_json::json!({ "type": "get", "item": "Northwnd" }));
+    let dismiss = || {
+        let event = harness.pending();
+        harness
+            .decide(&event, CliDecisionKind::Dismiss, None, false)
+            .expect("dismissed");
+    };
+
+    let (replies, _) = harness.run_with(&missing(22), &origin, |_, _| dismiss());
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (replies, events) = harness.run_with(&missing(23), &origin, |_, _| dismiss());
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (replies, events) = harness.run_with(&missing(24), &origin, |_, _| {});
+    assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+    assert!(events.is_empty());
+
+    harness.clock.advance(COOLING_FIRST);
+    let (_, _) = harness.run_with(&get(25, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    let (replies, _) = harness.run_with(&missing(26), &origin, |_, _| dismiss());
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (_, events) = harness.run_with(&get(27, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
 }
 
 #[test]

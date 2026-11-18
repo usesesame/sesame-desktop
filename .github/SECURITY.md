@@ -166,6 +166,19 @@ good-faith report that turns out to be out of scope is not held against you.
   session in the same terminal is asked again. The allowance also ends when the vault locks and when almost
   anything in the vault changes, such as saving, deleting or starring an item,
   so a terminal you allowed may be asked again before five minutes pass.
+- After a terminal request is denied or not answered, Sesame turns terminal
+  requests away for 15 seconds without raising the window, and the wait
+  doubles with each further one up to 5 minutes. Allowing a request ends it.
+  A request for an item or field the vault does not have counts as well once
+  you dismiss its notice, except the first one since your last Allow, so a
+  typo costs nothing but a run of made-up names stops raising the window. A
+  lock while a request waits does not count. The tool exits with 0 when the
+  request was answered, 1 for any other failure, 2 for a mistyped command, 3
+  when Sesame is not running or closed before it answered, 4 when nobody
+  answered in time, 5 when the request was denied, 6 when Sesame locked or the
+  vault changed first, 7 when nothing has that name, 8 when Sesame is busy or
+  making terminals wait and 9 when Sesame needs an update. `sesame --help`
+  lists the same codes.
 - Windows offers no terminal allowance, because Sesame cannot tell one
   terminal from another there, so every request from the `sesame` command
   asks in the window.

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isolatedVaultText } from '../vault-text'
   import { getContext, onDestroy, onMount } from 'svelte'
   import { messageFor } from '../controllers/feedback-controller'
   import { platformCapabilities } from '../platform'
@@ -66,7 +67,7 @@
   function titleFor(itemId: string | undefined): string | null {
     if (!itemId) return null
     const item = items.find((candidate) => candidate.id === itemId)
-    return item ? shownText(item.title) : null
+    return item ? isolatedVaultText(shownText(item.title)) : null
   }
 
   async function refreshPermissions() {

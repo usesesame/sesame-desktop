@@ -31,6 +31,7 @@ import { controllerStore } from './controller-store'
 import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 import type { PresenceController } from './presence-controller'
+import { isolatedVaultText } from '../vault-text'
 
 const AUTO_TYPE_COUNTDOWN_SECONDS = 3
 const PASSWORD_REVEAL_TIMEOUT_MS = 30_000
@@ -249,7 +250,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       return
     }
     if (field === 'backupCodes') void markUsed(id)
-    feedback.showNotice(`${label} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+    feedback.showNotice(`${isolatedVaultText(label)} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
   }
 
   async function checkBreach(entryId: string): Promise<void> {
@@ -310,7 +311,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       await copyToClipboard(value)
       if (itemId && ['Username', 'Email', 'Password', '2FA code', 'Backup codes'].includes(label)) void markUsed(itemId)
       const clearSeconds = settings.value().clipboardClearSeconds
-      feedback.showNotice(`${label} copied`, `Clears after ${clearSeconds} seconds if the clipboard has not changed.`)
+      feedback.showNotice(`${isolatedVaultText(label)} copied`, `Clears after ${clearSeconds} seconds if the clipboard has not changed.`)
     } catch (error) {
       void recordDiagnostic('clipboard', 'failed')
       void refreshDiagnostics()
@@ -496,7 +497,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
       const card = vault.value().loginCard
       if (card && current.selectedIds.includes(card.id)) vault.patch({ loginCard: { ...card, tags: uniqueTags([...(card.tags ?? []), tag]) } })
       const count = current.selectedIds.length
-      feedback.showNotice('Tag added', `${tag} added to ${count} ${count === 1 ? 'item' : 'items'}.`)
+      feedback.showNotice('Tag added', `${isolatedVaultText(tag)} added to ${count} ${count === 1 ? 'item' : 'items'}.`)
       clearMultiSelect()
     } catch (error) {
       feedback.setError(error)
@@ -627,7 +628,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
           recoveryNotApplicable: true, notes: card.notes || '', matchRule: card.matchRule,
         })
         vault.patch({ snapshot: result.snapshot, loginCard: { ...card, backupCodeCount: 0, recoveryEmail: undefined, recoveryPhone: undefined, recoveryNotApplicable: true } })
-        feedback.showNotice('Recovery checked', `${card.title} is marked as having no separate recovery options.`)
+        feedback.showNotice('Recovery checked', `${isolatedVaultText(card.title)} is marked as having no separate recovery options.`)
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -649,7 +650,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
         modal.close('login-editor')
         state.patch({ loginDraft: emptyLoginDraft() })
         await selectEntry(result.id)
-        feedback.showNotice(draft.id ? 'Login updated' : 'Login saved', `${draft.title.trim()} is stored in your vault.`)
+        feedback.showNotice(draft.id ? 'Login updated' : 'Login saved', `${isolatedVaultText(draft.title.trim())} is stored in your vault.`)
       } catch (error) {
         feedback.setError(error)
       } finally {
@@ -796,7 +797,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
           vault.patch({ snapshot })
           const card = vault.value().loginCard
           if (card?.folderId === action.folderId) vault.patch({ loginCard: { ...card, folder: name } })
-          feedback.showNotice('Folder renamed', `Folder renamed to ${name}.`)
+          feedback.showNotice('Folder renamed', `Folder renamed to ${isolatedVaultText(name)}.`)
         } else {
           let snapshot = await createFolder(name)
           const folder = snapshot.folders.find((candidate) => candidate.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0)
@@ -804,7 +805,7 @@ export function createLoginController({ stores, feedback, modal, presence, refre
           snapshot = await bulkAssignFolder(action.ids, folder.id)
           vault.patch({ snapshot })
           if (selection.value().collectionFilter !== null) selection.patch({ collectionFilter: folder.id })
-          feedback.showNotice('Folder created', `Item moved to ${folder.name}.`)
+          feedback.showNotice('Folder created', `Item moved to ${isolatedVaultText(folder.name)}.`)
         }
         modal.close('folder-name')
         state.patch({ folderAction: null })

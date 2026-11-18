@@ -72,27 +72,27 @@ describe('pending password notices', () => {
   })
 
   it('suggests going back when the browser could not fill the new password', () => {
-    expect(pendingChangeMessage(view({ fill: 'notFilled' }))).toBe('The browser could not fill the new password for Northwind. Go back to the old password.')
+    expect(pendingChangeMessage(view({ fill: 'notFilled' }))).toBe('The browser could not fill the new password for \u2068Northwind\u2069. Go back to the old password.')
   })
 
   it('warns from day 23 how long the old password stays in history', () => {
-    expect(pendingChangeMessage(view({ urgent: true, daysLeft: 6 }))).toBe('The new password for Northwind is still not confirmed. The old one leaves history in 6 days.')
+    expect(pendingChangeMessage(view({ urgent: true, daysLeft: 6 }))).toBe('The new password for \u2068Northwind\u2069 is still not confirmed. The old one leaves history in 6 days.')
     expect(pendingChangeMessage(view({ urgent: true, daysLeft: 1 }))).toContain('in 1 day.')
   })
 
   it('says a newer password was saved since an older change and offers no way back', () => {
     const message = pendingChangeMessage(view({ canGoBack: false, superseded: true, fill: 'notFilled' }))
-    expect(message).toBe('A newer password was saved for Northwind since this one. Open its history to see each version.')
+    expect(message).toBe('A newer password was saved for \u2068Northwind\u2069 since this one. Open its history to see each version.')
     expect(message).not.toMatch(/go back/i)
   })
 
   it('says the login changed when another edit moved it on and the old password is still in history', () => {
-    expect(pendingChangeMessage(view({ canGoBack: false, superseded: false, daysLeft: 20 }))).toBe('Northwind changed after Sesame saved this password. Open its history to see each version.')
+    expect(pendingChangeMessage(view({ canGoBack: false, superseded: false, daysLeft: 20 }))).toBe('\u2068Northwind\u2069 changed after Sesame saved this password. Open its history to see each version.')
     expect(pendingChangeMessage(view({ canGoBack: false, daysLeft: undefined }))).toContain('no longer in history')
   })
 
   it('shows the username a sign up attached', () => {
-    expect(pendingChangeMessage(view({ kind: 'new', username: 'casey@example.com' }))).toContain('as casey@example.com')
+    expect(pendingChangeMessage(view({ kind: 'new', username: 'casey@example.com' }))).toContain('as \u2068casey@example.com\u2069.')
   })
 })
 

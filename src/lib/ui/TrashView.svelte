@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import ViewHeader from './ViewHeader.svelte'
   import type { ItemPreview, TrashSummary } from '../types'
@@ -34,8 +35,8 @@
           <span class="entry-avatar"><Icon name="trash" size={15} /></span>
           {#if previewId === item.id && preview}
             <div class="trash-row-detail">
-              <strong>{preview.title}</strong>
-              <small>{preview.detail ? `${preview.detail} · ` : ''}{daysLeft(item.deletedAt)} {daysLeft(item.deletedAt) === 1 ? 'day' : 'days'} left</small>
+              <strong><bdi>{vaultText(preview.title)}</bdi></strong>
+              <small>{#if preview.detail}<bdi>{vaultText(preview.detail)}</bdi> · {/if}{daysLeft(item.deletedAt)} {daysLeft(item.deletedAt) === 1 ? 'day' : 'days'} left</small>
             </div>
             <div class="trash-row-actions">
               <button type="button" class="secondary-button" on:click={onCancelPreview}>Cancel</button>

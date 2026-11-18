@@ -79,7 +79,7 @@
     <h1 id="unlock-heading">{!status.exists ? 'Create your vault' : recoveryUnlockOpen ? 'Use another unlock method' : showPin ? 'Enter your PIN' : 'Enter your master password'}</h1>
     {#if !showPin}<p>{!status.exists ? 'Choose a master password. You will get a one-time recovery kit to write down.' : recoveryUnlockOpen ? 'Enter the master password or the recovery kit for this vault.' : 'This vault opens with the master password you chose.'}</p>{/if}
     {#if restoreMessage}<div class="restore-success" role="status"><Icon name="check" size={16} /><span>{restoreMessage}</span></div>{/if}
-    {#if terminalWaiting && status.exists}<p class="terminal-waiting" role="status"><Icon name="keyboard" size={16} /><span>{unlockLine(terminalWaiting.command)}{terminalWaiting.remote ? ' It came through a remote login.' : ''}</span></p>{/if}
+    {#if terminalWaiting && status.exists}<p class="terminal-waiting" role="status"><Icon name="keyboard" size={16} /><span>{unlockLine(terminalWaiting)}{terminalWaiting.remote ? ' It came through a remote login.' : ''}</span></p>{/if}
 
     {#if showHello}
       <button type="button" class="secondary-button full hello-unlock" disabled={isWorking} on:click={onUnlockWithHello}>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import SecretText from './SecretText.svelte'
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import Icon from '../Icon.svelte'
   import ModalShell from './ModalShell.svelte'
@@ -146,7 +148,7 @@
     <p id="merge-login-description">Sesame keeps an encrypted copy of the vault first, so this can be undone.</p>
     <div class="keep-options" role="radiogroup" aria-label="Login to keep">
       {#each mergeCandidate.entries as entry (entry.id)}
-        <label class:active={mergeKeepId === entry.id}><input type="radio" name="keep-login" value={entry.id} bind:group={mergeKeepId} /><span class="entry-avatar">{entry.initials || entry.title.slice(0, 1)}</span><span><strong>{entry.title}</strong><small>{entry.username || 'No username'} · {entry.site}</small></span></label>
+        <label class:active={mergeKeepId === entry.id}><input type="radio" name="keep-login" value={entry.id} bind:group={mergeKeepId} /><span class="entry-avatar">{vaultText(entry.initials || entry.title.slice(0, 1))}</span><span><strong><bdi>{vaultText(entry.title)}</bdi></strong><small><bdi>{vaultText(entry.username) || 'No username'}</bdi> · <bdi>{vaultText(entry.site)}</bdi></small></span></label>
       {/each}
     </div>
 
@@ -155,14 +157,14 @@
         <p class="merge-fields-head"><strong>These fields differ.</strong> Choose which value survives. Passwords, 2FA secrets, notes and backup codes stay hidden, custom fields show only their names, and you can show one password at a time.</p>
         {#each conflicts as field (field.field)}
           <fieldset class="merge-field">
-            <legend>{field.label}</legend>
+            <legend><bdi>{vaultText(field.label)}</bdi></legend>
             {#each field.options as option (option.entryId)}
               <div class="merge-option">
                 <label class:active={mergeChoices[field.field] === option.entryId}>
                   <input type="radio" name={`merge-${field.field}`} value={option.entryId} checked={mergeChoices[field.field] === option.entryId} on:change={() => (mergeChoices = { ...mergeChoices, [field.field]: option.entryId })} />
                   <span>
-                    <small>{titleFor(option.entryId)}</small>
-                    <code class:empty={!option.present || (field.secret && revealed?.entryId !== option.entryId)}>{shown(field, option, revealed)}</code>
+                    <small><bdi>{vaultText(titleFor(option.entryId))}</bdi></small>
+                    <code class:empty={!option.present || (field.secret && revealed?.entryId !== option.entryId)}>{#if field.secret && option.present && revealed?.entryId === option.entryId && field.field === 'password'}<SecretText value={revealed.value} />{:else}<bdi>{vaultText(shown(field, option, revealed))}</bdi>{/if}</code>
                   </span>
                 </label>
                 {#if canShow(field, option)}

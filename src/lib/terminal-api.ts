@@ -38,6 +38,7 @@ const previewBase: CliApprovalRequestEvent = {
   remote: false,
   canAllowTerminal: true,
   needsPresence: false,
+  missingField: false,
   allowed: false,
   expiresInMs: 600_000,
 }
@@ -59,6 +60,7 @@ const previewRequests: Record<string, Partial<CliApprovalRequestEvent>> = {
   remote: { remote: true, program: { reportedName: 'sshd' }, terminal: 'pts/7', canAllowTerminal: true },
   'no-terminal': { terminal: undefined, program: { reportedName: 'cron' }, canAllowTerminal: false },
   'not-found': { candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false, fieldHidden: false },
+  'missing-field': { field: 'Recovery PIN', fieldHidden: false, missingField: true, canAllowTerminal: false, candidates: [{ id: 'gmail', kind: 'login', title: 'Gmail', fieldHidden: false }] },
   hostile: {
     field: `api\u202Etoken\u0007${'x'.repeat(200)}`,
     fieldHidden: true,
@@ -77,7 +79,7 @@ export function previewTerminalRequest(): CliApprovalRequestEvent | null {
 
 export function previewTerminalUnlock(): CliUnlockRequestEvent | null {
   if (!previewMode || previewQuery('previewTerminal') !== 'unlock') return null
-  return { command: 'get', terminal: 'pts/3', program: { reportedName: 'bash' }, remote: false }
+  return { command: 'get', field: 'password', copy: false, terminal: 'pts/3', program: { reportedName: 'bash' }, remote: false }
 }
 
 function previewAllowances(): TerminalAllowanceList {

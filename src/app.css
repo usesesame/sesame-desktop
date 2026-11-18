@@ -215,6 +215,7 @@ button.no-totp, .credential-button, .more-button {
 .toast:hover .toast-timer, .toast:focus-within .toast-timer { animation-play-state: paused; }
 .toast.has-action { grid-template-columns: auto minmax(0, 1fr) auto auto; }
 .toast.has-action .toast-timer { animation-duration: 9s; }
+.toast.refused .toast-icon { color: var(--warn-text); background: var(--warn-bg); }
 .toast .toast-action { width: auto; padding: 0 var(--space-2); color: var(--accent-link); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .alert { z-index: 130; border-color: var(--danger-tint); color: var(--danger); background: var(--danger-bg); }
 .alert .toast-icon { color: var(--danger); background: var(--danger-tint); }
@@ -1427,6 +1428,7 @@ button.activity-row-body:hover { background: var(--control-hover); }
 .multiline-value.mono { font-family: var(--font-code); font-size: var(--type-2); line-height: 1.55; }
 .multiline-value.concealed { letter-spacing: 1.6px; }
 .item-notes { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; white-space: pre-wrap; }
+.item-notes, .multiline-value { unicode-bidi: plaintext; text-align: start; }
 .attachment-list { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
 .attachment-list li { display: flex; align-items: center; gap: var(--space-3); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--surface-inset); font-size: var(--type-2); }
 .attachment-list small { margin-left: auto; color: var(--text-faint); }
