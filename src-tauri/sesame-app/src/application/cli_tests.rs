@@ -983,6 +983,39 @@ fn not_found_arrives_only_after_the_person_saw_it() {
 }
 
 #[test]
+fn one_dismissed_name_the_vault_lacks_is_forgiven_but_a_run_of_them_waits() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let missing = |n: u8| request(n, serde_json::json!({ "type": "get", "item": "Northwnd" }));
+    let dismiss = || {
+        let event = harness.pending();
+        harness
+            .decide(&event, CliDecisionKind::Dismiss, None, false)
+            .expect("dismissed");
+    };
+
+    let (replies, _) = harness.run_with(&missing(22), &origin, |_, _| dismiss());
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (replies, events) = harness.run_with(&missing(23), &origin, |_, _| dismiss());
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (replies, events) = harness.run_with(&missing(24), &origin, |_, _| {});
+    assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+    assert!(events.is_empty());
+
+    harness.clock.advance(COOLING_FIRST);
+    let (_, _) = harness.run_with(&get(25, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    let (replies, _) = harness.run_with(&missing(26), &origin, |_, _| dismiss());
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NotFound));
+    let (_, events) = harness.run_with(&get(27, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
+}
+
+#[test]
 fn several_matches_open_the_chooser_and_refuse_an_item_it_did_not_offer() {
     let harness = Harness::new();
     let origin = terminal(100);

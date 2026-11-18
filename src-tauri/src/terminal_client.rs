@@ -46,6 +46,20 @@ Each request waits for your approval in the Sesame window. A hidden value also n
 With --copy Sesame puts the value on the clipboard instead of printing it, and clears it again after a while.
 Sesame never takes a secret as an argument, but the item and field names you type stay in your shell history.
 Anything printed in a terminal can be read by other programs that run as you.
+Sesame turns terminal requests away for a while after one is denied or not answered, or after a second one since your last Allow asks for something the vault does not have.
+The wait starts at 15 seconds, doubles each time up to 5 minutes, and ends when you allow a request.
+
+Exit codes:
+  0  The request was answered.
+  1  Something else went wrong.
+  2  The command was not typed correctly.
+  3  Sesame is not running, or it closed before it answered.
+  4  Nobody answered in Sesame in time.
+  5  The request was denied in Sesame.
+  6  Sesame locked or the vault changed before you answered.
+  7  No item, field or one-time code has that name.
+  8  Sesame is busy, or it is making terminals wait.
+  9  Sesame needs an update to answer this command.
 ";
 
 #[cfg(not(windows))]
@@ -772,6 +786,25 @@ mod tests {
             assert!(help.contains("./Sesame.AppImage list"));
         }
         assert!(!help.contains('\u{2014}') && !help.contains('(') && !help.contains(')'));
+        assert!(help.contains("doubles each time up to 5 minutes"));
+        for (exit, words) in [
+            (EXIT_OK, "answered."),
+            (EXIT_FAILED, "went wrong."),
+            (EXIT_USAGE, "not typed correctly."),
+            (EXIT_UNREACHABLE, "not running"),
+            (EXIT_TIMEOUT, "in time."),
+            (EXIT_DENIED, "denied in Sesame."),
+            (EXIT_STALE, "locked"),
+            (EXIT_MISSING, "has that name."),
+            (EXIT_BUSY, "making terminals wait."),
+            (EXIT_OUTDATED, "needs an update"),
+        ] {
+            let line = help
+                .lines()
+                .find(|line| line.trim_start().starts_with(&format!("{exit}  ")))
+                .unwrap_or_else(|| panic!("exit code {exit} is not listed"));
+            assert!(line.contains(words), "{line}");
+        }
     }
 
     #[test]

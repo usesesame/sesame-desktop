@@ -374,10 +374,11 @@ fn answer(
     };
     let chosen = if prompt_needed {
         let decision = prompt(context, request_id, epoch, event, &subject, not_found)?;
-        if matches!(decision, CliDecision::Allow { .. }) {
-            context.approvals.note_approved();
-        } else if decision != CliDecision::Withdrawn {
-            context.approvals.note_unanswered();
+        match decision {
+            CliDecision::Allow { .. } => context.approvals.note_approved(),
+            CliDecision::Dismiss => context.approvals.note_missing_dismissed(),
+            CliDecision::Withdrawn => {}
+            _ => context.approvals.note_unanswered(),
         }
         match decision {
             CliDecision::Allow {

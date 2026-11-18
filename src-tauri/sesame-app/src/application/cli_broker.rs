@@ -22,7 +22,7 @@ pub const DEFAULT_CLEAR_AFTER_SECONDS: u64 = 30;
 pub const CLEAR_AFTER_CHOICES: [u64; 3] = [10, 30, 60];
 pub const COOLING_FIRST: Duration = Duration::from_secs(15);
 pub const COOLING_LONGEST: Duration = Duration::from_secs(5 * 60);
-pub const COOLING_MESSAGE: &str = "Sesame is turning away terminal requests for a short while because the last one was denied or not answered. Try again shortly.";
+pub const COOLING_MESSAGE: &str = "Sesame is turning terminal requests away for a short while because recent ones were denied, went unanswered or asked for something the vault does not have. Try again shortly.";
 const REPLAY_CACHE_SIZE: usize = 128;
 const APPROVAL_EXPIRED: &str = "approvalExpired";
 const SELECTION_NOT_OFFERED: &str = "selectionNotOffered";
@@ -163,6 +163,7 @@ struct CliInner {
     clock: Arc<dyn Clock>,
     unanswered: u32,
     cooling_until: Option<Instant>,
+    missing_forgiven: bool,
     clear_after_seconds: u64,
     approval_timeout: Duration,
 }
@@ -177,6 +178,7 @@ impl CliInner {
             clock,
             unanswered: 0,
             cooling_until: None,
+            missing_forgiven: false,
             clear_after_seconds: DEFAULT_CLEAR_AFTER_SECONDS,
             approval_timeout: CLI_APPROVAL_TIMEOUT,
         }
@@ -467,10 +469,21 @@ impl CliApprovalState {
         inner.cooling_until = Some(until);
     }
 
+    pub fn note_missing_dismissed(&self) {
+        let forgiven = {
+            let mut inner = self.lock();
+            !std::mem::replace(&mut inner.missing_forgiven, true)
+        };
+        if !forgiven {
+            self.note_unanswered();
+        }
+    }
+
     pub fn note_approved(&self) {
         let mut inner = self.lock();
         inner.unanswered = 0;
         inner.cooling_until = None;
+        inner.missing_forgiven = false;
     }
 
     pub fn revoke(&self, approval_id: &str) {
