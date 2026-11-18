@@ -586,37 +586,91 @@ mod tests {
         }
     }
 
-    fn answer_declaring(declared_extra: usize) -> Result<String, AliasFailure> {
-        use std::io::{Read, Write};
+    const FIXTURE_WAIT: Duration = Duration::from_secs(3);
+
+    fn serve_one_answer(declared_extra: usize) -> (String, std::sync::mpsc::Receiver<()>) {
+        use std::io::{ErrorKind, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
         let base = format!("http://{}", listener.local_addr().expect("address"));
         let body = serde_json::to_vec(&serde_json::json!({
             "data": { "email": "fictional.alias@anonaddy.me" }
         }))
         .expect("body");
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("connection");
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + FIXTURE_WAIT;
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == ErrorKind::WouldBlock
+                            && std::time::Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => {
+                        let _ = done.send(());
+                        return;
+                    }
+                }
+            };
+            let ready = stream.set_nonblocking(false).is_ok()
+                && stream.set_read_timeout(Some(FIXTURE_WAIT)).is_ok();
             let mut seen = Vec::new();
             let mut chunk = [0u8; 4096];
-            while !seen.windows(4).any(|window| window == b"\r\n\r\n") {
-                let read = stream.read(&mut chunk).expect("request");
-                seen.extend_from_slice(&chunk[..read]);
+            while ready && !seen.windows(4).any(|window| window == b"\r\n\r\n") {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => {
+                        let _ = done.send(());
+                        return;
+                    }
+                    Ok(read) => seen.extend_from_slice(&chunk[..read]),
+                }
             }
-            let head = format!(
-                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len() + declared_extra
-            );
-            stream.write_all(head.as_bytes()).expect("head");
-            stream.write_all(&body).expect("body");
-            stream.flush().expect("flush");
+            if ready {
+                let head = format!(
+                    "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len() + declared_extra
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+            }
+            let _ = done.send(());
         });
+        (base, finished)
+    }
+
+    fn answer_declaring(declared_extra: usize) -> Result<String, AliasFailure> {
+        let (base, finished) = serve_one_answer(declared_extra);
+        ensure_crypto_provider();
+        let client = Client::builder()
+            .no_proxy()
+            .redirect(Policy::none())
+            .timeout(FIXTURE_WAIT)
+            .build()
+            .expect("fixture client");
         let result = crate::test_support::block_on(create_alias_at(
-            &local_client(Duration::from_secs(5)),
+            &client,
             &base,
             &request(EmailAliasService::Addy, None),
         ));
-        server.join().expect("server");
+        assert!(finished.recv_timeout(FIXTURE_WAIT * 2).is_ok());
         result
+    }
+
+    #[test]
+    fn the_answer_fixture_stops_when_no_request_arrives() {
+        let (_, finished) = serve_one_answer(0);
+        assert!(finished.recv_timeout(FIXTURE_WAIT * 2).is_ok());
+
+        let (base, finished) = serve_one_answer(0);
+        let address = base.trim_start_matches("http://").to_string();
+        drop(std::net::TcpStream::connect(address).expect("connection"));
+        assert!(finished.recv_timeout(FIXTURE_WAIT * 2).is_ok());
     }
 
     #[test]
