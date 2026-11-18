@@ -9,7 +9,8 @@ function entry(partial: Partial<ReleaseEntryView>): ReleaseEntryView {
   return { seq: 1, at: 1_800_000_000, kind: 'browserFill', outcome: 'released', fields: [], count: 1, late: false, ...partial }
 }
 
-const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'emailAlias', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
+const TERMINAL_KINDS: EntryKind[] = ['terminalRead', 'terminalCopy', 'terminalList', 'terminalCode']
+const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'emailAlias', ...TERMINAL_KINDS, 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
 const ALL_OUTCOMES: Outcome[] = ['released', 'saved', 'updated', 'denied', 'timedOut', 'connectionClosed', 'vaultChanged', 'withdrawn', 'lookalike', 'noMatch', 'locked', 'busy', 'mismatch', 'replayed', 'neverSave', 'noted']
 
 function readable(text: string) {
@@ -71,8 +72,44 @@ describe('activity sentences', () => {
     expect(text).toContain('one-time codes you only look at')
     expect(text).toContain('breach checks')
     expect(text).toContain('stays on this device')
-    expect(text).toContain('Terminal requests it turned down are not listed.')
-    expect(text).not.toMatch(/every browser request it turned down\.$/m)
+    expect(text).toContain('every request a browser or a terminal made, including the ones it turned down')
+    expect(text).not.toMatch(/are not listed/)
+  })
+
+  test('a terminal request says what the terminal asked for and what happened', () => {
+    const gmail = { itemId: 'login-a', itemKind: 'login', fields: ['password'] as ReleaseEntryView['fields'], host: 'terminal' }
+    const said = (partial: Partial<ReleaseEntryView>) => entrySentence(entry({ ...gmail, ...partial }), titleFor)
+    expect(said({ kind: 'terminalRead' })).toBe('Read the password of \u2068Northwind\u2069 for a terminal')
+    expect(said({ kind: 'terminalRead', host: 'terminal-allowance' })).toBe('Read the password of \u2068Northwind\u2069 for a terminal you allowed')
+    expect(said({ kind: 'terminalCopy' })).toBe('Copied the password of \u2068Northwind\u2069 for a terminal')
+    expect(said({ kind: 'terminalCode', fields: ['twoFactorCode'] })).toBe('Read the one-time code of \u2068Northwind\u2069 for a terminal')
+    expect(said({ kind: 'terminalList', itemId: undefined, itemKind: undefined, fields: [] })).toBe('Sent the names of your items to a terminal')
+    expect(said({ kind: 'terminalRead', outcome: 'denied' })).toBe("You refused a terminal's request for the password of \u2068Northwind\u2069")
+    expect(said({ kind: 'terminalList', outcome: 'denied', itemId: undefined, fields: [] })).toBe("You refused a terminal's request for the names of your items")
+    expect(said({ kind: 'terminalRead', outcome: 'timedOut' })).toBe("A terminal's request for the password of \u2068Northwind\u2069 was not answered in time")
+    expect(said({ kind: 'terminalRead', outcome: 'locked', itemId: undefined, itemKind: undefined })).toBe("A terminal's request for the password of an item ended because Sesame locked")
+    expect(said({ kind: 'terminalRead', outcome: 'withdrawn' })).toBe("Sesame turned away a terminal's request for the password of \u2068Northwind\u2069")
+    expect(said({ kind: 'terminalCopy', outcome: 'busy', itemId: undefined, itemKind: undefined })).toBe("Sesame turned away a terminal's request for the password of an item while terminals had to wait after a refusal")
+    expect(said({ kind: 'terminalRead', outcome: 'noMatch', itemId: undefined, itemKind: undefined, fields: [] })).toBe('A terminal asked for an item that is not in the vault')
+    expect(said({ kind: 'terminalRead', outcome: 'noMatch', fields: ['other'] })).toBe('A terminal asked for a field that \u2068Northwind\u2069 does not have')
+  })
+
+  test('a refused terminal request never reads as a release or as a website', () => {
+    for (const kind of TERMINAL_KINDS) {
+      for (const outcome of ALL_OUTCOMES.filter(isRefusal)) {
+        for (const host of ['terminal', 'terminal-allowance', undefined]) {
+          const sentence = entrySentence(entry({ kind, outcome, host, itemId: 'login-a', itemKind: 'login', fields: ['password'] }), titleFor)
+          readable(sentence)
+          expect(sentence).not.toMatch(/^(Read|Copied|Sent) /)
+          expect(sentence).not.toMatch(/site|website|browser| on terminal|from terminal/i)
+        }
+      }
+    }
+  })
+
+  test('older terminal entries still read the way they did', () => {
+    expect(entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)).toBe('Read the password of \u2068Northwind\u2069 for a terminal')
+    expect(entrySentence(entry({ kind: 'copy', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)).toBe('Copied the password of \u2068Northwind\u2069 for a terminal')
   })
 
   test('details show the time, the match, repeats and late writes', () => {

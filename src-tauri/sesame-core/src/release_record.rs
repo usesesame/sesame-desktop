@@ -71,6 +71,10 @@ pub enum EntryKind {
     AttachmentSaved,
     DevicePaired,
     EmailAlias,
+    TerminalRead,
+    TerminalCopy,
+    TerminalList,
+    TerminalCode,
     Cleared,
     RetentionShortened,
     Unreadable,
@@ -94,6 +98,17 @@ impl EntryKind {
                 | Self::BrowserChange
                 | Self::BrowserCreate
         )
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::TerminalRead | Self::TerminalCopy | Self::TerminalList | Self::TerminalCode
+        )
+    }
+
+    pub fn merges_refusals(self) -> bool {
+        self.is_browser() || self.is_terminal()
     }
 
     pub fn marks_gap(self) -> bool {
@@ -1139,7 +1154,7 @@ impl RecordState {
 }
 
 fn is_refusal_entry(entry: &RecordEntry) -> bool {
-    entry.kind.is_browser() && entry.outcome.is_refusal()
+    entry.kind.merges_refusals() && entry.outcome.is_refusal()
 }
 
 fn evict_over_cap(entries: &mut Vec<RecordEntry>) {
@@ -1367,7 +1382,8 @@ impl Inner {
         let now = (self.clock)();
         let mut draft = draft;
         draft.at = Some(draft.at.unwrap_or(now));
-        if draft.kind.is_browser() && draft.outcome.is_refusal() && self.coalesce(&draft, now) {
+        if draft.kind.merges_refusals() && draft.outcome.is_refusal() && self.coalesce(&draft, now)
+        {
             return Appended::Counted;
         }
         self.push_unwritten(draft, false);
@@ -2488,5 +2504,156 @@ mod tests {
         assert_eq!(ordinary.len(), COMPACT_AT);
         assert!(sealed_line_len(PLAINTEXT_BYTES) * COMPACT_AT as u64 + 1_024 < COMPACT_AT_BYTES);
         assert!(sealed_line_len(PLAINTEXT_BYTES) * MAX_ENTRIES as u64 + 1_024 < KEEP_BYTES);
+    }
+
+    const TERMINAL_KINDS: [EntryKind; 4] = [
+        EntryKind::TerminalRead,
+        EntryKind::TerminalCopy,
+        EntryKind::TerminalList,
+        EntryKind::TerminalCode,
+    ];
+
+    fn terminal(kind: EntryKind, outcome: Outcome) -> ReleaseDraft {
+        ReleaseDraft::new(kind, outcome)
+            .item("item-0", "login")
+            .field("password")
+            .host("terminal")
+    }
+
+    #[test]
+    fn the_cap_removes_a_terminal_refusal_before_a_terminal_release() {
+        let mut entries: Vec<RecordEntry> = (0..MAX_ENTRIES as u64)
+            .map(|seq| {
+                terminal(EntryKind::TerminalRead, Outcome::Released).into_entry(seq, seq, false)
+            })
+            .collect();
+        entries.insert(
+            1,
+            terminal(EntryKind::TerminalRead, Outcome::Busy).into_entry(9_999_999, 1, false),
+        );
+
+        evict_over_cap(&mut entries);
+
+        assert_eq!(entries.len(), MAX_ENTRIES);
+        assert!(entries
+            .iter()
+            .all(|entry| entry.outcome == Outcome::Released));
+        assert_eq!(entries[0].seq, 0);
+    }
+
+    #[test]
+    fn repeated_terminal_refusals_share_one_entry_and_keep_their_count() {
+        let fixture = Fixture::new();
+        let state = fixture.state();
+        for _ in 0..50 {
+            state.append(
+                &fixture.session,
+                terminal(EntryKind::TerminalCopy, Outcome::Busy),
+            );
+            fixture.advance(1);
+        }
+        state.close(Some(&fixture.session));
+
+        let (_, entries) = fixture.reopen();
+        let refused: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::TerminalCopy)
+            .collect();
+        assert_eq!(refused.len(), 2, "{refused:?}");
+        assert_eq!(refused.iter().map(|entry| entry.count).sum::<u32>(), 50);
+    }
+
+    #[test]
+    fn a_loop_of_terminal_refusals_stays_small_on_disk() {
+        let fixture = Fixture::new();
+        let state = fixture.state();
+        let hours = 6;
+        let requests = hours * 3_600 / 2;
+        for _ in 0..requests {
+            state.append(
+                &fixture.session,
+                terminal(EntryKind::TerminalRead, Outcome::Busy),
+            );
+            fixture.advance(2);
+        }
+        state.append(&fixture.session, fill("item-after"));
+        state.close(Some(&fixture.session));
+
+        let (_, entries) = fixture.reopen();
+        let refused: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::TerminalRead)
+            .collect();
+        assert!(
+            refused.len() <= (hours as usize) * 2 * 60 + 2,
+            "{}",
+            refused.len()
+        );
+        assert_eq!(
+            refused
+                .iter()
+                .map(|entry| u64::from(entry.count))
+                .sum::<u64>(),
+            requests
+        );
+        assert_eq!(
+            entries.last().and_then(|entry| entry.item_id.as_deref()),
+            Some("item-after")
+        );
+        let bytes = std::fs::metadata(fixture.file())
+            .expect("record file")
+            .len();
+        assert!(bytes < COMPACT_AT_BYTES / 8, "{bytes}");
+    }
+
+    #[test]
+    fn terminal_releases_are_never_merged() {
+        let fixture = Fixture::new();
+        let state = fixture.state();
+        for _ in 0..3 {
+            state.append(
+                &fixture.session,
+                terminal(EntryKind::TerminalRead, Outcome::Released),
+            );
+        }
+        let (_, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().all(|entry| entry.count == 1));
+    }
+
+    #[test]
+    fn a_reader_that_does_not_know_the_terminal_kinds_keeps_their_entries() {
+        for kind in TERMINAL_KINDS {
+            let writer = Fixture::new();
+            writer
+                .state()
+                .append(&writer.session, terminal(kind, Outcome::Denied));
+            let written = writer.plaintexts().remove(0);
+            let fields = json_fields(&written);
+            let name = fields["kind"].as_str().expect("a kind").to_string();
+            assert!(name.starts_with("terminal"), "{name}");
+            assert_eq!(fields["outcome"], "denied");
+            assert_eq!(fields["host"], "terminal");
+            assert_eq!(fields["fields"], serde_json::json!(["password"]));
+            let json = String::from_utf8(written)
+                .expect("utf8")
+                .trim_end()
+                .replace(
+                    &format!("\"kind\":\"{name}\""),
+                    "\"kind\":\"fictionalLaterKind\"",
+                );
+            assert!(json.contains("fictionalLaterKind"));
+
+            let reader = Fixture::new();
+            reader.seed(1);
+            reader.seal(&json.replacen("\"seq\":0", "\"seq\":1", 1));
+            reader.state().append(&reader.session, fill("item-after"));
+
+            let (state, entries) = reader.reopen();
+            assert_eq!(entries.len(), 3, "{kind:?}");
+            assert_eq!(entries[1].kind, EntryKind::Newer);
+            assert_eq!(entries[2].item_id.as_deref(), Some("item-after"));
+            assert_eq!(state.status().notice, None);
+        }
     }
 }

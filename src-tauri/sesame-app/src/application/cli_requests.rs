@@ -11,9 +11,11 @@ use super::cli_broker::{
     CliDecision, CliUnlockRequestEvent, StartRefusal, CLI_UNLOCK_TIMEOUT, COOLING_MESSAGE,
 };
 use super::logins::terminal_totp_in_session;
+use super::release_record::record;
 use super::reveal::{
-    record_terminal_release_in, terminal_copy_item_field_in_state, terminal_item_field_in_state,
-    TerminalField, VAULT_CHANGED,
+    record_terminal_release_in, terminal_copy_item_field_in_state, terminal_draft,
+    terminal_item_field_in_state, TerminalField, TerminalRelease, TERMINAL_ALLOWANCE_SOURCE,
+    TERMINAL_SOURCE, VAULT_CHANGED,
 };
 use super::terminal_allowances::{allowed_request, TerminalAllowances, TerminalOrigin};
 use super::DesktopEffects;
@@ -23,7 +25,7 @@ use crate::cli_protocol::{
     MAX_TOTP_REMAINING_SECONDS, MAX_WAITING_FRAMES,
 };
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
-use crate::vault::release_record::EntryKind;
+use crate::vault::release_record::{EntryKind, Outcome};
 use crate::vault::{TaggedItem, VaultState};
 
 pub const CLI_POLL: Duration = Duration::from_millis(200);
@@ -110,10 +112,25 @@ pub fn serve_cli_request(context: &CliContext<'_>, payload: &[u8], origin: &Term
     let flight = match context.approvals.start(&request_id) {
         Ok(flight) => flight,
         Err(StartRefusal::Code(code)) => {
+            let outcome = match code {
+                CliErrorCode::Stale => Some(Outcome::Replayed),
+                CliErrorCode::Busy => Some(Outcome::Withdrawn),
+                _ => None,
+            };
+            if let Some(outcome) = outcome {
+                record_terminal(context.vault, &command, outcome, None, TERMINAL_SOURCE);
+            }
             context.host.send(&CliReply::error(Some(&request_id), code));
             return;
         }
         Err(StartRefusal::CoolingOff) => {
+            record_terminal(
+                context.vault,
+                &command,
+                Outcome::Busy,
+                None,
+                TERMINAL_SOURCE,
+            );
             context.host.send(&CliReply::error_with(
                 Some(&request_id),
                 CliErrorCode::Busy,
@@ -122,7 +139,27 @@ pub fn serve_cli_request(context: &CliContext<'_>, payload: &[u8], origin: &Term
             return;
         }
     };
-    let frames = match answer(context, &request_id, &command, origin) {
+    let mut noted = Noted {
+        item: None,
+        source: TERMINAL_SOURCE,
+        outcome: None,
+    };
+    let answered = answer(context, &request_id, &command, origin, &mut noted);
+    if let Err(stop) = &answered {
+        if let Some(outcome) = noted
+            .outcome
+            .or_else(|| refusal_outcome(context.vault, stop))
+        {
+            record_terminal(
+                context.vault,
+                &command,
+                outcome,
+                noted.item.as_ref(),
+                noted.source,
+            );
+        }
+    }
+    let frames = match answered {
         Ok(frames) => frames,
         Err(Stop::Reply(code)) => vec![CliReply::error(Some(&request_id), code)],
         Err(Stop::ReplyWith(code, message)) => {
@@ -151,6 +188,71 @@ fn command_name(command: &CliCommand) -> &'static str {
         CliCommand::List => "list",
         CliCommand::Get { .. } => "get",
         CliCommand::Totp { .. } => "totp",
+    }
+}
+
+fn terminal_kind(command: &CliCommand) -> EntryKind {
+    match command {
+        CliCommand::List => EntryKind::TerminalList,
+        _ if command.copies() => EntryKind::TerminalCopy,
+        CliCommand::Get { .. } => EntryKind::TerminalRead,
+        CliCommand::Totp { .. } => EntryKind::TerminalCode,
+    }
+}
+
+fn record_terminal(
+    vault: &VaultState,
+    command: &CliCommand,
+    outcome: Outcome,
+    item: Option<&CliCandidate>,
+    source: &str,
+) {
+    let release = TerminalRelease {
+        entry: terminal_kind(command),
+        id: item.map_or("", |item| item.id.as_str()),
+        kind: item.map_or("", |item| item.kind.as_str()),
+        field: requested_field(command),
+        source,
+    };
+    record(vault, terminal_draft(&release, outcome));
+}
+
+struct Noted {
+    item: Option<CliCandidate>,
+    source: &'static str,
+    outcome: Option<Outcome>,
+}
+
+fn vault_locked(vault: &VaultState) -> bool {
+    vault
+        .session
+        .lock()
+        .map(|session| session.is_none())
+        .unwrap_or(true)
+}
+
+fn refusal_outcome(vault: &VaultState, stop: &Stop) -> Option<Outcome> {
+    let code = match stop {
+        Stop::Gone => return Some(Outcome::ConnectionClosed),
+        Stop::ReplyWith(CliErrorCode::Cancelled, PRESENCE_MESSAGE) => {
+            return Some(Outcome::Withdrawn)
+        }
+        Stop::Reply(code) | Stop::ReplyWith(code, _) => *code,
+    };
+    match code {
+        CliErrorCode::Timeout => Some(Outcome::TimedOut),
+        CliErrorCode::Stale if vault_locked(vault) => Some(Outcome::Locked),
+        CliErrorCode::Stale => Some(Outcome::VaultChanged),
+        CliErrorCode::Cancelled => Some(Outcome::Denied),
+        CliErrorCode::NotFound
+        | CliErrorCode::NoField
+        | CliErrorCode::EmptyField
+        | CliErrorCode::NoTotp => Some(Outcome::NoMatch),
+        CliErrorCode::Busy => Some(Outcome::Withdrawn),
+        CliErrorCode::Invalid
+        | CliErrorCode::UnsupportedVersion
+        | CliErrorCode::TooLarge
+        | CliErrorCode::Unavailable => None,
     }
 }
 
@@ -339,6 +441,7 @@ fn answer(
     request_id: &str,
     command: &CliCommand,
     origin: &TerminalOrigin,
+    noted: &mut Noted,
 ) -> Result<Vec<CliReply>, Stop> {
     let unlocked = wait_for_unlock(context, request_id, command, origin)?;
     let epoch = unlocked.epoch;
@@ -346,6 +449,12 @@ fn answer(
     let subject = resolve_subject(context.vault, epoch, command)?;
     let allowed_revision = context.allowances.covering_revision(origin, epoch);
     let allowed = allowed_revision.is_some();
+    if subject.candidates.len() == 1 {
+        noted.item = subject.candidates.first().cloned();
+    }
+    if allowed {
+        noted.source = TERMINAL_ALLOWANCE_SOURCE;
+    }
     let needs_presence = subject.field_hidden
         && (fresh_password_since.is_some() || context.presence.require(epoch).is_err());
     let not_found = !matches!(command, CliCommand::List) && subject.candidates.is_empty();
@@ -363,6 +472,9 @@ fn answer(
     }
     let notice_only = not_found || missing_field;
     let prompt_needed = !allowed || subject.candidates.len() > 1 || needs_presence || notice_only;
+    if prompt_needed {
+        noted.source = TERMINAL_SOURCE;
+    }
     let event = CliApprovalRequestEvent {
         approval_id: String::new(),
         command: command_kind(command),
@@ -423,8 +535,10 @@ fn answer(
                 return Err(Stop::Reply(CliErrorCode::NoField))
             }
             CliDecision::Dismiss => return Err(Stop::Reply(CliErrorCode::NotFound)),
-            CliDecision::Deny | CliDecision::InvalidSelection => {
-                return Err(Stop::Reply(CliErrorCode::Cancelled))
+            CliDecision::Deny => return Err(Stop::Reply(CliErrorCode::Cancelled)),
+            CliDecision::InvalidSelection => {
+                noted.outcome = Some(Outcome::Mismatch);
+                return Err(Stop::Reply(CliErrorCode::Cancelled));
             }
             CliDecision::Withdrawn => return Err(Stop::Reply(CliErrorCode::Stale)),
             CliDecision::Preempted => {
@@ -437,6 +551,9 @@ fn answer(
     if not_found {
         return Err(Stop::Reply(CliErrorCode::NotFound));
     }
+    if let Some(chosen) = chosen.as_ref() {
+        noted.item = Some(chosen.clone());
+    }
     ensure_epoch(context.vault, epoch)?;
     let frames = release(
         context,
@@ -446,6 +563,7 @@ fn answer(
         Freshness {
             epoch,
             password_since: fresh_password_since,
+            source: noted.source,
         },
     )?;
     if let Some(revision) = allowed_revision.filter(|_| !prompt_needed) {
@@ -912,6 +1030,7 @@ fn release_error(error: &str) -> Stop {
 struct Freshness {
     epoch: u64,
     password_since: Option<Instant>,
+    source: &'static str,
 }
 
 fn release(
@@ -923,7 +1042,17 @@ fn release(
 ) -> Result<Vec<CliReply>, Stop> {
     let epoch = freshness.epoch;
     match command {
-        CliCommand::List => list_frames(context.vault, epoch, request_id, context.list_budget),
+        CliCommand::List => {
+            let frames = list_frames(context.vault, epoch, request_id, context.list_budget)?;
+            record_terminal(
+                context.vault,
+                command,
+                Outcome::Released,
+                None,
+                freshness.source,
+            );
+            Ok(frames)
+        }
         CliCommand::Get { field: None, .. } => {
             let chosen = chosen.ok_or(Stop::Reply(CliErrorCode::NotFound))?;
             let fields = with_session(context.vault, epoch, |session| {
@@ -954,6 +1083,13 @@ fn release(
             if !reply.fits_one_frame() {
                 return Err(Stop::ReplyWith(CliErrorCode::TooLarge, ITEM_TOO_LARGE));
             }
+            record_terminal(
+                context.vault,
+                command,
+                Outcome::Released,
+                Some(chosen),
+                freshness.source,
+            );
             Ok(vec![reply])
         }
         CliCommand::Get {
@@ -973,12 +1109,20 @@ fn release(
                     .as_ref()
                     .filter(|value| !value.trim().is_empty())
                     .ok_or(Stop::Reply(CliErrorCode::EmptyField))?;
+                let released = TerminalRelease {
+                    entry: terminal_kind(command),
+                    id: &chosen.id,
+                    kind: &chosen.kind,
+                    field: Some(&field.key),
+                    source: freshness.source,
+                };
                 if *copy {
                     let seconds = context.approvals.clear_after_seconds();
                     context
                         .effects
                         .copy_secret(value.clone(), Some(seconds * 1_000))
                         .map_err(|_| Stop::Reply(CliErrorCode::Unavailable))?;
+                    record_terminal_release_in(context.vault, session, released);
                     return Ok(Picked::Frames(vec![CliReply::copied(
                         request_id,
                         Some(seconds),
@@ -988,6 +1132,7 @@ fn release(
                 if !reply.fits_one_frame() {
                     return Err(Stop::Reply(CliErrorCode::TooLarge));
                 }
+                record_terminal_release_in(context.vault, session, released);
                 Ok(Picked::Frames(vec![reply]))
             })?;
             match picked {
@@ -1012,20 +1157,26 @@ fn release(
                     record_terminal_release_in(
                         context.vault,
                         session,
-                        EntryKind::Copy,
-                        &chosen.id,
-                        &chosen.kind,
-                        "totp",
+                        TerminalRelease {
+                            entry: terminal_kind(command),
+                            id: &chosen.id,
+                            kind: &chosen.kind,
+                            field: Some("totp"),
+                            source: freshness.source,
+                        },
                     );
                     return Ok(vec![CliReply::copied(request_id, Some(seconds))]);
                 }
                 record_terminal_release_in(
                     context.vault,
                     session,
-                    EntryKind::Reveal,
-                    &chosen.id,
-                    &chosen.kind,
-                    "totp",
+                    TerminalRelease {
+                        entry: terminal_kind(command),
+                        id: &chosen.id,
+                        kind: &chosen.kind,
+                        field: Some("totp"),
+                        source: freshness.source,
+                    },
                 );
                 Ok(vec![CliReply::totp(
                     request_id,
@@ -1053,6 +1204,7 @@ fn release_hidden(
     }
     let wanted = TerminalField {
         epoch: freshness.epoch,
+        source: freshness.source,
         id: &chosen.id,
         kind: &chosen.kind,
         field: key,
@@ -1150,6 +1302,7 @@ pub(super) fn release_at(
         Freshness {
             epoch,
             password_since: None,
+            source: TERMINAL_SOURCE,
         },
     )
     .map_err(|stop| match stop {
