@@ -10,7 +10,7 @@ import {
   type CliApprovalRequestEvent,
   type CliDecisionInput,
 } from '../terminal-api'
-import { cancelledLine } from '../terminal-text'
+import { cancelledLine, secretNeeded } from '../terminal-text'
 import { grantPresence, previewMode, recordDiagnostic } from '../vault'
 import { approvalLoop } from './approval-loop'
 import { messageFor, type FeedbackController } from './feedback-controller'
@@ -170,7 +170,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       store.patch({ error: 'Choose one of the items Sesame offered.' })
       return
     }
-    const needsSecret = request.needsPresence && !state.presenceGranted
+    const needsSecret = secretNeeded(request, itemId, state.presenceGranted)
     if (needsSecret && !state.secret) {
       store.patch({ error: 'Enter your master password to send a hidden value.' })
       return

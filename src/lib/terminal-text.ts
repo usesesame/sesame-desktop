@@ -98,6 +98,12 @@ export function approvalSummary(request: HeadingRequest): string {
   return request.fieldHidden ? 'Sesame prints this hidden value in the terminal.' : 'Sesame prints this value in the terminal.'
 }
 
+export function secretNeeded(request: CliApprovalRequestEvent, selectedId: string, presenceGranted: boolean): boolean {
+  if (!request.needsPresence || presenceGranted) return false
+  if (request.candidates.length <= 1) return true
+  return request.candidates.some((candidate) => candidate.id === selectedId && candidate.fieldHidden)
+}
+
 export function commandWords(command: CliCommandKind | string): string {
   if (command === 'list') return 'list every item title'
   if (command === 'totp') return 'read a one-time code'

@@ -271,6 +271,26 @@ describe('terminal approvals in the window', () => {
     stop()
   })
 
+  it('asks for the master password only when the chosen item sends a hidden value', async () => {
+    const { controller, stop } = await started()
+    const candidates = [
+      { id: 'northwind', kind: 'login', title: 'Northwind mail', fieldName: 'Recovery PIN', fieldHidden: true },
+      { id: 'contoso', kind: 'login', title: 'Northwind mail', fieldName: 'Member number', fieldHidden: false },
+    ]
+    handlers.request(request('approval-1', { field: 'field:0', needsPresence: true, candidates }))
+    controller.select('contoso')
+    await controller.allow()
+    expect(vaultApi.grantPresence).not.toHaveBeenCalled()
+    expect(decisions()[0]).toEqual({ approvalId: 'approval-1', decision: 'allow', itemId: 'contoso' })
+
+    handlers.request(request('approval-2', { field: 'field:0', needsPresence: true, candidates }))
+    controller.select('northwind')
+    await controller.allow()
+    expect(state().error).toBe('Enter your master password to send a hidden value.')
+    expect(decisions()).toHaveLength(1)
+    stop()
+  })
+
   it('does not allow a request that changed while the master password was checked', async () => {
     const { controller, stop } = await started()
     handlers.request(request('approval-1', { needsPresence: true }))

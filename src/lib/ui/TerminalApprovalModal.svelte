@@ -8,7 +8,7 @@
   import { useAppStores } from '../stores/app-stores'
   import { getTerminalApprovalWait, type CliApprovalRequestEvent } from '../terminal-api'
   import { presenceCopy } from '../presence-copy'
-  import { approvalHeading, approvalSummary, kindWords, outputWords, shownText } from '../terminal-text'
+  import { approvalHeading, approvalSummary, kindWords, outputWords, secretNeeded, shownText } from '../terminal-text'
   import { vaultItems } from '../vault-items'
   import MasterPasswordField from './MasterPasswordField.svelte'
   import ModalShell from './ModalShell.svelte'
@@ -44,7 +44,7 @@
 
   $: state = $terminalApproval
   $: working = state.working
-  $: askSecret = request.needsPresence && !state.presenceGranted
+  $: askSecret = secretNeeded(request, state.selectedId, state.presenceGranted)
   $: secret = state.secret
   $: chosenValid = !choosing || request.candidates.some((candidate) => candidate.id === state.selectedId)
   $: armed = heldLongEnough && $wait.ms === 0
