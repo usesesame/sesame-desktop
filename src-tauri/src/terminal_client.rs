@@ -182,29 +182,70 @@ impl Streams<'_> {
     }
 }
 
+const STAND_IN: char = '?';
+
+fn hides_or_reorders(character: char) -> bool {
+    if character.is_control() {
+        return true;
+    }
+    let point = u32::from(character);
+    point & 0xfffe == 0xfffe
+        || matches!(
+            point,
+            0x00ad
+                | 0x034f
+                | 0x0600..=0x0605
+                | 0x061c
+                | 0x06dd
+                | 0x070f
+                | 0x0890..=0x0891
+                | 0x08e2
+                | 0x115f..=0x1160
+                | 0x17b4..=0x17b5
+                | 0x180b..=0x180f
+                | 0x200b..=0x200f
+                | 0x2028..=0x202e
+                | 0x2060..=0x206f
+                | 0x2800
+                | 0x3164
+                | 0xe000..=0xf8ff
+                | 0xfdd0..=0xfdef
+                | 0xfe00..=0xfe0f
+                | 0xfeff
+                | 0xffa0
+                | 0xfff0..=0xfffb
+                | 0x110bd
+                | 0x110cd
+                | 0x13430..=0x1343f
+                | 0x1bca0..=0x1bca3
+                | 0x1d159
+                | 0x1d173..=0x1d17a
+                | 0xe0000..=0xe0fff
+                | 0xf0000..=0x10ffff
+        )
+}
+
+fn shown_character(character: char) -> char {
+    if hides_or_reorders(character) {
+        STAND_IN
+    } else if character.is_whitespace() {
+        ' '
+    } else {
+        character
+    }
+}
+
 fn printable_line(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                '?'
-            } else {
-                character
-            }
-        })
-        .collect()
+    value.chars().map(shown_character).collect()
 }
 
 fn printable_block(value: &str) -> Zeroizing<String> {
     Zeroizing::new(
         value
             .chars()
-            .map(|character| {
-                if character.is_control() && character != '\n' && character != '\t' {
-                    '?'
-                } else {
-                    character
-                }
+            .map(|character| match character {
+                '\n' | '\t' => character,
+                _ => shown_character(character),
             })
             .collect(),
     )
@@ -213,7 +254,7 @@ fn printable_block(value: &str) -> Zeroizing<String> {
 fn unsafe_for_terminal(value: &str) -> bool {
     value
         .chars()
-        .any(|character| character.is_control() && character != '\n' && character != '\t')
+        .any(|character| character != '\n' && character != '\t' && hides_or_reorders(character))
 }
 
 pub fn request_id() -> String {
@@ -300,7 +341,7 @@ fn print_list(
             .min(60);
         let kind_width = items
             .iter()
-            .map(|item| item.kind.chars().count())
+            .map(|item| printable_line(&item.kind).chars().count())
             .max()
             .unwrap_or(0);
         for item in items {
@@ -308,7 +349,7 @@ fn print_list(
                 streams.out,
                 "{:title_width$}  {:kind_width$}  {}",
                 printable_line(&item.title),
-                item.kind,
+                printable_line(&item.kind),
                 printable_line(&item.id),
             )?;
         }
@@ -318,7 +359,7 @@ fn print_list(
                 streams.out,
                 "{}\t{}\t{}",
                 printable_line(&item.id),
-                item.kind,
+                printable_line(&item.kind),
                 printable_line(&item.title),
             )?;
         }
@@ -380,10 +421,14 @@ fn finish(reply: &CliReply, streams: &mut Streams<'_>) -> i32 {
             let hidden = reply.hidden.unwrap_or(true);
             let written = if streams.out_terminal {
                 if hidden && unsafe_for_terminal(value) {
-                    streams.say("This value contains control characters, so Sesame will not print it to a terminal. Use --copy or send the output to another program.");
+                    streams.say("This value contains control or invisible characters, so Sesame will not print it to a terminal. Use --copy or send the output to another program.");
                     return EXIT_FAILED;
                 }
-                let shown = printable_block(value);
+                let shown = if hidden {
+                    Zeroizing::new(value.to_string())
+                } else {
+                    printable_block(value)
+                };
                 writeln!(streams.out, "{}", shown.as_str())
             } else {
                 streams.out.write_all(value.as_bytes())
@@ -827,6 +872,135 @@ mod tests {
         assert!(!out.contains('\u{1b}'));
         assert!(out.contains("casey?[2J"));
         assert!(out.contains("password  hidden"));
+    }
+
+    fn code_point(hex: &serde_json::Value) -> char {
+        let hex = hex.as_str().expect("a code point");
+        char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("a character")
+    }
+
+    #[test]
+    fn the_terminal_and_the_window_replace_the_same_characters() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/cli/v1/vectors.json"))
+                .expect("vectors");
+        let cases = &vectors["shownTextCases"];
+        for (group, expected) in [
+            ("standIns", Some('?')),
+            ("spaces", Some(' ')),
+            ("kept", None),
+        ] {
+            let points = cases[group].as_array().expect("a group");
+            assert!(!points.is_empty(), "{group}");
+            for point in points {
+                let character = code_point(point);
+                let shown = expected.unwrap_or(character);
+                assert_eq!(
+                    printable_line(&format!("a{character}b")),
+                    format!("a{shown}b"),
+                    "{group} {point}"
+                );
+                assert_eq!(
+                    printable_block(&format!("a{character}b")).as_str(),
+                    format!("a{shown}b"),
+                    "{group} {point}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_direction_override_in_a_title_kind_or_message_never_reaches_the_terminal() {
+        let items = vec![CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: "Mallory \u{202e}gnp.exe\u{202c} Item".to_string(),
+        }];
+        let list = [CliReply::items(ID, items), CliReply::done(ID)];
+        for terminal in [true, false] {
+            let (code, out, _) = talk(&CliCommand::List, &list, terminal);
+            assert_eq!(code, EXIT_OK);
+            assert!(out.contains("Mallory ?gnp.exe? Item"), "{out:?}");
+            assert!(!out.contains(['\u{202e}', '\u{202c}']));
+        }
+        for terminal in [true, false] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let mut streams = Streams {
+                out: &mut out,
+                err: &mut err,
+                out_terminal: terminal,
+                err_terminal: terminal,
+            };
+            let unchecked = [CliItemSummary {
+                id: "fictional\u{2066}login".to_string(),
+                kind: "log\u{2067}in".to_string(),
+                title: "Northwind".to_string(),
+            }];
+            print_list(&unchecked, &mut streams).expect("printed");
+            let out = String::from_utf8(out).expect("utf8");
+            assert!(
+                out.contains("log?in") && out.contains("fictional?login"),
+                "{out:?}"
+            );
+        }
+
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "North\u{200b}wind \u{2066}mail\u{2069}".to_string(),
+            },
+            vec![CliField {
+                name: "web\u{202e}site".to_string(),
+                hidden: false,
+                value: Some("https://\u{202e}elpmaxe.dniwhtron".to_string()),
+            }],
+        );
+        for terminal in [true, false] {
+            let (code, out, _) = talk(&get(None, false), std::slice::from_ref(&item), terminal);
+            assert_eq!(code, EXIT_OK);
+            assert!(!out.contains(['\u{202e}', '\u{200b}', '\u{2066}', '\u{2069}']));
+            assert!(out.contains("web?site"));
+            assert!(out.contains("https://?elpmaxe.dniwhtron"));
+        }
+
+        let refusal = CliReply::error_with(Some(ID), CliErrorCode::Busy, "Try \u{202e}later");
+        let (code, _, err) = talk(&CliCommand::List, &[refusal], true);
+        assert_eq!(code, EXIT_BUSY);
+        assert!(err.contains("Try ?later"));
+    }
+
+    #[test]
+    fn a_value_asked_for_is_exact_in_a_pipe_and_a_hidden_one_is_never_altered_on_a_terminal() {
+        let hidden = "fictional\u{202e}canary\u{a0}pass";
+        let replies = [CliReply::value(ID, hidden, true)];
+        let (code, out, err) = talk(&get(Some("password"), false), &replies, true);
+        assert_eq!(code, EXIT_FAILED);
+        assert!(out.is_empty());
+        assert!(err.contains("--copy"));
+        let (code, out, _) = talk(&get(Some("password"), false), &replies, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out.as_bytes(), hidden.as_bytes());
+
+        let spaced = "fictional\u{a0}canary\u{3000}pass";
+        let (code, out, _) = talk(
+            &get(Some("password"), false),
+            &[CliReply::value(ID, spaced, true)],
+            true,
+        );
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, format!("{spaced}\n"));
+
+        let visible = "https://\u{202e}elpmaxe.dniwhtron";
+        let replies = [CliReply::value(ID, visible, false)];
+        let (code, out, _) = talk(&get(Some("url"), false), &replies, true);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, "https://?elpmaxe.dniwhtron\n");
+        let (code, out, _) = talk(&get(Some("url"), false), &replies, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, visible);
     }
 
     #[test]

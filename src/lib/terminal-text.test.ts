@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import vectors from '../../src-tauri/contracts/cli/v1/vectors.json'
 import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
 
 const plainProse = /[—–()]/
@@ -32,6 +33,23 @@ describe('text a terminal sent', () => {
     expect(shownText('\u3164', 15)).toBe(UNREADABLE_NAME)
     expect(shownText('Readable', 0)).toBe('')
     expect(shownText('Readable', 1)).toBe('…')
+  })
+})
+
+describe('the rule the terminal tool shares', () => {
+  const character = (hex: string) => String.fromCodePoint(Number.parseInt(hex, 16))
+
+  test.each([
+    ['standIns', '?'],
+    ['spaces', ' '],
+    ['kept', null],
+  ] as const)('the %s cases read the same in the window as in the terminal', (group, shown) => {
+    const points: string[] = vectors.shownTextCases[group]
+    expect(points.length).toBeGreaterThan(0)
+    for (const point of points) {
+      const value = character(point)
+      expect(shownText(`a${value}b`), point).toBe(`a${shown ?? value}b`)
+    }
   })
 })
 
