@@ -389,6 +389,7 @@ pub async fn take_new_key_in_state(
     }
     let (recovery_kit, recovery) = prepare_recovery(&key)?;
     let wraps = AdoptionWraps::seal(*key, &master_password, Some(recovery.clone()))?;
+    state.pause_for_test("adoptionSealed");
     let (recovery_kit, kept) = {
         let mut session = state
             .session
@@ -489,6 +490,7 @@ pub async fn adopt_journal_key_in_state(
         confirm_master_password(session.as_ref().ok_or(LOCKED)?, &proof)?;
     }
     let wraps = AdoptionWraps::seal(*key, master_password, journal.recovery.clone())?;
+    state.pause_for_test("adoptionSealed");
     drop(key);
     let adopted = {
         let mut session = state
@@ -646,13 +648,14 @@ pub async fn rekey_without_in_state(
         None => rotate_entry(&identity, list),
     }
     .map_err(present_proof)?;
-    let mut new_key = [0u8; 32];
+    let mut new_key = zeroize::Zeroizing::new([0u8; 32]);
     let recovery = if adopt_locally {
-        let (key, recovery) = prepared.take(std::time::Instant::now())?;
-        new_key = key;
+        let (mut key, recovery) = prepared.take(std::time::Instant::now())?;
+        *new_key = key;
+        key.zeroize();
         Some(recovery)
     } else {
-        crate::vault::util::fill_secret(&mut new_key)?;
+        crate::vault::util::fill_secret(&mut *new_key)?;
         None
     };
     let excluded: Vec<&str> = subject
@@ -680,13 +683,7 @@ pub async fn rekey_without_in_state(
                 journal.save(&journal_path)?;
                 Ok(journal)
             });
-        match saved {
-            Ok(created) => journal = Some(created),
-            Err(error) => {
-                new_key.zeroize();
-                return Err(error);
-            }
-        }
+        journal = Some(saved?);
     }
     let posted = match subject {
         Some(_) => client.remove(&identity, &entry, &packages).await,
@@ -696,7 +693,6 @@ pub async fn rekey_without_in_state(
         if adopt_locally && refused_before_commit(&error) {
             let _ = rekey_journal::forget(&journal_path);
         }
-        new_key.zeroize();
         return Err(present(error));
     }
 
@@ -706,19 +702,15 @@ pub async fn rekey_without_in_state(
     next.entries = entries;
     let mut clean = false;
     if adopt_locally {
-        let wraps = match AdoptionWraps::seal(new_key, master_password, recovery) {
-            Ok(wraps) => wraps,
-            Err(error) => {
-                new_key.zeroize();
-                return Err(error);
-            }
-        };
+        let wraps = AdoptionWraps::seal(*new_key, master_password, recovery)?;
+        state.pause_for_test("adoptionSealed");
         {
             let mut session = state
                 .session
                 .lock()
                 .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
             let unlocked = session.as_mut().ok_or(LOCKED)?;
+            confirm_master_password(unlocked, &proof)?;
             let kept = KeptThroughAdoption::capture(&local, list, unlocked, [None, None])?;
             clean = kept.cleaned();
             let payload = unlocked.open_payload()?.clone();
@@ -726,10 +718,7 @@ pub async fn rekey_without_in_state(
                 if let Some(journal) = journal.as_mut() {
                     journal.prospective_payload_digest =
                         kept.adopted_payload_digest().map(str::to_string);
-                    if let Err(error) = journal.save(&journal_path) {
-                        new_key.zeroize();
-                        return Err(error);
-                    }
+                    journal.save(&journal_path)?;
                 }
             }
             adopt_prepared(unlocked, wraps, payload)?;
@@ -739,10 +728,7 @@ pub async fn rekey_without_in_state(
             if clean {
                 if let Some(journal) = journal.as_mut() {
                     journal.adopted_payload_digest = journal.prospective_payload_digest.take();
-                    if let Err(error) = journal.save(&journal_path) {
-                        new_key.zeroize();
-                        return Err(error);
-                    }
+                    journal.save(&journal_path)?;
                 }
             }
         }
@@ -752,7 +738,7 @@ pub async fn rekey_without_in_state(
         effects.cancel_pending_approvals();
         next.activated_epoch = entry.epoch_after;
     }
-    new_key.zeroize();
+    drop(new_key);
     if adopt_locally {
         store.save_state(&next)?;
         let _ = rekey_journal::forget(&journal_path);

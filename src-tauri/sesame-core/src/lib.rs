@@ -144,8 +144,14 @@ pub struct VaultState {
     hello_unlock_available: AtomicBool,
     auto_lock_minutes: AtomicU64,
     session_epoch: AtomicU64,
+    lock_generation: AtomicU64,
     pub release_record: release_record::RecordState,
+    #[cfg(any(test, feature = "test-util"))]
+    pub test_pause: Mutex<Option<TestPause>>,
 }
+
+#[cfg(any(test, feature = "test-util"))]
+pub type TestPause = std::sync::Arc<dyn Fn(&VaultState, &str) + Send + Sync>;
 
 impl Default for VaultState {
     fn default() -> Self {
@@ -161,7 +167,10 @@ impl Default for VaultState {
             hello_unlock_available: AtomicBool::new(false),
             auto_lock_minutes: AtomicU64::new(5),
             session_epoch: AtomicU64::new(1),
+            lock_generation: AtomicU64::new(0),
             release_record: release_record::RecordState::default(),
+            #[cfg(any(test, feature = "test-util"))]
+            test_pause: Mutex::new(None),
         }
     }
 }
@@ -174,6 +183,42 @@ impl VaultState {
 
     pub fn advance_session_epoch(&self) -> u64 {
         self.session_epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn lock_generation(&self) -> u64 {
+        self.lock_generation.load(Ordering::Acquire)
+    }
+
+    pub fn pause_for_test(&self, _point: &str) {
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            let pause = self
+                .test_pause
+                .lock()
+                .ok()
+                .and_then(|pause| pause.as_ref().map(std::sync::Arc::clone));
+            if let Some(pause) = pause {
+                pause(self, _point);
+            }
+        }
+    }
+
+    fn mark_locked(&self) {
+        self.pause_for_test("lock");
+        self.lock_generation.fetch_add(1, Ordering::AcqRel);
+        self.advance_session_epoch();
+    }
+
+    pub fn lock_if_unlocked(&self) -> VaultResult<bool> {
+        let session = self
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not lock the vault session.".to_string())?;
+        if session.is_some() {
+            return Ok(true);
+        }
+        self.mark_locked();
+        Ok(false)
     }
 
     pub fn cached_pin_unlock(&self) -> Option<bool> {
@@ -230,7 +275,7 @@ impl VaultState {
         self.release_record.close(None);
         *session = None;
         self.discard_pending_import();
-        self.advance_session_epoch();
+        self.mark_locked();
         Ok(session)
     }
 
@@ -252,7 +297,7 @@ impl VaultState {
             self.release_record.close(None);
             *session = None;
             self.discard_pending_import();
-            self.advance_session_epoch();
+            self.mark_locked();
         }
         result
     }
@@ -264,10 +309,10 @@ impl VaultState {
             .map_err(|_| "Sesame could not lock the vault session.".to_string())?;
         self.release_record.close(session.as_ref());
         *session = None;
-        drop(session);
         // Parsed import entries are secrets; they never outlive an unlocked vault.
         self.discard_pending_import();
-        self.advance_session_epoch();
+        self.mark_locked();
+        drop(session);
         Ok(())
     }
 }

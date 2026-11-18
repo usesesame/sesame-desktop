@@ -539,15 +539,25 @@ pub fn validate_new_unlock_pin(pin: &str) -> VaultResult<()> {
     Ok(())
 }
 
+pub(crate) fn pin_secret(pin: &str, pepper: &[u8]) -> Zeroizing<String> {
+    let encoded = Zeroizing::new(URL_SAFE_NO_PAD.encode(pepper));
+    let mut secret = Zeroizing::new(String::with_capacity(pin.len() + 1 + encoded.len()));
+    secret.push_str(pin);
+    secret.push(':');
+    secret.push_str(&encoded);
+    secret
+}
+
 pub fn derive_pin_wrapping_key(pin: &str, pin_wrap: &PinWrap) -> VaultResult<[u8; 32]> {
     validate_unlock_pin(pin)?;
     let protected_pepper = URL_SAFE_NO_PAD
         .decode(&pin_wrap.protected_pepper)
         .map_err(|_| "The PIN unlock data is invalid. Use another unlock method.".to_string())?;
-    let mut pepper = unprotect_for_device(&protected_pepper)
-        .map_err(|error| format!("PIN unlock is unavailable. {error}"))?;
-    let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(&pepper)));
-    pepper.zeroize();
+    let pepper = Zeroizing::new(
+        unprotect_for_device(&protected_pepper)
+            .map_err(|error| format!("PIN unlock is unavailable. {error}"))?,
+    );
+    let secret = pin_secret(pin, &pepper);
     derive_key(secret.as_str(), &pin_wrap.kdf)
 }
 

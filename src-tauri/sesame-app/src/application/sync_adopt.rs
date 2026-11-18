@@ -1,5 +1,3 @@
-use zeroize::Zeroize;
-
 use crate::application::sync::{
     confirm_master_password, master_password_proof, prepare_recovery, SyncStore,
 };
@@ -28,6 +26,7 @@ pub fn finish_adoption_in_state(
         confirm_master_password(session.as_ref().ok_or(LOCKED)?, &proof)?;
     }
     let wraps = AdoptionWraps::seal(key, master_password, None)?;
+    state.pause_for_test("adoptionSealed");
     let recovery_kit = {
         let mut session = state
             .session
@@ -201,16 +200,15 @@ pub fn adopt_prepared(
         recovery,
         shown,
     } = wraps;
-    let mut key = *sealed_key;
     let (recovery_wrap, recovery_kdf) = (recovery.wrap, recovery.kdf);
 
     let next_pending = crate::vault::pending_change::stage_for_new_key(
         vault,
-        &key,
+        &sealed_key,
         payload.vault_id.as_deref().unwrap_or_default(),
     )?;
-    let protected_key = crate::vault::VaultKey::new(key)?;
-    key.zeroize();
+    let protected_key = crate::vault::VaultKey::new(*sealed_key)?;
+    drop(sealed_key);
     let stale_hello = vault.hello_wrap.take();
     let previous = (
         std::mem::replace(&mut vault.kdf, kdf),

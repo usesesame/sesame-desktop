@@ -645,6 +645,28 @@ test('only a master password unlock counts as the presence check', () => {
   assert.match(braceBody(command, command.indexOf('pub async fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
 })
 
+test('every way of locking goes through a lock that cancels an unlock in progress', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const guard = read('src-tauri', 'src', 'adapters', 'platform', 'session_guard.rs')
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
+  const backups = read('src-tauri', 'src', 'commands', 'backups.rs')
+  assert.match(braceBody(shell, shell.indexOf('pub fn lock_vault_if_unlocked(')), /lifecycle::lock_if_unlocked\(/, 'a conditional lock skips an unlock in progress')
+  assert.match(braceBody(shell, shell.indexOf('pub fn lock_vault(')), /lock_and_notify\(/)
+  assert.match(shell, /"sesame\.lock" => lock_vault\(app\)/, 'the tray no longer locks')
+  assert.match(braceBody(shell, shell.indexOf('fn web_process_terminated(')), /lock_vault_if_unlocked\(app\)/, 'a webview crash no longer locks')
+  assert.equal((guard.match(/lock_vault_if_unlocked\(&app\)/g) ?? []).length, 2, 'the screen lock, sleep or idle check no longer locks')
+  assert.match(lib, /ExitRequested[\s\S]{0,120}lock_vault_if_unlocked\(app\)/, 'exit no longer locks')
+  assert.match(updater, /lock_vault_if_unlocked\(&app\)/, 'installing an update no longer locks')
+  assert.match(braceBody(backups, backups.indexOf('pub fn lock_vault(')), /lock_and_notify\(/, 'the lock command no longer locks')
+  const core = read('src-tauri', 'sesame-core', 'src', 'lib.rs')
+  for (const name of ['lock_for_lifecycle', 'begin_destructive_lifecycle_change', 'apply_lifecycle_replacement', 'lock_if_unlocked']) {
+    assert.match(braceBody(core, core.indexOf(`pub fn ${name}`)), /self\.mark_locked\(\)/, `${name} no longer cancels an unlock in progress`)
+  }
+  const lock = braceBody(core, core.indexOf('pub fn lock_for_lifecycle('))
+  assert.ok(lock.indexOf('self.mark_locked()') < lock.indexOf('drop(session)'), 'a lock advances the epoch after it lets go of the session')
+})
+
 test('every command that derives a key from a secret runs off the window thread', () => {
   const sources = {
     lifecycle: read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0],
@@ -665,7 +687,9 @@ test('every command that derives a key from a secret runs off the window thread'
   const unlock = read('src-tauri', 'sesame-app', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
   const derived = braceBody(unlock, unlock.indexOf('pub fn unlock_with_derived_key('))
   assert.ok(derived.indexOf('derive(&read)') < derived.indexOf('state\n        .session\n        .lock()'), 'the unlock derives its key while it holds the vault session')
-  assert.match(derived, /if state\.session_epoch\(\) != epoch \{\s*return Err\(LOCKED_DURING_UNLOCK\.into\(\)\);/, 'a lock during the derivation no longer wins over the unlock')
+  assert.match(derived, /if state\.session_epoch\(\) != epoch \|\| state\.lock_generation\(\) != turn\.lock_generation \{\s*return Err\(LOCKED_DURING_UNLOCK\.into\(\)\);/, 'a lock during the derivation no longer wins over the unlock')
+  const confirm = braceBody(unlock, unlock.indexOf('pub fn confirm_unlock_survived('))
+  assert.match(confirm, /session\.is_some\(\) && state\.lock_generation\(\) == turn\.lock_generation/, 'an unlock that lost to a lock can still be reported as a success')
 })
 
 test('the window never keeps a secret value in a record view', () => {

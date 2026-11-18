@@ -457,7 +457,7 @@ test('removing a device rotates the vault key and leaving does the same', () => 
   const sync = read('src-tauri', 'src', 'commands', 'sync.rs')
   const rekey = transfer.match(/async fn rekey_without_in_state\([\s\S]*?\n}\n/)
   assert.ok(rekey, 'rekey_without_in_state is no longer one function this test can read')
-  assert.match(rekey[0], /fill_secret\(&mut new_key\)/)
+  assert.match(rekey[0], /fill_secret\(&mut \*new_key\)/)
   assert.match(rekey[0], /prepared\.take\(/, 'a vault key change must use the key and kit the person was shown')
   assert.match(rekey[0], /remove_entry\(/)
   assert.match(rekey[0], /rotate_entry\(/)

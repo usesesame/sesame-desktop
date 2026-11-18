@@ -241,6 +241,7 @@ pub fn complete_recovery_replacement_in_state(
     }
     let wraps = NewKeyWraps::derive(&master_password)?;
     drop(master_password);
+    state.pause_for_test("replacementDerived");
     let rotation = {
         let mut session = state
             .session

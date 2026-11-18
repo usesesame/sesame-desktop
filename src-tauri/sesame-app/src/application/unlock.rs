@@ -207,10 +207,10 @@ pub fn unlock_recovery_vault_in_state(
     let (snapshot, _) = unlock_with_derived_key(state, effects, &turn, |file| {
         sesame_core::api::unwrap_key_with_recovery_kit(file, &recovery_kit)
     })?;
-    drop(turn);
     drop(recovery_kit);
+    confirm_unlock_survived(state, &turn)?;
+    drop(turn);
     let _ = establish_pin_throttle_state(state, effects);
-    confirm_unlock_survived(state)?;
     Ok(snapshot)
 }
 
@@ -219,22 +219,32 @@ pub fn set_unlock_pin_in_state(
     effects: &dyn DesktopEffects,
     pin: String,
 ) -> VaultResult<()> {
-    const LOCKED: &str = "Unlock your vault before setting a PIN.";
     let pin = Zeroizing::new(pin);
     validate_new_unlock_pin(&pin)?;
-    key_settings_in_state(state, LOCKED)?;
+    key_settings_in_state(state, SET_PIN_LOCKED)?;
     let wrap = NewPinWrap::prepare(&pin)?;
     drop(pin);
+    apply_unlock_pin_in_state(state, effects, &wrap)
+}
+
+const SET_PIN_LOCKED: &str = "Unlock your vault before setting a PIN.";
+
+pub fn apply_unlock_pin_in_state(
+    state: &VaultState,
+    effects: &dyn DesktopEffects,
+    wrap: &NewPinWrap,
+) -> VaultResult<()> {
     {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault session.".to_string())?;
-        let session = session.as_mut().ok_or(LOCKED)?;
-        set_pin_with(session, &wrap)?;
+        let session = session.as_mut().ok_or(SET_PIN_LOCKED)?;
+        set_pin_with(session, wrap)?;
+        state.pause_for_test("pinSaved");
+        state.cache_pin_unlock(true);
     }
     let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
-    state.cache_pin_unlock(true);
     Ok(())
 }
 
@@ -251,8 +261,8 @@ pub fn remove_unlock_pin_in_state(
             .as_mut()
             .ok_or("Unlock your vault before removing the PIN.")?;
         remove_pin_for_session(session)?;
+        state.cache_pin_unlock(false);
     }
-    state.cache_pin_unlock(false);
     crate::application::unlock::discard_pin_throttle_state(state, effects);
     Ok(())
 }
@@ -357,12 +367,12 @@ fn unlock_pin_vault_inner(
             .map_err(|_| "The local vault key is invalid.".to_string())?;
         Ok(key_array)
     })?;
-    drop(turn);
     if let Ok(mut guard) = state.pin_guard.lock() {
         guard.record_success();
         let _ = effects.write_pin_throttle_state(&guard);
     }
-    confirm_unlock_survived(state)?;
+    confirm_unlock_survived(state, &turn)?;
+    drop(turn);
     Ok(snapshot)
 }
 
@@ -434,6 +444,7 @@ pub fn change_master_password_in_state(
     }
     let wraps = NewKeyWraps::derive(&new_password)?;
     drop(new_password);
+    state.pause_for_test("passwordChangeDerived");
     let mut session = state
         .session
         .lock()

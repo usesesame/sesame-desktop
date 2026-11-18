@@ -171,13 +171,22 @@ impl NewPinWrap {
         ensure_device_protection()?;
         let protected_pepper = URL_SAFE_NO_PAD.encode(protect_for_device(&*pepper)?);
         let kdf = default_kdf_params();
-        let secret = Zeroizing::new(format!("{}:{}", pin, URL_SAFE_NO_PAD.encode(*pepper)));
+        let secret = crate::storage::pin_secret(pin, &*pepper);
         let wrapping_key = Zeroizing::new(derive_key(secret.as_str(), &kdf)?);
         Ok(Self {
             kdf,
             protected_pepper,
             wrapping_key,
         })
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn for_tests(wrapping_key: [u8; 32]) -> Self {
+        Self {
+            kdf: default_kdf_params(),
+            protected_pepper: "fictional-protected-pepper".to_string(),
+            wrapping_key: Zeroizing::new(wrapping_key),
+        }
     }
 
     pub fn seal(&self, vault_key: &[u8; 32]) -> VaultResult<PinWrap> {

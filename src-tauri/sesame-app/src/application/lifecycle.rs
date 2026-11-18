@@ -64,21 +64,24 @@ fn same_key_settings(read: &VaultFile, current: &VaultFile) -> bool {
 
 pub struct UnlockTurn<'a> {
     _gate: MutexGuard<'a, ()>,
+    lock_generation: u64,
 }
 
 pub fn begin_unlock(state: &VaultState) -> UnlockTurn<'_> {
+    let gate = state
+        .unlock_gate
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     UnlockTurn {
-        _gate: state
-            .unlock_gate
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        _gate: gate,
+        lock_generation: state.lock_generation(),
     }
 }
 
 pub fn unlock_with_derived_key(
     state: &VaultState,
     effects: &dyn DesktopEffects,
-    _turn: &UnlockTurn<'_>,
+    turn: &UnlockTurn<'_>,
     derive: impl FnOnce(&VaultFile) -> VaultResult<[u8; 32]>,
 ) -> VaultResult<(VaultSnapshot, u64)> {
     let epoch = state.session_epoch();
@@ -89,7 +92,7 @@ pub fn unlock_with_derived_key(
         .session
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
-    if state.session_epoch() != epoch {
+    if state.session_epoch() != epoch || state.lock_generation() != turn.lock_generation {
         return Err(LOCKED_DURING_UNLOCK.into());
     }
     let current = sesame_core::loader::VaultLoader::read(&path)?;
@@ -112,13 +115,12 @@ pub fn key_settings_in_state(state: &VaultState, locked: &str) -> VaultResult<Ke
         .ok_or(locked.to_string())
 }
 
-pub fn confirm_unlock_survived(state: &VaultState) -> VaultResult<()> {
-    let unlocked = state
+pub fn confirm_unlock_survived(state: &VaultState, turn: &UnlockTurn<'_>) -> VaultResult<()> {
+    let session = state
         .session
         .lock()
-        .map_err(|_| "Sesame could not open the vault session.".to_string())?
-        .is_some();
-    if unlocked {
+        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
+    if session.is_some() && state.lock_generation() == turn.lock_generation {
         Ok(())
     } else {
         Err(LOCKED_DURING_UNLOCK.into())
@@ -135,12 +137,20 @@ pub fn unlock_vault_in_state(
     let (snapshot, epoch) = unlock_with_derived_key(state, effects, &turn, |file| {
         sesame_core::api::unwrap_key_with_password(file, &master_password)
     })?;
-    drop(turn);
     drop(master_password);
+    confirm_unlock_survived(state, &turn)?;
+    drop(turn);
     let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
     presence.grant_after_unlock(epoch);
-    confirm_unlock_survived(state)?;
     Ok(snapshot)
+}
+
+pub fn lock_if_unlocked(state: &VaultState, effects: &dyn DesktopEffects) -> VaultResult<bool> {
+    if !state.lock_if_unlocked()? {
+        return Ok(false);
+    }
+    lock_and_notify(state, effects)?;
+    Ok(true)
 }
 
 /// The event half of locking; every lock entry point calls this so behavior cannot drift.
