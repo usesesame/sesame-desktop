@@ -387,6 +387,122 @@ fn a_request_while_locked_waits_for_the_unlock_and_then_still_asks() {
     assert!(!wire(&replies).contains(CANARY));
 }
 
+fn unlock_for_real(harness: &Harness, effects: &FakeEffects<'_>) {
+    unlock_vault_in_state(
+        &harness.vault.state,
+        &harness.presence,
+        effects,
+        Zeroizing::new("fictional master password".to_string()),
+    )
+    .expect("unlocked");
+}
+
+#[test]
+fn a_hidden_value_asked_for_while_locked_needs_the_master_password_after_the_unlock() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.lock(&harness.effects());
+
+    let (replies, _) = harness.run_with(
+        &get(160, Some("password"), false),
+        &origin,
+        |host, effects| {
+            wait_for(host, "unlockRequested");
+            unlock_for_real(&harness, effects);
+            assert!(harness
+                .presence
+                .require(harness.vault.state.session_epoch())
+                .is_ok());
+            let event = harness.pending();
+            assert!(event.needs_presence);
+            assert!(event.field_hidden);
+            harness
+                .decide(&event, CliDecisionKind::Allow, None, false)
+                .expect("allowed without the password");
+        },
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
+    assert!(!wire(&replies).contains(CANARY));
+    assert!(record_entries(&harness).is_empty());
+}
+
+#[test]
+fn a_hidden_value_asked_for_while_locked_is_released_after_a_fresh_password_check() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    grant(&harness.vault, &harness.presence);
+    harness.lock(&harness.effects());
+
+    let (replies, _) = harness.run_with(
+        &get(161, Some("password"), false),
+        &origin,
+        |host, effects| {
+            wait_for(host, "unlockRequested");
+            unlock_for_real(&harness, effects);
+            let event = harness.pending();
+            assert!(event.needs_presence);
+            grant(&harness.vault, &harness.presence);
+            harness
+                .decide(&event, CliDecisionKind::Allow, None, false)
+                .expect("allowed after the password");
+        },
+    );
+    assert_eq!(
+        replies.last(),
+        Some(&CliReply::value(&id(161), CANARY, true))
+    );
+}
+
+#[test]
+fn a_visible_field_asked_for_while_locked_needs_no_password_after_the_unlock() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.lock(&harness.effects());
+
+    let (replies, _) = harness.run_with(
+        &get(162, Some("username"), false),
+        &origin,
+        |host, effects| {
+            wait_for(host, "unlockRequested");
+            unlock_for_real(&harness, effects);
+            let event = harness.pending();
+            assert!(!event.needs_presence);
+            harness
+                .decide(&event, CliDecisionKind::Allow, None, false)
+                .expect("allowed");
+        },
+    );
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+}
+
+#[test]
+fn a_request_made_while_unlocked_still_uses_the_unlock_grant() {
+    let harness = Harness::new();
+    let effects = harness.effects();
+    harness.lock(&effects);
+    unlock_for_real(&harness, &effects);
+
+    let (replies, _) = harness.run_with(
+        &get(163, Some("password"), false),
+        &terminal(100),
+        |_, _| {
+            let event = harness.pending();
+            assert!(!event.needs_presence);
+            harness.allow(false);
+        },
+    );
+    assert_eq!(
+        replies.last(),
+        Some(&CliReply::value(&id(163), CANARY, true))
+    );
+}
+
 #[test]
 fn an_unlock_that_never_comes_ends_at_the_deadline() {
     let mut harness = Harness::new();

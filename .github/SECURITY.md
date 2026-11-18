@@ -155,7 +155,9 @@ good-faith report that turns out to be out of scope is not held against you.
 - Any program running as you can run the `sesame` command and ask for an
   item, the same way it can start the browser helper. The approval in the
   Sesame window is the check, and a hidden value also needs the master
-  password check described above. When you allow a terminal for five minutes,
+  password check described above. When a terminal asks for a hidden value
+  while the vault is locked, the window asks for the master password again
+  after you unlock, because the unlock alone does not count for that request. When you allow a terminal for five minutes,
   every program started from that terminal gets what it asks for without a
   prompt until the five minutes end, and hidden values still need the master
   password check. The allowance also ends when the vault locks and when almost

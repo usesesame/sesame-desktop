@@ -244,6 +244,7 @@ test('the security policy records the limits of the command line tool', () => {
   assert.match(body, /On Linux the `sesame` command only checks that the program answering on its socket runs as you/)
   assert.match(body, /can print values it made up, but it never gets a real value from your vault/)
   assert.match(body, /Windows offers no terminal allowance/)
+  assert.match(body, /while the vault is locked, the window asks for the master password again after you unlock/)
   assert.match(body, /The allowance also ends when the vault locks and when almost anything in the vault changes/)
   assert.match(body, /may be asked again before five minutes pass/)
   assert.doesNotMatch(body, /does not end it/)

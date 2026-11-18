@@ -159,14 +159,22 @@ fn unlocked_epoch(vault: &VaultState) -> Option<u64> {
     Some(vault.session_epoch())
 }
 
+struct Unlocked {
+    epoch: u64,
+    after_wait: Option<Instant>,
+}
+
 fn wait_for_unlock(
     context: &CliContext<'_>,
     request_id: &str,
     command: &CliCommand,
     origin: &TerminalOrigin,
-) -> Result<u64, Stop> {
+) -> Result<Unlocked, Stop> {
     if let Some(epoch) = unlocked_epoch(context.vault) {
-        return Ok(epoch);
+        return Ok(Unlocked {
+            epoch,
+            after_wait: None,
+        });
     }
     if !context
         .host
@@ -189,7 +197,10 @@ fn wait_for_unlock(
         );
         if let Some(epoch) = unlocked_epoch(context.vault) {
             context.host.unlock_ended("unlocked");
-            return Ok(epoch);
+            return Ok(Unlocked {
+                epoch,
+                after_wait: Some(Instant::now()),
+            });
         }
         if !context.host.peer_connected() {
             context.host.unlock_ended("connectionClosed");
@@ -307,10 +318,13 @@ fn answer(
     command: &CliCommand,
     origin: &TerminalOrigin,
 ) -> Result<Vec<CliReply>, Stop> {
-    let epoch = wait_for_unlock(context, request_id, command, origin)?;
+    let unlocked = wait_for_unlock(context, request_id, command, origin)?;
+    let epoch = unlocked.epoch;
+    let fresh_password_since = unlocked.after_wait;
     let subject = resolve_subject(context.vault, command)?;
     let allowed = context.allowances.covers(origin, epoch);
-    let needs_presence = subject.field_hidden && context.presence.require(epoch).is_err();
+    let needs_presence = subject.field_hidden
+        && (fresh_password_since.is_some() || context.presence.require(epoch).is_err());
     let not_found = !matches!(command, CliCommand::List) && subject.candidates.is_empty();
     if not_found && allowed {
         return Err(Stop::Reply(CliErrorCode::NotFound));
@@ -396,7 +410,16 @@ fn answer(
         return Err(Stop::Reply(CliErrorCode::NotFound));
     }
     ensure_epoch(context.vault, epoch)?;
-    release(context, request_id, command, chosen.as_ref())
+    release(
+        context,
+        request_id,
+        command,
+        chosen.as_ref(),
+        Freshness {
+            epoch,
+            password_since: fresh_password_since,
+        },
+    )
 }
 
 fn ensure_epoch(vault: &VaultState, epoch: u64) -> Result<(), Stop> {
@@ -810,11 +833,18 @@ fn release_error(error: &str) -> Stop {
     }
 }
 
+#[derive(Clone, Copy)]
+struct Freshness {
+    epoch: u64,
+    password_since: Option<Instant>,
+}
+
 fn release(
     context: &CliContext<'_>,
     request_id: &str,
     command: &CliCommand,
     chosen: Option<&CliCandidate>,
+    freshness: Freshness,
 ) -> Result<Vec<CliReply>, Stop> {
     match command {
         CliCommand::List => list_frames(context.vault, request_id),
@@ -857,7 +887,7 @@ fn release(
             let fields = chosen_fields(context.vault, chosen)?;
             let field = find_field(&fields, name).ok_or(Stop::Reply(CliErrorCode::NoField))?;
             if field.hidden {
-                release_hidden(context, request_id, chosen, &field.key, *copy)
+                release_hidden(context, request_id, chosen, &field.key, *copy, freshness)
             } else {
                 let value = field
                     .value
@@ -921,7 +951,14 @@ fn release_hidden(
     chosen: &CliCandidate,
     key: &str,
     copy: bool,
+    freshness: Freshness,
 ) -> Result<Vec<CliReply>, Stop> {
+    if let Some(since) = freshness.password_since {
+        context
+            .presence
+            .require_password_since(freshness.epoch, since)
+            .map_err(|error| release_error(&error))?;
+    }
     if copy {
         let seconds = context.approvals.clear_after_seconds();
         terminal_copy_item_field_in_state(
