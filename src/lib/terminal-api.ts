@@ -134,16 +134,24 @@ export async function getTerminalStatus(): Promise<TerminalToolStatus> {
   return invoke<TerminalToolStatus>('get_terminal_status')
 }
 
+function stopQuietly(stop: UnlistenFn): Promise<unknown> {
+  try {
+    return Promise.resolve(stop()).catch(() => undefined)
+  } catch {
+    return Promise.resolve()
+  }
+}
+
 async function listenToBoth(first: Promise<UnlistenFn>, second: Promise<UnlistenFn>): Promise<UnlistenFn> {
   const results = await Promise.allSettled([first, second])
   const stops = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
   const failure = results.find((result) => result.status === 'rejected')
   if (failure) {
-    for (const stop of stops) stop()
+    await Promise.all(stops.map(stopQuietly))
     throw failure.reason
   }
   return () => {
-    for (const stop of stops) stop()
+    for (const stop of stops) void stopQuietly(stop)
   }
 }
 

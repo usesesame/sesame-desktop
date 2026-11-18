@@ -17,6 +17,7 @@ import { messageFor, type FeedbackController } from './feedback-controller'
 import type { ModalController } from './modal-controller'
 
 export const TOO_SOON_MESSAGE = 'Wait a moment after Sesame comes forward, then approve again.'
+export const PRESENCE_NEEDED_MESSAGE = 'Enter your master password to send a hidden value.'
 const NOTICE_TITLE = 'Terminal request closed'
 const BROWSER_STORES = ['browserFill', 'browserIdentityFill', 'browserCardFill', 'browserTotpFill', 'browserSave', 'browserChange', 'browserCreate'] as const
 const REMEMBERED_CANCELLATIONS = 32
@@ -47,12 +48,17 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   const store = stores.terminalApproval
   let closedQuietly: string | null = null
   let reported: string | null = null
-  const cancelled: string[] = []
+  const ended: string[] = []
+  const settling = new Set<string>()
 
-  function rememberCancelled(approvalId: string) {
-    if (cancelled.includes(approvalId)) return
-    cancelled.push(approvalId)
-    if (cancelled.length > REMEMBERED_CANCELLATIONS) cancelled.shift()
+  function rememberEnded(approvalId: string) {
+    if (ended.includes(approvalId)) return
+    ended.push(approvalId)
+    if (ended.length > REMEMBERED_CANCELLATIONS) ended.shift()
+  }
+
+  function settled(approvalId: string): boolean {
+    return ended.includes(approvalId) || settling.has(approvalId)
   }
 
   const loopStore = {
@@ -91,7 +97,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const before = store.value().request?.approvalId
     const pending = await getPendingTerminalRequest()
     const shown = store.value().request
-    if (pending && cancelled.includes(pending.approvalId)) return shown
+    if (pending && settled(pending.approvalId)) return shown
     if (!pending && shown && shown.approvalId !== before) return shown
     return pending
   }
@@ -103,7 +109,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     } catch {
       return
     }
-    if (pending && !cancelled.includes(pending.approvalId) && !store.value().request) loop.receive(pending)
+    if (pending && !settled(pending.approvalId) && !store.value().request) loop.receive(pending)
   }
 
   async function reopenIfStillWaiting(approvalId: string, message: string) {
@@ -111,20 +117,26 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     try {
       pending = await getPendingTerminalRequest()
     } catch {
+      feedback.showNotice(NOTICE_TITLE, message)
       return
     }
-    if (!pending || pending.approvalId !== approvalId || cancelled.includes(approvalId) || store.value().request) return
+    if (!pending || pending.approvalId !== approvalId || settled(approvalId) || store.value().request) return
     loop.receive(pending)
     if (store.value().request?.approvalId === approvalId) store.patch({ error: message })
   }
 
   async function closeWith(request: CliApprovalRequestEvent, decision: 'deny' | 'dismiss') {
     loopStore.patch({ request: null })
+    settling.add(request.approvalId)
     try {
       await resolveTerminalRequest({ approvalId: request.approvalId, decision })
     } catch (error) {
+      settling.delete(request.approvalId)
       await reopenIfStillWaiting(request.approvalId, messageFor(error))
+      return
     }
+    settling.delete(request.approvalId)
+    rememberEnded(request.approvalId)
   }
 
   const loop = approvalLoop<CliApprovalRequestEvent, CliApprovalCancelledEvent>({
@@ -147,7 +159,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       void confirmPending()
     },
     onCancelled: (payload) => {
-      rememberCancelled(payload.approvalId)
+      rememberEnded(payload.approvalId)
       const current = store.value().request
       if (current?.approvalId === payload.approvalId) {
         loopStore.patch({ request: null })
@@ -179,6 +191,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
         store.patch({ working: false, error: message })
         return false
       }
+      if (message === PRESENCE_NEEDED_MESSAGE && store.value().request?.approvalId === request.approvalId) {
+        store.patch({ working: false, error: message, presenceGranted: false, request: { ...request, needsPresence: true } })
+        return false
+      }
       finish(request.approvalId)
       reported = request.approvalId
       feedback.showNotice(NOTICE_TITLE, message)
@@ -202,7 +218,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     }
     const needsSecret = secretNeeded(request, itemId, state.presenceGranted)
     if (needsSecret && !state.secret) {
-      store.patch({ error: 'Enter your master password to send a hidden value.' })
+      store.patch({ error: PRESENCE_NEEDED_MESSAGE })
       return
     }
     const secret = state.secret
@@ -221,7 +237,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     if (itemId) decision.itemId = itemId
     if (request.canAllowTerminal && state.allowTerminal === true) decision.allowTerminal = true
     if (request.copy) decision.clearAfterSeconds = stores.settings.value().clipboardClearSeconds
-    if (await send(request, decision)) finish(request.approvalId)
+    if (await send(request, decision)) {
+      rememberEnded(request.approvalId)
+      finish(request.approvalId)
+    }
   }
 
   async function deny() {
@@ -280,7 +299,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       }).then((stop) => {
         if (disposed) stop()
         else stopUnlock = stop
-      }).catch(() => void recordDiagnostic('renderer', 'terminal_listener_failed'))
+      }).catch(() => {
+        store.patch({ unlock: null })
+        void recordDiagnostic('renderer', 'terminal_listener_failed')
+      })
     }
     return () => {
       disposed = true

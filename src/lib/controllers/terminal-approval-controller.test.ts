@@ -4,7 +4,7 @@ import type { CliApprovalRequestEvent } from '../terminal-api'
 import { createAppStores } from '../stores/app-stores'
 import { createFeedbackController } from './feedback-controller'
 import { createModalController } from './modal-controller'
-import { createTerminalApprovalController, TOO_SOON_MESSAGE } from './terminal-approval-controller'
+import { createTerminalApprovalController, PRESENCE_NEEDED_MESSAGE, TOO_SOON_MESSAGE } from './terminal-approval-controller'
 
 const terminalApi = vi.hoisted(() => ({
   getPendingTerminalRequest: vi.fn(),
@@ -470,6 +470,64 @@ describe('terminal approvals in the window', () => {
     answerPoll(request('approval-1'))
     await flush()
     expect(state().request).toBeNull()
+    stop()
+  })
+
+  it('keeps a request closed when a poll that began before its denial returns it afterwards', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1'))
+    let answerPoll: (value: CliApprovalRequestEvent) => void = () => {}
+    terminalApi.getPendingTerminalRequest.mockReturnValueOnce(new Promise((resolve) => { answerPoll = resolve }))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(terminalApi.getPendingTerminalRequest).toHaveBeenCalledTimes(2)
+    await controller.deny()
+    answerPoll(request('approval-1'))
+    await flush()
+    expect(state().request).toBeNull()
+    stop()
+  })
+
+  it('says a denial may not have reached Sesame when it cannot check the request', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1'))
+    terminalApi.resolveTerminalRequest.mockRejectedValueOnce(new Error('Sesame could not reach the request.'))
+    terminalApi.getPendingTerminalRequest.mockRejectedValueOnce(new Error('unreachable'))
+    await controller.deny()
+    expect(state().request).toBeNull()
+    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'Sesame could not reach the request.')
+    stop()
+  })
+
+  it('asks for the master password when Sesame says it lapsed and keeps the request', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1'))
+    terminalApi.resolveTerminalRequest.mockRejectedValueOnce(new Error(PRESENCE_NEEDED_MESSAGE))
+    await controller.allow()
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(state().request?.needsPresence).toBe(true)
+    expect(state()).toMatchObject({ working: false, error: PRESENCE_NEEDED_MESSAGE })
+    await controller.allow()
+    expect(decisions()).toHaveLength(1)
+    controller.setSecret('fictional-master-password')
+    await controller.allow()
+    expect(vaultApi.grantPresence).toHaveBeenCalledWith('fictional-master-password')
+    expect(decisions()).toHaveLength(2)
+    stop()
+  })
+
+  it('clears the waiting terminal notice when the unlock listeners could not be set up', async () => {
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: false } })
+    let fail: (error: Error) => void = () => {}
+    terminalApi.subscribeTerminalUnlock.mockImplementation((next) => {
+      unlockHandlers = next
+      return new Promise((_, reject) => { fail = reject })
+    })
+    const { stop } = await started()
+    unlockHandlers.request({ command: 'list', terminal: 'pts/3', remote: false })
+    expect(state().unlock).not.toBeNull()
+    fail(new Error('fictional listen failure'))
+    await flush()
+    expect(state().unlock).toBeNull()
     stop()
   })
 

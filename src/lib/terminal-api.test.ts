@@ -31,6 +31,26 @@ describe('terminal event listeners', () => {
     expect(stopFirst).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps the registration error when removing the surviving listener also fails', async () => {
+    const stopFirst = vi.fn(() => Promise.reject(new Error('fictional unlisten failure')))
+    eventApi.listen
+      .mockResolvedValueOnce(stopFirst)
+      .mockRejectedValueOnce(new Error('fictional listen failure'))
+    await expect(subscribeTerminalApproval({ request: () => {}, cancelled: () => {} })).rejects.toThrow('fictional listen failure')
+    expect(stopFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the other listener when one removal fails', async () => {
+    const failing = vi.fn(() => Promise.reject(new Error('fictional unlisten failure')))
+    const working = vi.fn()
+    eventApi.listen.mockResolvedValueOnce(failing).mockResolvedValueOnce(working)
+    const stop = await subscribeTerminalUnlock({ request: () => {}, ended: () => {} })
+    stop()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(failing).toHaveBeenCalledTimes(1)
+    expect(working).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps both listeners when both register and removes both on cleanup', async () => {
     const stops = [vi.fn(), vi.fn()]
     eventApi.listen.mockResolvedValueOnce(stops[0]).mockResolvedValueOnce(stops[1])
