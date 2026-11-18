@@ -228,7 +228,7 @@ fn read_failure(error: &io::Error, answered: bool, streams: &mut Streams<'_>) ->
             streams.say(CliErrorCode::Timeout.message());
             EXIT_TIMEOUT
         }
-        ErrorKind::UnexpectedEof if !answered => {
+        ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe if !answered => {
             streams.say(NOT_SESAME);
             EXIT_UNREACHABLE
         }
@@ -1029,6 +1029,47 @@ mod tests {
         let (code, _, err) = talk(&CliCommand::List, &[], false);
         assert_eq!(code, EXIT_UNREACHABLE);
         assert!(err.contains(NOT_SESAME));
+    }
+
+    struct Closed(io::Error);
+
+    impl FrameSource for Closed {
+        fn next_frame(&mut self) -> io::Result<Zeroizing<Vec<u8>>> {
+            Err(io::Error::new(self.0.kind(), "closed"))
+        }
+    }
+
+    fn closed_with(error: io::Error) -> (i32, String) {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = {
+            let mut streams = Streams {
+                out: &mut out,
+                err: &mut err,
+                out_terminal: false,
+                err_terminal: false,
+            };
+            converse(&mut Closed(error), ID, &CliCommand::List, &mut streams)
+        };
+        (code, String::from_utf8(err).expect("utf8"))
+    }
+
+    #[test]
+    fn a_pipe_closed_before_any_reply_exits_as_unreachable_on_every_platform() {
+        let (code, err) = closed_with(io::Error::from(ErrorKind::BrokenPipe));
+        assert_eq!(code, EXIT_UNREACHABLE);
+        assert!(err.contains(NOT_SESAME));
+        let (code, _) = closed_with(io::Error::from(ErrorKind::ConnectionReset));
+        assert_eq!(code, EXIT_FAILED);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_native_closed_pipe_error_exits_as_unreachable() {
+        const ERROR_BROKEN_PIPE: i32 = 109;
+        let native = io::Error::from_raw_os_error(ERROR_BROKEN_PIPE);
+        assert_eq!(native.kind(), ErrorKind::BrokenPipe);
+        assert_eq!(closed_with(native).0, EXIT_UNREACHABLE);
     }
 
     #[test]

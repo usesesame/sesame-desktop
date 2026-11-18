@@ -12,8 +12,8 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER,
-        ERROR_IO_PENDING, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_TIMEOUT, GENERIC_READ,
-        GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
+        ERROR_IO_INCOMPLETE, ERROR_IO_PENDING, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+        ERROR_TIMEOUT, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
     },
     Security::{
         Authorization::{
@@ -184,18 +184,14 @@ pub(super) fn connect_verified(
     expected_server: &Path,
     payload: &[u8],
 ) -> io::Result<(OwnedHandle, OwnedHandle)> {
-    validate_size_on(channel, payload, channel.max_request_bytes)?;
-    let identity = current_user_identity(channel)?;
-    if unsafe {
-        WaitNamedPipeW(
-            identity.pipe_name.as_ptr(),
-            millis(channel.connect_deadline),
-        )
-    } == 0
-    {
+    connect_verified_with(channel, expected_server, payload, false)
+}
+
+fn open_pipe(identity: &UserIdentity, wait: Duration) -> io::Result<OwnedHandle> {
+    if unsafe { WaitNamedPipeW(identity.pipe_name.as_ptr(), millis(wait)) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    let pipe = OwnedHandle::new(unsafe {
+    OwnedHandle::new(unsafe {
         CreateFileW(
             identity.pipe_name.as_ptr(),
             GENERIC_READ | GENERIC_WRITE,
@@ -205,7 +201,31 @@ pub(super) fn connect_verified(
             FILE_FLAG_OVERLAPPED,
             ptr::null_mut(),
         )
-    })?;
+    })
+}
+
+fn connect_verified_with(
+    channel: &Channel,
+    expected_server: &Path,
+    payload: &[u8],
+    retry_busy: bool,
+) -> io::Result<(OwnedHandle, OwnedHandle)> {
+    validate_size_on(channel, payload, channel.max_request_bytes)?;
+    let identity = current_user_identity(channel)?;
+    let deadline = Instant::now() + channel.connect_deadline;
+    let pipe = loop {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        match open_pipe(&identity, wait) {
+            Err(error)
+                if retry_busy
+                    && error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+                    && wait > Duration::from_millis(1) =>
+            {
+                continue;
+            }
+            opened => break opened?,
+        }
+    };
     // Verified handle kept alive for the exchange; a same-name squatter is rejected up front.
     let server = verified_server(channel, pipe.raw(), expected_server)?;
 
@@ -351,7 +371,7 @@ pub fn open_terminal_request(payload: &[u8]) -> io::Result<TerminalClient> {
         .and_then(Path::parent)
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "no Sesame install folder"))?;
     let expected_server = fs::canonicalize(install.join("sesame.exe"))?;
-    let (pipe, server) = connect_verified(&TERMINAL, &expected_server, payload)?;
+    let (pipe, server) = connect_verified_with(&TERMINAL, &expected_server, payload, true)?;
     Ok(TerminalClient {
         pipe,
         _server: server,
@@ -458,35 +478,45 @@ where
     let expected_client = std::sync::Arc::new(fs::canonicalize(expected_client)?);
     let handler = std::sync::Arc::new(handler);
     let open = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let mut waiting = first_terminal_instance(&identity)?;
+    let mut waiting = Some(first_terminal_instance(&identity)?);
     listening();
     let mut create_failures = 0_u32;
     let mut connect_errors = 0_u32;
     loop {
-        match connect_with_timeout(waiting.raw(), Duration::MAX) {
+        let current = match waiting.take() {
+            Some(pipe) => pipe,
+            None => match next_terminal_instance(&identity, &mut create_failures)? {
+                Some(pipe) => pipe,
+                None => continue,
+            },
+        };
+        match connect_with_timeout(current.raw(), Duration::MAX) {
             Ok(true) => connect_errors = 0,
-            Ok(false) => continue,
+            Ok(false) => {
+                waiting = Some(current);
+                continue;
+            }
             Err(_) => {
-                disconnect(&waiting);
+                disconnect(&current);
                 connect_errors += 1;
                 if connect_errors >= REPLACE_AFTER_CONNECT_ERRORS {
                     if let Some(fresh) = next_terminal_instance(&identity, &mut create_failures)? {
-                        waiting = fresh;
+                        waiting = Some(fresh);
                         connect_errors = 0;
+                        continue;
                     }
                 }
+                waiting = Some(current);
                 continue;
             }
         }
         if open.load(Ordering::Acquire) >= MAX_TERMINAL_CONNECTIONS {
-            disconnect(&waiting);
+            disconnect(&current);
+            waiting = Some(current);
             continue;
         }
-        let Some(next) = next_terminal_instance(&identity, &mut create_failures)? else {
-            disconnect(&waiting);
-            continue;
-        };
-        let pipe = std::mem::replace(&mut waiting, next);
+        waiting = next_terminal_instance(&identity, &mut create_failures)?;
+        let pipe = current;
         open.fetch_add(1, Ordering::AcqRel);
         let slot = OpenConnection(std::sync::Arc::clone(&open));
         let expected_client = std::sync::Arc::clone(&expected_client);
@@ -817,7 +847,7 @@ fn finish_overlapped(
         return Ok(transferred);
     }
     let error = unsafe { GetLastError() };
-    if error != ERROR_TIMEOUT {
+    if !matches!(error, WAIT_TIMEOUT | ERROR_TIMEOUT | ERROR_IO_INCOMPLETE) {
         return Err(io::Error::from_raw_os_error(error as i32));
     }
 
