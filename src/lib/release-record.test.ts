@@ -64,6 +64,8 @@ describe('activity sentences', () => {
     expect(text).toContain('one-time codes you only look at')
     expect(text).toContain('breach checks')
     expect(text).toContain('stays on this device')
+    expect(text).toContain('Terminal requests it turned down are not listed.')
+    expect(text).not.toMatch(/every browser request it turned down\.$/m)
   })
 
   test('details show the time, the match, repeats and late writes', () => {

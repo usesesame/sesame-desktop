@@ -272,7 +272,7 @@ export function statusNotice(status: ReleaseRecordStatus | null): string | null 
 }
 
 export const RECORD_SCOPE_TEXT = [
-  'Sesame lists every time a password or other secret leaves your vault, and every browser request it turned down.',
+  'Sesame lists every time a password or other secret leaves your vault, including to a terminal, and every browser request it turned down. Terminal requests it turned down are not listed.',
   'The list is encrypted, stays on this device, and drops entries older than the time you choose above.',
   'It leaves out one-time codes you only look at and breach checks.',
   'Another program on this computer could change or delete the list, so use it as a guide.',
