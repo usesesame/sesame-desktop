@@ -277,17 +277,26 @@ test('the Windows installer puts only the cli folder on the system Path and neve
     assert.ok(match, `the hook has no ${name} macro`)
     return match[0]
   }
+  const readPath = macro('SESAME_READ_PATH')
+  assert.match(readPath, /ClearErrors\s+ReadRegStr \$R0 HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
+  assert.match(readPath, /\$\{If\} \$\{Errors\}\s+StrCpy \$R3 1/)
+  assert.match(readPath, /StrLen \$R4 \$R0\s+IntOp \$R4 \$R4 \+ 1\s+\$\{If\} \$R4 >= \$\{NSIS_MAX_STRLEN\}\s+StrCpy \$R3 1/, 'a value that fills the string buffer may be cut short and must count as unreadable')
+
+  const write = macro('SESAME_WRITE_PATH')
+  assert.match(write, /ClearErrors\s+WriteRegExpandStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"\s+\$\{If\} \$\{Errors\}\s+DetailPrint "\$\{FAILED\}"\s+\$\{Else\}\s+SendMessage \$\{HWND_BROADCAST\} \$\{WM_SETTINGCHANGE\} 0 "STR:Environment"/)
+  assert.doesNotMatch(write, /Abort|Quit|SetErrorLevel/, 'a failed Path write must not fail the install')
+  assert.equal((hook.match(/WriteRegExpandStr/g) ?? []).length, 1, 'every Path write goes through the one checked macro')
+
   const add = macro('SESAME_ADD_TERMINAL_PATH')
-  assert.match(add, /ClearErrors\s+ReadRegStr \$R0 HKLM/)
-  assert.match(add, /\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
+  assert.match(add, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
   assert.match(add, /\$\{If\} \$R3 >= \$\{NSIS_MAX_STRLEN\}\s+DetailPrint/)
   assert.match(add, /\$\{If\} \$R2 <> 1/)
-  assert.equal((add.match(/WriteRegExpandStr/g) ?? []).length, 2)
-  assert.match(add, /SendMessage \$\{HWND_BROADCAST\} \$\{WM_SETTINGCHANGE\} 0 "STR:Environment"/)
+  assert.match(add, /!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not add/)
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
-  assert.match(remove, /\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
-  assert.match(remove, /\$\{If\} \$R2 = 1\s+WriteRegExpandStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$R1"/)
+  assert.match(remove, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/, 'an unreadable or cut short Path is never written on uninstall')
+  assert.match(remove, /\$\{If\} \$R2 = 1\s+!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not remove/)
+  assert.doesNotMatch(remove, /\$R1 == ""|\$R1 != ""/, 'a Path that held only the Sesame entry is written back empty, which removes only that entry')
 
   const scan = macro('SESAME_SCAN_PATH')
   assert.match(scan, /\$R5 == "\$\{SESAME_TERMINAL_FOLDER\}"/)

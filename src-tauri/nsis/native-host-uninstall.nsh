@@ -65,11 +65,34 @@
   Pop $R0
 !macroend
 
-!macro SESAME_ADD_TERMINAL_PATH
-  !insertmacro SESAME_SAVE_REGISTERS
+!macro SESAME_READ_PATH
   ClearErrors
   ReadRegStr $R0 HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"
+  StrCpy $R3 0
   ${If} ${Errors}
+    StrCpy $R3 1
+  ${EndIf}
+  StrLen $R4 $R0
+  IntOp $R4 $R4 + 1
+  ${If} $R4 >= ${NSIS_MAX_STRLEN}
+    StrCpy $R3 1
+  ${EndIf}
+!macroend
+
+!macro SESAME_WRITE_PATH VALUE FAILED
+  ClearErrors
+  WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
+  ${If} ${Errors}
+    DetailPrint "${FAILED}"
+  ${Else}
+    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  ${EndIf}
+!macroend
+
+!macro SESAME_ADD_TERMINAL_PATH
+  !insertmacro SESAME_SAVE_REGISTERS
+  !insertmacro SESAME_READ_PATH
+  ${If} $R3 = 1
   ${OrIf} $R0 == ""
     DetailPrint "Sesame left the system Path as it was because it could not read all of it. Add ${SESAME_TERMINAL_FOLDER} to Path to use the sesame command."
   ${Else}
@@ -84,11 +107,11 @@
       ${Else}
         StrCpy $R9 $R0 1 -1
         ${If} $R9 == ";"
-          WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "$R0${SESAME_TERMINAL_FOLDER}"
+          StrCpy $R1 "$R0${SESAME_TERMINAL_FOLDER}"
         ${Else}
-          WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "$R0;${SESAME_TERMINAL_FOLDER}"
+          StrCpy $R1 "$R0;${SESAME_TERMINAL_FOLDER}"
         ${EndIf}
-        SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+        !insertmacro SESAME_WRITE_PATH $R1 "Sesame could not add ${SESAME_TERMINAL_FOLDER} to the system Path. Add it by hand to use the sesame command."
       ${EndIf}
     ${EndIf}
   ${EndIf}
@@ -97,16 +120,14 @@
 
 !macro SESAME_REMOVE_TERMINAL_PATH
   !insertmacro SESAME_SAVE_REGISTERS
-  ClearErrors
-  ReadRegStr $R0 HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"
-  ${If} ${Errors}
+  !insertmacro SESAME_READ_PATH
+  ${If} $R3 = 1
   ${OrIf} $R0 == ""
     DetailPrint "Sesame left the system Path as it was because it could not read all of it. Remove ${SESAME_TERMINAL_FOLDER} from Path if it is there."
   ${Else}
     !insertmacro SESAME_SCAN_PATH $R0 $R1 $R2
     ${If} $R2 = 1
-      WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "$R1"
-      SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+      !insertmacro SESAME_WRITE_PATH $R1 "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path. Remove it by hand."
     ${EndIf}
   ${EndIf}
   !insertmacro SESAME_RESTORE_REGISTERS
