@@ -35,5 +35,3 @@ export function createCustomRecordController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type CustomRecordController = ReturnType<typeof createCustomRecordController>

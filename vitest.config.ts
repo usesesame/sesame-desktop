@@ -14,9 +14,7 @@ export default defineConfig({
   resolve: { conditions: ['browser'] },
   test: {
     include: ['src/**/*.test.ts'],
-    passWithNoTests: true,
     environment: 'node',
-    environmentMatchGlobs: [['src/lib/ui/**/*.test.ts', 'jsdom']],
     restoreMocks: true,
     coverage: {
       provider: 'v8',

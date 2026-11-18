@@ -31,5 +31,3 @@ export function createIdentityController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type IdentityController = ReturnType<typeof createIdentityController>
