@@ -68,6 +68,14 @@
     else onDeny()
   }
 
+  function allowTerminalChanged(event: Event & { currentTarget: HTMLInputElement }) {
+    if (working || !armed) {
+      event.currentTarget.checked = state.allowTerminal
+      return
+    }
+    onAllowTerminal(event.currentTarget.checked)
+  }
+
   function focusDialog(dialog: HTMLElement) {
     dialog.focus({ preventScroll: true })
   }
@@ -155,7 +163,7 @@
 
   {#if request.canAllowTerminal && !notFound}
     <label class="terminal-allow">
-      <input type="checkbox" checked={state.allowTerminal} disabled={working} on:change={(event) => onAllowTerminal(event.currentTarget.checked)} />
+      <input type="checkbox" checked={state.allowTerminal} disabled={working || !armed} on:change={allowTerminalChanged} />
       <span><strong>Allow this terminal for five minutes</strong><small>Sesame answers it and any program started from it without asking, but hidden values still ask for your master password.</small></span>
     </label>
   {/if}

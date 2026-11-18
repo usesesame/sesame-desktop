@@ -284,3 +284,23 @@ test('a field that cleans down to nothing reads as an unreadable name', () => {
   show({ candidates: [{ id: 'northwind', kind: 'login', title: '\u3164\u3164', fieldName: '\u2800', fieldHidden: true }], program: { reportedName: '\u115F' } })
   expect(screen.getAllByText('Unreadable name')).toHaveLength(3)
 })
+
+test('the allow-terminal box waits for the same delay as Allow', async () => {
+  vi.useFakeTimers()
+  terminalApi.getTerminalApprovalWait.mockResolvedValue(600)
+  const { props } = show()
+  const box = () => screen.getByRole('checkbox', { name: /Allow this terminal for five minutes/ }) as HTMLInputElement
+  await vi.advanceTimersByTimeAsync(0)
+  expect(box().disabled).toBe(true)
+  await fireEvent.click(box())
+  expect(props.onAllowTerminal).not.toHaveBeenCalled()
+  expect(box().checked).toBe(false)
+  terminalApi.getTerminalApprovalWait.mockResolvedValue(0)
+  await vi.advanceTimersByTimeAsync(300)
+  expect(box().disabled).toBe(true)
+  await vi.advanceTimersByTimeAsync(600)
+  expect(box().disabled).toBe(false)
+  expect(allowButton().disabled).toBe(false)
+  await fireEvent.click(box())
+  expect(props.onAllowTerminal).toHaveBeenCalledWith(true)
+})
