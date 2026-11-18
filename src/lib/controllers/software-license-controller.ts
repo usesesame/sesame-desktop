@@ -29,5 +29,3 @@ export function createSoftwareLicenseController(options: RecordControllerOptions
     },
   })
 }
-
-export type SoftwareLicenseController = ReturnType<typeof createSoftwareLicenseController>

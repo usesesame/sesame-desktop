@@ -12,10 +12,6 @@ export function withoutKept<T extends { keptSecrets?: string[] }>(draft: T, key:
   return { ...draft, keptSecrets: (draft.keptSecrets ?? []).filter((kept) => kept !== key) }
 }
 
-export function typedSecret<T extends { keptSecrets?: string[] }>(draft: T, key: string, value: string): boolean {
-  return value.length === 0 && isKept(draft, key)
-}
-
 export type DraftField = CustomFieldEntry & { keptFrom?: number }
 
 export function draftFields(fields: CustomFieldEntry[], secretFields: string[]): DraftField[] {

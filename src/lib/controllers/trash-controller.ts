@@ -56,5 +56,3 @@ export function createTrashController({ stores, feedback }: TrashControllerOptio
     },
   }
 }
-
-export type TrashController = ReturnType<typeof createTrashController>

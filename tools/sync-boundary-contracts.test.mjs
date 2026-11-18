@@ -135,7 +135,13 @@ test('the Sync client no longer hides behind a build feature, and nothing of the
   for (const name of Object.keys(scripts)) {
     assert.ok(!/sync:preview/.test(name), `the ${name} script is left over from the old gate`)
   }
-  assert.equal(scripts['desktop:test:rust:sync'], 'npm run desktop:test:rust')
+  assert.equal(scripts['desktop:test:rust:sync'], undefined)
+  assert.match(scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml --locked$/)
+  const defaultMembers = manifest.match(/^default-members = \[(.*)\]$/m)
+  assert.ok(defaultMembers, 'the workspace names no default members')
+  for (const crate of ['"sesame-sync"', '"sesame-app"']) {
+    assert.ok(defaultMembers[1].split(', ').includes(crate), `cargo test without --workspace skips ${crate}`)
+  }
   const vite = read('vite.config.ts')
   assert.doesNotMatch(vite, /SYNC_PREVIEW/)
   const module = read('src-tauri', 'sesame-app', 'src', 'sync', 'mod.rs')

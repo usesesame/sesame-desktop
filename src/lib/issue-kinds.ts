@@ -12,22 +12,6 @@ export const issueKindLabels: Record<IssueKind, { title: string; summary: string
   recovery: { title: 'Recovery details to review', summary: 'recovery not reviewed', filter: 'missing recovery details' },
 }
 
-export const issueSeverityWeight: Record<IssueKind, number> = {
-  'reused-password': 0,
-  'compromised-pattern': 1,
-  'weak-password': 2,
-  'common-password': 3,
-  totp: 4,
-  recovery: 5,
-  'old-password': 6,
-  duplicate: 7,
-  url: 8,
-}
-
-export function issueSummary(issueKinds: IssueKind[]): string {
-  return issueKinds.map((issue) => issueKindLabels[issue].summary).join(' · ')
-}
-
 export function issueFilterLabel(issue: IssueKind): string {
   return issueKindLabels[issue].filter
 }

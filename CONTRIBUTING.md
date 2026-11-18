@@ -78,7 +78,8 @@ surface for this repository.
 
 `npm run desktop:test` is the everyday loop: interface unit tests, vault core
 tests, and the contract suites, in one command. `npm run desktop:ci` adds the
-production build, the lints, and the Sync preview feature tests.
+lints, the type checks, the version and dependency checks, the production
+build, and on Linux the glib patch tests.
 
 Unit tests cover the Svelte controllers and Rust vault core. Installed-app
 lifecycle evidence comes from `npm run desktop:linux:package:gate`,
@@ -92,8 +93,8 @@ If you change what the desktop is allowed to depend on, run `npm run
 desktop:boundary:verify`. It copies the files listed in `desktop-boundary.json`
 into a temporary directory and runs `npm ci` and `npm run desktop:ci` there,
 which is how we know the desktop still stands on its own. CI runs the same
-check on a weekly schedule and on demand, so a boundary that breaks quietly
-does not stay broken.
+check on every pull request, once a week and on demand, so a boundary that
+breaks quietly does not stay broken.
 
 ## Filling in the pull request template
 
