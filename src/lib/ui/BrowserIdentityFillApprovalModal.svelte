@@ -62,7 +62,7 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserIdentityFill.selectedId} noun="identity" />

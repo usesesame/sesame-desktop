@@ -168,7 +168,7 @@
                   </span>
                 </label>
                 {#if canShow(field, option)}
-                  <button type="button" class="text-button" disabled={revealWorking} aria-label={`${revealed?.entryId === option.entryId ? 'Hide' : 'Show'} the password of ${titleFor(option.entryId)}`} on:click={() => togglePassword(option.entryId)}>{revealed?.entryId === option.entryId ? 'Hide' : 'Show'}</button>
+                  <button type="button" class="text-button" disabled={revealWorking} aria-label={`${revealed?.entryId === option.entryId ? 'Hide' : 'Show'} the password of ${vaultText(titleFor(option.entryId))}`} on:click={() => togglePassword(option.entryId)}>{revealed?.entryId === option.entryId ? 'Hide' : 'Show'}</button>
                 {/if}
               </div>
             {/each}

@@ -88,7 +88,7 @@
     aria-haspopup="listbox"
     aria-expanded={open}
     aria-controls={open ? listId : undefined}
-    aria-label={selectedLabel ? `${label}: ${selectedLabel}` : label}
+    aria-label={selectedLabel ? `${label}: ${vaultText(selectedLabel)}` : label}
     {disabled}
     on:click={() => (open = !open)}
     on:keydown={handleTriggerKeydown}

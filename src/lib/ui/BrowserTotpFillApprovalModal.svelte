@@ -51,7 +51,7 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserTotpFill.selectedId} noun="login's code" />
@@ -59,7 +59,7 @@
   {#if selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
-      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers its code on <code>{request.origin}</code>.</span></p>
+      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers its code on <code><bdi>{vaultText(request.origin)}</bdi></code>.</span></p>
     </div>
   {/if}
 

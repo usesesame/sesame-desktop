@@ -542,7 +542,7 @@
         <div class="entry-list" class:selecting={multiSelect} bind:this={entryList} role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
             <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
-              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
+              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${vaultText(item.title)}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
               <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => handleRowKeydown(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
@@ -550,7 +550,7 @@
                 <span class="entry-title"><strong><bdi>{vaultText(item.title)}</bdi></strong><small><span class="entry-subtitle"><bdi>{vaultText(item.subtitle) || itemKindLabel(item.kind)}</bdi></span>{#if item.folder}<span class="entry-folder"><bdi>{vaultText(item.folder)}</bdi></span>{/if}</small></span>
                 {#if item.securityLevel === 'needs-work'}<span class="entry-warning" role="img" aria-label="Needs attention"><span class="entry-warning-label" aria-hidden="true">Needs attention</span></span>{/if}
               </button>
-              <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} title={item.favourite ? "Remove from favourites" : "Add to favourites"} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
+              <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${vaultText(item.title)} from favourites` : `Add ${vaultText(item.title)} to favourites`} title={item.favourite ? "Remove from favourites" : "Add to favourites"} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
             </div>
           {/each}
         </div>

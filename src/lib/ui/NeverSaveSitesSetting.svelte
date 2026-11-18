@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onMount } from 'svelte'
   import { forgetNeverSaveSite, loadNeverSaveSites, neverSaveSites } from '../never-save-sites'
   import { messageFor } from '../controllers/feedback-controller'
@@ -35,7 +36,7 @@
 {#each $neverSaveSites ?? [] as origin (origin)}
   <article class="never-save-row">
     <code>{#each origin.split(/(?<=[./:])/) as part, index (index)}{part}<wbr />{/each}</code>
-    <button type="button" class="text-button" disabled={working !== ''} aria-label={`Remove ${origin}`} on:click={() => remove(origin)}>{working === origin ? 'Removing…' : 'Remove'}</button>
+    <button type="button" class="text-button" disabled={working !== ''} aria-label={`Remove ${vaultText(origin)}`} on:click={() => remove(origin)}>{working === origin ? 'Removing…' : 'Remove'}</button>
   </article>
 {/each}
 
