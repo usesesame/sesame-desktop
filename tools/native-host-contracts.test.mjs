@@ -40,3 +40,13 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.equal(config.bundle.linux.rpm.preRemoveScript, 'linux/pre-remove.sh')
   assert.equal(config.bundle.windows.nsis.installerHooks, 'nsis/native-host-uninstall.nsh')
 })
+
+test('the extension host tests build without the staged Windows resource', () => {
+  for (const file of ['test-extension-native-host.mjs', 'test-extension-native-host.ps1']) {
+    assert.match(
+      readFileSync(join(root, 'tools', file), 'utf8'),
+      /"externalBin":\[\],"resources":\[\]/,
+      `${file} must build without the staged Windows resource`,
+    )
+  }
+})
