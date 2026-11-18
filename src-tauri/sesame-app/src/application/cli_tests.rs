@@ -514,6 +514,33 @@ fn the_epoch_check_alone_ends_an_allowance_when_the_vault_changes_without_a_lock
 }
 
 #[test]
+fn a_save_in_the_window_ends_an_allowance() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    allow_terminal_for_five_minutes(&harness, &origin);
+
+    super::logins::save_login_in_state(
+        &harness.vault.state,
+        crate::test_support::login_input(None, "https://contoso.example", "fictional-other"),
+    )
+    .expect("saved in the window");
+
+    assert_needs_a_new_approval(&harness, &origin, 140);
+}
+
+#[test]
+fn a_favourite_change_in_the_window_ends_an_allowance() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    allow_terminal_for_five_minutes(&harness, &origin);
+
+    super::logins::set_item_favourite_in_state(&harness.vault.state, "fictional-login", true)
+        .expect("favourite set");
+
+    assert_needs_a_new_approval(&harness, &origin, 141);
+}
+
+#[test]
 fn an_allowance_ends_after_five_minutes_and_with_its_session_leader() {
     let clock = FakeClock::new();
     let allowances = TerminalAllowances::with_clock(clock.clone());

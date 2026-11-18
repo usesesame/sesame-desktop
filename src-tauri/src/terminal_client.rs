@@ -47,7 +47,7 @@ Anything printed in a terminal can be read by other programs that run as you.
 ";
 
 #[cfg(not(windows))]
-const USAGE_PLATFORM: &str = "When you allow a terminal for five minutes, any program started from that terminal can read what it asks for during that time. The allowance ends early when the vault locks.
+const USAGE_PLATFORM: &str = "When you allow a terminal for five minutes, any program started from that terminal can read what it asks for during that time. The allowance ends early when the vault locks or almost anything in the vault changes.
 With the AppImage, run ./Sesame.AppImage list, or add an alias such as alias sesame=~/Applications/Sesame.AppImage to your shell.
 ";
 

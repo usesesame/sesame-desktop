@@ -158,9 +158,9 @@ good-faith report that turns out to be out of scope is not held against you.
   password check described above. When you allow a terminal for five minutes,
   every program started from that terminal gets what it asks for without a
   prompt until the five minutes end, and hidden values still need the master
-  password check. The allowance ends early when the vault locks, and when
-  Sesame starts a new vault session after a restore, an import or a Sync
-  change. Saving an item in the window does not end it.
+  password check. The allowance also ends when the vault locks and when almost
+  anything in the vault changes, such as saving, deleting or starring an item,
+  so a terminal you allowed may be asked again before five minutes pass.
 - Windows offers no terminal allowance, because Sesame cannot tell one
   terminal from another there, so every request from the `sesame` command
   asks in the window.
