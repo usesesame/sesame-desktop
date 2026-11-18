@@ -188,7 +188,13 @@ pub(super) fn connect_verified(
 }
 
 fn open_pipe(identity: &UserIdentity, wait: Duration) -> io::Result<OwnedHandle> {
-    if unsafe { WaitNamedPipeW(identity.pipe_name.as_ptr(), millis(wait)) } == 0 {
+    if wait.is_zero() {
+        return Err(io::Error::new(
+            ErrorKind::TimedOut,
+            "terminal pipe connect deadline exceeded",
+        ));
+    }
+    if unsafe { WaitNamedPipeW(identity.pipe_name.as_ptr(), millis(wait).max(1)) } == 0 {
         return Err(io::Error::last_os_error());
     }
     OwnedHandle::new(unsafe {
@@ -219,7 +225,7 @@ fn connect_verified_with(
             Err(error)
                 if retry_busy
                     && error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
-                    && wait > Duration::from_millis(1) =>
+                    && !deadline.saturating_duration_since(Instant::now()).is_zero() =>
             {
                 continue;
             }
