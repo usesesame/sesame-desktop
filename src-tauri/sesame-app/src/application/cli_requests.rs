@@ -19,7 +19,8 @@ use super::terminal_allowances::{allowed_request, TerminalAllowances, TerminalOr
 use super::DesktopEffects;
 use crate::cli_protocol::{
     bounded_title_text, parse_request, CliCommand, CliErrorCode, CliField, CliItemSummary,
-    CliReply, WaitReason, MAX_CLI_REPLY_BYTES, MAX_FIELD_CHARS, MAX_TOTP_REMAINING_SECONDS,
+    CliReply, WaitReason, MAX_CLI_LIST_BYTES, MAX_CLI_REPLY_BYTES, MAX_FIELD_CHARS,
+    MAX_TOTP_REMAINING_SECONDS, MAX_WAITING_FRAMES,
 };
 use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::vault::release_record::EntryKind;
@@ -32,6 +33,12 @@ const PRESENCE_MESSAGE: &str =
 const EMPTY_FIELD_ERROR: &str = "Nothing is saved in that field for this item.";
 const PREEMPTED_MESSAGE: &str =
     "Sesame set this request aside to answer your browser. Try again in a moment.";
+const ITEM_TOO_LARGE: &str =
+    "This item is too large to send at once. Ask for one field at a time instead.";
+const LIST_TOO_LARGE: &str =
+    "The list of items is too large to send to a terminal. Browse it in the Sesame window instead.";
+const LIST_BUDGET_BYTES: usize = MAX_CLI_LIST_BYTES - MAX_WAITING_FRAMES * MAX_CLI_REPLY_BYTES;
+
 pub trait CliHost {
     fn peer_connected(&self) -> bool;
     fn send(&self, reply: &CliReply) -> bool;
@@ -869,7 +876,7 @@ fn release(
 ) -> Result<Vec<CliReply>, Stop> {
     let epoch = freshness.epoch;
     match command {
-        CliCommand::List => list_frames(context.vault, epoch, request_id),
+        CliCommand::List => list_frames(context.vault, epoch, request_id, LIST_BUDGET_BYTES),
         CliCommand::Get { field: None, .. } => {
             let chosen = chosen.ok_or(Stop::Reply(CliErrorCode::NotFound))?;
             let fields = with_session(context.vault, epoch, |session| {
@@ -898,7 +905,7 @@ fn release(
                 wire,
             );
             if !reply.fits_one_frame() {
-                return Err(Stop::Reply(CliErrorCode::TooLarge));
+                return Err(Stop::ReplyWith(CliErrorCode::TooLarge, ITEM_TOO_LARGE));
             }
             Ok(vec![reply])
         }
@@ -1023,7 +1030,12 @@ fn release_hidden(
     Ok(vec![CliReply::value(request_id, &value, true)])
 }
 
-fn list_frames(vault: &VaultState, epoch: u64, request_id: &str) -> Result<Vec<CliReply>, Stop> {
+fn list_frames(
+    vault: &VaultState,
+    epoch: u64,
+    request_id: &str,
+    total_budget: usize,
+) -> Result<Vec<CliReply>, Stop> {
     let items = with_session(vault, epoch, |session| Ok(all_items(session)))?;
     let budget = MAX_CLI_REPLY_BYTES - FRAME_MARGIN_BYTES;
     let mut frames = Vec::new();
@@ -1049,7 +1061,30 @@ fn list_frames(vault: &VaultState, epoch: u64, request_id: &str) -> Result<Vec<C
         frames.push(CliReply::items(request_id, current));
     }
     frames.push(CliReply::done(request_id));
+    let mut total = 0_usize;
+    for frame in &frames {
+        let encoded = frame
+            .to_bytes()
+            .map_err(|_| Stop::Reply(CliErrorCode::Unavailable))?;
+        total = total.saturating_add(encoded.len());
+    }
+    if total > total_budget {
+        return Err(Stop::ReplyWith(CliErrorCode::TooLarge, LIST_TOO_LARGE));
+    }
     Ok(frames)
+}
+
+#[cfg(test)]
+pub(super) fn list_within(
+    vault: &VaultState,
+    request_id: &str,
+    total_budget: usize,
+) -> Result<Vec<CliReply>, (CliErrorCode, &'static str)> {
+    list_frames(vault, vault.session_epoch(), request_id, total_budget).map_err(|stop| match stop {
+        Stop::ReplyWith(code, message) => (code, message),
+        Stop::Reply(code) => (code, ""),
+        Stop::Gone => (CliErrorCode::Unavailable, ""),
+    })
 }
 
 #[cfg(test)]

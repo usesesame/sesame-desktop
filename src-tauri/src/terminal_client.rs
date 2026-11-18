@@ -34,6 +34,7 @@ const VERBS: [&str; 8] = [
 const NOT_RUNNING: &str = "Sesame is not running. Open Sesame and try again.";
 const NOT_SESAME: &str = "This is not the Sesame app this command belongs to.";
 const UNREADABLE_REPLY: &str = "Sesame sent a reply this command does not understand.";
+const OUTPUT_FAILED: &str = "The output could not be written completely, so this command failed.";
 
 const USAGE_COMMON: &str = "Usage:
   sesame list
@@ -169,6 +170,16 @@ impl Streams<'_> {
     fn say(&mut self, message: &str) {
         let _ = writeln!(self.err, "{}", printable_line(message));
     }
+
+    fn delivered(&mut self, written: io::Result<()>) -> i32 {
+        match written.and_then(|()| self.out.flush()) {
+            Ok(()) => EXIT_OK,
+            Err(_) => {
+                self.say(OUTPUT_FAILED);
+                EXIT_FAILED
+            }
+        }
+    }
 }
 
 fn printable_line(value: &str) -> String {
@@ -268,15 +279,18 @@ pub fn converse(
             }
             CliReplyType::Items => items.extend(reply.items.clone().unwrap_or_default()),
             CliReplyType::Done => {
-                print_list(&items, streams);
-                return EXIT_OK;
+                let written = print_list(&items, streams);
+                return streams.delivered(written);
             }
             _ => return finish(&reply, streams),
         }
     }
 }
 
-fn print_list(items: &[crate::cli_protocol::CliItemSummary], streams: &mut Streams<'_>) {
+fn print_list(
+    items: &[crate::cli_protocol::CliItemSummary],
+    streams: &mut Streams<'_>,
+) -> io::Result<()> {
     if streams.out_terminal {
         let title_width = items
             .iter()
@@ -290,100 +304,106 @@ fn print_list(items: &[crate::cli_protocol::CliItemSummary], streams: &mut Strea
             .max()
             .unwrap_or(0);
         for item in items {
-            let _ = writeln!(
+            writeln!(
                 streams.out,
                 "{:title_width$}  {:kind_width$}  {}",
                 printable_line(&item.title),
                 item.kind,
                 printable_line(&item.id),
-            );
+            )?;
         }
     } else {
         for item in items {
-            let _ = writeln!(
+            writeln!(
                 streams.out,
                 "{}\t{}\t{}",
                 printable_line(&item.id),
                 item.kind,
                 printable_line(&item.title),
-            );
+            )?;
         }
     }
+    Ok(())
+}
+
+fn print_item(reply: &CliReply, streams: &mut Streams<'_>) -> io::Result<()> {
+    let fields = reply.fields.as_deref().unwrap_or_default();
+    if streams.out_terminal {
+        writeln!(
+            streams.out,
+            "{}",
+            printable_line(reply.title.as_deref().unwrap_or_default())
+        )?;
+        let width = fields
+            .iter()
+            .map(|field| printable_line(&field.name).chars().count())
+            .max()
+            .unwrap_or(0);
+        for field in fields {
+            let value = match (&field.value, field.hidden) {
+                (Some(value), false) => printable_block(value),
+                _ => Zeroizing::new("hidden".to_string()),
+            };
+            writeln!(
+                streams.out,
+                "{:width$}  {}",
+                printable_line(&field.name),
+                value.as_str()
+            )?;
+        }
+    } else {
+        for field in fields {
+            let value = match (&field.value, field.hidden) {
+                (Some(value), false) => Zeroizing::new(printable_line(value)),
+                _ => Zeroizing::new(String::new()),
+            };
+            writeln!(
+                streams.out,
+                "{}\t{}\t{}",
+                printable_line(&field.name),
+                if field.hidden { "hidden" } else { "visible" },
+                value.as_str()
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn finish(reply: &CliReply, streams: &mut Streams<'_>) -> i32 {
     match reply.reply_type {
         CliReplyType::Item => {
-            let fields = reply.fields.as_deref().unwrap_or_default();
-            if streams.out_terminal {
-                let _ = writeln!(
-                    streams.out,
-                    "{}",
-                    printable_line(reply.title.as_deref().unwrap_or_default())
-                );
-                let width = fields
-                    .iter()
-                    .map(|field| printable_line(&field.name).chars().count())
-                    .max()
-                    .unwrap_or(0);
-                for field in fields {
-                    let value = match (&field.value, field.hidden) {
-                        (Some(value), false) => printable_block(value),
-                        _ => Zeroizing::new("hidden".to_string()),
-                    };
-                    let _ = writeln!(
-                        streams.out,
-                        "{:width$}  {}",
-                        printable_line(&field.name),
-                        value.as_str()
-                    );
-                }
-            } else {
-                for field in fields {
-                    let value = match (&field.value, field.hidden) {
-                        (Some(value), false) => Zeroizing::new(printable_line(value)),
-                        _ => Zeroizing::new(String::new()),
-                    };
-                    let _ = writeln!(
-                        streams.out,
-                        "{}\t{}\t{}",
-                        printable_line(&field.name),
-                        if field.hidden { "hidden" } else { "visible" },
-                        value.as_str()
-                    );
-                }
-            }
-            EXIT_OK
+            let written = print_item(reply, streams);
+            streams.delivered(written)
         }
         CliReplyType::Value => {
             let value = reply.value.as_deref().unwrap_or_default();
             let hidden = reply.hidden.unwrap_or(true);
-            if streams.out_terminal {
+            let written = if streams.out_terminal {
                 if hidden && unsafe_for_terminal(value) {
                     streams.say("This value contains control characters, so Sesame will not print it to a terminal. Use --copy or send the output to another program.");
                     return EXIT_FAILED;
                 }
                 let shown = printable_block(value);
-                let _ = writeln!(streams.out, "{}", shown.as_str());
+                writeln!(streams.out, "{}", shown.as_str())
             } else {
-                let _ = streams.out.write_all(value.as_bytes());
-            }
-            let _ = streams.out.flush();
-            EXIT_OK
+                streams.out.write_all(value.as_bytes())
+            };
+            streams.delivered(written)
         }
         CliReplyType::Totp => {
             let code = reply.code.as_deref().unwrap_or_default();
-            if streams.out_terminal {
-                let _ = writeln!(streams.out, "{code}");
+            let written = if streams.out_terminal {
+                writeln!(streams.out, "{code}")
             } else {
-                let _ = streams.out.write_all(code.as_bytes());
-            }
-            if streams.err_terminal {
+                streams.out.write_all(code.as_bytes())
+            };
+            let exit = streams.delivered(written);
+            if exit == EXIT_OK && streams.err_terminal {
                 if let Some(seconds) = reply.remaining_seconds {
                     streams.say(&format!("The code changes in {seconds} seconds."));
                 }
             }
-            EXIT_OK
+            exit
         }
         CliReplyType::Copied => {
             match reply.clear_after_seconds {
@@ -469,12 +489,12 @@ fn send_request(_command: &CliCommand, streams: &mut Streams<'_>) -> i32 {
 pub fn run_with(arguments: &[OsString], streams: &mut Streams<'_>) -> i32 {
     match parse_arguments(arguments) {
         Ok(Invocation::Help) => {
-            let _ = streams.out.write_all(usage().as_bytes());
-            EXIT_OK
+            let written = streams.out.write_all(usage().as_bytes());
+            streams.delivered(written)
         }
         Ok(Invocation::Version) => {
-            let _ = writeln!(streams.out, "sesame {}", env!("CARGO_PKG_VERSION"));
-            EXIT_OK
+            let written = writeln!(streams.out, "sesame {}", env!("CARGO_PKG_VERSION"));
+            streams.delivered(written)
         }
         Ok(Invocation::Run(command)) => send_request(&command, streams),
         Err(problem) => {
@@ -499,8 +519,13 @@ pub fn run_from_environment(arguments: &[OsString]) -> i32 {
         err_terminal,
     };
     let code = run_with(arguments, &mut streams);
-    let _ = streams.out.flush();
-    code
+    match streams.out.flush() {
+        Err(_) if code == EXIT_OK => {
+            streams.say(OUTPUT_FAILED);
+            EXIT_FAILED
+        }
+        _ => code,
+    }
 }
 
 #[cfg(test)]
@@ -868,6 +893,135 @@ mod tests {
             CliReply::waiting(ID, WaitReason::Approval),
         ];
         assert_eq!(talk(&CliCommand::List, &waits, false).0, EXIT_FAILED);
+    }
+
+    struct ShortWrite {
+        room: usize,
+        written: Vec<u8>,
+    }
+
+    impl Write for ShortWrite {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.room == 0 {
+                return Err(io::Error::from(ErrorKind::BrokenPipe));
+            }
+            let taken = bytes.len().min(self.room);
+            self.room -= taken;
+            self.written.extend_from_slice(&bytes[..taken]);
+            Ok(taken)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailingFlush(Vec<u8>);
+
+    impl Write for FailingFlush {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::from(ErrorKind::BrokenPipe))
+        }
+    }
+
+    fn deliver_into(
+        out: &mut dyn Write,
+        command: &CliCommand,
+        replies: &[CliReply],
+        terminal: bool,
+    ) -> (i32, String) {
+        let mut err = Vec::new();
+        let code = {
+            let mut streams = Streams {
+                out,
+                err: &mut err,
+                out_terminal: terminal,
+                err_terminal: terminal,
+            };
+            converse(&mut frames(replies), ID, command, &mut streams)
+        };
+        (code, String::from_utf8(err).expect("utf8"))
+    }
+
+    #[test]
+    fn output_that_cannot_be_written_completely_fails_without_naming_the_value() {
+        let summary = CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: "Northwind mail".to_string(),
+        };
+        let item = CliReply::item(
+            ID,
+            summary.clone(),
+            vec![CliField {
+                name: "username".to_string(),
+                hidden: false,
+                value: Some("casey@northwind.example".to_string()),
+            }],
+        );
+        let cases = [
+            (
+                get(Some("password"), false),
+                vec![CliReply::value(ID, "fictional-password-canary", true)],
+            ),
+            (get(None, false), vec![item]),
+            (
+                CliCommand::List,
+                vec![CliReply::items(ID, vec![summary]), CliReply::done(ID)],
+            ),
+            (
+                CliCommand::Totp {
+                    item: "Northwind mail".to_string(),
+                    copy: false,
+                },
+                vec![CliReply::totp(ID, "287082", 12)],
+            ),
+        ];
+        for (command, replies) in &cases {
+            for terminal in [false, true] {
+                let mut short = ShortWrite {
+                    room: 4,
+                    written: Vec::new(),
+                };
+                let (code, err) = deliver_into(&mut short, command, replies, terminal);
+                assert_eq!(code, EXIT_FAILED, "{command:?}");
+                assert!(err.contains(OUTPUT_FAILED));
+                assert!(!err.contains("canary") && !err.contains("287082"));
+
+                let mut flushing = FailingFlush(Vec::new());
+                let (code, err) = deliver_into(&mut flushing, command, replies, terminal);
+                assert_eq!(code, EXIT_FAILED, "{command:?}");
+                assert!(err.contains(OUTPUT_FAILED));
+            }
+        }
+
+        for words in [&["--help"][..], &["--version"][..]] {
+            let mut short = ShortWrite {
+                room: 4,
+                written: Vec::new(),
+            };
+            let mut err = Vec::new();
+            let mut streams = Streams {
+                out: &mut short,
+                err: &mut err,
+                out_terminal: false,
+                err_terminal: false,
+            };
+            assert_eq!(run_with(&args(words), &mut streams), EXIT_FAILED);
+        }
+
+        let mut roomy = ShortWrite {
+            room: usize::MAX,
+            written: Vec::new(),
+        };
+        let (code, _) = deliver_into(&mut roomy, &cases[0].0, &cases[0].1, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(roomy.written, b"fictional-password-canary");
     }
 
     #[test]

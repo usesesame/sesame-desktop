@@ -8,8 +8,8 @@ use crate::application::broker_tests::FakeClock;
 use crate::application::tests::{Effect, FakeEffects};
 use crate::browser_protocol::BrowserRequest;
 use crate::cli_protocol::{
-    parse_request, CliErrorCode, CliReply, CliReplyType, WaitReason, MAX_CLI_REPLY_BYTES,
-    MAX_CLI_REQUEST_BYTES,
+    parse_request, CliErrorCode, CliReply, CliReplyType, WaitReason, MAX_CLI_LIST_BYTES,
+    MAX_CLI_REPLY_BYTES, MAX_CLI_REQUEST_BYTES,
 };
 use crate::release::ReleasePresence;
 use crate::test_support::{grant, TestVault};
@@ -23,7 +23,7 @@ use super::cli_broker::{
     CliApprovalRequestEvent, CliApprovalState, CliCandidate, CliDecisionInput, CliDecisionKind,
     CliUnlockRequestEvent, COOLING_FIRST, COOLING_MESSAGE,
 };
-use super::cli_requests::{release_at, serve_cli_request, CliContext, CliHost};
+use super::cli_requests::{list_within, release_at, serve_cli_request, CliContext, CliHost};
 use super::lifecycle::{lock_and_notify, unlock_vault_in_state};
 use super::release_record::{release_record_page_in_state, ReleaseRecordQuery};
 use super::terminal_allowances::{
@@ -1755,3 +1755,45 @@ fn reading_the_permissions_for_an_older_vault_keeps_a_newer_grant() {
     assert_eq!(allowances.list(5).allowances.len(), 1);
 }
 
+#[test]
+fn a_list_larger_than_the_tool_accepts_is_refused_before_any_row_is_sent() {
+    let harness = Harness::new();
+    harness.vault.seed(|payload| {
+        for index in 0..400 {
+            let mut entry = VaultEntry::default();
+            entry.id = format!("fictional-{index:04}");
+            entry.title = format!("Fictional service {index} {}", "x".repeat(300));
+            payload.entries.push(entry);
+        }
+    });
+    let frames = list_within(&harness.vault.state, &id(238), MAX_CLI_LIST_BYTES).expect("fits");
+    let total: usize = frames
+        .iter()
+        .map(|frame| frame.to_bytes().expect("encodes").len())
+        .sum();
+    assert!(total > 100_000);
+    let refused = list_within(&harness.vault.state, &id(239), total - 1).expect_err("too large");
+    assert_eq!(refused.0, CliErrorCode::TooLarge);
+    assert!(refused.1.contains("Sesame window"));
+    assert_eq!(
+        list_within(&harness.vault.state, &id(239), total)
+            .expect("exactly fits")
+            .len(),
+        frames.len()
+    );
+}
+
+#[test]
+fn a_whole_item_too_large_for_one_frame_says_to_ask_for_one_field() {
+    let harness = Harness::new();
+    harness.vault.seed(|payload| {
+        payload.entries[0].notes = Some("n".repeat(MAX_CLI_REPLY_BYTES));
+    });
+    let (replies, _) = harness.run_with(&get(241, None, false), &terminal(100), |_, _| {
+        harness.allow(false)
+    });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::TooLarge));
+    let message = error_message(&replies).expect("a message");
+    assert!(message.contains("one field at a time"));
+    assert!(!message.contains("--copy"));
+}
