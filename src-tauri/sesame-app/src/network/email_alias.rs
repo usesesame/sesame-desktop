@@ -586,6 +586,48 @@ mod tests {
         }
     }
 
+    fn answer_declaring(declared_extra: usize) -> Result<String, AliasFailure> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
+        let base = format!("http://{}", listener.local_addr().expect("address"));
+        let body = serde_json::to_vec(&serde_json::json!({
+            "data": { "email": "fictional.alias@anonaddy.me" }
+        }))
+        .expect("body");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("connection");
+            let mut seen = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !seen.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).expect("request");
+                seen.extend_from_slice(&chunk[..read]);
+            }
+            let head = format!(
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len() + declared_extra
+            );
+            stream.write_all(head.as_bytes()).expect("head");
+            stream.write_all(&body).expect("body");
+            stream.flush().expect("flush");
+        });
+        let result = crate::test_support::block_on(create_alias_at(
+            &local_client(Duration::from_secs(5)),
+            &base,
+            &request(EmailAliasService::Addy, None),
+        ));
+        server.join().expect("server");
+        result
+    }
+
+    #[test]
+    fn an_answer_cut_off_before_its_end_is_not_used() {
+        assert_eq!(
+            answer_declaring(0),
+            Ok("fictional.alias@anonaddy.me".to_string())
+        );
+        assert_eq!(answer_declaring(40), Err(AliasFailure::UnusableAnswer));
+    }
+
     #[test]
     fn a_dropped_connection_is_reported_as_unreachable() {
         let server = TestServer::start(|_| Reply::disconnect());
