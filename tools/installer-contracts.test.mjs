@@ -311,6 +311,7 @@ test('the Windows installer puts only the cli folder on the system Path and neve
   const add = macro('SESAME_ADD_TERMINAL_PATH')
   assert.match(add, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
   assert.match(add, /\$\{If\} \$R3 >= \$\{NSIS_MAX_STRLEN\}\s+DetailPrint/)
+  assert.match(add, /\$\{If\} \$R9 == ";"\s+StrCpy \$R1 "\$R0\$\{SESAME_TERMINAL_FOLDER\};"\s+\$\{Else\}\s+StrCpy \$R1 "\$R0;\$\{SESAME_TERMINAL_FOLDER\}"/, 'a Path that ends with a semicolon must keep its empty last entry, or uninstall cannot give it back unchanged')
   assert.match(add, /!insertmacro SESAME_SCAN_PATH \$R0 \$R1 \$R2 \$R4\s+\$\{If\} \$R2 = 0/, 'setup adds the entry again when Path already holds it')
   assert.match(add, /!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not add[^"]*"\s+\$\{If\} \$R6 = 1\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"/, 'Sesame does not record the exact Path entry it added')
   assert.equal((hook.match(/WriteRegStr SHCTX/g) ?? []).length, 1, 'Sesame marks the Path entry as its own somewhere other than after adding it')

@@ -135,7 +135,7 @@ Var SesameOwnsTerminalPath
       ${Else}
         StrCpy $R9 $R0 1 -1
         ${If} $R9 == ";"
-          StrCpy $R1 "$R0${SESAME_TERMINAL_FOLDER}"
+          StrCpy $R1 "$R0${SESAME_TERMINAL_FOLDER};"
         ${Else}
           StrCpy $R1 "$R0;${SESAME_TERMINAL_FOLDER}"
         ${EndIf}
