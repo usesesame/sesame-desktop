@@ -226,9 +226,9 @@ fn is_mark(character: char) -> bool {
     in_table(crate::terminal_text_tables::MARKS, character)
 }
 
-fn printable(value: &str, keep_layout: bool) -> String {
+fn printable(value: &str, keep_layout: bool) -> Zeroizing<String> {
     let normalized = sesame_core::util::nfc(value);
-    let mut out = String::with_capacity(normalized.len());
+    let mut out = Zeroizing::new(String::with_capacity(normalized.len()));
     let mut last: Option<char> = None;
     let mut marks = 0;
     let mut excess = false;
@@ -268,11 +268,25 @@ fn printable(value: &str, keep_layout: bool) -> String {
 }
 
 fn printable_line(value: &str) -> String {
-    printable(value, false)
+    printable(value, false).to_string()
 }
 
 fn printable_block(value: &str) -> Zeroizing<String> {
-    Zeroizing::new(printable(value, true))
+    printable(value, true)
+}
+
+fn line_safe(value: &str) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(value.len()));
+    for character in value.chars() {
+        out.push(if hides_or_reorders(character) {
+            STAND_IN
+        } else if character.is_whitespace() {
+            ' '
+        } else {
+            character
+        });
+    }
+    out
 }
 
 fn unsafe_for_terminal(value: &str) -> bool {
@@ -435,7 +449,7 @@ fn print_item(reply: &CliReply, streams: &mut Streams<'_>) -> io::Result<()> {
     } else {
         for field in fields {
             let value = match (&field.value, field.hidden) {
-                (Some(value), false) => Zeroizing::new(printable_line(value)),
+                (Some(value), false) => line_safe(value),
                 _ => Zeroizing::new(String::new()),
             };
             writeln!(
@@ -1008,6 +1022,32 @@ mod tests {
         assert!(is_mark('\u{301}') && is_mark('\u{20dd}') && is_mark('\u{903}'));
         assert!(!is_mark('a') && !hides_or_reorders('a'));
         assert!(hides_or_reorders('\u{378}') && hides_or_reorders('\u{e0067}'));
+    }
+
+    #[test]
+    fn a_visible_value_in_a_whole_item_reaches_a_pipe_unnormalized_and_uncapped() {
+        let value = "Cafe\u{301}\u{301}\u{301}\u{301} name";
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: "username".to_string(),
+                hidden: false,
+                value: Some(value.to_string()),
+            }],
+        );
+        let (code, piped, _) = talk(&get(None, false), &[item.clone()], false);
+        assert_eq!(code, EXIT_OK);
+        assert!(
+            piped.contains(&format!("username\tvisible\t{value}\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Caf\u{e9}\u{301}\u{301}? name"), "{shown:?}");
     }
 
     #[test]

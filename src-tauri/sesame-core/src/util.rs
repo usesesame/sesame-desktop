@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use zeroize::Zeroizing;
+
 use crate::VaultResult;
 
 /// Bounded read for every vault, backup, import, and auxiliary file; `NotFound` and `InvalidData` are distinguished.
@@ -38,9 +40,11 @@ pub fn require_file_with_limit(
     })
 }
 
-pub fn nfc(value: &str) -> String {
+pub fn nfc(value: &str) -> Zeroizing<String> {
     use unicode_normalization::UnicodeNormalization;
-    value.nfc().collect()
+    let mut normalized = Zeroizing::new(String::with_capacity(value.len().saturating_mul(3)));
+    normalized.extend(value.nfc());
+    normalized
 }
 
 pub fn random_id() -> String {
