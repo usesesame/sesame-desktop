@@ -179,7 +179,7 @@
 
 <style>
   .terminal-setting-list ul { display: grid; margin: var(--space-2) 0 0; padding: 0; list-style: none; }
-  .terminal-setting-list li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; }
+  .terminal-setting-list li { overflow: hidden; line-height: 1.7; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: var(--space-2) 0; }
   .terminal-setting-list li + li { border-top: 1px solid var(--border-soft); }
   .terminal-line { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); min-width: 0; color: var(--text); font-size: var(--type-3); overflow-wrap: anywhere; }
   .terminal-line code, .terminal-setting-list small code { font-family: var(--font-code); font-size: var(--type-2); }

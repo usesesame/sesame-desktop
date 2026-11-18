@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
+import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
 
 const plainProse = /[—–()]/
 
@@ -23,7 +23,41 @@ describe('text a terminal sent', () => {
     expect(shown.endsWith('…')).toBe(true)
     expect([...shownText('\u{1F600}'.repeat(100), 10)]).toHaveLength(10)
     expect(shownText('pts/3', 24)).toBe('pts/3')
-    expect(shownText(undefined)).toBe('')
+    expect(shownText(undefined)).toBe(UNREADABLE_NAME)
+  })
+})
+
+describe('characters that draw outside their place or look blank', () => {
+  test('combining marks are capped per character and the rest become one stand-in', () => {
+    const stacked = 'x' + '\u0301'.repeat(45) + 'b'
+    const shown = shownText(stacked)
+    expect([...shown]).toHaveLength(1 + MAX_MARKS_PER_CHARACTER + 2)
+    expect(shown).toBe('x\u0301\u0301?b')
+    expect(shownText('Caf\u0065\u0301 mail')).toBe('Caf\u00E9 mail')
+    expect(shownText('\u0301\u0302\u0303Northwind')).toBe('?Northwind')
+    expect(shownText('North wind \u0301\u0301')).toBe('North wind ?')
+    expect(shownText('\u0E01\u0E34\u0E48')).toBe('\u0E01\u0E34\u0E48')
+  })
+
+  test.each([
+    ['Hangul filler', '\u3164'],
+    ['Hangul choseong filler', '\u115F'],
+    ['Hangul jungseong filler', '\u1160'],
+    ['halfwidth Hangul filler', '\uFFA0'],
+    ['braille blank', '\u2800'],
+    ['combining grapheme joiner', '\u034F'],
+    ['Khmer inherent vowel', '\u17B4'],
+    ['Mongolian free variation selector', '\u180B'],
+  ])('a %s becomes the visible stand-in', (_name, character) => {
+    expect(shownText(`North${character}wind`)).toBe('North?wind')
+  })
+
+  test('a name that is empty or only stand-ins after cleaning reads as unreadable', () => {
+    for (const value of ['', '   ', '\u3164\u3164', '\u2800 \u115F\u1160', '\u202E\u200B', '\u0301\u0301', '\u0000\u0007']) {
+      expect(shownText(value)).toBe(UNREADABLE_NAME)
+    }
+    expect(shownText('?')).toBe(UNREADABLE_NAME)
+    expect(shownText('a\u3164')).toBe('a?')
   })
 })
 

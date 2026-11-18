@@ -4,12 +4,49 @@ import { itemNoun } from './release-record'
 
 export const MAX_SHOWN_CHARS = 80
 
+export const MAX_MARKS_PER_CHARACTER = 2
+export const UNREADABLE_NAME = 'Unreadable name'
+export const STAND_IN = '?'
+
 const HIDDEN_FORMATTING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}]/u
 const SPACES = /\p{Zs}/u
+const MARK = /\p{M}/u
+const BLANK_LOOKING_POINTS = new Set([0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180b, 0x180c, 0x180d, 0x180e, 0x180f, 0x2800, 0x3164, 0xffa0, 0x1d159, 0x1d173, 0x1d174, 0x1d175, 0x1d176, 0x1d177, 0x1d178, 0x1d179, 0x1d17a])
+const BLANK_LOOKING = { test: (character: string) => BLANK_LOOKING_POINTS.has(character.codePointAt(0) ?? 0) }
+const READABLE = /[^?\s]/u
+
+function cleaned(value: string): string[] {
+  const out: string[] = []
+  let marks = 0
+  let excess = false
+  for (const character of value.normalize('NFC')) {
+    if (BLANK_LOOKING.test(character) || HIDDEN_FORMATTING.test(character)) {
+      out.push(STAND_IN)
+      marks = 0
+      excess = false
+    } else if (MARK.test(character)) {
+      if (out.length === 0 || out[out.length - 1] === ' ' || out[out.length - 1] === STAND_IN) {
+        if (!excess) out.push(STAND_IN)
+        excess = true
+      } else if (marks < MAX_MARKS_PER_CHARACTER) {
+        out[out.length - 1] += character
+        marks += 1
+      } else if (!excess) {
+        out.push(STAND_IN)
+        excess = true
+      }
+    } else {
+      out.push(SPACES.test(character) ? ' ' : character)
+      marks = 0
+      excess = false
+    }
+  }
+  return out
+}
 
 export function shownText(value: string | null | undefined, max = MAX_SHOWN_CHARS): string {
-  const plain = [...(value ?? '').normalize('NFC')]
-    .map((character) => (HIDDEN_FORMATTING.test(character) ? '?' : SPACES.test(character) ? ' ' : character))
+  const plain = cleaned(value ?? '')
+  if (!READABLE.test(plain.join(''))) return UNREADABLE_NAME
   if (plain.length <= max) return plain.join('')
   return `${plain.slice(0, max - 1).join('')}…`
 }

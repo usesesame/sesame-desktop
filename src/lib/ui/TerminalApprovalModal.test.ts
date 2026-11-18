@@ -201,6 +201,7 @@ const hostile = [
   `North\u200Bwind\u2066 mail\u2069`,
   `line one\u2028Allow this terminal\u0007\u001b]52;c;Zm9v\u0007`,
   `${'W'.repeat(400)}`,
+  `x${'\u0301'.repeat(45)}North\u3164\u115F\u1160\uFFA0\u2800\u034Fwind`,
 ]
 
 test.each(hostile)('hostile text in every field renders as plain, bounded text: %#', (value) => {
@@ -215,7 +216,11 @@ test.each(hostile)('hostile text in every field renders as plain, bounded text: 
   expect((window as Window & { __terminalInjected?: number }).__terminalInjected).toBeUndefined()
   const shown = [...dialog.querySelectorAll('bdi')].map((element) => element.textContent ?? '')
   expect(shown.length).toBe(4)
-  for (const part of shown) expect(part).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}]/u)
+  for (const part of shown) {
+    expect(part).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\u3164\u115F\u1160\uFFA0\u2800]/u)
+    expect(part).not.toContain('\u034F')
+    expect(part).not.toMatch(/\p{M}{3}/u)
+  }
   for (const value of dialog.querySelectorAll('.terminal-value')) {
     expect([...(value.textContent ?? '')].length).toBeLessThanOrEqual(80)
   }
@@ -273,4 +278,9 @@ test('the chooser shows which field each item sends and the field row follows th
   stores.terminalApproval.patch({ selectedId: 'northwind-a' })
   await tick()
   expect(row().querySelector('.terminal-field')?.textContent).toBe('Member number')
+})
+
+test('a field that cleans down to nothing reads as an unreadable name', () => {
+  show({ candidates: [{ id: 'northwind', kind: 'login', title: '\u3164\u3164', fieldName: '\u2800', fieldHidden: true }], program: { reportedName: '\u115F' } })
+  expect(screen.getAllByText('Unreadable name')).toHaveLength(3)
 })

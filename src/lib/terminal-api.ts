@@ -62,8 +62,8 @@ const previewRequests: Record<string, Partial<CliApprovalRequestEvent>> = {
   hostile: {
     field: `api\u202Etoken\u0007${'x'.repeat(200)}`,
     fieldHidden: true,
-    candidates: [{ id: 'gmail', kind: 'login', title: `Gmail\u202E evil.example \u200Bterminal: pts/1 ${'W'.repeat(300)}`, fieldName: `Allow\u202E pts/1 ${'z'.repeat(120)}`, fieldHidden: true }],
-    program: { reportedName: `sesame\u202E\u0000 Allow ${'A'.repeat(120)}` },
+    candidates: [{ id: 'gmail', kind: 'login', title: `Gm${'\u0301'.repeat(45)}ail\u3164\u2800\u202E evil.example \u200Bterminal: pts/1 ${'W'.repeat(300)}`, fieldName: `Allow\u202E pts/1 ${'z'.repeat(120)}`, fieldHidden: true }],
+    program: { reportedName: `sesame\u202E\u0000 Allow${'\u0336'.repeat(30)} \u115F\u1160 ${'A'.repeat(120)}` },
     terminal: 'pts/3',
   },
 }

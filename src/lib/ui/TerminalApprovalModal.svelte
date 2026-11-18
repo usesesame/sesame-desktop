@@ -186,9 +186,9 @@
   .terminal-request { display: grid; margin: var(--space-4) 0 0; border-top: 1px solid var(--border-soft); }
   .terminal-request > div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); align-items: baseline; gap: var(--space-3); border-bottom: 1px solid var(--border-soft); padding: var(--space-3) 0; }
   .terminal-request dt { color: var(--text-muted); font-size: var(--type-2); }
-  .terminal-request dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); min-width: 0; margin: 0; color: var(--text); font-size: var(--type-3); }
+  .terminal-request dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: var(--type-3); line-height: 1.7; }
   .terminal-request small { color: var(--text-muted); font-size: var(--type-2); }
-  .terminal-asked { flex-basis: 100%; }
+  .terminal-asked { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
   .terminal-asked code { font-family: var(--font-code); }
   .terminal-request .status-pill { margin-left: 0; }
   .terminal-value { min-width: 0; max-width: 100%; color: var(--text); overflow-wrap: anywhere; unicode-bidi: isolate; }
@@ -201,7 +201,7 @@
   .terminal-choices label:last-of-type { border-bottom: 1px solid var(--border-soft); }
   .terminal-choices label.selected { background: var(--tint); }
   .terminal-choices input { width: 16px; height: 16px; accent-color: var(--accent); }
-  .terminal-choices label > span { display: grid; min-width: 0; gap: 2px; }
+  .terminal-choices label > span { display: grid; min-width: 0; gap: 2px; overflow: hidden; line-height: 1.7; }
   .terminal-choices strong, .terminal-choices small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .terminal-choices strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-medium); }
   .terminal-choices small { color: var(--text-muted); font-size: var(--type-2); }
