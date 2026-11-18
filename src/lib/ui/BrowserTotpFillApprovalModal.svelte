@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
@@ -56,7 +57,7 @@
   {#if selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
-      <p><strong>Matched by site</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code> and set to fill on the whole site, so Sesame offers its code on <code>{request.origin}</code>.</span></p>
+      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers its code on <code>{request.origin}</code>.</span></p>
     </div>
   {/if}
 
@@ -64,8 +65,8 @@
     {#each request.candidates as candidate (candidate.id)}
       <label class:selected={$browserTotpFill.selectedId === candidate.id}>
         <input type="radio" name="browser-totp-choice" value={candidate.id} checked={$browserTotpFill.selectedId === candidate.id} on:change={() => browserTotpFill.patch({ selectedId: candidate.id })} disabled={working} />
-        <span class="entry-avatar">{(candidate.title || candidate.username).slice(0, 1).toUpperCase() || '?'}</span>
-        <span><strong>{candidate.title || candidate.username}</strong>{#if candidate.username}<small>{candidate.username}</small>{/if}{#if candidate.matchKind === 'site'}<small class="candidate-origin">{candidate.savedOrigin}</small>{/if}</span>
+        <span class="entry-avatar">{vaultText(candidate.title || candidate.username).slice(0, 1).toUpperCase() || '?'}</span>
+        <span><strong><bdi>{vaultText(candidate.title || candidate.username)}</bdi></strong>{#if candidate.username}<small><bdi>{vaultText(candidate.username)}</bdi></small>{/if}{#if candidate.matchKind === 'site'}<small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small>{/if}</span>
         {#if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
       </label>
     {/each}

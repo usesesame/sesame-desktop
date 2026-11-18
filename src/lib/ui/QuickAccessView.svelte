@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onDestroy, onMount, tick } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import Icon from '../Icon.svelte'
@@ -192,9 +193,9 @@
           <li class="quick-access-result-row" class:active={index === selectedIndex}>
             <button type="button" class:active={index === selectedIndex} on:mousemove={() => (selectedIndex = index)} on:click={() => { const action = primaryAction(item); if (action) void runAction(item, action) }} disabled={Boolean(workingId) && workingId !== item.id}>
               <span class="entry-avatar" aria-hidden="true">
-                {#if item.kind === 'login'}{item.initials}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
+                {#if item.kind === 'login'}{vaultText(item.initials)}{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
               </span>
-              <span class="quick-access-result-copy"><strong>{item.title}</strong><small>{item.subtitle || itemKindLabel(item.kind)}</small></span>
+              <span class="quick-access-result-copy"><strong><bdi>{vaultText(item.title)}</bdi></strong><small><bdi>{vaultText(item.subtitle) || itemKindLabel(item.kind)}</bdi></small></span>
               <span class="quick-access-result-state" role={workingId === item.id || doneId === item.id ? 'status' : undefined}>{#if doneId === item.id}{doneLabel} copied{:else if workingId === item.id}Working…{:else}<Icon name="copy" size={13} />{primaryAction(item)?.label ?? 'No action'}{/if}</span>
             </button>
             <span class="quick-access-actions">
@@ -221,7 +222,7 @@
       {/if}
       {#if presenceItem}
         <p class="quick-access-presence" role="status">
-          <span>Confirm your master password in Sesame to copy from {presenceItem.title}.</span>
+          <span>Confirm your master password in Sesame to copy from <bdi>{vaultText(presenceItem.title)}</bdi>.</span>
           <button type="button" on:click={() => void openPresenceItem()}>Open Sesame</button>
         </p>
       {/if}

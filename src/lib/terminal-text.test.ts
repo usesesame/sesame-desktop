@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import vectors from '../../src-tauri/contracts/cli/v1/vectors.json'
 import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
 
 const plainProse = /[—–()]/
@@ -32,6 +33,23 @@ describe('text a terminal sent', () => {
     expect(shownText('\u3164', 15)).toBe(UNREADABLE_NAME)
     expect(shownText('Readable', 0)).toBe('')
     expect(shownText('Readable', 1)).toBe('…')
+  })
+})
+
+describe('the rule the terminal tool shares', () => {
+  const character = (hex: string) => String.fromCodePoint(Number.parseInt(hex, 16))
+
+  test.each([
+    ['standIns', '?'],
+    ['spaces', ' '],
+    ['kept', null],
+  ] as const)('the %s cases read the same in the window as in the terminal', (group, shown) => {
+    const points: string[] = vectors.shownTextCases[group]
+    expect(points.length).toBeGreaterThan(0)
+    for (const point of points) {
+      const value = character(point)
+      expect(shownText(`a${value}b`), point).toBe(`a${shown ?? value}b`)
+    }
   })
 })
 
@@ -93,7 +111,22 @@ describe('what the dialog says', () => {
   test('every closing reason has its own sentence', () => {
     const lines = ['expired', 'connectionClosed', 'vaultChanged', 'preempted', 'somethingNew'].map(cancelledLine)
     expect(new Set(lines).size).toBe(5)
-    for (const line of [...lines, unlockLine('get'), unlockLine('list'), unlockLine('totp')]) expect(line).not.toMatch(plainProse)
+    const waiting = [
+      unlockLine({ command: 'get', copy: false }),
+      unlockLine({ command: 'list', copy: false }),
+      unlockLine({ command: 'totp', copy: true }),
+      unlockLine({ command: 'get', field: 'password', copy: false }),
+    ]
+    for (const line of [...lines, ...waiting]) expect(line).not.toMatch(plainProse)
+  })
+
+  test('the lock screen says what a waiting terminal wants without naming the item', () => {
+    expect(unlockLine({ command: 'get', field: 'password', copy: false })).toBe('A terminal wants the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'password', copy: true })).toBe('A terminal wants to copy the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'Recovery PIN', copy: false })).toBe('A terminal wants one field of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', copy: false })).toBe('A terminal wants to read an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'list', copy: false })).toBe('A terminal wants the names of all your items. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'totp', copy: false })).toBe('A terminal wants a one-time code. Sesame asks you about it after you unlock.')
   })
 
   test('allowed requests and remaining time read as sentences', () => {
@@ -101,7 +134,11 @@ describe('what the dialog says', () => {
     expect(allowedRequestWords('get', 'Recovery PIN', 'Northwind mail', 'login')).toBe('Read a field of Northwind mail')
     expect(allowedRequestWords('totp', 'totp', null, 'login')).toBe('Read the one-time code of a removed login')
     expect(allowedRequestWords('list', undefined, null, undefined)).toBe('Listed every item title')
-    expect(remainingWords(212_000)).toBe('4 more minutes')
+    expect(remainingWords(212_000)).toBe('3 more minutes')
+    expect(remainingWords(270_000)).toBe('4 more minutes')
+    expect(remainingWords(300_000)).toBe('5 more minutes')
+    expect(remainingWords(60_000)).toBe('1 more minute')
+    expect(remainingWords(59_400)).toBe('59 more seconds')
     expect(remainingWords(41_000)).toBe('41 more seconds')
     expect(remainingWords(1_000)).toBe('1 more second')
   })

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
@@ -124,7 +125,7 @@
                   title={`Save ${attachment.filename}`}
                 >
                   <Icon name="file-key" size={15} />
-                  <span class="document-attachment-name">{attachment.filename}</span>
+                  <span class="document-attachment-name"><bdi>{vaultText(attachment.filename)}</bdi></span>
                   <span class="document-attachment-size">{savingAttachmentId === attachment.id ? 'Saving…' : formatBytes(attachment.size)}</span>
                 </button>
                 <button

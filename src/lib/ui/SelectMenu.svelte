@@ -3,6 +3,7 @@
 </script>
 
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   export let value: string
   export let options: Array<{ value: string; label: string }>
   export let onChange: (value: string) => void
@@ -91,7 +92,7 @@
     on:click={() => (open = !open)}
     on:keydown={handleTriggerKeydown}
   >
-    <span>{selectedLabel}</span>
+    <span><bdi>{vaultText(selectedLabel)}</bdi></span>
     <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
   </button>
   {#if open}
@@ -105,7 +106,7 @@
           tabindex="-1"
           on:click={() => choose(option.value)}
           on:keydown={handleOptionKeydown}
-        >{option.label}</button>
+        ><bdi>{vaultText(option.label)}</bdi></button>
       {/each}
     </div>
   {/if}

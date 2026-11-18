@@ -27,6 +27,7 @@ import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { LoginController } from './login-controller'
 import type { PresenceController } from './presence-controller'
+import { isolatedVaultText } from '../vault-text'
 
 export const SEARCH_DEBOUNCE_MS = 120
 export const SECRET_REVEAL_TIMEOUT_MS = 30_000
@@ -216,7 +217,7 @@ export function createItemController({ stores, feedback, login, presence, editor
     try {
       await copyItemField(active.kind, active.id, key)
       void markUsed(active.id)
-      feedback.showNotice(`${label} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+      feedback.showNotice(`${isolatedVaultText(label)} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
     } catch (error) {
       if (presence.required(error)) {
         presence.ask('copy-field', () => copyField(key, label))
@@ -290,7 +291,7 @@ export function createItemController({ stores, feedback, login, presence, editor
       await copyToClipboard(value)
       const activeItemId = selection.value().activeItemId
       if (activeItemId) void markUsed(activeItemId)
-      feedback.showNotice(`${label} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
+      feedback.showNotice(`${isolatedVaultText(label)} copied`, `Clears after ${settings.value().clipboardClearSeconds} seconds if the clipboard has not changed.`)
     } catch (error) {
       void recordDiagnostic('clipboard', 'failed')
       feedback.setError(error)
@@ -363,7 +364,7 @@ export function createItemController({ stores, feedback, login, presence, editor
         if (card?.id === id) vault.patch({ loginCard: { ...card, folderId: folder?.id, folder: folder?.name ?? '' } })
         const detail = state.value().detail
         if (detail && selection.value().activeItemId === id) state.patch({ detail: { ...detail, folderId: folder?.id } })
-        feedback.showNotice('Collection updated', folder ? `Moved to ${folder.name}.` : 'Moved to Unfiled.')
+        feedback.showNotice('Collection updated', folder ? `Moved to ${isolatedVaultText(folder.name)}.` : 'Moved to Unfiled.')
       } catch (error) {
         feedback.setError(error)
       }

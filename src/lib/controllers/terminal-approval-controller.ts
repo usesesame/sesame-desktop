@@ -10,7 +10,7 @@ import {
   type CliApprovalRequestEvent,
   type CliDecisionInput,
 } from '../terminal-api'
-import { cancelledLine, secretNeeded } from '../terminal-text'
+import { cancelledLine, noticeOnly, secretNeeded } from '../terminal-text'
 import { grantPresence, previewMode, recordDiagnostic } from '../vault'
 import { approvalLoop } from './approval-loop'
 import { messageFor, type FeedbackController } from './feedback-controller'
@@ -28,6 +28,7 @@ interface TerminalApprovalControllerOptions {
   modal: ModalController
   blockingOverlayActive: () => boolean
   presenceOpen: () => boolean
+  overlayOpen?: () => boolean
 }
 
 type Patch = Partial<TerminalApprovalStoreState>
@@ -44,7 +45,7 @@ function freshFields(request: CliApprovalRequestEvent | null): Patch {
   }
 }
 
-export function createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive, presenceOpen }: TerminalApprovalControllerOptions) {
+export function createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive, presenceOpen, overlayOpen = () => false }: TerminalApprovalControllerOptions) {
   const store = stores.terminalApproval
   let closedQuietly: string | null = null
   let reported: string | null = null
@@ -61,11 +62,32 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     return ended.includes(approvalId) || settling.has(approvalId)
   }
 
+  let backendDeadline: { approvalId: string; at: number } | null = null
+
+  function keepBackendDeadline(pending: CliApprovalRequestEvent | null, askedAt: number) {
+    if (!pending || store.value().request?.approvalId !== pending.approvalId) return
+    const at = askedAt + pending.expiresInMs
+    const known = backendDeadline?.approvalId === pending.approvalId ? backendDeadline.at : null
+    if (known !== null && known >= at) return
+    backendDeadline = { approvalId: pending.approvalId, at }
+    store.patch({ expiresAt: at })
+  }
+
+  async function readBackendDeadline() {
+    const askedAt = Date.now()
+    try {
+      keepBackendDeadline(await getPendingTerminalRequest(), askedAt)
+    } catch {
+      return
+    }
+  }
+
   const loopStore = {
     value: store.value,
     patch(values: Patch) {
       if ('request' in values && values.request?.approvalId !== store.value().request?.approvalId) {
         store.patch({ ...values, ...freshFields(values.request ?? null) })
+        if (values.request && !previewMode) void readBackendDeadline()
       } else {
         store.patch(values)
       }
@@ -76,7 +98,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     if (reported === approvalId) return
     reported = approvalId
     if (closedQuietly === approvalId) closedQuietly = null
-    feedback.showNotice(NOTICE_TITLE, cancelledLine(reason))
+    feedback.showRefusal(NOTICE_TITLE, cancelledLine(reason))
   }
 
   function closeQuietly(approvalId: string) {
@@ -95,8 +117,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
 
   async function pendingNow(): Promise<CliApprovalRequestEvent | null> {
     const before = store.value().request?.approvalId
+    const askedAt = Date.now()
     const pending = await getPendingTerminalRequest()
     const shown = store.value().request
+    keepBackendDeadline(pending, askedAt)
     if (pending && settled(pending.approvalId)) return shown
     if (!pending && shown && shown.approvalId !== before) return shown
     return pending
@@ -117,7 +141,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     try {
       pending = await getPendingTerminalRequest()
     } catch {
-      feedback.showNotice(NOTICE_TITLE, message)
+      feedback.showRefusal(NOTICE_TITLE, message)
       return
     }
     if (!pending || pending.approvalId !== approvalId || settled(approvalId) || store.value().request) return
@@ -142,6 +166,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   const loop = approvalLoop<CliApprovalRequestEvent, CliApprovalCancelledEvent>({
     store: loopStore,
     mayShow: () => modal.terminalMayShow() && !presenceOpen(),
+    held: overlayOpen,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),
     decline,
     pending: pendingNow,
@@ -197,7 +222,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
       }
       finish(request.approvalId)
       reported = request.approvalId
-      feedback.showNotice(NOTICE_TITLE, message)
+      feedback.showRefusal(NOTICE_TITLE, message)
       return false
     }
   }
@@ -206,7 +231,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const state = store.value()
     const request = state.request
     if (!request || state.working) return
-    if (request.notFound !== undefined) return dismiss()
+    if (noticeOnly(request)) return dismiss()
     const itemId = state.selectedId
     if (request.candidates.length > 1 && !offered(request, itemId)) {
       store.patch({ error: 'Choose one of the items Sesame offered.' })
@@ -247,7 +272,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const state = store.value()
     const request = state.request
     if (!request) return
-    if (request.notFound !== undefined) return dismiss()
+    if (noticeOnly(request)) return dismiss()
     await closeWith(request, 'deny')
   }
 
@@ -261,6 +286,11 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     if (store.value().request?.approvalId !== approvalId) return
     loopStore.patch({ request: null })
     report(approvalId, 'expired')
+  }
+
+  function setAside() {
+    const current = store.value().request
+    if (current && !store.value().working) closeQuietly(current.approvalId)
   }
 
   function select(itemId: string) {
@@ -316,11 +346,10 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   function clearSecrets() {
     const current = store.value().request
     if (current) closedQuietly = current.approvalId
-    loop.clearSecrets()
-    store.patch({ ...freshFields(null), unlock: store.value().unlock })
+    store.patch({ ...freshFields(null), request: null, syncWorking: false, unlock: store.value().unlock })
   }
 
-  return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }
+  return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, setAside, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }
 }
 
 export type TerminalApprovalController = ReturnType<typeof createTerminalApprovalController>

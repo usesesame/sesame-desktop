@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import ViewHeader from './ViewHeader.svelte'
   import type { HistorySummary, ItemPreview } from '../types'
@@ -91,7 +92,7 @@
           >
             <span class="entry-avatar"><Icon name="refresh" size={15} /></span>
             <div class="history-row-detail">
-              <strong>{titleFor(group.kind, group.itemId) ?? `Removed ${group.kind.replaceAll('_', ' ')}`}</strong>
+              <strong><bdi>{vaultText(titleFor(group.kind, group.itemId)) || `Removed ${group.kind.replaceAll('_', ' ')}`}</bdi></strong>
               <small>{kindLabel(group.kind)} · {group.versions.length} saved {group.versions.length === 1 ? 'version' : 'versions'} · last {relativeWhen(group.versions[0].capturedAt)}</small>
             </div>
             <span class="history-group-chevron" class:expanded={expanded[group.itemId] === true}>
@@ -104,8 +105,8 @@
                 <li class="history-row">
                   {#if previewId === item.id && preview}
                     <div class="history-row-detail">
-                      <strong>{preview.title}</strong>
-                      <small>{preview.detail ? `${preview.detail} · ` : ''}Saved {formatWhen(item.capturedAt)}</small>
+                      <strong><bdi>{vaultText(preview.title)}</bdi></strong>
+                      <small>{#if preview.detail}<bdi>{vaultText(preview.detail)}</bdi> · {/if}Saved {formatWhen(item.capturedAt)}</small>
                     </div>
                     <div class="history-row-actions">
                       <button type="button" class="secondary-button" on:click={onCancelPreview}>Cancel</button>

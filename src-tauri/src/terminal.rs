@@ -292,6 +292,7 @@ mod tests {
                 copy: false,
                 candidates: Vec::new(),
                 not_found: None,
+                missing_field: false,
                 terminal: None,
                 program: None,
                 remote: false,

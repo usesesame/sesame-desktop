@@ -3,4 +3,4 @@ import type { CliCandidate } from "./CliCandidate";
 import type { CliCommandKind } from "./CliCommandKind";
 import type { UnverifiedProgram } from "./UnverifiedProgram";
 
-export type CliApprovalRequestEvent = { approvalId: string, command: CliCommandKind, field?: string, fieldHidden: boolean, copy: boolean, candidates: Array<CliCandidate>, notFound?: string, terminal?: string, program?: UnverifiedProgram, remote: boolean, canAllowTerminal: boolean, needsPresence: boolean, allowed: boolean, expiresInMs: number, };
+export type CliApprovalRequestEvent = { approvalId: string, command: CliCommandKind, field?: string, fieldHidden: boolean, copy: boolean, candidates: Array<CliCandidate>, notFound?: string, missingField: boolean, terminal?: string, program?: UnverifiedProgram, remote: boolean, canAllowTerminal: boolean, needsPresence: boolean, allowed: boolean, expiresInMs: number, };

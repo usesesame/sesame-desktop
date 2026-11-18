@@ -80,8 +80,10 @@ test('submitting a short PIN does nothing', async () => {
 })
 
 test('says which command a waiting terminal wants and clears when the wait ends', async () => {
-  const rendered = render(UnlockScreen, { props: { status, onUnlockWithPin: vi.fn(), onUnlockWithHello: vi.fn(), onSubmitMasterPassword: vi.fn(), terminalWaiting: { command: 'totp', terminal: 'pts/3', remote: true } } } as never)
-  expect(screen.getByRole('status').textContent).toBe('A terminal is waiting to read a one-time code. Sesame asks you about it after you unlock. It came through a remote login.')
+  const rendered = render(UnlockScreen, { props: { status, onUnlockWithPin: vi.fn(), onUnlockWithHello: vi.fn(), onSubmitMasterPassword: vi.fn(), terminalWaiting: { command: 'get', field: 'password', copy: false, terminal: 'pts/3', remote: true } } } as never)
+  const waiting = screen.getByRole('status')
+  expect(waiting.textContent).toBe('A terminal wants the password of an item. Sesame asks you about it after you unlock. It came through a remote login.')
   await rendered.rerender({ terminalWaiting: null })
-  expect(screen.queryByText(/A terminal is waiting/)).toBeNull()
+  expect(waiting.isConnected).toBe(false)
+  expect(screen.queryByText(/A terminal wants/)).toBeNull()
 })

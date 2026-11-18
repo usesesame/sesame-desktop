@@ -1,4 +1,6 @@
 <script lang="ts">
+  import SecretText from './SecretText.svelte'
+  import { noteText, vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import SelectMenu from './SelectMenu.svelte'
   import type { ItemDetail } from '../item-fields'
@@ -51,15 +53,15 @@
 <div class="login-title-row">
   <div class="entry-avatar large-entry"><Icon name={itemKindIcon(kind)} size={20} /></div>
   <div>
-    <h2>{detail.title}</h2>
+    <h2><bdi>{vaultText(detail.title)}</bdi></h2>
     <div class="login-meta">
       <span>{itemKindLabel(kind)}</span>
-      {#if detail.subtitle}<span class="item-subtitle">{detail.subtitle}</span>{/if}
+      {#if detail.subtitle}<span class="item-subtitle"><bdi>{vaultText(detail.subtitle)}</bdi></span>{/if}
     </div>
     {#if uniqueTags(detail.tags).length}
       <div class="issue-chips">
         {#each uniqueTags(detail.tags) as tag (tag)}
-          <button type="button" class="tag-chip" on:click={() => onShowTag(tag)}>{tag}</button>
+          <button type="button" class="tag-chip" on:click={() => onShowTag(tag)}><bdi>{vaultText(tag)}</bdi></button>
         {/each}
       </div>
     {/if}
@@ -75,11 +77,11 @@
     {#each detail.fields as field, index (index)}
       {#if !field.multiline}
       <div class="credential-row">
-        <div class="credential-label"><Icon name={field.icon} size={16} /><span>{field.label}</span></div>
+        <div class="credential-label"><Icon name={field.icon} size={16} /><span><bdi>{vaultText(field.label)}</bdi></span></div>
         {#if field.secret && !isShown(field)}
           <code class="concealed">••••••••••••••••</code>
         {:else}
-          <code>{shownValue(field)}</code>
+          <code>{#if field.secretKey}<SecretText value={shownValue(field)} />{:else}<bdi>{vaultText(shownValue(field))}</bdi>{/if}</code>
         {/if}
         {#if field.secret}
           <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
@@ -94,7 +96,7 @@
   {#if field.multiline}
     <section class="details-section multiline-field" aria-label={field.label}>
       <div class="section-heading">
-        <h3>{field.label}</h3>
+        <h3><bdi>{vaultText(field.label)}</bdi></h3>
         <div class="multiline-field-actions">
           {#if field.secret}
             <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} title={isShown(field) ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
@@ -105,7 +107,7 @@
       {#if field.secret && !isShown(field)}
         <p class="multiline-value concealed">••••••••••••••••</p>
       {:else}
-        <p class="multiline-value" class:mono={kind !== 'secure_note'}>{shownValue(field)}</p>
+        <p class="multiline-value" class:mono={kind !== 'secure_note'} dir="auto">{#if field.secretKey}<SecretText value={shownValue(field)} />{:else}{noteText(shownValue(field))}{/if}</p>
       {/if}
     </section>
   {/if}
@@ -116,7 +118,7 @@
     <div class="section-heading"><h3>Attachments</h3></div>
     <ul class="attachment-list">
       {#each detail.attachments as attachment (attachment.id)}
-        <li><Icon name="file-key" size={15} /><span>{attachment.filename}</span><small>{attachmentSize(attachment.size)}</small></li>
+        <li><Icon name="file-key" size={15} /><span><bdi>{vaultText(attachment.filename)}</bdi></span><small>{attachmentSize(attachment.size)}</small></li>
       {/each}
     </ul>
   </section>
@@ -125,7 +127,7 @@
 {#if detail.notes}
   <section class="details-section">
     <div class="section-heading"><h3>Notes</h3></div>
-    <p class="item-notes">{detail.notes}</p>
+    <p class="item-notes" dir="auto">{noteText(detail.notes)}</p>
   </section>
 {/if}
 
@@ -133,7 +135,7 @@
   <section class="details-section">
     <div class="section-heading"><h3>Legacy data</h3></div>
     {#each detail.legacyFields as field, index (index)}
-      <p><strong>{field.label}</strong>: {field.secret ? 'Secret value stored' : field.value} <button type="button" class="text-button" on:click={() => (field.secret ? onCopyField(`legacy:${index}`, field.label) : onCopy(field.value, field.label))}>Copy</button></p>
+      <p><strong><bdi>{vaultText(field.label)}</bdi></strong>: {#if field.secret}Secret value stored{:else}<bdi>{vaultText(field.value)}</bdi>{/if} <button type="button" class="text-button" on:click={() => (field.secret ? onCopyField(`legacy:${index}`, field.label) : onCopy(field.value, field.label))}>Copy</button></p>
     {/each}
   </section>
 {/if}

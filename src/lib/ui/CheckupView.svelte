@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import DuplicateReview from './DuplicateReview.svelte'
   import ViewHeader from './ViewHeader.svelte'
@@ -114,7 +115,7 @@
       {#if finding.logins?.length}
         <ul class="checkup-logins finding-logins" aria-label={finding.title}>
           {#each finding.logins as login (login.id)}
-            <li><button type="button" class="checkup-login" on:click={() => onOpenLogin(login.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login.site} initials={savedLogin(login.id)?.initials ?? login.title.slice(0, 1).toUpperCase()} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong>{login.title}</strong><small>{login.site}</small></span><Icon name="chevron-right" size={15} /></button></li>
+            <li><button type="button" class="checkup-login" on:click={() => onOpenLogin(login.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login.site} initials={savedLogin(login.id)?.initials ?? login.title.slice(0, 1).toUpperCase()} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong><bdi>{vaultText(login.title)}</bdi></strong><small><bdi>{vaultText(login.site)}</bdi></small></span><Icon name="chevron-right" size={15} /></button></li>
           {/each}
           {#if finding.count > finding.logins.length}<li class="checkup-logins-more">and {finding.count - finding.logins.length} more</li>{/if}
         </ul>
@@ -164,7 +165,7 @@
         <ul class="checkup-logins breach-check-list" aria-label="Logins with breached passwords">
           {#each visibleBreached as result (result.id)}
             {@const login = savedLogin(result.id)}
-            <li><button type="button" class="checkup-login" disabled={!login} on:click={() => login && onOpenLogin(result.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login?.site ?? ''} initials={login?.initials ?? '?'} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong>{login?.title ?? 'Deleted login'}</strong><small>{login?.site || 'No website saved'}</small></span><Icon name="chevron-right" size={15} /></button></li>
+            <li><button type="button" class="checkup-login" disabled={!login} on:click={() => login && onOpenLogin(result.id)}><span class="entry-avatar checkup-login-avatar"><WebsiteIcon site={login?.site ?? ''} initials={login?.initials ?? '?'} enabled={siteIconsEnabled} /></span><span class="checkup-login-text"><strong><bdi>{login ? vaultText(login.title) : 'Deleted login'}</bdi></strong><small><bdi>{vaultText(login?.site) || 'No website saved'}</bdi></small></span><Icon name="chevron-right" size={15} /></button></li>
           {/each}
         </ul>
         {#if breachedResults.length > DISPLAY_LIMIT}

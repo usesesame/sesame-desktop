@@ -41,7 +41,7 @@ test('the timeline shows sentences grouped under a day heading', async () => {
   ]))
   render(ReleaseRecordView, { titleFor })
 
-  expect(await screen.findByText('Filled Northwind on example.com')).toBeTruthy()
+  expect(await screen.findByText('Filled \u2068Northwind\u2069 on example.com')).toBeTruthy()
   expect(screen.getByText('You denied a login fill request from shop.example.org')).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Today' })).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Activity' })).toBeTruthy()
@@ -63,7 +63,7 @@ test('opening a row with a known item goes to that item', async () => {
   const onOpenItem = vi.fn()
   render(ReleaseRecordView, { titleFor, onOpenItem })
 
-  await fireEvent.click(await screen.findByRole('button', { name: /Filled Northwind/ }))
+  await fireEvent.click(await screen.findByRole('button', { name: /Filled \u2068Northwind/ }))
   expect(onOpenItem).toHaveBeenCalledWith('login-a')
 })
 

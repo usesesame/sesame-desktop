@@ -111,7 +111,7 @@ describe('deleting a login the person already confirmed in the editor', () => {
     await controller.deleteConfirmed({ id: 'login-a', title: 'Northwind', site: 'northwind.example.test', username: '', initials: 'N', reason: '' })
     expect(vaultApi.deleteLogin).toHaveBeenCalledWith('login-a')
     expect(get(controller.state).deleteCandidate).toBeNull()
-    expect(get(feedback.state).notice).toMatchObject({ title: 'Login deleted', message: 'Northwind is in Trash for 30 days.', action: { label: 'Undo' } })
+    expect(get(feedback.state).notice).toMatchObject({ title: 'Login deleted', message: '\u2068Northwind\u2069 is in Trash for 30 days.', action: { label: 'Undo' } })
   })
 })
 

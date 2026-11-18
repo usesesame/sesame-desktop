@@ -21,18 +21,25 @@ function readable(text: string) {
 
 describe('activity sentences', () => {
   test('a released fill names the item and the site', () => {
-    expect(entrySentence(entry({ itemId: 'login-a', itemKind: 'login', host: 'example.com' }), titleFor)).toBe('Filled Northwind on example.com')
+    expect(entrySentence(entry({ itemId: 'login-a', itemKind: 'login', host: 'example.com' }), titleFor)).toBe('Filled \u2068Northwind\u2069 on example.com')
   })
 
   test('a release through the command line names the terminal and never treats it as a website', () => {
     const shown = entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)
-    expect(shown).toBe('Read the password of Northwind for a terminal')
+    expect(shown).toBe('Read the password of \u2068Northwind\u2069 for a terminal')
     const copied = entrySentence(entry({ kind: 'copy', itemId: 'login-a', itemKind: 'login', fields: ['twoFactorCode'], host: 'terminal' }), titleFor)
-    expect(copied).toBe('Copied the one-time code of Northwind for a terminal')
+    expect(copied).toBe('Copied the one-time code of \u2068Northwind\u2069 for a terminal')
     readable(shown)
     readable(copied)
     for (const sentence of [shown, copied]) expect(sentence).not.toMatch(/ on terminal|from terminal|terminal\.|site/)
-    expect(entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'] }), titleFor)).toBe('Showed the password of Northwind')
+    expect(entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'] }), titleFor)).toBe('Showed the password of \u2068Northwind\u2069')
+  })
+
+  test('a title with a direction override cannot turn the sentence around it', () => {
+    const hostile = () => 'Mallory \u202Egnp.exe\u202C Item'
+    const shown = entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), hostile)
+    expect(shown).toBe('Read the password of \u2068Mallory ?gnp.exe? Item\u2069 for a terminal')
+    expect(shown).not.toMatch(/[\u202A-\u202E]/)
   })
 
   test('an item that no longer exists is named by its kind', () => {
@@ -64,6 +71,8 @@ describe('activity sentences', () => {
     expect(text).toContain('one-time codes you only look at')
     expect(text).toContain('breach checks')
     expect(text).toContain('stays on this device')
+    expect(text).toContain('Terminal requests it turned down are not listed.')
+    expect(text).not.toMatch(/every browser request it turned down\.$/m)
   })
 
   test('details show the time, the match, repeats and late writes', () => {

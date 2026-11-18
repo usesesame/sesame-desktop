@@ -10,6 +10,7 @@ import {
   recordDiagnostic,
 } from '../vault'
 import type { FeedbackController } from './feedback-controller'
+import { isolatedVaultText } from '../vault-text'
 
 interface PendingChangesControllerOptions {
   stores: AppStores
@@ -24,28 +25,29 @@ export function changedSince(change: PendingChangeView): boolean {
 }
 
 export function pendingChangeMessage(change: PendingChangeView): string {
+  const title = isolatedVaultText(change.title)
   if (change.kind === 'new') {
     return change.username
-      ? `You signed up on ${change.host} as ${change.username}. Keep this login if the site accepted it.`
+      ? `You signed up on ${change.host} as ${isolatedVaultText(change.username)}. Keep this login if the site accepted it.`
       : `Sesame saved a new login for ${change.host}. Keep it if the site accepted it.`
   }
   if (change.superseded) {
-    return `A newer password was saved for ${change.title} since this one. Open its history to see each version.`
+    return `A newer password was saved for ${title} since this one. Open its history to see each version.`
   }
   if (changedSince(change)) {
-    return `${change.title} changed after Sesame saved this password. Open its history to see each version.`
+    return `${title} changed after Sesame saved this password. Open its history to see each version.`
   }
   if (change.fill === 'notFilled') {
-    return `The browser could not fill the new password for ${change.title}. Go back to the old password.`
+    return `The browser could not fill the new password for ${title}. Go back to the old password.`
   }
   if (change.urgent && change.daysLeft !== undefined) {
     const days = change.daysLeft === 1 ? '1 day' : `${change.daysLeft} days`
-    return `The new password for ${change.title} is still not confirmed. The old one leaves history in ${days}.`
+    return `The new password for ${title} is still not confirmed. The old one leaves history in ${days}.`
   }
   if (!change.canGoBack) {
-    return `The new password for ${change.title} is not confirmed. The old one is no longer in history.`
+    return `The new password for ${title} is not confirmed. The old one is no longer in history.`
   }
-  return `Sesame saved a new password for ${change.title}. Keep it if the site accepted it.`
+  return `Sesame saved a new password for ${title}. Keep it if the site accepted it.`
 }
 
 export function createPendingChangesController({ stores, feedback, editLogin, copyPassword, openHistory }: PendingChangesControllerOptions) {
