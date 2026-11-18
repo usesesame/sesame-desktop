@@ -989,6 +989,43 @@ fn not_found_arrives_only_after_the_person_saw_it() {
 }
 
 #[test]
+fn a_field_the_item_does_not_have_offers_only_a_notice() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let (replies, _) = harness.run_with(&get(28, Some("Recovery PIN"), false), &origin, |_, _| {
+        let event = harness.pending();
+        assert!(event.missing_field);
+        assert!(event.not_found.is_none());
+        assert!(!event.can_allow_terminal);
+        assert_eq!(event.candidates.len(), 1);
+        assert!(event.candidates[0].field_name.is_none());
+        harness
+            .decide(&event, CliDecisionKind::Allow, None, true)
+            .expect("only dismissed");
+    });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::NoField));
+    assert!(harness
+        .allowances
+        .list(harness.vault.state.session_epoch())
+        .allowances
+        .is_empty());
+
+    let (replies, events) = harness.run_with(&get(29, Some("username"), false), &origin, |_, _| {
+        let event = harness.pending();
+        assert!(!event.missing_field);
+        harness.allow(false);
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+}
+
+#[test]
 fn one_dismissed_name_the_vault_lacks_is_forgiven_but_a_run_of_them_waits() {
     let harness = Harness::new();
     let origin = terminal(100);

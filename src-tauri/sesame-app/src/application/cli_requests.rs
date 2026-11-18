@@ -352,7 +352,17 @@ fn answer(
     if not_found && allowed {
         return Err(Stop::Reply(CliErrorCode::NotFound));
     }
-    let prompt_needed = !allowed || subject.candidates.len() > 1 || needs_presence || not_found;
+    let missing_field = !not_found
+        && matches!(command, CliCommand::Get { field: Some(_), .. })
+        && subject
+            .candidates
+            .iter()
+            .all(|candidate| candidate.field_name.is_none());
+    if missing_field && allowed {
+        return Err(Stop::Reply(CliErrorCode::NoField));
+    }
+    let notice_only = not_found || missing_field;
+    let prompt_needed = !allowed || subject.candidates.len() > 1 || needs_presence || notice_only;
     let event = CliApprovalRequestEvent {
         approval_id: String::new(),
         command: command_kind(command),
@@ -369,16 +379,17 @@ fn answer(
             }
             _ => None,
         },
+        missing_field,
         terminal: origin.device.clone(),
         program: origin.program.clone(),
         remote: origin.remote,
-        can_allow_terminal: origin.key.is_some() && !allowed && !not_found,
+        can_allow_terminal: origin.key.is_some() && !allowed && !notice_only,
         needs_presence,
         allowed,
         expires_in_ms: 0,
     };
     let chosen = if prompt_needed {
-        let decision = prompt(context, request_id, epoch, event, &subject, not_found)?;
+        let decision = prompt(context, request_id, epoch, event, &subject, notice_only)?;
         match decision {
             CliDecision::Allow { .. } => context.approvals.note_approved(),
             CliDecision::Dismiss => context.approvals.note_missing_dismissed(),
@@ -407,6 +418,9 @@ fn answer(
                     ),
                     None => None,
                 }
+            }
+            CliDecision::Dismiss if missing_field => {
+                return Err(Stop::Reply(CliErrorCode::NoField))
             }
             CliDecision::Dismiss => return Err(Stop::Reply(CliErrorCode::NotFound)),
             CliDecision::Deny | CliDecision::InvalidSelection => {
@@ -465,7 +479,7 @@ fn prompt(
     epoch: u64,
     event: CliApprovalRequestEvent,
     subject: &Subject,
-    not_found: bool,
+    notice_only: bool,
 ) -> Result<CliDecision, Stop> {
     let terminal_allowed = event.can_allow_terminal;
     let offer = context
@@ -478,7 +492,7 @@ fn prompt(
                 .iter()
                 .map(|candidate| candidate.id.clone())
                 .collect(),
-            not_found,
+            not_found: notice_only,
             terminal_allowed,
             event,
         })

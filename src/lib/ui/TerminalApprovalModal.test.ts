@@ -39,6 +39,7 @@ function request(partial: Partial<CliApprovalRequestEvent> = {}): CliApprovalReq
     remote: false,
     canAllowTerminal: true,
     needsPresence: false,
+    missingField: false,
     allowed: false,
     expiresInMs: 60_000,
     ...partial,
@@ -203,6 +204,44 @@ test('a request for a missing item shows only an OK button', async () => {
   await fireEvent.keyDown(window, { key: 'Escape' })
   expect(props.onDismiss).toHaveBeenCalledTimes(2)
   expect(props.onDeny).not.toHaveBeenCalled()
+})
+
+test('a field the item does not have shows only an OK button and names the field asked for', async () => {
+  vi.useFakeTimers()
+  const { props } = show({ field: 'Recovery PIN', fieldHidden: false, missingField: true, canAllowTerminal: false, candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldHidden: false }] })
+  await armed()
+  expect(screen.getByRole('heading', { name: 'A terminal asked for a field this item does not have' })).toBeTruthy()
+  expect(screen.getByText('Northwind mail')).toBeTruthy()
+  const row = screen.getByText('Field').closest('div') as HTMLElement
+  expect(row.textContent).toContain('Recovery PIN')
+  expect(row.textContent).toContain('No field by that name')
+  expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
+  expect(screen.queryByRole('checkbox')).toBeNull()
+  await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(props.onDismiss).toHaveBeenCalledTimes(2)
+  expect(props.onDeny).not.toHaveBeenCalled()
+  expect(props.onAllow).not.toHaveBeenCalled()
+})
+
+test('the chooser keeps Allow off for an item that has no field by that name', async () => {
+  vi.useFakeTimers()
+  const { stores } = show({
+    field: 'Recovery PIN',
+    fieldHidden: false,
+    candidates: [
+      { id: 'northwind-a', kind: 'login', title: 'Northwind mail', fieldHidden: false },
+      { id: 'northwind-b', kind: 'login', title: 'Northwind mail', fieldName: 'Recovery PIN', fieldHidden: false },
+    ],
+  })
+  await armed()
+  stores.terminalApproval.patch({ selectedId: 'northwind-a' })
+  await tick()
+  expect(allowButton().disabled).toBe(true)
+  stores.terminalApproval.patch({ selectedId: 'northwind-b' })
+  await tick()
+  expect(allowButton().disabled).toBe(false)
 })
 
 test('expiry closes the dialog through the controller', async () => {

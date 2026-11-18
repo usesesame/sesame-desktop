@@ -116,6 +116,10 @@ export function approvalSummary(request: HeadingRequest): string {
   return request.fieldHidden ? 'Sesame prints this hidden value in the terminal.' : 'Sesame prints this value in the terminal.'
 }
 
+export function noticeOnly(request: Pick<CliApprovalRequestEvent, 'notFound' | 'missingField'>): boolean {
+  return request.notFound !== undefined || request.missingField
+}
+
 export function secretNeeded(request: CliApprovalRequestEvent, selectedId: string, presenceGranted: boolean): boolean {
   if (!request.needsPresence || presenceGranted) return false
   if (request.candidates.length <= 1) return true

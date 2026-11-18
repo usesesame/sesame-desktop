@@ -37,6 +37,7 @@ function request(approvalId: string, partial: Partial<CliApprovalRequestEvent> =
     remote: false,
     canAllowTerminal: true,
     needsPresence: false,
+    missingField: false,
     allowed: false,
     expiresInMs: 60_000,
     ...partial,
@@ -333,6 +334,19 @@ describe('terminal approvals in the window', () => {
     expect(state().expiresAt - Date.now()).toBeLessThanOrEqual(41_000)
     expect(state().expiresAt - Date.now()).toBeGreaterThan(40_000)
 
+    stop()
+  })
+
+  it('turns Allow and Deny into a dismissal for a field the item does not have', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1', { field: 'Recovery PIN', fieldHidden: false, missingField: true, canAllowTerminal: false }))
+    await controller.allow()
+    handlers.request(request('approval-2', { field: 'Recovery PIN', fieldHidden: false, missingField: true, canAllowTerminal: false }))
+    await controller.deny()
+    expect(decisions()).toEqual([
+      { approvalId: 'approval-1', decision: 'dismiss' },
+      { approvalId: 'approval-2', decision: 'dismiss' },
+    ])
     stop()
   })
 

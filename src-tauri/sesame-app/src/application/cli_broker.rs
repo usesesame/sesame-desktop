@@ -62,6 +62,7 @@ pub struct CliApprovalRequestEvent {
     pub candidates: Vec<CliCandidate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_found: Option<String>,
+    pub missing_field: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

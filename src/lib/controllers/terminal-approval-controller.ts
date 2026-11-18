@@ -10,7 +10,7 @@ import {
   type CliApprovalRequestEvent,
   type CliDecisionInput,
 } from '../terminal-api'
-import { cancelledLine, secretNeeded } from '../terminal-text'
+import { cancelledLine, noticeOnly, secretNeeded } from '../terminal-text'
 import { grantPresence, previewMode, recordDiagnostic } from '../vault'
 import { approvalLoop } from './approval-loop'
 import { messageFor, type FeedbackController } from './feedback-controller'
@@ -220,7 +220,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const state = store.value()
     const request = state.request
     if (!request || state.working) return
-    if (request.notFound !== undefined) return dismiss()
+    if (noticeOnly(request)) return dismiss()
     const itemId = state.selectedId
     if (request.candidates.length > 1 && !offered(request, itemId)) {
       store.patch({ error: 'Choose one of the items Sesame offered.' })
@@ -261,7 +261,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const state = store.value()
     const request = state.request
     if (!request) return
-    if (request.notFound !== undefined) return dismiss()
+    if (noticeOnly(request)) return dismiss()
     await closeWith(request, 'deny')
   }
 
