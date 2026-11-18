@@ -612,6 +612,15 @@ fn unconfusable(mut fields: Vec<DescribedField>) -> Vec<DescribedField> {
     for index in clashing {
         fields[index].name = fields[index].key.clone();
     }
+    let unreachable: Vec<usize> = (0..fields.len())
+        .filter(|index| {
+            fields[*index].name != fields[*index].key
+                && find_index(&fields, &fields[*index].name) != Some(*index)
+        })
+        .collect();
+    for index in unreachable {
+        fields[index].name = fields[index].key.clone();
+    }
     fields
 }
 
@@ -813,22 +822,26 @@ fn display_name(field: &DescribedField) -> String {
     }
 }
 
-fn find_field<'a>(fields: &'a [DescribedField], wanted: &str) -> Option<&'a DescribedField> {
+fn find_index(fields: &[DescribedField], wanted: &str) -> Option<usize> {
     let wanted = wanted.trim();
     let lowered = wanted.to_lowercase();
     fields
         .iter()
-        .find(|field| field.key == wanted)
+        .position(|field| field.key == wanted)
         .or_else(|| {
             fields
                 .iter()
-                .find(|field| field.key.eq_ignore_ascii_case(wanted))
+                .position(|field| field.key.eq_ignore_ascii_case(wanted))
         })
         .or_else(|| {
             fields
                 .iter()
-                .find(|field| field.name.trim().to_lowercase() == lowered)
+                .position(|field| field.name.trim().to_lowercase() == lowered)
         })
+}
+
+fn find_field<'a>(fields: &'a [DescribedField], wanted: &str) -> Option<&'a DescribedField> {
+    find_index(fields, wanted).map(|index| &fields[index])
 }
 
 fn chosen_fields(

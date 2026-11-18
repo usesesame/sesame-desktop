@@ -1797,3 +1797,46 @@ fn a_whole_item_too_large_for_one_frame_says_to_ask_for_one_field() {
     assert!(message.contains("one field at a time"));
     assert!(!message.contains("--copy"));
 }
+
+#[test]
+fn every_field_name_in_a_whole_item_selects_that_field() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.vault.seed(|payload| {
+        payload.entries[0].email = "casey@northwind.example".to_string();
+        payload.entries[0].custom_fields = [
+            ("Email", "fictional-work@contoso.example"),
+            ("PIN", "fictional-first-pin"),
+            ("pin", "fictional-second-pin"),
+            ("field:0", "fictional-named-like-a-key"),
+        ]
+        .into_iter()
+        .map(|(label, value)| CustomFieldEntry {
+            label: label.to_string(),
+            value: value.to_string(),
+            kind: "text".to_string(),
+        })
+        .collect();
+    });
+    let (replies, _) =
+        harness.run_with(&get(242, None, false), &origin, |_, _| harness.allow(false));
+    let fields = replies
+        .last()
+        .and_then(|reply| reply.fields.clone())
+        .expect("fields");
+    let mut n = 243;
+    for field in fields.iter().filter(|field| !field.hidden) {
+        let (replies, _) = harness.run_with(&get(n, Some(&field.name), false), &origin, |_, _| {
+            harness.allow(false)
+        });
+        assert_eq!(
+            replies.last().and_then(|reply| reply.value.clone()),
+            field.value,
+            "{}",
+            field.name
+        );
+        n += 1;
+    }
+    assert!(fields.iter().any(|field| field.name == "email"));
+    assert!(fields.iter().any(|field| field.name == "PIN"));
+}
