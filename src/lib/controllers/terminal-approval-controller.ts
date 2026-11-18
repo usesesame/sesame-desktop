@@ -61,11 +61,24 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     return ended.includes(approvalId) || settling.has(approvalId)
   }
 
+  function keepBackendDeadline(pending: CliApprovalRequestEvent | null) {
+    if (pending && store.value().request?.approvalId === pending.approvalId) store.patch({ expiresAt: Date.now() + pending.expiresInMs })
+  }
+
+  async function readBackendDeadline() {
+    try {
+      keepBackendDeadline(await getPendingTerminalRequest())
+    } catch {
+      return
+    }
+  }
+
   const loopStore = {
     value: store.value,
     patch(values: Patch) {
       if ('request' in values && values.request?.approvalId !== store.value().request?.approvalId) {
         store.patch({ ...values, ...freshFields(values.request ?? null) })
+        if (values.request && !previewMode) void readBackendDeadline()
       } else {
         store.patch(values)
       }
@@ -97,6 +110,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     const before = store.value().request?.approvalId
     const pending = await getPendingTerminalRequest()
     const shown = store.value().request
+    keepBackendDeadline(pending)
     if (pending && settled(pending.approvalId)) return shown
     if (!pending && shown && shown.approvalId !== before) return shown
     return pending

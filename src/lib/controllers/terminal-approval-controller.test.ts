@@ -321,6 +321,21 @@ describe('terminal approvals in the window', () => {
     stop()
   })
 
+  it('counts down to the deadline Sesame holds, not the one the event carried when it was sent', async () => {
+    const { stop } = await started()
+    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1', { expiresInMs: 54_000 }))
+    handlers.request(request('approval-1', { expiresInMs: 60_000 }))
+    await flush()
+    expect(state().expiresAt - Date.now()).toBe(54_000)
+
+    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1', { expiresInMs: 41_000 }))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().expiresAt - Date.now()).toBeLessThanOrEqual(41_000)
+    expect(state().expiresAt - Date.now()).toBeGreaterThan(40_000)
+
+    stop()
+  })
+
   it('leaves a waiting request to the lock instead of denying it', async () => {
     const { controller, stop } = await started()
     handlers.request(request('approval-1', { needsPresence: true }))
@@ -492,7 +507,7 @@ describe('terminal approvals in the window', () => {
     let answerPoll: (value: CliApprovalRequestEvent) => void = () => {}
     terminalApi.getPendingTerminalRequest.mockReturnValueOnce(new Promise((resolve) => { answerPoll = resolve }))
     await vi.advanceTimersByTimeAsync(3_000)
-    expect(terminalApi.getPendingTerminalRequest).toHaveBeenCalledTimes(2)
+    expect(terminalApi.getPendingTerminalRequest).toHaveBeenCalledTimes(3)
     await controller.deny()
     answerPoll(request('approval-1'))
     await flush()
