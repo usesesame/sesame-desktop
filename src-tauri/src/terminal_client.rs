@@ -48,7 +48,9 @@ Sesame never takes a secret as an argument, but the item and field names you typ
 Anything printed in a terminal can be read by other programs that run as you.
 Sesame turns terminal requests away for a while after one is denied or not answered, or after a second one since your last Allow asks for something the vault does not have.
 The wait starts at 15 seconds, doubles each time up to 5 minutes, and ends when you allow a request.
+";
 
+const USAGE_EXIT_CODES: &str = "
 Exit codes:
   0  The request was answered.
   1  Something else went wrong.
@@ -72,7 +74,7 @@ const USAGE_PLATFORM: &str = "On Windows every request asks in the Sesame window
 ";
 
 fn usage() -> String {
-    format!("{USAGE_COMMON}{USAGE_PLATFORM}")
+    format!("{USAGE_COMMON}{USAGE_PLATFORM}{USAGE_EXIT_CODES}")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -787,6 +789,10 @@ mod tests {
         }
         assert!(!help.contains('\u{2014}') && !help.contains('(') && !help.contains(')'));
         assert!(help.contains("doubles each time up to 5 minutes"));
+        assert!(help
+            .trim_end()
+            .ends_with("Sesame needs an update to answer this command."));
+        assert!(help.contains("\n\nExit codes:\n"));
         for (exit, words) in [
             (EXIT_OK, "answered."),
             (EXIT_FAILED, "went wrong."),
