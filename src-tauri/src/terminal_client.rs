@@ -34,6 +34,7 @@ const VERBS: [&str; 8] = [
 const NOT_RUNNING: &str = "Sesame is not running. Open Sesame and try again.";
 const NOT_SESAME: &str = "This is not the Sesame app this command belongs to.";
 const UNREADABLE_REPLY: &str = "Sesame sent a reply this command does not understand.";
+const STOPPED_WAITING: &str = "Sesame closed before it answered this request.";
 const OUTPUT_FAILED: &str = "The output could not be written completely, so this command failed.";
 
 const USAGE_COMMON: &str = "Usage:
@@ -263,14 +264,25 @@ pub fn request_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn read_failure(error: &io::Error, answered: bool, streams: &mut Streams<'_>) -> i32 {
-    match error.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Progress {
+    Nothing,
+    Waiting,
+    Answering,
+}
+
+fn read_failure(error: &io::Error, progress: Progress, streams: &mut Streams<'_>) -> i32 {
+    match (error.kind(), progress) {
+        (ErrorKind::TimedOut | ErrorKind::WouldBlock, _) => {
             streams.say(CliErrorCode::Timeout.message());
             EXIT_TIMEOUT
         }
-        ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe if !answered => {
+        (ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe, Progress::Nothing) => {
             streams.say(NOT_SESAME);
+            EXIT_UNREACHABLE
+        }
+        (ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe, Progress::Waiting) => {
+            streams.say(STOPPED_WAITING);
             EXIT_UNREACHABLE
         }
         _ => {
@@ -287,15 +299,14 @@ pub fn converse(
     streams: &mut Streams<'_>,
 ) -> i32 {
     let mut waiting = 0;
-    let mut answered = false;
+    let mut progress = Progress::Nothing;
     let mut total = 0_usize;
     let mut items = Vec::new();
     loop {
         let frame = match source.next_frame() {
             Ok(frame) => frame,
-            Err(error) => return read_failure(&error, answered, streams),
+            Err(error) => return read_failure(&error, progress, streams),
         };
-        answered = true;
         total = total.saturating_add(frame.len());
         if total > MAX_CLI_LIST_BYTES {
             streams.say(UNREADABLE_REPLY);
@@ -308,6 +319,9 @@ pub fn converse(
         };
         match reply.reply_type {
             CliReplyType::Waiting => {
+                if progress == Progress::Nothing {
+                    progress = Progress::Waiting;
+                }
                 waiting += 1;
                 if waiting > MAX_WAITING_FRAMES {
                     streams.say(UNREADABLE_REPLY);
@@ -318,7 +332,10 @@ pub fn converse(
                     _ => "Approve this request in Sesame.",
                 });
             }
-            CliReplyType::Items => items.extend(reply.items.clone().unwrap_or_default()),
+            CliReplyType::Items => {
+                progress = Progress::Answering;
+                items.extend(reply.items.clone().unwrap_or_default());
+            }
             CliReplyType::Done => {
                 let written = print_list(&items, streams);
                 return streams.delivered(written);
@@ -1201,6 +1218,37 @@ mod tests {
         let (code, _) = deliver_into(&mut roomy, &cases[0].0, &cases[0].1, false);
         assert_eq!(code, EXIT_OK);
         assert_eq!(roomy.written, b"fictional-password-canary");
+    }
+
+    #[test]
+    fn sesame_closing_while_a_request_waits_exits_as_unreachable() {
+        for reason in [WaitReason::Approval, WaitReason::Unlock] {
+            let (code, out, err) = talk(
+                &get(Some("password"), false),
+                &[CliReply::waiting(ID, reason)],
+                false,
+            );
+            assert_eq!(code, EXIT_UNREACHABLE);
+            assert!(out.is_empty());
+            assert!(err.contains(STOPPED_WAITING));
+        }
+
+        let summary = CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: "Northwind mail".to_string(),
+        };
+        let (code, out, err) = talk(
+            &CliCommand::List,
+            &[
+                CliReply::waiting(ID, WaitReason::Approval),
+                CliReply::items(ID, vec![summary]),
+            ],
+            false,
+        );
+        assert_eq!(code, EXIT_FAILED);
+        assert!(out.is_empty());
+        assert!(err.contains("Sesame stopped answering."));
     }
 
     #[test]
