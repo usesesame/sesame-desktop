@@ -285,7 +285,7 @@ mod tests {
     use crate::engine::{add_entry, create_entry, remove_entry, seal_label, NewDevice};
     use crate::identity::DeviceIdentity;
     use crate::key_change::fictional_recovery;
-    use crate::test_support::TestProtector;
+    use crate::test_support::{scratch_dir, TestProtector};
 
     const VAULT: &str = "vaultAAAAAAAAAAAA01";
 
@@ -339,11 +339,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("sesame-journal-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        journal_path(&dir)
+        journal_path(&scratch_dir("sesame-journal", name))
     }
 
     fn rewritten(path: &Path, change: impl FnOnce(&mut serde_json::Value)) {

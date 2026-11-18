@@ -14,6 +14,7 @@ use crate::application::sync_pairing::{
 };
 use crate::application::DesktopEffects;
 use crate::sync::client::{SyncClient, SyncError};
+use crate::sync::devicelist::DeviceListEntry;
 use crate::sync::engine::{verify_join, verify_server_view, JoinCheck, ServerView};
 use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::pairing::ApproverIdentity;
@@ -280,8 +281,24 @@ where
         .pending_join
         .as_ref()
         .ok_or("This device has no unfinished join.")?;
+    let entries =
+        verified_join_device_list(client, identity, approver, &pending.entries, &package).await?;
+    pending.floor = crate::sync::engine::floor_for(&entries, &identity.device_id);
+    pending.entries = entries;
+    pending.pending_confirmation = None;
+    persist(&pending)?;
+    Ok((pending, package))
+}
+
+async fn verified_join_device_list(
+    client: &SyncClient,
+    identity: &DeviceIdentity,
+    approver: &ApproverIdentity,
+    known: &[DeviceListEntry],
+    package: &KeyPackageV3,
+) -> Result<Vec<DeviceListEntry>, String> {
     let entries = client.device_list(0).await.map_err(present)?;
-    if !entries.starts_with(&pending.entries) {
+    if !entries.starts_with(known) {
         return Err("sync_fork:The device list changed while this device was joining.".into());
     }
     verify_join(
@@ -292,14 +309,10 @@ where
             approver,
         },
         &entries,
-        &package,
+        package,
     )
     .map_err(present_proof)?;
-    pending.floor = crate::sync::engine::floor_for(&entries, &identity.device_id);
-    pending.entries = entries;
-    pending.pending_confirmation = None;
-    persist(&pending)?;
-    Ok((pending, package))
+    Ok(entries)
 }
 
 async fn wait_for_package<P, F>(client: &SyncClient, pause: &P) -> Result<KeyPackageV3, String>
@@ -339,21 +352,8 @@ pub async fn complete_join(
         .pending_join
         .as_ref()
         .ok_or("This device has no unfinished join.")?;
-    let entries = client.device_list(0).await.map_err(present)?;
-    if !entries.starts_with(&pending.entries) {
-        return Err("sync_fork:The device list changed while this device was joining.".into());
-    }
-    verify_join(
-        &JoinCheck {
-            device_id: &identity.device_id,
-            signing_key: &URL_SAFE_NO_PAD.encode(identity.signing_public_key()),
-            package_key: &URL_SAFE_NO_PAD.encode(identity.package_public_key()),
-            approver,
-        },
-        &entries,
-        &package,
-    )
-    .map_err(present_proof)?;
+    let entries =
+        verified_join_device_list(client, identity, approver, &pending.entries, &package).await?;
     let sealed = URL_SAFE_NO_PAD
         .decode(&package.ciphertext)
         .map_err(|_| "The key package could not be read.".to_string())?;

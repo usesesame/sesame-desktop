@@ -1,3 +1,6 @@
+use crate::application::record_writes::{
+    check_note_length, check_tag_lengths, normalised_tags, record_title, MAX_RECORD_NOTE_CHARS,
+};
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{
     DeleteWifiNetworkResult, SaveWifiNetworkResult, WifiNetwork, WifiNetworkInput,
@@ -6,28 +9,22 @@ use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::VaultResult;
 
 fn wifi_network_from_input(input: WifiNetworkInput) -> VaultResult<WifiNetwork> {
-    let title = input.title.trim();
-    if title.is_empty() {
-        return Err("Give this network a name so you can find it again.".into());
-    }
-    if title.chars().count() > 160 {
-        return Err("That network name is too long.".into());
-    }
+    let title = record_title(
+        &input.title,
+        "Give this network a name so you can find it again.",
+        "That network name is too long.",
+    )?;
     for (value, limit, message) in [
         (&input.ssid, 64, "That network's SSID is too long."),
         (&input.password, 256, "That network password is too long."),
         (&input.security_type, 32, "That security type is too long."),
-        (&input.notes, 4_000, "That note is too long."),
     ] {
         if value.chars().count() > limit {
             return Err(message.into());
         }
     }
-    for tag in &input.tags {
-        if tag.chars().count() > 64 {
-            return Err("A tag is too long.".into());
-        }
-    }
+    check_note_length(&input.notes, MAX_RECORD_NOTE_CHARS)?;
+    check_tag_lengths(&input.tags)?;
     let now = unix_timestamp();
     Ok(WifiNetwork {
         id: input
@@ -39,12 +36,7 @@ fn wifi_network_from_input(input: WifiNetworkInput) -> VaultResult<WifiNetwork> 
         password: input.password.trim().to_string(),
         security_type: input.security_type.trim().to_string(),
         notes: input.notes.trim().to_string(),
-        tags: input
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .collect(),
+        tags: normalised_tags(input.tags),
         folder_id: None,
         favourite: false,
         last_used_at: None,
