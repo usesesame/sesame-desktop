@@ -16,6 +16,7 @@ const SIMPLELOGIN_ALIAS_PATH: &str = "/api/alias/random/new";
 const ALIAS_TIMEOUT_SECS: u64 = 10;
 const ALIAS_CONNECT_TIMEOUT_SECS: u64 = 4;
 pub const ALIAS_MAX_BODY_BYTES: usize = 64 * 1024;
+const ADDY_MAX_DESCRIPTION_CHARS: usize = 200;
 
 pub struct AliasRequest {
     pub service: EmailAliasService,
@@ -141,7 +142,11 @@ async fn create_alias_at(
         EmailAliasService::Addy => {
             let mut body = serde_json::Map::new();
             body.insert("domain".into(), request.domain.clone().into());
-            if let Some(description) = &request.description {
+            if let Some(description) = request
+                .description
+                .as_ref()
+                .filter(|description| description.chars().count() <= ADDY_MAX_DESCRIPTION_CHARS)
+            {
                 body.insert("description".into(), description.clone().into());
             }
             let bearer = Zeroizing::new(format!("Bearer {}", request.token.as_str()));
@@ -342,6 +347,30 @@ mod tests {
             body_of(sent),
             serde_json::json!({ "domain": "anonaddy.me", "description": "example.com" })
         );
+    }
+
+    #[test]
+    fn an_addy_description_over_its_limit_is_left_out() {
+        let fits = format!("{}.example.com", "a".repeat(188));
+        let over = format!("{}.example.com", "a".repeat(189));
+        for (description, expected) in [
+            (
+                fits.as_str(),
+                serde_json::json!({ "domain": "anonaddy.me", "description": fits }),
+            ),
+            (
+                over.as_str(),
+                serde_json::json!({ "domain": "anonaddy.me" }),
+            ),
+        ] {
+            let server = TestServer::start(|_| addy_answer("fictional.alias@anonaddy.me"));
+            create_against(
+                &server,
+                &request(EmailAliasService::Addy, Some(description)),
+            )
+            .expect("alias");
+            assert_eq!(body_of(&server.requests()[0]), expected);
+        }
     }
 
     #[test]

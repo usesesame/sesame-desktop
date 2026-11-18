@@ -25,7 +25,9 @@ const PRIVATE_NAME_ENDINGS: &[&str] = &[
     "arpa",
     "onion",
     "invalid",
+    "test",
 ];
+const NON_WEB_SCHEMES: &[&str] = &["mailto", "sip", "sips", "xmpp", "im", "tel", "sms"];
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export, optional_fields)]
@@ -143,8 +145,14 @@ pub fn site_description(site: &str) -> Option<String> {
     if site.is_empty() || site.len() > 2048 {
         return None;
     }
-    let parsed = Url::parse(site)
-        .ok()
+    let first = Url::parse(site).ok();
+    if first
+        .as_ref()
+        .is_some_and(|url| NON_WEB_SCHEMES.contains(&url.scheme()))
+    {
+        return None;
+    }
+    let parsed = first
         .filter(|url| matches!(url.scheme(), "http" | "https"))
         .or_else(|| Url::parse(&format!("https://{site}")).ok())?;
     let Host::Domain(domain) = parsed.host()? else {
@@ -427,6 +435,8 @@ mod tests {
             ("Example.COM", "example.com"),
             ("https://user:pass@example.com:8443/a?b#c", "example.com"),
             ("user:pass@login.example.com:8443/path", "login.example.com"),
+            ("example.com:8443/path", "example.com"),
+            ("https://login.example.com/", "login.example.com"),
             ("http://example.com./", "example.com"),
             ("example.com.", "example.com"),
             ("https://bücher.example/", "xn--bcher-kva.example"),
@@ -459,6 +469,12 @@ mod tests {
             "printer.home.arpa",
             "files.internal",
             "fictionalhiddenservice.onion",
+            "https://payroll.test/",
+            "payroll.test",
+            "mailto:billing@example.com",
+            "MAILTO:billing@example.com",
+            "sip:alice@example.com",
+            "xmpp:alice@example.com",
             "https://example.123/",
             "javascript:alert(1)",
             "javascript:alert(document.domain)//example.com",
