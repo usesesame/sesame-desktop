@@ -57,10 +57,19 @@ function draft(overrides: Partial<LoginInput> = {}): LoginInput {
 }
 
 function renderEditor(loginDraft: LoginInput) {
+  const props = { loginDraft, onSubmit: vi.fn(), onClose: vi.fn(), onDelete: vi.fn() }
   render(LoginEditor, {
-    props: { loginDraft, onSubmit: vi.fn(), onClose: vi.fn(), onDelete: vi.fn() },
+    props,
     context: new Map([[APP_STORES, createAppStores()]]),
   } as never)
+  return props
+}
+
+function pendingAlias() {
+  let finish: (alias: string) => void = () => {}
+  let fail: (error: Error) => void = () => {}
+  vault.createEmailAlias.mockImplementation(() => new Promise<string>((resolve, reject) => { finish = resolve; fail = reject }))
+  return { finish: (alias: string) => finish(alias), fail: (error: Error) => fail(error) }
 }
 
 test('the action stays hidden while aliases are off', async () => {
@@ -146,4 +155,77 @@ test('the note names the service that made the alias even if the setting changes
   finish('quiet_harbor42@simplelogin.example')
 
   expect((await screen.findByRole('status')).textContent).toBe('SimpleLogin made a new alias. Save the login to keep it.')
+})
+
+test('the login cannot be saved while an alias is being made', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const request = pendingAlias()
+  const props = renderEditor(draft())
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  const save = screen.getByRole('button', { name: 'Save login' }) as HTMLButtonElement
+  expect(save.disabled).toBe(true)
+  await fireEvent.submit(save.closest('form') as HTMLFormElement)
+  expect(props.onSubmit).not.toHaveBeenCalled()
+
+  request.finish('quiet.harbor@anonaddy.me')
+  await waitFor(() => expect(save.disabled).toBe(false))
+  await fireEvent.submit(save.closest('form') as HTMLFormElement)
+  expect(props.onSubmit).toHaveBeenCalledOnce()
+})
+
+test('closing an unchanged login while an alias is being made asks first', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  pendingAlias()
+  const props = renderEditor(draft())
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Close login editor' }))
+
+  expect(props.onClose).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('An alias is still being made. Leaving does not stop it, and the new address will not be saved here.')
+  await fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  expect(props.onClose).toHaveBeenCalledOnce()
+})
+
+test('an email typed while the alias was being made is kept and the alias is offered', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const request = pendingAlias()
+  renderEditor(draft())
+  const email = screen.getByLabelText(/^Email/) as HTMLInputElement
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.input(email, { target: { value: 'typed@example.test' } })
+  request.finish('quiet.harbor@anonaddy.me')
+
+  expect((await screen.findByRole('status')).textContent).toBe('addy.io made quiet.harbor@anonaddy.me. You changed the email while it was being made, so Sesame kept what you typed.')
+  expect(email.value).toBe('typed@example.test')
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Use the alias' }))
+  expect(email.value).toBe('quiet.harbor@anonaddy.me')
+  expect(screen.getByRole('status').textContent).toBe('addy.io made a new alias. Save the login to keep it.')
+  expect(screen.queryByRole('button', { name: 'Use the alias' })).toBeNull()
+})
+
+test('the result of a started request stays visible after aliases are turned off', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const success = pendingAlias()
+  renderEditor(draft())
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  emailAliases.set({ nameSite: false })
+  success.finish('quiet.harbor@anonaddy.me')
+
+  expect((await screen.findByRole('status')).textContent).toBe('addy.io made a new alias. Save the login to keep it.')
+  expect((screen.getByLabelText(/^Email/) as HTMLInputElement).value).toBe('quiet.harbor@anonaddy.me')
+  expect(screen.queryByRole('button', { name: 'Create alias' })).toBeNull()
+  cleanup()
+
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const failure = pendingAlias()
+  renderEditor(draft())
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  emailAliases.set({ nameSite: false })
+  failure.fail(new Error('The alias service is having trouble. Try again later.'))
+
+  expect((await screen.findByRole('alert')).textContent).toBe('The alias service is having trouble. Try again later.')
 })

@@ -42,6 +42,7 @@
   let aliasWorking = false
   let aliasNote = ''
   let aliasError = ''
+  let offeredAlias = ''
   $: aliasService = $emailAliases?.service
 
   onMount(() => {
@@ -54,16 +55,36 @@
     aliasWorking = true
     aliasNote = ''
     aliasError = ''
+    offeredAlias = ''
+    const emailBefore = loginDraft.email
     try {
       const alias = await createEmailAlias(loginDraft.url || undefined)
-      loginDraft = { ...loginDraft, email: alias }
-      dirty = true
-      aliasNote = `${serviceNames[service]} made a new alias. Save the login to keep it.`
+      if (loginDraft.email === emailBefore) {
+        useAlias(alias, service)
+      } else {
+        offeredAlias = alias
+        aliasNote = `${serviceNames[service]} made ${alias}. You changed the email while it was being made, so Sesame kept what you typed.`
+        offeredService = service
+      }
     } catch (error) {
       aliasError = messageFor(error)
     } finally {
       aliasWorking = false
     }
+  }
+
+  let offeredService: NonNullable<typeof aliasService> = 'addy'
+
+  function useAlias(alias: string, service: NonNullable<typeof aliasService>) {
+    loginDraft = { ...loginDraft, email: alias }
+    dirty = true
+    offeredAlias = ''
+    aliasNote = `${serviceNames[service]} made a new alias. Save the login to keep it.`
+  }
+
+  function submit() {
+    if (aliasWorking) return
+    onSubmit(totpEntered)
   }
 
   export let loginDraft: LoginInput
@@ -126,7 +147,7 @@
 
   function requestClose() {
     if (savingLogin) return
-    if (dirty) {
+    if (dirty || aliasWorking) {
       confirmingDiscard = true
       return
     }
@@ -289,7 +310,7 @@
   initialFocus={focusInitial}
   ariaBusy={savingLogin}
 >
-  <form on:submit|preventDefault={() => onSubmit(totpEntered)} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
+  <form on:submit|preventDefault={submit} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
   <header class="editor-header">
     <div><h2 id="login-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingLogin} on:click={requestClose} aria-label="Close login editor">×</button>
@@ -322,10 +343,11 @@
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
       <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="off" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
-      {#if aliasService}
+      {#if aliasService || aliasWorking || aliasNote || aliasError}
         <p class="suggestion-note alias-action">
-          <button type="button" class="text-button" disabled={aliasWorking || savingLogin} on:click={createAlias}>{aliasWorking ? 'Creating alias…' : 'Create alias'}</button>
+          {#if aliasService || aliasWorking}<button type="button" class="text-button" disabled={aliasWorking || savingLogin} on:click={createAlias}>{aliasWorking ? 'Creating alias…' : 'Create alias'}</button>{/if}
           {#if aliasError}<span class="alias-error" role="alert">{aliasError}</span>{:else if aliasNote}<span role="status">{aliasNote}</span>{/if}
+          {#if offeredAlias}<button type="button" class="text-button" on:click={() => useAlias(offeredAlias, offeredService)}>Use the alias</button>{/if}
         </p>
       {/if}
       <datalist id="username-suggestions">{#each usernameSuggestions as value (value)}<option {value}></option>{/each}</datalist>
@@ -395,14 +417,14 @@
     </footer>
   {:else if confirmingDiscard}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Discard your changes?</strong> This login has edits that have not been saved.</p>
+      <p><strong>Discard your changes?</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : 'This login has edits that have not been saved.'}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDiscard = false)}>Keep editing</button>
         <button type="button" class="editor-delete" on:click={discard}>Discard changes</button>
       </div>
     </footer>
   {:else}
-    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={() => (confirmingDelete = true)}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
+    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={() => (confirmingDelete = true)}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin || aliasWorking}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
   {/if}
   </form>
 
