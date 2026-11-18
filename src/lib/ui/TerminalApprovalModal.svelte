@@ -176,7 +176,7 @@
     </label>
   {/if}
 
-  {#if state.error}<p id="terminal-approval-error" class="form-error" role="alert">{state.error}</p>{/if}
+  {#if !notice || state.error}<p id="terminal-approval-error" class="form-error terminal-error" role="alert">{state.error}</p>{/if}
 
   <div class="terminal-footer modal-actions">
     {#if notice}
@@ -233,9 +233,12 @@
   .terminal-allow strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-medium); }
   .terminal-allow small { color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
   :global(.modal) .terminal-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); margin-top: var(--space-5); border-top: 1px solid var(--border-soft); padding-top: var(--space-4); }
+  :global(.modal) .terminal-request + .terminal-footer, :global(.modal) .terminal-request + .terminal-error + .terminal-footer { margin-top: var(--space-4); border-top: 0; padding-top: 0; }
+  .terminal-error { min-height: calc(var(--type-2) * 1.45); margin: var(--space-3) 0 0; line-height: 1.45; }
   .terminal-footer > span { color: var(--text-muted); font-size: var(--type-2); }
   .terminal-footer .confirm-actions { margin: 0 0 0 auto; }
   @media (max-width: 520px) {
     .terminal-request > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+    .terminal-error { min-height: calc(var(--type-2) * 1.45 * 2); }
   }
 </style>

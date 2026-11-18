@@ -244,6 +244,25 @@ test('the chooser keeps Allow off for an item that has no field by that name', a
   expect(allowButton().disabled).toBe(false)
 })
 
+test('the error line holds its place before an error so the buttons stay put', async () => {
+  const { stores } = show()
+  const line = () => document.getElementById('terminal-approval-error') as HTMLElement
+  const footer = document.querySelector('.terminal-footer') as HTMLElement
+  expect(line()).not.toBeNull()
+  expect(line().textContent).toBe('')
+  expect(line().nextElementSibling).toBe(footer)
+  stores.terminalApproval.patch({ error: 'That master password does not open this vault.' })
+  await tick()
+  expect(line().textContent).toBe('That master password does not open this vault.')
+  expect(line().nextElementSibling).toBe(footer)
+})
+
+test('a notice puts OK straight under the details with no empty line between', () => {
+  show({ candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false, fieldHidden: false })
+  expect(document.getElementById('terminal-approval-error')).toBeNull()
+  expect(document.querySelector('.terminal-request')?.nextElementSibling?.classList.contains('terminal-footer')).toBe(true)
+})
+
 test('expiry closes the dialog through the controller', async () => {
   vi.useFakeTimers()
   const { props } = show({ expiresInMs: 2_000 })
