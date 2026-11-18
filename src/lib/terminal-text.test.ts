@@ -111,7 +111,22 @@ describe('what the dialog says', () => {
   test('every closing reason has its own sentence', () => {
     const lines = ['expired', 'connectionClosed', 'vaultChanged', 'preempted', 'somethingNew'].map(cancelledLine)
     expect(new Set(lines).size).toBe(5)
-    for (const line of [...lines, unlockLine('get'), unlockLine('list'), unlockLine('totp')]) expect(line).not.toMatch(plainProse)
+    const waiting = [
+      unlockLine({ command: 'get', copy: false }),
+      unlockLine({ command: 'list', copy: false }),
+      unlockLine({ command: 'totp', copy: true }),
+      unlockLine({ command: 'get', field: 'password', copy: false }),
+    ]
+    for (const line of [...lines, ...waiting]) expect(line).not.toMatch(plainProse)
+  })
+
+  test('the lock screen says what a waiting terminal wants without naming the item', () => {
+    expect(unlockLine({ command: 'get', field: 'password', copy: false })).toBe('A terminal wants the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'password', copy: true })).toBe('A terminal wants to copy the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'Recovery PIN', copy: false })).toBe('A terminal wants one field of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', copy: false })).toBe('A terminal wants to read an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'list', copy: false })).toBe('A terminal wants the names of all your items. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'totp', copy: false })).toBe('A terminal wants a one-time code. Sesame asks you about it after you unlock.')
   })
 
   test('allowed requests and remaining time read as sentences', () => {

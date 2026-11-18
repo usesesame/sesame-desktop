@@ -87,6 +87,9 @@ pub struct CliApprovalCancelledEvent {
 pub struct CliUnlockRequestEvent {
     pub command: CliCommandKind,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    pub copy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<UnverifiedProgram>,

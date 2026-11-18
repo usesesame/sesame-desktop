@@ -193,6 +193,11 @@ fn wait_for_unlock(
     }
     context.host.unlock_requested(&CliUnlockRequestEvent {
         command: command_kind(command),
+        field: match command {
+            CliCommand::Get { field, .. } => field.clone(),
+            _ => None,
+        },
+        copy: command.copies(),
         terminal: origin.device.clone(),
         program: origin.program.clone(),
         remote: origin.remote,

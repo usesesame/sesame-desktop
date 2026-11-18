@@ -1,5 +1,5 @@
 import type { CliApprovalRequestEvent } from './generated/CliApprovalRequestEvent'
-import type { CliCommandKind } from './generated/CliCommandKind'
+import type { CliUnlockRequestEvent } from './generated/CliUnlockRequestEvent'
 import { itemNoun } from './release-record'
 
 export const MAX_SHOWN_CHARS = 80
@@ -122,13 +122,6 @@ export function secretNeeded(request: CliApprovalRequestEvent, selectedId: strin
   return request.candidates.some((candidate) => candidate.id === selectedId && candidate.fieldHidden)
 }
 
-export function commandWords(command: CliCommandKind | string): string {
-  if (command === 'list') return 'list every item title'
-  if (command === 'totp') return 'read a one-time code'
-  if (command === 'get') return 'read an item'
-  return 'make a request'
-}
-
 export function outputWords(copy: boolean, clearAfterSeconds: number): string {
   return copy ? `Copied to the clipboard and cleared after ${clearAfterSeconds} seconds` : 'Printed in the terminal'
 }
@@ -149,8 +142,11 @@ export function cancelledLine(reason: string): string {
   return cancelledLines[reason] ?? 'Sesame closed the terminal request.'
 }
 
-export function unlockLine(command: CliCommandKind): string {
-  return `A terminal is waiting to ${commandWords(command)}. Sesame asks you about it after you unlock.`
+type UnlockRequest = Pick<CliUnlockRequestEvent, 'command' | 'field' | 'copy'>
+
+export function unlockLine(request: UnlockRequest): string {
+  const wanted = approvalHeading({ command: request.command, field: request.field, copy: request.copy, fieldHidden: false })
+  return `${wanted}. Sesame asks you about it after you unlock.`
 }
 
 export function remainingWords(ms: number): string {

@@ -67,8 +67,13 @@ impl CliHost for FakeHost {
         true
     }
 
-    fn unlock_requested(&self, _event: &CliUnlockRequestEvent) {
+    fn unlock_requested(&self, event: &CliUnlockRequestEvent) {
         self.note("unlockRequested".to_string());
+        self.note(format!(
+            "unlockAsks:{}:{}",
+            event.field.as_deref().unwrap_or_default(),
+            event.copy
+        ));
     }
 
     fn unlock_ended(&self, reason: &'static str) {
@@ -475,6 +480,7 @@ fn a_request_while_locked_waits_for_the_unlock_and_then_still_asks() {
     assert_eq!(replies[1], CliReply::waiting(&id(5), WaitReason::Approval));
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
     assert!(events.contains(&"unlockEnded:unlocked".to_string()));
+    assert!(events.contains(&"unlockAsks:password:false".to_string()));
     assert!(!wire(&replies).contains(CANARY));
 }
 

@@ -343,7 +343,7 @@ pub fn converse(
                 }
                 streams.say(match reply.reason {
                     Some(WaitReason::Unlock) => "Unlock Sesame to continue.",
-                    _ => "Approve this request in Sesame.",
+                    _ => "Answer this request in the Sesame window.",
                 });
             }
             CliReplyType::Items => {
@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(code, EXIT_OK);
         assert_eq!(out, "fictional-password-canary");
         assert!(err.contains("Unlock Sesame to continue."));
-        assert!(err.contains("Approve this request in Sesame."));
+        assert!(err.contains("Answer this request in the Sesame window."));
         assert!(!err.contains("canary"));
 
         let (_, out, _) = talk(&get(Some("password"), false), &replies, true);
