@@ -1024,9 +1024,14 @@ button.no-totp:hover { filter: brightness(.97); }
    ========================================================================= */
 .settings-groups { display: grid; gap: var(--space-5); }
 .settings-group > h2 { margin: 0 0 var(--space-2) var(--space-1); color: var(--text-muted); font-size: var(--type-2); font-weight: var(--weight-bold); }
-.settings-tabs { position: relative; display: inline-flex; gap: 3px; margin: 0 0 var(--space-5); padding: 3px; border-radius: var(--radius-lg); background: var(--field-bg); }
-.settings-tabs button { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-md); padding: 8px 15px; color: var(--text-2); background: transparent; font-size: var(--type-2); font-weight: var(--weight-medium); cursor: pointer; transition: color var(--t-fast) ease, background var(--t-fast) ease, box-shadow var(--t-fast) ease; }
+.settings-tabs { position: relative; display: inline-flex; max-width: 100%; gap: 3px; margin: 0 0 var(--space-5); padding: 3px; overflow-x: auto; overscroll-behavior-x: contain; scroll-padding-inline: var(--space-6); border-radius: var(--radius-lg); background: var(--field-bg); scrollbar-width: none; }
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tabs.more-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent); }
+.settings-tabs.more-before { mask-image: linear-gradient(to left, #000 calc(100% - var(--space-6)), transparent); }
+.settings-tabs.more-before.more-after { mask-image: linear-gradient(to right, transparent, #000 var(--space-6), #000 calc(100% - var(--space-6)), transparent); }
+.settings-tabs button { position: relative; z-index: 1; display: inline-flex; flex: none; align-items: center; gap: 7px; border: 0; white-space: nowrap; border-radius: var(--radius-md); padding: 8px 15px; color: var(--text-2); background: transparent; font-size: var(--type-2); font-weight: var(--weight-medium); cursor: pointer; transition: color var(--t-fast) ease, background var(--t-fast) ease, box-shadow var(--t-fast) ease; }
 .settings-tabs button:hover { color: var(--text); }
+.settings-tabs button:focus-visible { outline-offset: -2px; }
 .settings-tabs button.active { color: var(--text-heading); }
 .settings-tabs .segment-marker { border-radius: var(--radius-md); }
 .settings-panel .settings-groups { animation: view-enter .22s var(--ease-out) both; }

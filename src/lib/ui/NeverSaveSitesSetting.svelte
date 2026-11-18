@@ -24,25 +24,22 @@
   }
 </script>
 
-<section class="settings-group" aria-labelledby="settings-group-connections-never-save">
-  <h3 id="settings-group-connections-never-save">Sites Sesame never saves</h3>
-  <div class="settings-list">
-    <article>
-      <div class="setting-copy">
-        <strong>{$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'}</strong>
-        <p>Choose Never for this site when Sesame asks to save a login, and it stops asking on that address. Remove a site to be asked again.</p>
-        {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
-      </div>
-    </article>
-    {#each $neverSaveSites ?? [] as origin (origin)}
-      <article class="never-save-row">
-        <code>{#each origin.split(/(?<=[./:])/) as part, index (index)}{part}<wbr />{/each}</code>
-        <button type="button" class="text-button" disabled={working !== ''} aria-label={`Remove ${origin}`} on:click={() => remove(origin)}>{working === origin ? 'Removing…' : 'Remove'}</button>
-      </article>
-    {/each}
+<article>
+  <div class="setting-copy">
+    <strong>Sites Sesame never saves</strong>
+    <p>Choose Never for this site when Sesame asks to save a login, and it stops asking on that address. Remove a site to be asked again.</p>
+    {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
   </div>
-</section>
+  <span class="never-save-count">{$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'}</span>
+</article>
+{#each $neverSaveSites ?? [] as origin (origin)}
+  <article class="never-save-row">
+    <code>{#each origin.split(/(?<=[./:])/) as part, index (index)}{part}<wbr />{/each}</code>
+    <button type="button" class="text-button" disabled={working !== ''} aria-label={`Remove ${origin}`} on:click={() => remove(origin)}>{working === origin ? 'Removing…' : 'Remove'}</button>
+  </article>
+{/each}
 
 <style>
+  .never-save-count { flex: none; color: var(--text-muted); font-size: var(--type-2); }
   .never-save-row code { flex: 1; min-width: 0; color: var(--text); font-family: var(--font-code); font-size: var(--type-2); }
 </style>
