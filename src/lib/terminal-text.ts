@@ -8,7 +8,7 @@ export const MAX_MARKS_PER_CHARACTER = 2
 export const UNREADABLE_NAME = 'Unreadable name'
 export const STAND_IN = '?'
 
-const HIDDEN_FORMATTING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}]/u
+const HIDDEN_FORMATTING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\p{Cn}\p{Default_Ignorable_Code_Point}]/u
 const SPACES = /\p{Zs}/u
 const MARK = /\p{M}/u
 const BLANK_LOOKING_POINTS = new Set([0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180b, 0x180c, 0x180d, 0x180e, 0x180f, 0x2800, 0x3164, 0xffa0, 0x1d159, 0x1d173, 0x1d174, 0x1d175, 0x1d176, 0x1d177, 0x1d178, 0x1d179, 0x1d17a])
@@ -44,11 +44,24 @@ function cleaned(value: string): string[] {
   return out
 }
 
+function codePoints(unit: string): number {
+  return [...unit].length
+}
+
 export function shownText(value: string | null | undefined, max = MAX_SHOWN_CHARS): string {
   const plain = cleaned(value ?? '')
-  if (!READABLE.test(plain.join(''))) return UNREADABLE_NAME
-  if (plain.length <= max) return plain.join('')
-  return `${plain.slice(0, max - 1).join('')}…`
+  const joined = plain.join('')
+  if (!READABLE.test(joined)) return UNREADABLE_NAME
+  if (codePoints(joined) <= max) return joined
+  let kept = ''
+  let used = 0
+  for (const unit of plain) {
+    const size = codePoints(unit)
+    if (used + size > max - 1) break
+    kept += unit
+    used += size
+  }
+  return `${kept}…`
 }
 
 const knownFields: Record<string, string> = {

@@ -23,6 +23,10 @@ describe('text a terminal sent', () => {
     expect(shown.endsWith('…')).toBe(true)
     expect([...shownText('\u{1F600}'.repeat(100), 10)]).toHaveLength(10)
     expect(shownText('pts/3', 24)).toBe('pts/3')
+    const marked = shownText('x\u0301\u0301'.repeat(80))
+    expect([...marked].length).toBeLessThanOrEqual(80)
+    expect(marked.endsWith('x\u0301\u0301…')).toBe(true)
+    expect(shownText('x\u0301\u0301'.repeat(26))).toBe('x\u0301\u0301'.repeat(26))
     expect(shownText(undefined)).toBe(UNREADABLE_NAME)
   })
 })
@@ -48,6 +52,9 @@ describe('characters that draw outside their place or look blank', () => {
     ['combining grapheme joiner', '\u034F'],
     ['Khmer inherent vowel', '\u17B4'],
     ['Mongolian free variation selector', '\u180B'],
+    ['emoji variation selector', '\uFE0F'],
+    ['text variation selector', '\uFE0E'],
+    ['ideographic variation selector', '\u{E0100}'],
   ])('a %s becomes the visible stand-in', (_name, character) => {
     expect(shownText(`North${character}wind`)).toBe('North?wind')
   })
