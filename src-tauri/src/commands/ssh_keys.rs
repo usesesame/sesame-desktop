@@ -1,32 +1,29 @@
+use crate::application::record_writes::{
+    check_note_length, check_tag_lengths, normalised_tags, record_title, MAX_RECORD_NOTE_CHARS,
+};
 use crate::commands::record_commands::impl_record_commands;
 use crate::vault::types::{DeleteSshKeyResult, SaveSshKeyResult, SshKey, SshKeyInput};
 use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::VaultResult;
 
 fn ssh_key_from_input(input: SshKeyInput) -> VaultResult<SshKey> {
-    let title = input.title.trim();
-    if title.is_empty() {
-        return Err("Give this key a name so you can find it again.".into());
-    }
-    if title.chars().count() > 160 {
-        return Err("That key name is too long.".into());
-    }
+    let title = record_title(
+        &input.title,
+        "Give this key a name so you can find it again.",
+        "That key name is too long.",
+    )?;
     for (value, limit, message) in [
         (&input.key_type, 32, "That key type is too long."),
         (&input.private_key, 16_000, "That private key is too long."),
         (&input.public_key, 4_000, "That public key is too long."),
         (&input.passphrase, 256, "That passphrase is too long."),
-        (&input.notes, 4_000, "That note is too long."),
     ] {
         if value.chars().count() > limit {
             return Err(message.into());
         }
     }
-    for tag in &input.tags {
-        if tag.chars().count() > 64 {
-            return Err("A tag is too long.".into());
-        }
-    }
+    check_note_length(&input.notes, MAX_RECORD_NOTE_CHARS)?;
+    check_tag_lengths(&input.tags)?;
     let now = unix_timestamp();
     Ok(SshKey {
         id: input
@@ -39,12 +36,7 @@ fn ssh_key_from_input(input: SshKeyInput) -> VaultResult<SshKey> {
         public_key: input.public_key.trim().to_string(),
         passphrase: input.passphrase.trim().to_string(),
         notes: input.notes.trim().to_string(),
-        tags: input
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .collect(),
+        tags: normalised_tags(input.tags),
         folder_id: None,
         favourite: false,
         last_used_at: None,

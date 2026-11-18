@@ -285,15 +285,11 @@ pub fn random_opaque_id() -> VaultResult<String> {
 mod hybrid_tests {
     use super::*;
     use crate::keys::{seal_vault_key, seal_vault_key_hybrid};
-    use crate::test_support::TestProtector;
+    use crate::test_support::{scratch_dir, TestProtector};
     use crate::xwing::PUBLIC_KEY_BYTES;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("sesame-identity-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        identity_path(&dir)
+        identity_path(&scratch_dir("sesame-identity", name))
     }
 
     #[test]
