@@ -1827,8 +1827,7 @@ fn every_field_name_in_a_whole_item_selects_that_field() {
         .last()
         .and_then(|reply| reply.fields.clone())
         .expect("fields");
-    let mut n = 243;
-    for field in fields.iter().filter(|field| !field.hidden) {
+    for (n, field) in (243..).zip(fields.iter().filter(|field| !field.hidden)) {
         let (replies, _) = harness.run_with(&get(n, Some(&field.name), false), &origin, |_, _| {
             harness.allow(false)
         });
@@ -1838,7 +1837,6 @@ fn every_field_name_in_a_whole_item_selects_that_field() {
             "{}",
             field.name
         );
-        n += 1;
     }
     assert!(fields.iter().any(|field| field.name == "email"));
     assert!(fields.iter().any(|field| field.name == "PIN"));
