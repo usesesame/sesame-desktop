@@ -154,11 +154,11 @@ export function unlockLine(request: UnlockRequest): string {
 }
 
 export function remainingWords(ms: number): string {
-  const seconds = Math.max(0, Math.ceil(ms / 1_000))
-  if (seconds >= 60) {
-    const minutes = Math.ceil(seconds / 60)
+  if (ms >= 60_000) {
+    const minutes = Math.floor(ms / 60_000)
     return `${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}`
   }
+  const seconds = Math.min(59, Math.max(0, Math.ceil(ms / 1_000)))
   return `${seconds} more ${seconds === 1 ? 'second' : 'seconds'}`
 }
 
