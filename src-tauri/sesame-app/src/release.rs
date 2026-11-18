@@ -22,6 +22,7 @@ pub struct ReleasePresence {
 struct Grant {
     epoch: u64,
     expires_at: Instant,
+    password_checked_at: Option<Instant>,
 }
 
 impl ReleasePresence {
@@ -29,6 +30,22 @@ impl ReleasePresence {
         let grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
         match grant.as_ref() {
             Some(grant) if grant.epoch == epoch && grant.expires_at > Instant::now() => Ok(()),
+            _ => Err(PRESENCE_REQUIRED.into()),
+        }
+    }
+
+    pub fn require_password_since(&self, epoch: u64, since: Instant) -> VaultResult<()> {
+        let grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        match grant.as_ref() {
+            Some(grant)
+                if grant.epoch == epoch
+                    && grant.expires_at > Instant::now()
+                    && grant
+                        .password_checked_at
+                        .is_some_and(|checked| checked >= since) =>
+            {
+                Ok(())
+            }
             _ => Err(PRESENCE_REQUIRED.into()),
         }
     }
@@ -43,9 +60,11 @@ impl ReleasePresence {
         let verified = verify_master_password(session, secret);
         if verified.is_ok() {
             let mut grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
+            let now = Instant::now();
             *grant = Some(Grant {
                 epoch,
-                expires_at: Instant::now() + PRESENCE_TTL,
+                expires_at: now + PRESENCE_TTL,
+                password_checked_at: Some(now),
             });
             let mut failures = self.failures.lock().map_err(|_| LOCK_ERROR.to_string())?;
             *failures = 0;
@@ -60,6 +79,7 @@ impl ReleasePresence {
             *grant = Some(Grant {
                 epoch,
                 expires_at: Instant::now() + PRESENCE_TTL,
+                password_checked_at: None,
             });
         }
         if let Ok(mut failures) = self.failures.lock() {
@@ -69,7 +89,11 @@ impl ReleasePresence {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn grant_until(&self, epoch: u64, expires_at: Instant) {
-        *self.grant.lock().expect("grant lock") = Some(Grant { epoch, expires_at });
+        *self.grant.lock().expect("grant lock") = Some(Grant {
+            epoch,
+            expires_at,
+            password_checked_at: Some(Instant::now()),
+        });
     }
 
     pub fn revoke(&self) {
@@ -146,8 +170,39 @@ mod tests {
         *presence.grant.lock().expect("grant lock") = Some(Grant {
             epoch: 7,
             expires_at: Instant::now() - Duration::from_secs(1),
+            password_checked_at: None,
         });
         assert_eq!(presence.require(7), Err(PRESENCE_REQUIRED.to_string()));
+    }
+
+    #[test]
+    fn only_a_password_check_after_the_given_moment_counts_as_fresh() {
+        let opened = session();
+        let presence = ReleasePresence::default();
+        presence.grant_after_unlock(7);
+        let since = Instant::now();
+        assert!(presence.require(7).is_ok());
+        assert_eq!(
+            presence.require_password_since(7, since),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+        presence
+            .grant_with_password(&opened, 7, "fictional master password")
+            .expect("password accepted");
+        assert!(presence.require_password_since(7, since).is_ok());
+        assert_eq!(
+            presence.require_password_since(8, since),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+        assert_eq!(
+            presence.require_password_since(7, Instant::now() + Duration::from_secs(1)),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+        presence.grant_after_unlock(7);
+        assert_eq!(
+            presence.require_password_since(7, since),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
     }
 
     #[test]

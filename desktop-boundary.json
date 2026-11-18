@@ -44,6 +44,7 @@
     "tools/desktop-boundary-contracts.test.mjs",
     "tools/sync-boundary-contracts.test.mjs",
     "tools/installer-contracts.test.mjs",
+    "tools/installer-registry-allowlist.mjs",
     "tools/command-surface-contracts.test.mjs",
     "tools/governance-contracts.test.mjs",
     "tools/update-freshness.mjs",

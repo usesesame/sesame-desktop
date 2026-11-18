@@ -75,6 +75,7 @@ pub fn lock_and_notify(state: &VaultState, effects: &dyn DesktopEffects) -> Vaul
     state.lock_for_lifecycle()?;
     let _ = effects.clear_armed_clipboard();
     effects.revoke_presence();
+    effects.forget_terminal_allowances();
     effects.cancel_breach_scan();
     effects
         .emit_vault_locked()

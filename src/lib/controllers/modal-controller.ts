@@ -57,6 +57,7 @@ export interface ModalController {
   browserSaveMayShow(): boolean
   browserChangeMayShow(): boolean
   browserCreateMayShow(): boolean
+  terminalMayShow(): boolean
 }
 
 export function createModalController({ stores, feedback }: ModalControllerOptions): ModalController {
@@ -64,7 +65,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
 
   function open(modal: ActiveModal): boolean {
     if (modal === null) return true
-    if (otherBrowserRequestOpen()) return false
+    if (otherBrowserRequestOpen() || stores.terminalApproval.value().request !== null) return false
     const current = state.value().active
     if (current !== null && modalKindsConflict(current.kind, modal.kind)) {
       return false
@@ -131,6 +132,10 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
     return state.value().active === null && !otherBrowserRequestOpen('browserCreate')
   }
 
+  function terminalMayShow(): boolean {
+    return state.value().active === null && !otherBrowserRequestOpen()
+  }
+
   return {
     state,
     open,
@@ -144,6 +149,7 @@ export function createModalController({ stores, feedback }: ModalControllerOptio
     browserSaveMayShow,
     browserChangeMayShow,
     browserCreateMayShow,
+    terminalMayShow,
   }
 }
 

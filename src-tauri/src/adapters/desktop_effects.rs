@@ -77,6 +77,10 @@ impl DesktopEffects for DesktopHostEffects<'_> {
         }
     }
 
+    fn forget_terminal_allowances(&self) {
+        crate::terminal::forget_permissions(self.app);
+    }
+
     fn cancel_breach_scan(&self) {
         if let Some(scan) = self.app.try_state::<BreachScanState>() {
             scan.cancel();

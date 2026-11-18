@@ -632,3 +632,26 @@ describe('the manual update check', () => {
     expect(feedback.state.value().notice?.title).toBe('A newer Sesame exists')
   })
 })
+
+describe('the clipboard timeout for terminal copies', () => {
+  it('confirms a new timeout only after Sesame applied it', async () => {
+    const { controller, feedback } = harness()
+    vi.spyOn(feedback, 'showNotice')
+    let applied: () => void = () => {}
+    vaultApi.setClipboardClearSeconds.mockReturnValueOnce(new Promise<void>((resolve) => { applied = resolve }))
+    controller.setClipboardClearSeconds(10)
+    await Promise.resolve()
+    expect(feedback.showNotice).not.toHaveBeenCalled()
+    applied()
+    await vi.waitFor(() => expect(feedback.showNotice).toHaveBeenCalledWith('Clipboard timeout updated', 'Copied values clear after 10 seconds.'))
+  })
+
+  it('says when terminal copies kept the old timeout', async () => {
+    const { controller, feedback } = harness()
+    vi.spyOn(feedback, 'showNotice')
+    vaultApi.setClipboardClearSeconds.mockRejectedValueOnce(new Error('fictional failure'))
+    controller.setClipboardClearSeconds(10)
+    await vi.waitFor(() => expect(feedback.state.value().errorMessage).toBe('Sesame could not apply the clipboard timeout to terminal copies. Choose it again to retry.'))
+    expect(feedback.showNotice).not.toHaveBeenCalled()
+  })
+})

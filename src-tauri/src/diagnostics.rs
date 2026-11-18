@@ -155,6 +155,7 @@ fn severity(code: &str) -> &'static str {
         | "breach_scan_listener_failed"
         | "card_fill_listener_failed"
         | "totp_fill_listener_failed"
+        | "terminal_listener_failed"
         | "web_process_terminated" => "error",
         "key_page_fallback" => "warn",
         "fill_locked"
@@ -203,7 +204,8 @@ fn severity(code: &str) -> &'static str {
         | "create_never_site"
         | "create_timeout"
         | "create_connection_closed"
-        | "create_vault_changed" => "warn",
+        | "create_vault_changed"
+        | "pipe_served_elsewhere" => "warn",
         "started"
         | "registration_ok"
         | "host_started"
@@ -257,6 +259,18 @@ pub fn record_browser_host_registration(app: &AppHandle, code: &'static str) {
     }
     if let Ok(path) = diagnostic_path(app) {
         let _ = append_event(&path, "browser_host", code);
+    }
+}
+
+pub fn record_terminal_listener(app: &AppHandle, code: &'static str) {
+    if !matches!(
+        code,
+        "pipe_server_started" | "pipe_server_failed" | "pipe_served_elsewhere"
+    ) {
+        return;
+    }
+    if let Ok(path) = diagnostic_path(app) {
+        let _ = append_event(&path, "terminal", code);
     }
 }
 
@@ -611,6 +625,7 @@ fn allowed_code(value: &str) -> bool {
             | "breach_scan_listener_failed"
             | "card_fill_listener_failed"
             | "totp_fill_listener_failed"
+            | "terminal_listener_failed"
             | "platform_capabilities_failed"
             | "picker_opened"
             | "picker_cancelled"

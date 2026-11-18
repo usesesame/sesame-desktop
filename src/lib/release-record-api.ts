@@ -38,6 +38,8 @@ function previewReleaseEntries(): ReleaseEntryView[] {
     entry(7, today + 1_200, { kind: 'browserFill', outcome: 'denied', host: 'shop.example.org', count: 3 }),
     entry(8, today + 2_400, { kind: 'browserFill', itemId: 'gmail', itemKind: 'login', host: 'accounts.example.com', fields: ['username', 'password'], matchKind: 'site' }),
     entry(9, today + 3_000, { kind: 'reveal', itemId: 'github', itemKind: 'login', fields: ['password'] }),
+    entry(11, today - PREVIEW_DAY + 12_000, { kind: 'reveal', itemId: 'gmail', itemKind: 'login', fields: ['password'], host: 'terminal' }),
+    entry(12, today - PREVIEW_DAY + 12_600, { kind: 'copy', itemId: 'github', itemKind: 'login', fields: ['twoFactorCode'], host: 'terminal' }),
   ]
   if (previewReleaseState() === 'unreadable') entries.push(entry(10, today - 2 * PREVIEW_DAY, { kind: 'unreadable', outcome: 'noted', count: 4 }))
   return entries.filter((item) => item.at <= now).sort((left, right) => right.at - left.at || right.seq - left.seq)

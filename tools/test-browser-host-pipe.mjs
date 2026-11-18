@@ -34,7 +34,7 @@ function run(command, args, environment) {
 }
 
 function buildBinaries() {
-  const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[]}}' }
+  const environment = { ...process.env, TAURI_CONFIG: '{"bundle":{"externalBin":[],"resources":[]}}' }
   console.log('Building sesame and sesame-browser-host as true directory siblings...')
   run('cargo', ['build', '--manifest-path', manifest, '--bin', 'sesame'], environment)
   run('cargo', ['build', '--manifest-path', manifest, '--features', 'browser-helper-dev', '--bin', 'sesame-browser-host'], environment)

@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { get } from 'svelte/store'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { approvalFooterText, approvalWait } from './approval-wait'
+import { approvalFooterText, approvalWait, createApprovalWait } from './approval-wait'
 
 const vaultApi = vi.hoisted(() => ({
   getBrowserApprovalWait: vi.fn(),
@@ -70,6 +70,54 @@ test('nothing is polled after the last subscriber leaves', async () => {
   await settle()
 
   expect(vaultApi.getBrowserApprovalWait).not.toHaveBeenCalled()
+})
+
+test('a focus change during a read waits for a fresh read and keeps one poll going', async () => {
+  const answers: Array<(ms: number) => void> = []
+  const fetchWait = vi.fn(() => new Promise<number>((resolve) => answers.push(resolve)))
+  const wait = createApprovalWait(fetchWait)
+  const seen: number[] = []
+  const stop = wait.subscribe((value) => seen.push(value.ms))
+  expect(fetchWait).toHaveBeenCalledTimes(1)
+
+  window.dispatchEvent(new Event('blur'))
+  expect(fetchWait).toHaveBeenCalledTimes(1)
+  answers[0](0)
+  await settle()
+  expect(seen).not.toContain(0)
+  expect(fetchWait).toHaveBeenCalledTimes(2)
+
+  answers[1](750)
+  await settle()
+  expect(seen.at(-1)).toBe(750)
+  await vi.advanceTimersByTimeAsync(100)
+  expect(fetchWait).toHaveBeenCalledTimes(3)
+  answers[2](750)
+  await vi.advanceTimersByTimeAsync(100)
+  expect(fetchWait).toHaveBeenCalledTimes(4)
+  stop()
+})
+
+test('a focus change takes back a ready state at once, before any read returns', async () => {
+  const answers: Array<(ms: number) => void> = []
+  const fetchWait = vi.fn(() => new Promise<number>((resolve) => answers.push(resolve)))
+  const wait = createApprovalWait(fetchWait)
+  const stop = wait.subscribe(() => {})
+  answers[0](0)
+  await settle()
+  expect(get(wait).ms).toBe(0)
+  await vi.advanceTimersByTimeAsync(300)
+  expect(fetchWait).toHaveBeenCalledTimes(2)
+
+  window.dispatchEvent(new Event('blur'))
+  expect(get(wait).ms).toBeGreaterThan(0)
+  answers[1](0)
+  await settle()
+  expect(get(wait).ms).toBeGreaterThan(0)
+  answers[2](0)
+  await settle()
+  expect(get(wait).ms).toBe(0)
+  stop()
 })
 
 test('the footer says when approval opens, when to click the window, and how long is left', () => {

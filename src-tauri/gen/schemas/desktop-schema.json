@@ -417,6 +417,12 @@
           "markdownDescription": "Sync commands for the main window. Each one does nothing on a device where Sync was never turned on."
         },
         {
+          "description": "Approvals, item choices and remembered terminal permissions for command line requests, for the main window only.",
+          "type": "string",
+          "const": "terminal-approval",
+          "markdownDescription": "Approvals, item choices and remembered terminal permissions for command line requests, for the main window only."
+        },
+        {
           "description": "Item and folder mutation, deletion, restoration, and duplicate merging for the main window.",
           "type": "string",
           "const": "vault-edit",

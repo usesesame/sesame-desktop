@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
 import { PACKAGE_RUN_SCHEMA, disabledWebviewFeatures, judgeWebviewFeatures, requiredPackageSteps, validateLinuxPackageEvidence } from './linux-installed-package-gate.mjs'
-import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
+import { APPIMAGE_RUN_SCHEMA, RPM_RUN_SCHEMA, SHIPPED_RUN_SCHEMA, apprunHooksForceX11, evidenceFilenameByFormat, formatForPackage, judgeTerminalHelp, judgeTerminalNotRunning, requiredAppImageSteps, requiredRpmSteps, requiredShippedSteps, runTerminalVerb, shippedPackageRuntimeRootBase, shippedPackageWorkRootBase, terminalVerbEnvironment, validateLinuxAppImageShippedEvidence, validateLinuxRpmShippedEvidence, validateLinuxShippedEvidence } from './linux-shipped-package-gate.mjs'
 import { fetchTool, installPinnedTool, pinnedBundleTools, verifiedCliVersion } from './prepare-linux-bundle-tools.mjs'
 import { appProcessAlive, chromeHostManifestMatches, linuxBrowserEnvironment, pinnedChromeOrigin, storeChromeOrigin, trustedChromeOrigins } from './desktop-e2e-bridge.mjs'
 
@@ -533,3 +534,41 @@ test('bundle tool downloads retry a body that breaks while it is read', async ()
   assert.equal(calls.length, 2)
 })
 
+
+test('every Linux package answers the command line verbs from the installed sesame binary', () => {
+  for (const steps of [requiredShippedSteps, requiredRpmSteps, requiredAppImageSteps]) {
+    assert.ok(steps.includes('terminal.help'))
+    assert.ok(steps.includes('terminal.not_running'))
+    assert.ok(steps.indexOf('terminal.not_running') < steps.indexOf('app.launch'), 'the not running check must run before the app starts')
+  }
+  const gate = readFileSync(path.join(repository, 'tools', 'linux-shipped-package-gate.mjs'), 'utf8')
+  assert.match(gate, /checkTerminalVerbs\(steps, packagePath, environment, \{ APPIMAGE_EXTRACT_AND_RUN: '1' \}\)/)
+  assert.equal((gate.match(/await checkTerminalVerbs\(steps, binary, environment\)/g) ?? []).length, 2)
+})
+
+test('the command line checks run without a display and judge exit codes and streams', () => {
+  const quiet = terminalVerbEnvironment({ XDG_RUNTIME_DIR: '/run/fictional-runtime', DISPLAY: ':7', WAYLAND_DISPLAY: 'wayland-fictional' }, { APPIMAGE_EXTRACT_AND_RUN: '1' })
+  assert.equal(quiet.DISPLAY, undefined)
+  assert.equal(quiet.WAYLAND_DISPLAY, undefined)
+  assert.equal(quiet.XDG_RUNTIME_DIR, '/run/fictional-runtime')
+  assert.equal(quiet.APPIMAGE_EXTRACT_AND_RUN, '1')
+  const usage = 'Usage:\n  sesame list\n  sesame get <item> [field] [--copy]\n  sesame totp <item> [--copy]\n'
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: usage, stderr: '' }), true)
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: 'Sesame', stderr: '' }), false)
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replace('  sesame list\n', ''), stderr: '' }), false)
+  for (const line of ['  sesame get <item> [field] [--copy]\n', '  sesame totp <item> [--copy]\n']) {
+    assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replace(line, '') + 'Try sesame get <item> [field] or sesame totp <item> for one value.\n', stderr: '' }), false)
+  }
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replaceAll(' [--copy]', ''), stderr: '' }), false)
+  assert.equal(judgeTerminalHelp({ code: 1, stdout: usage, stderr: '' }), false)
+  assert.equal(judgeTerminalNotRunning({ code: 3, stdout: '', stderr: 'Sesame is not running. Open Sesame and try again.\n' }), true)
+  assert.equal(judgeTerminalNotRunning({ code: 0, stdout: 'Northwind mail\n', stderr: '' }), false)
+  assert.equal(judgeTerminalNotRunning({ code: 3, stdout: 'leak', stderr: 'Sesame is not running.' }), false)
+  assert.equal(judgeTerminalNotRunning({ code: 4, stdout: '', stderr: 'Nobody answered in Sesame.' }), false)
+})
+
+test('a terminal verb that cannot start reports no exit code instead of throwing', async () => {
+  const result = await runTerminalVerb(path.join(tmpdir(), 'sesame-no-such-fictional-binary'), ['--help'], terminalVerbEnvironment({}))
+  assert.equal(result.code, null)
+  assert.equal(judgeTerminalHelp(result), false)
+})

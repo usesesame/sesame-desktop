@@ -5,6 +5,8 @@ import { makePassphrase, passphraseEntropy } from '../passphrase'
 import { DEFAULT_SORT_MODE, type SortMode } from '../vault-collections'
 import type { BrowserCardFillRequest, BrowserChangeRequest, BrowserCreateRequest, BrowserFillRequest, BrowserIdentityFillRequest, BrowserSaveRequest, BrowserTotpFillRequest, GeneratorOption, PendingChangeView, ImportPreview, ImportSource, ItemKind, LoginCard, SecurityFilter, Theme, TotpRefresh, VaultSnapshot, VaultStatus, View } from '../types'
 import { refreshTotp } from '../vault'
+import type { CliApprovalRequestEvent } from '../generated/CliApprovalRequestEvent'
+import type { CliUnlockRequestEvent } from '../generated/CliUnlockRequestEvent'
 
 export interface VaultStoreState {
   status: VaultStatus
@@ -82,6 +84,20 @@ export interface BrowserCreateStoreState {
   working: boolean
   syncWorking: boolean
   syncFailed: boolean
+}
+
+export interface TerminalApprovalStoreState {
+  request: CliApprovalRequestEvent | null
+  selectedId: string
+  allowTerminal: boolean
+  secret: string
+  presenceGranted: boolean
+  error: string
+  expiresAt: number
+  working: boolean
+  syncWorking: boolean
+  syncFailed: boolean
+  unlock: CliUnlockRequestEvent | null
 }
 
 export interface PendingChangesStoreState {
@@ -374,6 +390,7 @@ export function createAppStores() {
     browserSave: patchable<BrowserSaveStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserChange: patchable<BrowserChangeStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
     browserCreate: patchable<BrowserCreateStoreState>({ request: null, selectedId: '', working: false, syncWorking: false, syncFailed: false }),
+    terminalApproval: patchable<TerminalApprovalStoreState>({ request: null, selectedId: '', allowTerminal: false, secret: '', presenceGranted: false, error: '', expiresAt: 0, working: false, syncWorking: false, syncFailed: false, unlock: null }),
     pendingChanges: patchable<PendingChangesStoreState>({ changes: [], working: null }),
     settings: patchable<SettingsStoreState>({ theme: 'auto', siteIconsEnabled: false, autoLockMinutes: 5, clipboardClearSeconds: 30, keepInTray: true, quickAccessShortcut: 'Ctrl+Alt+S' }),
   }

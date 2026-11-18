@@ -4,7 +4,7 @@ import { copyFileSync, chmodSync, mkdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { buildBrowserHost, hostTargetTriple, executableSuffix } from './browser-host.mjs'
+import { buildBrowserHost, buildTerminalClient, hostTargetTriple, executableSuffix } from './browser-host.mjs'
 
 const workspace = dirname(dirname(fileURLToPath(import.meta.url)))
 const manifest = join(workspace, 'src-tauri', 'Cargo.toml')
@@ -40,3 +40,17 @@ if (process.platform !== 'win32') {
 }
 
 process.stdout.write(`Staged the Sesame browser host sidecar for ${triple}.\n`)
+
+if (process.platform === 'win32') {
+  buildTerminalClient({ manifest, release: true })
+  const cliSource = join(targetDirectory, 'release', 'sesame-cli.exe')
+  try {
+    if (!statSync(cliSource).isFile()) throw new Error('not a file')
+  } catch {
+    throw new Error(`The built Sesame command line program was not found at ${cliSource}.`)
+  }
+  const cliDirectory = join(stageDirectory, 'cli')
+  mkdirSync(cliDirectory, { recursive: true })
+  copyFileSync(cliSource, join(cliDirectory, 'sesame.exe'))
+  process.stdout.write('Staged the Sesame command line program as cli\\sesame.exe.\n')
+}

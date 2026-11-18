@@ -1,0 +1,683 @@
+{
+  "vectorSchemaVersion": 1,
+  "protocolVersion": 1,
+  "fictionalDataOnly": true,
+  "requestCases": [
+    {
+      "name": "list request",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      }
+    },
+    {
+      "name": "get request for a whole item",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      }
+    },
+    {
+      "name": "get request for one field",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      }
+    },
+    {
+      "name": "get request that copies a field",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password",
+        "copy": true
+      }
+    },
+    {
+      "name": "totp request",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      }
+    },
+    {
+      "name": "totp request that copies the code",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "copy": true
+      }
+    },
+    {
+      "name": "list request with an item is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "list request with copy is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "copy": false
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "get request without an item is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "get request that copies a whole item is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "copy": true
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "totp request with a field is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "unknown type is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "set",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "unknown field is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "origin": "https://northwind.example"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "uppercase request id is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3F9A0C1E5B7D2A4C6E8F0A1B2C3D4E5F"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "short request id is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "item with a control character is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind\u001b]52;c;Zm9v\u0007"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "item of 257 characters is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "item of 256 characters is accepted",
+      "valid": true,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+      }
+    },
+    {
+      "name": "blank item is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "   "
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "field of 129 characters is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "version two is unsupported",
+      "valid": false,
+      "message": {
+        "version": 2,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "code": "unsupportedVersion"
+    },
+    {
+      "name": "version as text is refused",
+      "valid": false,
+      "message": {
+        "version": "1",
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "code": "invalid"
+    },
+    {
+      "name": "browser fill request is refused",
+      "valid": false,
+      "message": {
+        "version": 8,
+        "type": "fill",
+        "requestId": "fill-8-1",
+        "origin": "https://login.example.com"
+      },
+      "code": "unsupportedVersion"
+    },
+    {
+      "name": "browser capabilities request at version one is refused",
+      "valid": false,
+      "message": {
+        "version": 1,
+        "type": "capabilities",
+        "requestId": "capabilities-1"
+      },
+      "code": "invalid"
+    }
+  ],
+  "replyCases": [
+    {
+      "name": "waiting for an unlock",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "waiting",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "reason": "unlock"
+      }
+    },
+    {
+      "name": "waiting for an approval",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "message": {
+        "version": 1,
+        "type": "waiting",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "reason": "approval"
+      }
+    },
+    {
+      "name": "items frame",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "items",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "items": [
+          {
+            "id": "fictional-login",
+            "kind": "login",
+            "title": "Northwind mail"
+          }
+        ]
+      }
+    },
+    {
+      "name": "done frame",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "done",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      }
+    },
+    {
+      "name": "items frame for a get request is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "items",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "items": []
+      }
+    },
+    {
+      "name": "items frame with an unknown kind is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "items",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "items": [
+          {
+            "id": "fictional-login",
+            "kind": "bank",
+            "title": "Northwind mail"
+          }
+        ]
+      }
+    },
+    {
+      "name": "whole item with a hidden field name",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "username",
+            "hidden": false,
+            "value": "casey@northwind.example"
+          },
+          {
+            "name": "password",
+            "hidden": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "whole item that carries a hidden value is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "password",
+            "hidden": true,
+            "value": "fictional-password-canary"
+          }
+        ]
+      }
+    },
+    {
+      "name": "whole item with a control picture in a field name",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "Gate\u2409code",
+            "hidden": false,
+            "value": "fictional-gate-4471"
+          }
+        ]
+      }
+    },
+    {
+      "name": "whole item with a raw tab in a field name is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "item",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "id": "fictional-login",
+        "kind": "login",
+        "title": "Northwind mail",
+        "fields": [
+          {
+            "name": "Gate\tcode",
+            "hidden": false,
+            "value": "fictional-gate-4471"
+          }
+        ]
+      }
+    },
+    {
+      "name": "value of a hidden field",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "message": {
+        "version": 1,
+        "type": "value",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "value": "fictional-password-canary",
+        "hidden": true
+      }
+    },
+    {
+      "name": "value for a copy request is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password",
+        "copy": true
+      },
+      "message": {
+        "version": 1,
+        "type": "value",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "value": "fictional-password-canary",
+        "hidden": true
+      }
+    },
+    {
+      "name": "copied reply",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password",
+        "copy": true
+      },
+      "message": {
+        "version": 1,
+        "type": "copied",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "clearAfterSeconds": 30
+      }
+    },
+    {
+      "name": "copied reply with a value is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password",
+        "copy": true
+      },
+      "message": {
+        "version": 1,
+        "type": "copied",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "clearAfterSeconds": 30,
+        "value": "fictional-password-canary"
+      }
+    },
+    {
+      "name": "totp code",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "code": "123456",
+        "remainingSeconds": 17
+      }
+    },
+    {
+      "name": "totp code of ten digits is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "code": "1234567890",
+        "remainingSeconds": 17
+      }
+    },
+    {
+      "name": "totp window over an hour is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail"
+      },
+      "message": {
+        "version": 1,
+        "type": "totp",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "code": "123456",
+        "remainingSeconds": 3601
+      }
+    },
+    {
+      "name": "error reply",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "message": {
+        "version": 1,
+        "type": "error",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "code": "cancelled",
+        "message": "Denied in Sesame."
+      }
+    },
+    {
+      "name": "error with an unknown code is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "message": {
+        "version": 1,
+        "type": "error",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "code": "approvalUnavailable",
+        "message": "Denied in Sesame."
+      }
+    },
+    {
+      "name": "reply for another request id is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "get",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "item": "Northwind mail",
+        "field": "password"
+      },
+      "message": {
+        "version": 1,
+        "type": "value",
+        "requestId": "00000000000000000000000000000000",
+        "value": "fictional-password-canary",
+        "hidden": true
+      }
+    },
+    {
+      "name": "unsupported version error names the desktop version",
+      "valid": true,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "error",
+        "code": "unsupportedVersion",
+        "message": "Update Sesame to use this command."
+      }
+    },
+    {
+      "name": "reply with an unknown field is refused",
+      "valid": false,
+      "request": {
+        "version": 1,
+        "type": "list",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f"
+      },
+      "message": {
+        "version": 1,
+        "type": "done",
+        "requestId": "3f9a0c1e5b7d2a4c6e8f0a1b2c3d4e5f",
+        "extra": true
+      }
+    }
+  ]
+}

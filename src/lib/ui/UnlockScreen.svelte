@@ -3,6 +3,8 @@
   import Icon from '../Icon.svelte'
   import SetupProgress from './SetupProgress.svelte'
   import type { VaultStatus } from '../types'
+  import type { CliUnlockRequestEvent } from '../generated/CliUnlockRequestEvent'
+  import { unlockLine } from '../terminal-text'
   import { platformCapabilities } from '../platform'
   import { MAX_PIN_DIGITS, MIN_PIN_DIGITS, pinDigits as keepPinDigits } from '../pin-rules'
 
@@ -14,6 +16,7 @@
   export let errorMessage = ''
   export let isWorking = false
   export let restoreMessage = ''
+  export let terminalWaiting: CliUnlockRequestEvent | null = null
   export let onUnlockWithPin: () => void
   export let onUnlockWithHello: () => void
   export let onSubmitMasterPassword: () => void
@@ -76,6 +79,7 @@
     <h1 id="unlock-heading">{!status.exists ? 'Create your vault' : recoveryUnlockOpen ? 'Use another unlock method' : showPin ? 'Enter your PIN' : 'Enter your master password'}</h1>
     {#if !showPin}<p>{!status.exists ? 'Choose a master password. You will get a one-time recovery kit to write down.' : recoveryUnlockOpen ? 'Enter the master password or the recovery kit for this vault.' : 'This vault opens with the master password you chose.'}</p>{/if}
     {#if restoreMessage}<div class="restore-success" role="status"><Icon name="check" size={16} /><span>{restoreMessage}</span></div>{/if}
+    {#if terminalWaiting && status.exists}<p class="terminal-waiting" role="status"><Icon name="keyboard" size={16} /><span>{unlockLine(terminalWaiting.command)}{terminalWaiting.remote ? ' It came through a remote login.' : ''}</span></p>{/if}
 
     {#if showHello}
       <button type="button" class="secondary-button full hello-unlock" disabled={isWorking} on:click={onUnlockWithHello}>
@@ -137,3 +141,8 @@
     {/if}
   </section>
 </main>
+
+<style>
+  .terminal-waiting { display: flex; align-items: flex-start; gap: var(--space-2); margin: var(--space-4) 0 0; border-top: 1px solid var(--border-soft); padding-top: var(--space-3); color: var(--text-2); font-size: var(--type-2); line-height: 1.45; }
+  .terminal-waiting :global(svg) { flex: none; margin-top: 1px; color: var(--text-muted); }
+</style>

@@ -24,6 +24,17 @@ describe('activity sentences', () => {
     expect(entrySentence(entry({ itemId: 'login-a', itemKind: 'login', host: 'example.com' }), titleFor)).toBe('Filled Northwind on example.com')
   })
 
+  test('a release through the command line names the terminal and never treats it as a website', () => {
+    const shown = entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)
+    expect(shown).toBe('Read the password of Northwind for a terminal')
+    const copied = entrySentence(entry({ kind: 'copy', itemId: 'login-a', itemKind: 'login', fields: ['twoFactorCode'], host: 'terminal' }), titleFor)
+    expect(copied).toBe('Copied the one-time code of Northwind for a terminal')
+    readable(shown)
+    readable(copied)
+    for (const sentence of [shown, copied]) expect(sentence).not.toMatch(/ on terminal|from terminal|terminal\.|site/)
+    expect(entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'] }), titleFor)).toBe('Showed the password of Northwind')
+  })
+
   test('an item that no longer exists is named by its kind', () => {
     expect(entrySentence(entry({ kind: 'copy', itemId: 'gone', itemKind: 'card', fields: ['cardNumber'] }), titleFor)).toBe('Copied the card number of a removed card')
   })

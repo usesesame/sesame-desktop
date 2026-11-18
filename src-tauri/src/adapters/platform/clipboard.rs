@@ -244,11 +244,28 @@ pub fn clear_armed_clipboard(app: &AppHandle) -> VaultResult<()> {
     clear_armed_clipboard_from(app, None)
 }
 
+const UNCLEARABLE: &str =
+    "Sesame cannot copy this value, because it could not clear it from the clipboard afterwards.";
+
+fn clearable(value: &str) -> bool {
+    let wide_bytes = value
+        .encode_utf16()
+        .count()
+        .saturating_add(1)
+        .saturating_mul(2);
+    !value.contains('\0')
+        && value.len() <= MAX_CLIPBOARD_COMPARE_BYTES
+        && wide_bytes <= MAX_CLIPBOARD_COMPARE_BYTES
+}
+
 fn arm_secret<B: ClipboardBackend>(
     state: &ClipboardGuard,
     backend: &B,
     value: &str,
 ) -> VaultResult<u64> {
+    if !clearable(value) {
+        return Err(UNCLEARABLE.into());
+    }
     let computed = digest(value);
     let mut armed = lock_state(state);
     backend.write(state, value)?;
@@ -457,6 +474,28 @@ mod tests {
             state.epoch = epoch;
         }
         guard
+    }
+
+    #[test]
+    fn a_value_the_clear_could_not_match_is_never_written() {
+        let guard = ClipboardGuard::default();
+        let clipboard = FakeClipboard::holding("fictional-user-notes");
+        let wide = "\u{10348}".repeat(MAX_CLIPBOARD_COMPARE_BYTES / 4 + 1);
+        let narrow_but_wide_on_windows = "a".repeat(MAX_CLIPBOARD_COMPARE_BYTES / 2);
+        for value in [
+            "fictional\0password",
+            wide.as_str(),
+            narrow_but_wide_on_windows.as_str(),
+        ] {
+            assert!(arm_secret(&guard, &clipboard, value).is_err());
+            assert_eq!(clipboard.text().as_deref(), Some("fictional-user-notes"));
+            assert_eq!(armed_digest(&guard), None);
+        }
+        assert!(arm_secret(&guard, &clipboard, "fictional-ordinary-secret").is_ok());
+        assert_eq!(
+            clipboard.text().as_deref(),
+            Some("fictional-ordinary-secret")
+        );
     }
 
     #[test]

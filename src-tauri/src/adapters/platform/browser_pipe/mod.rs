@@ -9,26 +9,33 @@ use zeroize::Zeroizing;
 pub const MAX_PIPE_MESSAGE_BYTES: usize = 16 * 1024;
 
 static SERVED_ELSEWHERE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TERMINAL_SERVED_ELSEWHERE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// True once another Sesame already held the connection when this one tried to take it.
 pub fn served_elsewhere() -> bool {
     SERVED_ELSEWHERE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(target_os = "linux")]
-fn note_served_elsewhere() {
-    SERVED_ELSEWHERE.store(true, std::sync::atomic::Ordering::Relaxed);
+pub fn terminal_served_elsewhere() -> bool {
+    TERMINAL_SERVED_ELSEWHERE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{request, serve_forever, PipePeer};
+pub use windows::{
+    open_terminal_request, request, serve_forever, serve_terminal, PipePeer, TerminalClient,
+    TerminalConnection,
+};
 
 #[cfg(target_os = "linux")]
 mod unix;
 #[cfg(target_os = "linux")]
-pub use unix::{request, serve_forever, PipePeer};
+pub use unix::{
+    open_terminal_request, request, serve_forever, serve_terminal, PipePeer, TerminalClient,
+    TerminalConnection,
+};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn request(_payload: &[u8]) -> io::Result<Zeroizing<Vec<u8>>> {

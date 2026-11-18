@@ -10,9 +10,11 @@ mod diagnostics;
 #[cfg(test)]
 mod record_writes_tests;
 mod rollback_guard;
+mod terminal;
+mod terminal_client;
 mod vault;
 
-pub(crate) use sesame_app::{application, browser_protocol, release, sync};
+pub(crate) use sesame_app::{application, browser_protocol, cli_protocol, release, sync};
 #[cfg(fuzzing)]
 pub use sync::fuzz_entry as sync_fuzz;
 
@@ -191,6 +193,13 @@ macro_rules! sesame_invoke_handler {
             commands::get_release_record_hint,
             commands::set_release_record_retention,
             commands::clear_release_record,
+            commands::get_pending_terminal_request,
+            commands::get_terminal_approval_wait,
+            commands::resolve_terminal_request,
+            commands::set_terminal_clipboard_clear_seconds,
+            commands::list_terminal_permissions,
+            commands::forget_terminal_permissions,
+            commands::get_terminal_status,
             capabilities::get_platform_capabilities,
             clipboard::copy_secret,
             clipboard::clear_clipboard_if_unchanged,
@@ -296,6 +305,7 @@ pub fn run() {
         adapters::platform::webview_sandbox::refuse(context, unavailable);
         return;
     }
+    let (browser_approvals, terminal_approvals) = approval_states();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_shell::show_main_window(app);
@@ -319,7 +329,10 @@ pub fn run() {
         .manage(vault::VaultState::default())
         .manage(commands::BreachScanState::default())
         .manage(commands::FileSelectionState::default())
-        .manage(browser_fill::BrowserFillState::default())
+        .manage(browser_approvals)
+        .manage(terminal_approvals)
+        .manage(terminal::TerminalListener::default())
+        .manage(terminal::TerminalAllowances::default())
         .manage(release::ReleasePresence::default())
         .manage(rollback_guard::RollbackGuard::default())
         .manage(desktop_shell::DesktopShellState::default())
@@ -355,6 +368,7 @@ pub fn run() {
             if browser_fill::start(app.handle().clone()).is_err() {
                 diagnostics::record_browser_host_registration(app.handle(), "pipe_server_failed");
             }
+            let _ = terminal::start(app.handle().clone());
             session_guard::start(app.handle().clone());
             Ok(())
         })
@@ -382,6 +396,43 @@ pub fn run() {
                 clipboard::release(&app.state::<clipboard::ClipboardGuard>());
             }
         });
+}
+
+fn approval_states() -> (browser_fill::BrowserFillState, terminal::CliApprovalState) {
+    let slot = application::approval_slot::ApprovalSlot::default();
+    (
+        browser_fill::BrowserFillState::sharing(slot.clone()),
+        terminal::CliApprovalState::sharing(slot),
+    )
+}
+
+#[cfg(target_os = "linux")]
+pub fn run_terminal_command() -> Option<i32> {
+    let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if !arguments
+        .first()
+        .is_some_and(terminal_client::is_terminal_verb)
+    {
+        return None;
+    }
+    Some(terminal_client::run_from_environment(&arguments))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn run_terminal_command() -> Option<i32> {
+    None
+}
+
+pub fn run_terminal_client() -> i32 {
+    if dll_search::harden_process().is_err() {
+        return terminal_client::EXIT_FAILED;
+    }
+    #[cfg(windows)]
+    if crash_protection::harden_process().is_err() {
+        return terminal_client::EXIT_FAILED;
+    }
+    let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    terminal_client::run_from_environment(&arguments)
 }
 
 pub fn run_browser_host() {

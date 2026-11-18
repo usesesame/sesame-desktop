@@ -9,6 +9,7 @@ use std::{
 
 use zeroize::Zeroize;
 
+use super::approval_slot::{ApprovalSlot, SlotClaim};
 use crate::vault::random_id;
 use crate::vault::release_record::Outcome;
 
@@ -144,6 +145,7 @@ struct PendingApproval {
     request_event: Option<ApprovalEvent>,
     deadline: Instant,
     sender: SyncSender<ApprovalDecision>,
+    _slot: SlotClaim,
 }
 
 impl Drop for PendingApproval {
@@ -174,9 +176,17 @@ struct FillInner {
 #[derive(Default)]
 pub struct BrowserFillState {
     inner: Mutex<FillInner>,
+    slot: ApprovalSlot,
 }
 
 impl BrowserFillState {
+    pub fn sharing(slot: ApprovalSlot) -> Self {
+        Self {
+            inner: Mutex::default(),
+            slot,
+        }
+    }
+
     #[cfg(test)]
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
@@ -184,6 +194,7 @@ impl BrowserFillState {
                 focus: FocusDelay::new(clock),
                 ..FillInner::default()
             }),
+            slot: ApprovalSlot::default(),
         }
     }
 
@@ -327,6 +338,7 @@ impl BrowserFillState {
         if inner.pending.is_some() {
             return Err("approvalUnavailable");
         }
+        let claim = self.slot.claim_for_browser().ok_or("approvalUnavailable")?;
         let approval_id = random_id();
         inner.focus.approval_shown();
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -340,6 +352,7 @@ impl BrowserFillState {
             request_event: None,
             deadline,
             sender,
+            _slot: claim,
         });
         Ok((approval_id, deadline, receiver))
     }

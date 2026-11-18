@@ -249,6 +249,7 @@ test('each desktop webview gets only the Tauri permissions its imports need', ()
     'diagnostics',
     'external-navigation',
     'browser-approval',
+    'terminal-approval',
     'release-record',
     'desktop-settings',
     'website-icons',
@@ -1780,6 +1781,59 @@ test('the Activity record is reachable only from the main window', () => {
   const emit = read('src-tauri', 'src', 'commands', 'release_record.rs')
   assert.match(emit, /emit_to\("main", RELEASE_RECORD_CHANGED/, 'the record status is not sent to the main window only')
   assert.doesNotMatch(emit, /\.emit\(/, 'the record status is broadcast to every window')
+})
+
+test('the command line tool releases hidden values only behind the presence check', () => {
+  const requests = read('src-tauri', 'sesame-app', 'src', 'application', 'cli_requests.rs')
+  assert.doesNotMatch(requests, /secret_value|visit_secrets|open_payload|(?<![a-z_])(?:copy_)?item_field_in_state\(/, 'the tool reads a hidden value around the presence check')
+  assert.match(requests, /terminal_item_field_in_state\(/)
+  assert.match(requests, /terminal_copy_item_field_in_state\(/)
+  assert.match(requests, /let present = redact\(&mut redacted\);/, 'the tool builds visible fields from an item that still holds its secrets')
+  assert.match(requests, /match &mut redacted \{/)
+  assert.match(requests, /entry\.totp\.zeroize\(\);/, 'a whole-item reply can carry the one-time code seed')
+  assert.match(requests, /entry\.backup_codes\.zeroize\(\);/, 'a whole-item reply can carry the backup codes')
+  const reveal = read('src-tauri', 'sesame-app', 'src', 'application', 'reveal.rs')
+  const shared = reveal.match(/fn item_field_in_state\([\s\S]*?\n\}/)
+  assert.ok(shared, 'item_field_in_state moved')
+  assert.match(shared[0], /require_release_presence\(state, presence\)\?;\s*let item = record_item\(state, id, kind\)\?;/, 'the desktop release reads the item before the presence check')
+  const field = reveal.match(/fn terminal_field\([\s\S]*?\n\}/)
+  assert.ok(field, 'terminal_field moved')
+  assert.match(field[0], /\) -> VaultResult<Zeroizing<String>> \{\s*presence\.require\(epoch\)\?;\s*let item = item_in\(session, id, kind\)\?;/, 'the terminal release reads the item before the presence check')
+  const sessionAt = reveal.match(/pub fn with_session_at<T>\([\s\S]*?\n\}/)
+  assert.ok(sessionAt, 'with_session_at moved')
+  assert.match(sessionAt[0], /let session = state\s*\.session\s*\.lock\(\)[\s\S]*?if state\.session_epoch\(\) != epoch \{\s*return Err\(VAULT_CHANGED\.into\(\)\);\s*\}\s*read\(session\)/, 'the terminal release must read the session under the lock that guards the epoch check')
+  for (const name of ['terminal_item_field_in_state', 'terminal_copy_item_field_in_state']) {
+    const body = reveal.match(new RegExp(`pub fn ${name}\\([\\s\\S]*?\\n\\}`))
+    assert.ok(body, `${name} moved`)
+    assert.match(body[0], /with_session_at\(state, wanted\.epoch, \|session\| \{\s*let value = terminal_field\(/, `${name} skips the presence check`)
+  }
+  const browserSide = [
+    read('src-tauri', 'src', 'browser_fill.rs'),
+    read('src-tauri', 'sesame-app', 'src', 'browser_protocol.rs'),
+    read('src-tauri', 'sesame-app', 'src', 'application', 'browser_replies.rs'),
+    ...readdirSync(join(root, 'src-tauri', 'src', 'adapters', 'platform', 'browser_host')).map((name) => read('src-tauri', 'src', 'adapters', 'platform', 'browser_host', name)),
+  ]
+  for (const source of browserSide) {
+    assert.doesNotMatch(source, /cli_protocol|CliRequest|CliReply|serve_cli_request|cli_requests/, 'the browser side names the command line protocol')
+  }
+  const tool = [read('src-tauri', 'sesame-app', 'src', 'cli_protocol.rs'), requests]
+  for (const source of tool) {
+    assert.doesNotMatch(source, /BrowserRequest|BrowserResponse|browser_replies/, 'the command line side names the browser protocol')
+  }
+})
+
+test('the terminal verbs answer before the desktop starts and never touch the window', () => {
+  const main = read('src-tauri', 'src', 'main.rs')
+  assert.match(main, /fn main\(\) \{\s*if let Some\(code\) = sesame_lib::run_terminal_command\(\) \{\s*std::process::exit\(code\);\s*\}\s*sesame_lib::run\(\)\s*\}/, 'a handled terminal command does not exit before the desktop starts')
+  const client = read('src-tauri', 'src', 'terminal_client.rs')
+  const verbs = client.match(/const VERBS: \[&str; \d+\] = \[([^\]]*)\]/)
+  assert.ok(verbs, 'the terminal verbs moved')
+  assert.deepEqual([...verbs[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]), ['list', 'get', 'totp', 'help', '--help', '-h', '--version', '-V'])
+  assert.doesNotMatch(client, /tauri::|AppHandle|webview_sandbox|crash_protection/, 'the terminal client loads desktop parts')
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const linux = lib.match(/pub fn run_terminal_command\(\) -> Option<i32> \{([\s\S]*?)\n\}/)
+  assert.ok(linux, 'the Linux terminal dispatch moved')
+  assert.doesNotMatch(linux[1], /crash_protection|harden_process/, 'a non-dumpable tool hides its executable from the desktop peer check')
 })
 
 test('no native messaging message type can reach the Activity record', () => {

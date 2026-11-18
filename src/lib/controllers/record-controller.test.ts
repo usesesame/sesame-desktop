@@ -37,6 +37,7 @@ function fakeStores(): AppStores {
     browserSave: noRequest,
     browserChange: noRequest,
     browserCreate: noRequest,
+    terminalApproval: noRequest,
   } as unknown as AppStores
 }
 

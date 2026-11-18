@@ -1,5 +1,5 @@
 use sesame_core::imports::resolved_totp;
-use sesame_core::snapshot::{login_card_for, totp_from_value};
+use sesame_core::snapshot::{login_card_for, totp_at, totp_from_value};
 use sesame_core::types::VaultEntry;
 
 // RFC 6238 test key "12345678901234567890" in base32.
@@ -111,4 +111,14 @@ fn a_typed_secret_is_trimmed_and_stored() {
         resolved_totp(Some(format!("  {RFC_KEY}  ")), None),
         Some(RFC_KEY.to_string())
     );
+}
+
+#[test]
+fn a_code_and_its_lifetime_come_from_the_same_moment() {
+    assert_eq!(totp_at(RFC_KEY, 59), Some(("287082".to_string(), 1, 30)));
+    let Some((code, remaining, _)) = totp_at(RFC_KEY, 60) else {
+        panic!("the reference key was rejected");
+    };
+    assert_eq!(remaining, 30);
+    assert_ne!(code, "287082");
 }
