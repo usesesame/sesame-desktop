@@ -93,7 +93,7 @@ export function terminalVerbEnvironment(environment, extraEnv = {}) {
 
 export function judgeTerminalHelp(result) {
   const stdout = result?.stdout ?? ''
-  return result?.code === 0 && /^\s*sesame list\s*$/m.test(stdout) && /sesame get <item> \[field\]/.test(stdout) && /sesame totp <item>/.test(stdout)
+  return result?.code === 0 && /^\s*sesame list\s*$/m.test(stdout) && /^\s*sesame get <item> \[field\] \[--copy\]\s*$/m.test(stdout) && /^\s*sesame totp <item> \[--copy\]\s*$/m.test(stdout)
 }
 
 export function judgeTerminalNotRunning(result) {

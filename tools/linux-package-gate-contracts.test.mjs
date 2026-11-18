@@ -556,6 +556,10 @@ test('the command line checks run without a display and judge exit codes and str
   assert.equal(judgeTerminalHelp({ code: 0, stdout: usage, stderr: '' }), true)
   assert.equal(judgeTerminalHelp({ code: 0, stdout: 'Sesame', stderr: '' }), false)
   assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replace('  sesame list\n', ''), stderr: '' }), false)
+  for (const line of ['  sesame get <item> [field] [--copy]\n', '  sesame totp <item> [--copy]\n']) {
+    assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replace(line, '') + 'Try sesame get <item> [field] or sesame totp <item> for one value.\n', stderr: '' }), false)
+  }
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replaceAll(' [--copy]', ''), stderr: '' }), false)
   assert.equal(judgeTerminalHelp({ code: 1, stdout: usage, stderr: '' }), false)
   assert.equal(judgeTerminalNotRunning({ code: 3, stdout: '', stderr: 'Sesame is not running. Open Sesame and try again.\n' }), true)
   assert.equal(judgeTerminalNotRunning({ code: 0, stdout: 'Northwind mail\n', stderr: '' }), false)

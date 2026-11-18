@@ -1801,7 +1801,7 @@ test('the command line tool releases hidden values only behind the presence chec
   assert.match(field[0], /\) -> VaultResult<Zeroizing<String>> \{\s*presence\.require\(epoch\)\?;\s*let item = item_in\(session, id, kind\)\?;/, 'the terminal release reads the item before the presence check')
   const sessionAt = reveal.match(/pub fn with_session_at<T>\([\s\S]*?\n\}/)
   assert.ok(sessionAt, 'with_session_at moved')
-  assert.match(sessionAt[0], /if state\.session_epoch\(\) != epoch \{\s*return Err\(VAULT_CHANGED\.into\(\)\);\s*\}\s*read\(session\)/, 'the terminal release reads a vault other than the approved one')
+  assert.match(sessionAt[0], /let session = state\s*\.session\s*\.lock\(\)[\s\S]*?if state\.session_epoch\(\) != epoch \{\s*return Err\(VAULT_CHANGED\.into\(\)\);\s*\}\s*read\(session\)/, 'the terminal release must read the session under the lock that guards the epoch check')
   for (const name of ['terminal_item_field_in_state', 'terminal_copy_item_field_in_state']) {
     const body = reveal.match(new RegExp(`pub fn ${name}\\([\\s\\S]*?\\n\\}`))
     assert.ok(body, `${name} moved`)

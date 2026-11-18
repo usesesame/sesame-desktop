@@ -160,8 +160,10 @@ good-faith report that turns out to be out of scope is not held against you.
   after you unlock, because the unlock alone does not count for that request. When you allow a terminal for five minutes,
   every program started from the shell session you approved in that terminal
   gets what it asks for without a prompt until the five minutes end, and
-  hidden values still need the master password check. A new shell session in
-  the same terminal is asked again. The allowance also ends when the vault locks and when almost
+  hidden values still need the master password check. The allowance skips
+  only the routine approval, so the window still asks when several items
+  match the name or when a hidden value needs the master password. A new shell
+  session in the same terminal is asked again. The allowance also ends when the vault locks and when almost
   anything in the vault changes, such as saving, deleting or starring an item,
   so a terminal you allowed may be asked again before five minutes pass.
 - Windows offers no terminal allowance, because Sesame cannot tell one
