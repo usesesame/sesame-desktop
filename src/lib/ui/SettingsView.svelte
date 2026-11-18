@@ -8,6 +8,7 @@
   import SecuritySettings from './SecuritySettings.svelte'
   import BrowserSettings from './BrowserSettings.svelte'
   import SyncSettings from './SyncSettings.svelte'
+  import ExtrasSettings from './ExtrasSettings.svelte'
   import DataSettings from './DataSettings.svelte'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import IssuedRecoveryKitModal from './IssuedRecoveryKitModal.svelte'
@@ -231,6 +232,8 @@
         {onDisconnectService}
         {onRefreshService}
       />
+    {:else if tab === 'extras'}
+      <ExtrasSettings />
     {:else if tab === 'data'}
       <DataSettings
         {onManageData}

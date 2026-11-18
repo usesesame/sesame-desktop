@@ -141,6 +141,7 @@ test.each([
   ['security', ['This device', 'Your vault key']],
   ['browser', ['Extension', 'Saving']],
   ['sync', ['Sesame account', 'Sesame Sync', 'Your own server']],
+  ['extras', ['Command line']],
   ['data', ['Your vault', 'Diagnostics']],
 ])('the %s tab shows its own groups and no other tab\'s', (tab, headings) => {
   renderSettings({ tab })
