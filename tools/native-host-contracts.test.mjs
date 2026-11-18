@@ -24,8 +24,9 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
   assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
-  for (const line of hook.split('\n').filter((entry) => /HKLM/.test(entry))) {
-    assert.match(line, /^\s*(?:ReadRegStr \$R0|WriteRegExpandStr) HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
+  assert.match(hook, /^!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"$/m, 'the Path the hook edits is not the machine environment')
+  for (const line of hook.split('\n').filter((entry) => /\bHKLM\b|HKEY_LOCAL_MACHINE|0x80000002/i.test(entry))) {
+    assert.match(line, /^\s*(?:ReadRegStr \$R[04]|WriteRegStr|WriteRegExpandStr) HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"|^\s*System::Call 'advapi32::RegGetValueW\(p 0x80000002, w "\$\{SESAME_ENVIRONMENT_KEY\}", w "Path",/)
   }
 
   const scriptLines = read('src-tauri', 'linux', 'pre-remove.sh')

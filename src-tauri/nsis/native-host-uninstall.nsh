@@ -1,11 +1,14 @@
 ; Remove only the per-user browser native-host registration owned by Sesame and
-; the cli folder entry Sesame adds to the system Path.
+; the cli folder entry Sesame added to the system Path.
 ; All user vault data and all browser data are deliberately outside this hook.
 !include LogicLib.nsh
 !include WinMessages.nsh
 
 !define SESAME_ENVIRONMENT_KEY "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
 !define SESAME_TERMINAL_FOLDER "$INSTDIR\cli"
+!define SESAME_PATH_OWNER_VALUE "TerminalPathAdded"
+
+Var SesameOwnsTerminalPath
 
 !macro SESAME_SCAN_PATH PATH KEPT FOUND
   StrCpy ${KEPT} ""
@@ -80,12 +83,32 @@
 !macroend
 
 !macro SESAME_WRITE_PATH VALUE FAILED
+  StrCpy $R6 0
   ClearErrors
-  WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
+  ReadRegStr $R4 HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"
   ${If} ${Errors}
-    DetailPrint "${FAILED}"
+  ${OrIf} $R4 S!= $R0
+    DetailPrint "Another program changed the system Path while Sesame was working, so Sesame left it as it was. ${FAILED}"
   ${Else}
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+    StrCpy $R4 0
+    StrCpy $R5 -1
+    System::Call 'advapi32::RegGetValueW(p 0x80000002, w "${SESAME_ENVIRONMENT_KEY}", w "Path", i 0x1000ffff, *i .R4, p 0, p 0) i .R5'
+    ClearErrors
+    ${If} $R5 = 0
+    ${AndIf} $R4 = 1
+      WriteRegStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
+    ${ElseIf} $R5 = 0
+    ${AndIf} $R4 = 2
+      WriteRegExpandStr HKLM "${SESAME_ENVIRONMENT_KEY}" "Path" "${VALUE}"
+    ${Else}
+      SetErrors
+    ${EndIf}
+    ${If} ${Errors}
+      DetailPrint "${FAILED}"
+    ${Else}
+      StrCpy $R6 1
+      SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+    ${EndIf}
   ${EndIf}
 !macroend
 
@@ -112,6 +135,9 @@
           StrCpy $R1 "$R0;${SESAME_TERMINAL_FOLDER}"
         ${EndIf}
         !insertmacro SESAME_WRITE_PATH $R1 "Sesame could not add ${SESAME_TERMINAL_FOLDER} to the system Path. Add it by hand to use the sesame command."
+        ${If} $R6 = 1
+          WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}" "1"
+        ${EndIf}
       ${EndIf}
     ${EndIf}
   ${EndIf}
@@ -138,8 +164,15 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  ReadRegStr $SesameOwnsTerminalPath SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}"
   ${If} $UpdateMode <> 1
     ExecWait '"$INSTDIR\sesame-browser-host.exe" unregister'
+  ${EndIf}
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+  ${AndIf} $SesameOwnsTerminalPath == "1"
     !insertmacro SESAME_REMOVE_TERMINAL_PATH
   ${EndIf}
 !macroend
