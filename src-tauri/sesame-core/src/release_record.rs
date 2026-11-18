@@ -300,23 +300,32 @@ fn sealed_line_len(plaintext_len: usize) -> u64 {
     61 + ciphertext
 }
 
-fn entry_bytes(entry: &RecordEntry) -> Option<u64> {
+fn can_reseal(entry: &RecordEntry) -> bool {
+    entry
+        .newer
+        .as_ref()
+        .is_none_or(|newer| newer.json.is_some())
+}
+
+fn entry_bytes(entry: &RecordEntry) -> u64 {
     let plaintext_len = match entry.newer.as_ref() {
         None => PLAINTEXT_BYTES,
-        Some(newer) => newer.size.max(newer.json.as_ref()?.len() + 20),
+        Some(newer) => newer
+            .size
+            .max(newer.json.as_ref().map_or(0, |json| json.len() + 20)),
     };
-    Some(sealed_line_len(plaintext_len))
+    sealed_line_len(plaintext_len)
 }
 
 fn entries_bytes(entries: &[RecordEntry]) -> u64 {
-    entries.iter().filter_map(entry_bytes).sum()
+    entries.iter().map(entry_bytes).sum()
 }
 
 fn evict_over_bytes(entries: &mut Vec<RecordEntry>, budget: u64) {
     let mut total = entries_bytes(entries);
     let mut dropped = 0;
     while total > budget && dropped < entries.len() {
-        total -= entry_bytes(&entries[dropped]).unwrap_or(0);
+        total -= entry_bytes(&entries[dropped]);
         dropped += 1;
     }
     entries.drain(..dropped);
@@ -864,12 +873,9 @@ fn write_fresh(
     entries: &mut Vec<RecordEntry>,
     now: u64,
 ) -> VaultResult<OpenRecord> {
-    let unsealable = entries
-        .iter()
-        .filter(|entry| entry_bytes(entry).is_none())
-        .count();
+    let unsealable = entries.iter().filter(|entry| !can_reseal(entry)).count();
     if unsealable > 0 {
-        entries.retain(|entry| entry_bytes(entry).is_some());
+        entries.retain(can_reseal);
         entries.push(
             ReleaseDraft::new(EntryKind::WritesLost, Outcome::Noted)
                 .count(u32::try_from(unsealable).unwrap_or(u32::MAX))
@@ -2274,6 +2280,21 @@ mod tests {
     }
 
     #[test]
+    fn newer_entries_kept_without_a_body_still_count_toward_the_byte_budget() {
+        let size = MAX_NEWER_PLAINTEXT_BYTES + 1;
+        let json = large_json(0, START, size);
+        let oversized = NewerEntry::open(&json, size).expect("newer");
+        assert!(!can_reseal(&oversized));
+        assert_eq!(entry_bytes(&oversized), sealed_line_len(size));
+
+        let mut entries: Vec<RecordEntry> = (0..1_600).map(|_| oversized.clone()).collect();
+        assert!(entries_bytes(&entries) > COMPACT_AT_BYTES);
+        fit_bytes(&mut entries);
+        assert!(entries_bytes(&entries) <= KEEP_BYTES);
+        assert!(entries.len() < 1_600);
+    }
+
+    #[test]
     fn ordinary_entries_still_compact_by_count_and_never_by_bytes() {
         let key = [3_u8; 32];
         let line = entry_line(
@@ -2288,7 +2309,7 @@ mod tests {
         let json = large_json(0, START, MAX_NEWER_PLAINTEXT_BYTES);
         let newer = NewerEntry::open(&json, MAX_NEWER_PLAINTEXT_BYTES).expect("newer");
         let line = entry_line(&key, &[4_u8; 16], "vault", &[5_u8; 32], &newer).expect("line");
-        assert!(line.len() as u64 <= entry_bytes(&newer).expect("bytes"));
+        assert!(line.len() as u64 <= entry_bytes(&newer));
 
         let mut ordinary: Vec<RecordEntry> = (0..COMPACT_AT as u64)
             .map(|seq| entry(seq, Outcome::Released))
