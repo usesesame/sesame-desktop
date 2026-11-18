@@ -26,6 +26,9 @@
   let now = fetchedAt
   let working = false
   let errorMessage = ''
+  let permissionsError = ''
+  let permissionsRead = 0
+  let statusEvents = 0
   let disposed = false
   const stops: Array<() => void> = []
 
@@ -36,7 +39,7 @@
     .map((allowance) => ({ ...allowance, left: allowance.expiresInMs - (now - fetchedAt) }))
     .filter((allowance) => allowance.left > 0)
   $: requests = permissions?.requests ?? []
-  $: nothingToForget = permissions !== null && live.length === 0 && requests.length === 0
+  $: nothingToForget = permissions !== null && !permissionsFailed && live.length === 0 && requests.length === 0
   $: statusLabel = !status
     ? 'Checking…'
     : status.code === 'ready'
@@ -67,24 +70,32 @@
   }
 
   async function refreshPermissions() {
+    const read = ++permissionsRead
     try {
       const next = await listTerminalPermissions()
-      if (disposed) return
+      if (disposed || read !== permissionsRead) return
       permissions = next
       permissionsFailed = false
+      permissionsError = ''
       fetchedAt = performance.now()
       now = fetchedAt
     } catch (error) {
-      if (disposed) return
-      errorMessage = messageFor(error)
+      if (disposed || read !== permissionsRead) return
+      permissionsError = messageFor(error)
       permissionsFailed = true
     }
   }
 
+  function statusChanged(next: TerminalToolStatus) {
+    statusEvents += 1
+    status = next
+  }
+
   async function refreshStatus() {
+    const eventsBefore = statusEvents
     try {
       const next = await getTerminalStatus()
-      if (!disposed) status = next
+      if (!disposed && statusEvents === eventsBefore) status = next
     } catch (error) {
       if (!disposed) errorMessage = messageFor(error)
     }
@@ -94,6 +105,7 @@
     if (working) return
     working = true
     errorMessage = ''
+    permissionsRead += 1
     try {
       await forgetTerminalPermissions()
       await refreshPermissions()
@@ -110,7 +122,6 @@
   }
 
   async function retry() {
-    errorMessage = ''
     await refreshPermissions()
   }
 
@@ -120,7 +131,7 @@
   }, 1_000)
 
   onMount(() => {
-    void onTerminalStatusChanged((next) => (status = next)).then(keep).catch(() => {}).finally(() => void refreshStatus())
+    void onTerminalStatusChanged(statusChanged).then(keep).catch(() => {}).finally(() => void refreshStatus())
     void onTerminalPermissionsChanged(() => void refreshPermissions()).then(keep).catch(() => {}).finally(() => void refreshPermissions())
   })
 
@@ -138,6 +149,7 @@
       <p>{description(status, windows)}</p>
       {#if windows && status?.supported}<p>On Windows, Sesame asks in this window every time a terminal makes a request.</p>{/if}
       {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
+      {#if permissionsError}<p class="form-error" role="alert">{permissionsError}</p>{/if}
     </div>
     <span class="status-pill {statusTone}">{statusLabel}</span>
   </article>
@@ -158,7 +170,7 @@
             {/each}
           </ul>
         {:else}
-          <p>No terminal is allowed right now, so every request asks.</p>
+          <p>{permissionsFailed ? 'Sesame could not read which terminals are allowed.' : 'No terminal is allowed right now, so every request asks.'}</p>
         {/if}
       </div>
     </article>

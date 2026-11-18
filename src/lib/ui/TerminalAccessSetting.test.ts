@@ -134,7 +134,7 @@ test('a failed permission read says so, keeps Forget available and offers to try
   expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
 })
 
-test('the listeners are registered before the first reads', async () => {
+test.each(['permissions', 'status'] as const)('the %s read waits only for its own listener', async (first) => {
   let permissionsReady: (stop: () => void) => void = () => {}
   let statusReady: (stop: () => void) => void = () => {}
   terminalApi.onTerminalPermissionsChanged.mockImplementation((handler) => { permissionsChanged = handler; return new Promise((resolve) => { permissionsReady = resolve }) })
@@ -143,11 +143,61 @@ test('the listeners are registered before the first reads', async () => {
   await vi.advanceTimersByTimeAsync(0)
   expect(terminalApi.listTerminalPermissions).not.toHaveBeenCalled()
   expect(terminalApi.getTerminalStatus).not.toHaveBeenCalled()
-  permissionsReady(() => {})
-  statusReady(() => {})
+  const [ready, read, other, otherRead] = first === 'permissions'
+    ? [permissionsReady, terminalApi.listTerminalPermissions, statusReady, terminalApi.getTerminalStatus]
+    : [statusReady, terminalApi.getTerminalStatus, permissionsReady, terminalApi.listTerminalPermissions]
+  ready(() => {})
   await vi.advanceTimersByTimeAsync(0)
-  expect(terminalApi.listTerminalPermissions).toHaveBeenCalledTimes(1)
-  expect(terminalApi.getTerminalStatus).toHaveBeenCalledTimes(1)
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(otherRead).not.toHaveBeenCalled()
+  other(() => {})
+  await vi.advanceTimersByTimeAsync(0)
+  expect(otherRead).toHaveBeenCalledTimes(1)
+})
+
+test('a status event newer than the first status read is kept', async () => {
+  let answerStatus: (status: TerminalToolStatus) => void = () => {}
+  terminalApi.getTerminalStatus.mockReturnValueOnce(new Promise((resolve) => { answerStatus = resolve }))
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  statusChanged(ready)
+  answerStatus({ supported: true, available: false, servedElsewhere: false, code: 'starting' })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.getByText('Ready')).toBeTruthy()
+})
+
+test('a failed refresh after an empty list keeps Forget available, and a later success clears the error', async () => {
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect((screen.getByRole('button', { name: 'Forget' }) as HTMLButtonElement).disabled).toBe(true)
+  terminalApi.listTerminalPermissions.mockRejectedValueOnce(new Error('Sesame could not read the terminal permissions.'))
+  permissionsChanged()
+  await vi.advanceTimersByTimeAsync(0)
+  expect((screen.getByRole('button', { name: 'Forget' }) as HTMLButtonElement).disabled).toBe(false)
+  expect(screen.queryByText(/No terminal is allowed right now/)).toBeNull()
+  expect(screen.getByText('Sesame could not read the terminal permissions.')).toBeTruthy()
+  permissionsChanged()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.queryByText('Sesame could not read the terminal permissions.')).toBeNull()
+  expect(screen.getByText(/No terminal is allowed right now/)).toBeTruthy()
+})
+
+test('a read that began before Forget cannot bring the forgotten terminal back', async () => {
+  const allowed = { allowances: [{ terminal: 'pts/6', remote: false, expiresInMs: 200_000 }], requests: [] }
+  terminalApi.listTerminalPermissions.mockResolvedValueOnce(allowed)
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.getByText(/Allowed for/)).toBeTruthy()
+  let answerStale: (list: TerminalAllowanceList) => void = () => {}
+  terminalApi.listTerminalPermissions.mockReturnValueOnce(new Promise((resolve) => { answerStale = resolve }))
+  permissionsChanged()
+  await vi.advanceTimersByTimeAsync(0)
+  await fireEvent.click(screen.getByRole('button', { name: 'Forget' }))
+  await vi.advanceTimersByTimeAsync(0)
+  answerStale(allowed)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.queryByText(/Allowed for/)).toBeNull()
+  expect(screen.getByText(/No terminal is allowed right now/)).toBeTruthy()
 })
 
 test('terminals whose names and positions run together are each listed', async () => {
