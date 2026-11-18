@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
@@ -32,6 +33,7 @@
 <ModalShell
   approval
   let:settled
+  settleKey={settleKeyFor(request)}
   open={true}
   onClose={cancel}
   labelledby="browser-create-heading"

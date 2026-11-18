@@ -84,14 +84,7 @@
   import SyncNotice from './lib/ui/SyncNotice.svelte'
   import { syncController } from './lib/sync'
   import { describeSyncForChrome } from './lib/controllers/sync-controller'
-  import BrowserFillApprovalModal from './lib/ui/BrowserFillApprovalModal.svelte'
-  import TerminalApprovalModal from './lib/ui/TerminalApprovalModal.svelte'
-  import BrowserIdentityFillApprovalModal from './lib/ui/BrowserIdentityFillApprovalModal.svelte'
-  import BrowserCardFillApprovalModal from './lib/ui/BrowserCardFillApprovalModal.svelte'
-  import BrowserTotpFillApprovalModal from './lib/ui/BrowserTotpFillApprovalModal.svelte'
-  import BrowserSaveApprovalModal from './lib/ui/BrowserSaveApprovalModal.svelte'
-  import BrowserChangeApprovalModal from './lib/ui/BrowserChangeApprovalModal.svelte'
-  import BrowserCreateApprovalModal from './lib/ui/BrowserCreateApprovalModal.svelte'
+  import ApprovalHost from './lib/ui/ApprovalHost.svelte'
   import PinSetupModal from './lib/ui/PinSetupModal.svelte'
   import ChangeMasterPasswordModal from './lib/ui/ChangeMasterPasswordModal.svelte'
   import EntryContextMenu from './lib/ui/EntryContextMenu.svelte'
@@ -1025,34 +1018,7 @@
     />
   {/if}
 
-  {#if $browserFill.request}
-    <BrowserFillApprovalModal request={$browserFill.request} working={$browserFill.working} onCancel={() => void browserFillController.resolve(null)} onConfirm={() => void browserFillController.resolve($browserFill.selectedId)} />
-  {:else if $browserIdentityFill.request}
-    <BrowserIdentityFillApprovalModal request={$browserIdentityFill.request} working={$browserIdentityFill.working} onCancel={() => void identityFillController.resolve(null)} onConfirm={() => void identityFillController.resolve($browserIdentityFill.selectedId)} />
-  {:else if $browserCardFill.request}
-    <BrowserCardFillApprovalModal request={$browserCardFill.request} working={$browserCardFill.working} onCancel={() => void cardFillController.resolve(null)} onConfirm={() => void cardFillController.resolve($browserCardFill.selectedId)} />
-  {:else if $browserTotpFill.request}
-    <BrowserTotpFillApprovalModal request={$browserTotpFill.request} working={$browserTotpFill.working} onCancel={() => void totpFillController.resolve(null)} onConfirm={() => void totpFillController.resolve($browserTotpFill.selectedId)} />
-  {:else if $browserSave.request}
-    <BrowserSaveApprovalModal request={$browserSave.request} working={$browserSave.working} onCancel={() => void browserSaveController.resolve(false)} onConfirm={() => void browserSaveController.resolve(true)} onNeverForSite={() => void browserSaveController.neverForSite()} />
-  {:else if $browserChange.request}
-    <BrowserChangeApprovalModal request={$browserChange.request} working={$browserChange.working} onCancel={() => void browserChangeController.resolve(null)} onConfirm={() => void browserChangeController.resolve($browserChange.selectedId)} />
-  {:else if $browserCreate.request}
-    <BrowserCreateApprovalModal request={$browserCreate.request} working={$browserCreate.working} onCancel={() => void browserCreateController.resolve(false)} onConfirm={() => void browserCreateController.resolve(true)} />
-  {:else if $terminalApproval.request}
-    {#key $terminalApproval.request.approvalId}
-      <TerminalApprovalModal
-        request={$terminalApproval.request}
-        onAllow={() => void terminalApprovalController.allow()}
-        onDeny={() => void terminalApprovalController.deny()}
-        onDismiss={() => void terminalApprovalController.dismiss()}
-        onExpire={terminalApprovalController.expire}
-        onSelect={terminalApprovalController.select}
-        onAllowTerminal={terminalApprovalController.setAllowTerminal}
-        onSecret={terminalApprovalController.setSecret}
-      />
-    {/key}
-  {/if}
+  <ApprovalHost fill={browserFillController} identity={identityFillController} card={cardFillController} totp={totpFillController} save={browserSaveController} change={browserChangeController} create={browserCreateController} terminal={terminalApprovalController} />
 
   {#if $presenceState.open}
     <PasswordPresenceModal intent={$presenceState.intent} bind:presenceSecret={$presenceState.secret} errorMessage={$presenceState.error} onConfirm={() => void presenceController.confirm()} onCancel={presenceController.cancel} />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { approvalFooterText, createApprovalWait } from '../approval-wait'
   import { useAppStores } from '../stores/app-stores'
   import { getTerminalApprovalWait, type CliApprovalRequestEvent } from '../terminal-api'
@@ -78,6 +79,7 @@
 <ModalShell
   approval
   let:settled
+  settleKey={settleKeyFor(request, state.selectedId, request.needsPresence)}
   open={true}
   onClose={close}
   labelledby="terminal-approval-heading"

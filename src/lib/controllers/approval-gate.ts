@@ -16,6 +16,10 @@ export type ApprovalKind = (typeof APPROVAL_KINDS)[number]
 
 export const APPROVAL_SETTLE_MS = 750
 
+export function settleKeyFor(request: { approvalId: string; candidates?: ReadonlyArray<{ id: string }> }, selectedId = '', ...shown: unknown[]): string {
+  return JSON.stringify([request.approvalId, (request.candidates ?? []).map((candidate) => candidate.id), selectedId, ...shown])
+}
+
 const surfaces = writable({ approvals: 0, prompts: 0 })
 
 function claim(field: 'approvals' | 'prompts'): () => void {

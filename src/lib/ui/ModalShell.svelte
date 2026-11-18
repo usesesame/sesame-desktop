@@ -17,6 +17,7 @@
   export let initialFocus: ((dialog: HTMLElement) => void) | null = null
   export let ariaBusy: boolean | undefined = undefined
   export let approval = false
+  export let settleKey = ''
 
   const steady = typeof document !== 'undefined' && (document.querySelector('[data-modal-shell]') !== null || performance.now() - lastClosedAt < HANDOVER_MS)
 
@@ -32,7 +33,13 @@
   let stopWatching: () => void = () => {}
   const releaseSurface = approval ? claimApprovalSurface() : claimPromptSurface()
 
+  let shownKey = settleKey
+
   $: if (waiting && !$approvalOnScreen) waiting = false
+  $: if (approval && settleKey !== shownKey) {
+    shownKey = settleKey
+    unsettle()
+  }
   $: shown = open && !waiting
 
   const focusableSelector = [

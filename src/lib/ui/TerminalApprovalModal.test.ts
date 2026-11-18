@@ -263,6 +263,8 @@ test('the chooser keeps Allow off for an item that has no field by that name', a
   expect(allowButton().disabled).toBe(true)
   stores.terminalApproval.patch({ selectedId: 'northwind-b' })
   await tick()
+  expect(allowButton().disabled).toBe(true)
+  await armed()
   expect(allowButton().disabled).toBe(false)
 })
 

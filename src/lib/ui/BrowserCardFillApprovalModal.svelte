@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
@@ -28,7 +29,7 @@
   const cancel = () => { if (!working) onCancel() }
 </script>
 
-<ModalShell approval let:settled open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
+<ModalShell approval let:settled settleKey={settleKeyFor(request, $browserCardFill.selectedId)} open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
   <h2 id="browser-card-heading">Fill {request.hostname}?</h2>
   <p id="browser-card-description">Choose a saved card. Every card fill needs this confirmation, and Sesame does not submit the form.</p>
