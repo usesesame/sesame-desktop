@@ -295,7 +295,7 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
         keepInTray: readKeepInTray(),
         quickAccessShortcut: readQuickAccessShortcut(),
       })
-      setVaultClipboardClearSeconds(settings.value().clipboardClearSeconds)
+      void Promise.resolve(setVaultClipboardClearSeconds(settings.value().clipboardClearSeconds)).catch(() => feedback.setErrorMessage('Sesame could not apply the clipboard timeout to terminal copies. Choose it again to retry.'))
       selection.patch({ sortMode: readSortMode() })
       state.patch({
         betaOnboardingDismissed: readBetaOnboardingDismissed(),
@@ -419,8 +419,9 @@ export function createSettingsController({ stores, feedback, modal, onPinSetupFi
     setClipboardClearSeconds(seconds: number) {
       settings.patch({ clipboardClearSeconds: seconds })
       storeClipboardClearSeconds(seconds)
-      setVaultClipboardClearSeconds(seconds)
-      feedback.showNotice('Clipboard timeout updated', `Copied values clear after ${seconds} seconds.`)
+      void Promise.resolve(setVaultClipboardClearSeconds(seconds))
+        .then(() => feedback.showNotice('Clipboard timeout updated', `Copied values clear after ${seconds} seconds.`))
+        .catch(() => feedback.setErrorMessage('Sesame could not apply the clipboard timeout to terminal copies. Choose it again to retry.'))
     },
     openPinSetup,
     closePinSetup() {
