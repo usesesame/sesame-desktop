@@ -43,8 +43,11 @@ impl AliasFailure {
     pub fn message(self) -> &'static str {
         match self {
             Self::NotSent => "Sesame could not prepare the request, so your API token was not sent.",
-            Self::NotConnected | Self::Unreachable => {
+            Self::NotConnected => {
                 "Sesame could not reach the alias service. Check your connection and try again."
+            }
+            Self::Unreachable => {
+                "The connection to the alias service ended before it answered, so an alias may have been made. Check your alias service before you try again."
             }
             Self::TokenRefused => {
                 "The alias service did not accept your API token. Paste a new one in Settings."
@@ -603,6 +606,14 @@ mod tests {
         .unwrap_err();
         assert_eq!(failure, AliasFailure::NotConnected);
         assert!(!failure.token_may_have_left());
+    }
+
+    #[test]
+    fn only_a_request_that_never_left_is_worth_simply_trying_again() {
+        assert!(AliasFailure::NotConnected.message().contains("try again"));
+        let unsure = AliasFailure::Unreachable.message();
+        assert!(unsure.contains("may have been made"));
+        assert!(unsure.contains("Check your alias service before you try again"));
     }
 
     #[test]

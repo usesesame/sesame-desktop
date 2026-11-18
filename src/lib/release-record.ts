@@ -159,10 +159,12 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
       return `Saved an attachment from ${title} to a file`
     case 'devicePaired':
       return 'Gave the vault key to a new device through Sync'
-    case 'emailAlias':
-      return entry.outcome === 'withdrawn'
-        ? `Sesame tried to make a new alias but did not send your API token to ${entry.host ?? 'the alias service'}`
-        : `Sent your alias API token to ${entry.host ?? 'the alias service'} to make a new alias`
+    case 'emailAlias': {
+      const host = entry.host ?? 'the alias service'
+      if (entry.outcome === 'withdrawn') return `Sesame tried to make a new alias but did not send your API token to ${host}`
+      if (entry.outcome === 'connectionClosed') return `Sesame may have sent your alias API token to ${host}, but the connection ended before an answer`
+      return `Sent your alias API token to ${host} to make a new alias`
+    }
     case 'cleared':
       return 'The activity record was cleared'
     case 'retentionShortened':

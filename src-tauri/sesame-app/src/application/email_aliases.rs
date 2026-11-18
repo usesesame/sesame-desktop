@@ -198,11 +198,12 @@ struct AliasAttempt<'a> {
 
 impl AliasAttempt<'_> {
     fn finish(&mut self, result: &Result<String, AliasFailure>) {
-        if let Err(failure) = result {
-            if !failure.token_may_have_left() {
-                self.outcome = Outcome::Withdrawn;
-            }
-        }
+        self.outcome = match result {
+            Ok(_) => Outcome::Released,
+            Err(failure) if !failure.token_may_have_left() => Outcome::Withdrawn,
+            Err(AliasFailure::Unreachable) => Outcome::ConnectionClosed,
+            Err(_) => Outcome::Released,
+        };
     }
 }
 
@@ -228,7 +229,7 @@ where
     let mut attempt = AliasAttempt {
         vault,
         host: api_host(request.service),
-        outcome: Outcome::Released,
+        outcome: Outcome::ConnectionClosed,
     };
     let result = send(request).await;
     attempt.finish(&result);
@@ -563,10 +564,9 @@ mod tests {
     }
 
     #[test]
-    fn a_request_that_may_have_left_is_recorded_as_sent() {
+    fn a_request_the_service_answered_is_recorded_as_sent() {
         for answer in [
             Ok("fictional.alias@anonaddy.me".to_string()),
-            Err(AliasFailure::Unreachable),
             Err(AliasFailure::TokenRefused),
             Err(AliasFailure::UnusableAnswer),
             Err(AliasFailure::ServiceDown),
@@ -588,7 +588,23 @@ mod tests {
     }
 
     #[test]
-    fn a_request_cut_short_after_it_started_is_still_recorded_as_sent() {
+    fn a_request_that_lost_its_connection_is_recorded_as_perhaps_sent() {
+        let vault = vault_with_addy(false);
+        let (result, seen) = sent_requests(&vault, None, Err(AliasFailure::Unreachable));
+        assert_eq!(result.unwrap_err(), AliasFailure::Unreachable.message());
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            recorded(&vault),
+            vec![(
+                EntryKind::EmailAlias,
+                Outcome::ConnectionClosed,
+                Some("app.addy.io".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn a_request_cut_short_after_it_started_is_recorded_as_perhaps_sent() {
         let vault = vault_with_addy(false);
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             block_on(create_email_alias_in_state(
@@ -606,7 +622,7 @@ mod tests {
             recorded(&vault),
             vec![(
                 EntryKind::EmailAlias,
-                Outcome::Released,
+                Outcome::ConnectionClosed,
                 Some("app.addy.io".to_string())
             )]
         );
