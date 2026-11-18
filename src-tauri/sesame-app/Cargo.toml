@@ -36,5 +36,6 @@ ts-rs = "12.0.1"
 tokio = { version = "=1.54.1", features = ["net", "rt", "time"], optional = true }
 
 [dev-dependencies]
+sesame-core = { path = "../sesame-core", features = ["test-util"] }
 sesame-sync = { path = "../sesame-sync", features = ["test-util"] }
 tokio = { version = "=1.54.1", features = ["net", "rt", "time"] }

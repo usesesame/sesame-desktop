@@ -48,6 +48,16 @@ test('the timeline shows sentences grouped under a day heading', async () => {
   expect(screen.getByText('About this list')).toBeTruthy()
 })
 
+test('an entry from a newer version shows as one plain row that opens nothing', async () => {
+  getReleaseRecord.mockResolvedValue(page([entry({ kind: 'newer', outcome: 'noted' })]))
+  const onOpenItem = vi.fn()
+  render(ReleaseRecordView, { titleFor, onOpenItem })
+
+  expect(await screen.findByText('Something a newer version of Sesame recorded')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /newer version/ })).toBeNull()
+  expect(document.querySelector('.activity-row.refused')).toBeNull()
+})
+
 test('opening a row with a known item goes to that item', async () => {
   getReleaseRecord.mockResolvedValue(page([entry({ itemId: 'login-a', itemKind: 'login', host: 'example.com' })]))
   const onOpenItem = vi.fn()
