@@ -99,7 +99,7 @@ pub async fn read_limited(mut response: reqwest::Response, limit: usize) -> Opti
         return None;
     }
     let mut body = Vec::new();
-    while let Ok(Some(chunk)) = response.chunk().await {
+    while let Some(chunk) = response.chunk().await.ok()? {
         if body.len() + chunk.len() > limit {
             return None;
         }

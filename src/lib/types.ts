@@ -162,6 +162,9 @@ export type { BrowserIntegrationStatus } from './generated/BrowserIntegrationSta
 // differently-named, differently-shaped Rust event type) and stay hand-written.
 export type { BrowserFillCandidate } from './generated/BrowserFillCandidate'
 export type { EntryKind } from './generated/EntryKind'
+export type { EmailAliasService } from './generated/EmailAliasService'
+export type { EmailAliasSettingsInput } from './generated/EmailAliasSettingsInput'
+export type { EmailAliasStatus } from './generated/EmailAliasStatus'
 export type { FieldKind } from './generated/FieldKind'
 export type { MatchKind } from './generated/MatchKind'
 export type { Outcome } from './generated/Outcome'

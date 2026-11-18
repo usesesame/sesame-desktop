@@ -3,6 +3,7 @@
 pub mod account_service;
 pub mod breach;
 pub mod capabilities;
+pub mod email_alias;
 pub mod server_address;
 pub mod server_trust;
 pub mod time;

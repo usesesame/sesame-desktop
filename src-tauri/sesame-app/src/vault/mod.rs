@@ -43,6 +43,8 @@ pub use sesame_core::backup::*;
 #[allow(unused_imports)]
 pub use sesame_core::crypto::*;
 #[allow(unused_imports)]
+pub use sesame_core::email_aliases::*;
+#[allow(unused_imports)]
 pub use sesame_core::history::*;
 #[allow(unused_imports)]
 pub use sesame_core::imports::*;
