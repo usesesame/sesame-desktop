@@ -1824,7 +1824,7 @@ test('the command line tool releases hidden values only behind the presence chec
 
 test('the terminal verbs answer before the desktop starts and never touch the window', () => {
   const main = read('src-tauri', 'src', 'main.rs')
-  assert.match(main, /run_terminal_command\(\)[\s\S]*sesame_lib::run\(\)/, 'the desktop starts before the terminal verbs are checked')
+  assert.match(main, /fn main\(\) \{\s*if let Some\(code\) = sesame_lib::run_terminal_command\(\) \{\s*std::process::exit\(code\);\s*\}\s*sesame_lib::run\(\)\s*\}/, 'a handled terminal command does not exit before the desktop starts')
   const client = read('src-tauri', 'src', 'terminal_client.rs')
   const verbs = client.match(/const VERBS: \[&str; \d+\] = \[([^\]]*)\]/)
   assert.ok(verbs, 'the terminal verbs moved')
