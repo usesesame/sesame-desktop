@@ -21,6 +21,8 @@ export const requiredShippedSteps = [
   'package.desktop_entry',
   'package.browser_host',
   'package.install',
+  'terminal.help',
+  'terminal.not_running',
   'app.launch',
   'app.stop',
   'browser.registration',
@@ -34,6 +36,8 @@ export const requiredRpmSteps = [
   'package.install',
   'package.desktop_entry',
   'package.browser_host',
+  'terminal.help',
+  'terminal.not_running',
   'app.launch',
   'app.stop',
   'browser.registration',
@@ -47,6 +51,8 @@ export const requiredAppImageSteps = [
   'package.desktop_entry',
   'package.browser_host',
   'package.display_backend',
+  'terminal.help',
+  'terminal.not_running',
   'app.launch',
   'app.stop',
   'browser.registration_staged',
@@ -76,6 +82,40 @@ export function formatForPackage(packagePath) {
   if (name.endsWith('.rpm')) return 'rpm'
   if (name.endsWith('.AppImage')) return 'appimage'
   throw new Error(`Unsupported Linux package: ${name}`)
+}
+
+export function terminalVerbEnvironment(environment, extraEnv = {}) {
+  const quiet = { ...process.env, ...environment, ...extraEnv }
+  delete quiet.DISPLAY
+  delete quiet.WAYLAND_DISPLAY
+  return quiet
+}
+
+export function judgeTerminalHelp(result) {
+  return result?.code === 0 && /sesame get <item> \[field\]/.test(result.stdout ?? '') && /sesame totp <item>/.test(result.stdout ?? '')
+}
+
+export function judgeTerminalNotRunning(result) {
+  return result?.code === 3 && /Sesame is not running/.test(result.stderr ?? '') && (result.stdout ?? '') === ''
+}
+
+export async function runTerminalVerb(executable, args, environment) {
+  try {
+    const { stdout, stderr } = await run(executable, args, { env: environment, timeout: 30_000, maxBuffer: 1024 * 1024 })
+    return { code: 0, stdout, stderr }
+  } catch (error) {
+    return { code: typeof error.code === 'number' ? error.code : null, stdout: String(error.stdout ?? ''), stderr: String(error.stderr ?? '') }
+  }
+}
+
+async function checkTerminalVerbs(steps, executable, environment, extraEnv = {}) {
+  const quiet = terminalVerbEnvironment(environment, extraEnv)
+  const help = await runTerminalVerb(executable, ['--help'], quiet)
+  const helpOk = judgeTerminalHelp(help)
+  record(steps, 'terminal.help', helpOk, { code: help.code }, helpOk ? undefined : 'sesame --help did not print the usage without a display.')
+  const list = await runTerminalVerb(executable, ['list'], quiet)
+  const listOk = judgeTerminalNotRunning(list)
+  record(steps, 'terminal.not_running', listOk, { code: list.code }, listOk ? undefined : 'sesame list did not exit with code 3 while the app was closed.')
 }
 
 export function apprunHooksForceX11(hookContents) {
@@ -324,6 +364,7 @@ async function runDebGate(context) {
     record(steps, 'package.install', true, { installKind: 'extracted', binary })
   }
   const binarySha256 = sha256(await readFile(binary))
+  await checkTerminalVerbs(steps, binary, environment)
 
   if (options.previous) {
     const previousPath = path.resolve(options.previous)
@@ -408,6 +449,7 @@ async function runRpmGate(context) {
   record(steps, 'package.desktop_entry', /^Exec=.*\bsesame\b/m.test(desktopEntry) && desktopEntry.includes('Icon=sesame') && icon?.isFile() === true)
   record(steps, 'package.browser_host', await executableFile(host))
   const binarySha256 = sha256(await readFile(binary))
+  await checkTerminalVerbs(steps, binary, environment)
 
   let reach = appNotRunning
   const alive = await launchAndStop(binary, { launchSeconds: context.options.launchSeconds, logPath: path.join(out, 'linux-rpm-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
@@ -470,6 +512,7 @@ async function runAppImageGate(context) {
   const displayBackendPinned = apprunHooksForceX11(hookContents)
   record(steps, 'package.display_backend', displayBackendPinned, { hooks: hookNames }, displayBackendPinned ? undefined : 'The AppImage apprun-hooks no longer export GDK_BACKEND=x11; update README.md and .github/SECURITY.md or drop the documented trade.')
   const binarySha256 = sha256(binaryBytes)
+  await checkTerminalVerbs(steps, packagePath, environment, { APPIMAGE_EXTRACT_AND_RUN: '1' })
 
   await removeBrowserRegistration(environment)
   let reach = appNotRunning
