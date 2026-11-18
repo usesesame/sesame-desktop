@@ -40,6 +40,42 @@ release cannot be published without saying what changed in it.
   notices survive a master password change and a crash.
 - The browser helper registers for Brave and Vivaldi on Linux.
 
+### Email aliases
+
+- Settings has a new Extras tab with email aliases, which stay off until you
+  pick addy.io or SimpleLogin and paste an API token from your account
+  there. The login editor then has a Create alias action that asks the
+  service for a new forwarding address and offers it for the email field.
+- The token is kept in your vault and syncs with it. Turning aliases off
+  removes it from the vault, but older backups and synced versions keep it,
+  so revoke it at the service to stop it working.
+- The service is told which site an alias is for only if you turn that on,
+  and then only the site's host name.
+- If the connection ends before the service answers, Sesame says an alias
+  may have been made, because it cannot tell.
+
+### Command line
+
+- sesame list, sesame get and sesame totp let a terminal ask the running app
+  for an item. Nothing leaves until you allow it in the Sesame window, a
+  hidden value also asks for your master password, and --copy has Sesame
+  copy the value so it never reaches the terminal.
+- On Linux you can allow one terminal for five minutes. The allowance ends
+  when the vault locks and when almost anything in the vault changes, and
+  Settings lists the allowed terminals under Extras. On Windows every
+  request asks.
+- Anything printed in a terminal can be read by other programs running as
+  you. On Linux the tool only checks that the app it reaches runs as you, so
+  a fake app run as you could learn what you typed and print made-up values.
+- The AppImage does not put sesame on your path, so use an alias to the
+  AppImage file.
+
+### Settings
+
+- Settings has six tabs: General, Security, Browser, Sync, Extras and Data.
+  The browser extension and the sites Sesame never saves are under Browser,
+  and the account, Sync and your own server are under Sync.
+
 ### Activity
 
 - A new Activity view lists every fill, copy, reveal and export, each item
@@ -50,6 +86,8 @@ release cannot be published without saying what changed in it.
   and the view says so.
 - Shortening how long activity is kept asks for the master password and
   leaves an entry.
+- An entry written by a newer version of Sesame is kept and shown as one
+  plain line, so going back a version does not make the list look damaged.
 
 ### Sync
 
