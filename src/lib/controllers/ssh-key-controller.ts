@@ -29,5 +29,3 @@ export function createSshKeyController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type SshKeyController = ReturnType<typeof createSshKeyController>

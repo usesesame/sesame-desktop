@@ -29,5 +29,3 @@ export function createCardController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type CardController = ReturnType<typeof createCardController>
