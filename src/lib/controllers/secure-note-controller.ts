@@ -29,5 +29,3 @@ export function createSecureNoteController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type SecureNoteController = ReturnType<typeof createSecureNoteController>

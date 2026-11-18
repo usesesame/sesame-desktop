@@ -155,13 +155,6 @@ export interface BackupSelection extends BackupInspection {
 export type { DesktopUpdateStatus } from './generated/DesktopUpdateStatus'
 export type { DesktopUpdateProgress } from './generated/DesktopUpdateProgress'
 
-export type BrowserIntegrationCode =
-  | 'ready'
-  | 'hostMissing'
-  | 'manifestMissing'
-  | 'registrationMissing'
-  | 'unsupported'
-
 export type { BrowserIntegrationStatus } from './generated/BrowserIntegrationStatus'
 
 // The other Browser*/*Fill*/*Cancelled types below have no Rust struct of the

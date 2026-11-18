@@ -29,5 +29,3 @@ export function createWifiNetworkController(options: RecordControllerOptions) {
     },
   })
 }
-
-export type WifiNetworkController = ReturnType<typeof createWifiNetworkController>

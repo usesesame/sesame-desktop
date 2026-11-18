@@ -56,5 +56,3 @@ export function createHistoryController({ stores, feedback }: HistoryControllerO
     },
   }
 }
-
-export type HistoryController = ReturnType<typeof createHistoryController>
