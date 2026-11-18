@@ -144,6 +144,8 @@ struct Harness {
     allowances: TerminalAllowances,
     clock: Arc<FakeClock>,
     unlock_timeout: Duration,
+    poll: Duration,
+    list_budget: Option<usize>,
 }
 
 impl Harness {
@@ -190,6 +192,8 @@ impl Harness {
             slot,
             clock,
             unlock_timeout: Duration::from_secs(10),
+            poll: Duration::from_millis(10),
+            list_budget: None,
         }
     }
 
@@ -216,8 +220,11 @@ impl Harness {
             &self.allowances,
             host,
         );
-        context.poll = Duration::from_millis(10);
+        context.poll = self.poll;
         context.unlock_timeout = self.unlock_timeout;
+        if let Some(budget) = self.list_budget {
+            context.list_budget = budget;
+        }
         serve_cli_request(&context, payload, origin);
     }
 
@@ -302,6 +309,9 @@ impl Harness {
                 clear_after_seconds: None,
             },
             self.allowances.revision(),
+            self.presence
+                .require(self.vault.state.session_epoch())
+                .is_ok(),
         )
     }
 
@@ -808,7 +818,25 @@ fn an_approval_without_presence_still_releases_no_hidden_value() {
     let harness = Harness::new();
     let (replies, _) =
         harness.run_with(&get(16, Some("password"), false), &terminal(100), |_, _| {
-            harness.allow(false)
+            let event = harness.pending();
+            assert_eq!(
+                harness.decide(&event, CliDecisionKind::Allow, None, false),
+                Err(super::cli_broker::PRESENCE_NEEDED)
+            );
+            harness
+                .approvals
+                .decide(
+                    CliDecisionInput {
+                        approval_id: event.approval_id.clone(),
+                        decision: CliDecisionKind::Allow,
+                        item_id: None,
+                        allow_terminal: None,
+                        clear_after_seconds: None,
+                    },
+                    harness.allowances.revision(),
+                    true,
+                )
+                .expect("a window that claims presence");
         });
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
     assert!(!wire(&replies).contains(CANARY));
@@ -1189,7 +1217,7 @@ fn a_browser_approval_makes_the_tool_busy_and_takes_the_slot_from_a_tool_approva
     assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
     assert_eq!(
         error_message(&replies).as_deref(),
-        Some("Sesame set this request aside to answer your browser. Try again in a moment.")
+        Some("Sesame set this request aside to answer your browser. Try again shortly.")
     );
     assert!(events.contains(&"approvalCancelled:preempted".to_string()));
     assert!(!wire(&replies).contains("casey@northwind.example"));
@@ -1511,8 +1539,7 @@ fn labels_with_control_characters_reach_the_tool_readable_distinct_and_matchable
     }
 }
 
-const PREEMPTED: &str =
-    "Sesame set this request aside to answer your browser. Try again in a moment.";
+const PREEMPTED: &str = "Sesame set this request aside to answer your browser. Try again shortly.";
 
 fn northwind() -> CliCandidate {
     CliCandidate {
@@ -1618,6 +1645,7 @@ fn an_allowance_decided_before_forget_is_not_kept() {
                     clear_after_seconds: None,
                 },
                 before_forget,
+                false,
             )
             .expect("allowed");
     });
@@ -1840,4 +1868,159 @@ fn every_field_name_in_a_whole_item_selects_that_field() {
     }
     assert!(fields.iter().any(|field| field.name == "email"));
     assert!(fields.iter().any(|field| field.name == "PIN"));
+}
+
+#[test]
+fn a_decision_turned_down_for_the_browser_keeps_the_clipboard_timeout() {
+    let harness = Harness::new();
+    let (replies, _) = harness.run_with(
+        &get(1, Some("username"), true),
+        &terminal(100),
+        |host, _| {
+            wait_for(host, "approvalRequested");
+            let event = harness.pending();
+            let browser = harness.slot.take_for_browser_before_preempting();
+            harness.approvals.window_focus_changed(true);
+            harness.clock.advance(Duration::from_secs(1));
+            assert_eq!(
+                harness.approvals.decide(
+                    CliDecisionInput {
+                        approval_id: event.approval_id.clone(),
+                        decision: CliDecisionKind::Allow,
+                        item_id: None,
+                        allow_terminal: None,
+                        clear_after_seconds: Some(60),
+                    },
+                    harness.allowances.revision(),
+                    true,
+                ),
+                Err("approvalExpired")
+            );
+            drop(browser);
+        },
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
+    assert_eq!(harness.approvals.clear_after_seconds(), 30);
+}
+
+#[test]
+fn an_allow_that_arrives_after_the_terminal_closed_releases_and_grants_nothing() {
+    let mut harness = Harness::new();
+    harness.poll = Duration::from_secs(5);
+    let origin = terminal(100);
+    let (replies, events) =
+        harness.run_with(&get(2, Some("username"), true), &origin, |host, effects| {
+            wait_for(host, "approvalRequested");
+            host.gone.store(true, Ordering::SeqCst);
+            harness.allow(true);
+            let until = Instant::now() + Duration::from_secs(10);
+            while !host
+                .events()
+                .iter()
+                .any(|event| event == "approvalCancelled:connectionClosed")
+            {
+                assert!(
+                    Instant::now() < until,
+                    "the closed terminal was not noticed"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!effects
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Effect::CopySecret { .. })));
+        });
+    assert_eq!(
+        replies,
+        vec![CliReply::waiting(&id(2), WaitReason::Approval)]
+    );
+    assert!(events.contains(&"approvalCancelled:connectionClosed".to_string()));
+    assert!(!harness
+        .allowances
+        .covers(&origin, harness.vault.state.session_epoch()));
+}
+
+#[test]
+fn an_unlock_that_finishes_after_the_deadline_behind_the_session_lock_opens_no_approval() {
+    let mut harness = Harness::new();
+    harness.unlock_timeout = Duration::from_millis(200);
+    harness
+        .approvals
+        .shorten_approval_timeout(Duration::from_millis(150));
+    harness.lock(&harness.effects());
+    let (replies, events) = harness.run_with(
+        &get(3, Some("username"), false),
+        &terminal(100),
+        |host, _| {
+            wait_for(host, "unlockRequested");
+            harness
+                .vault
+                .reopen_after_holding(Duration::from_millis(500));
+        },
+    );
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Timeout));
+    assert!(events.contains(&"unlockEnded:expired".to_string()));
+    assert!(!events.contains(&"approvalRequested".to_string()));
+}
+
+#[test]
+fn a_request_answered_before_forget_is_not_listed_after_it() {
+    let clock = FakeClock::new();
+    let allowances = TerminalAllowances::with_clock(clock);
+    let origin = terminal(100);
+    assert!(allowances.grant(&origin, 5, allowances.revision()));
+    let revision = allowances.covering_revision(&origin, 5).expect("covered");
+    allowances.forget_all();
+    allowances.note_request(
+        &origin,
+        revision,
+        super::terminal_allowances::allowed_request("list", None, None),
+    );
+    assert!(allowances.list(5).requests.is_empty());
+
+    let fresh = allowances.revision();
+    allowances.note_request(
+        &origin,
+        fresh,
+        super::terminal_allowances::allowed_request("list", None, None),
+    );
+    assert_eq!(allowances.list(5).requests.len(), 1);
+}
+
+#[test]
+fn presence_that_lapses_while_the_approval_is_open_asks_for_the_password_and_keeps_the_request() {
+    let harness = Harness::new();
+    grant(&harness.vault, &harness.presence);
+    let (replies, _) = harness.run_with(
+        &get(4, Some("password"), false),
+        &terminal(100),
+        |host, _| {
+            wait_for(host, "approvalRequested");
+            let event = harness.pending();
+            assert!(!event.needs_presence);
+            harness.presence.revoke();
+            assert_eq!(
+                harness.decide(&event, CliDecisionKind::Allow, None, false),
+                Err(super::cli_broker::PRESENCE_NEEDED)
+            );
+            assert!(harness.approvals.pending_request().is_some());
+            grant(&harness.vault, &harness.presence);
+            harness
+                .decide(&event, CliDecisionKind::Allow, None, false)
+                .expect("allowed after the password");
+        },
+    );
+    assert_eq!(replies.last(), Some(&CliReply::value(&id(4), CANARY, true)));
+}
+
+#[test]
+fn a_list_over_the_budget_sends_no_rows_through_the_request() {
+    let mut harness = Harness::new();
+    harness.list_budget = Some(64);
+    let list = request(5, serde_json::json!({ "type": "list" }));
+    let (replies, _) = harness.run_with(&list, &terminal(100), |_, _| harness.allow(false));
+    assert!(replies
+        .iter()
+        .all(|reply| !matches!(reply.reply_type, CliReplyType::Items | CliReplyType::Done)));
+    assert_eq!(error_code(&replies), Some(CliErrorCode::TooLarge));
 }

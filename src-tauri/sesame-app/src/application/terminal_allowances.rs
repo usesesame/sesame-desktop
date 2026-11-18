@@ -191,27 +191,37 @@ impl TerminalAllowances {
     }
 
     pub fn covers(&self, origin: &TerminalOrigin, epoch: u64) -> bool {
-        let Some(key) = origin.key.as_ref() else {
-            return false;
-        };
-        let Ok(mut inner) = self.inner.lock() else {
-            return false;
-        };
+        self.covering_revision(origin, epoch).is_some()
+    }
+
+    pub fn covering_revision(&self, origin: &TerminalOrigin, epoch: u64) -> Option<u64> {
+        let key = origin.key.as_ref()?;
+        let mut inner = self.inner.lock().ok()?;
         let now = self.clock.now();
         let epoch_checked = inner.epoch_checked;
         inner.allowances.retain(|allowance| {
             allowance.expires_at > now && (!epoch_checked || allowance.epoch == epoch)
         });
+        let revision = inner.revision;
         inner
             .allowances
             .iter()
             .any(|allowance| allowance.key == *key)
+            .then_some(revision)
     }
 
-    pub fn note_request(&self, origin: &TerminalOrigin, request: AllowedTerminalRequest) {
+    pub fn note_request(
+        &self,
+        origin: &TerminalOrigin,
+        revision: u64,
+        request: AllowedTerminalRequest,
+    ) {
         let Ok(mut inner) = self.inner.lock() else {
             return;
         };
+        if inner.revision != revision {
+            return;
+        }
         let mut request = request;
         request.terminal = terminal_label(origin);
         inner.requests.push_front(request);

@@ -26,6 +26,7 @@ pub const COOLING_MESSAGE: &str = "Sesame is turning away terminal requests for 
 const REPLAY_CACHE_SIZE: usize = 128;
 const APPROVAL_EXPIRED: &str = "approvalExpired";
 const SELECTION_NOT_OFFERED: &str = "selectionNotOffered";
+pub const PRESENCE_NEEDED: &str = "presenceNeeded";
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export)]
@@ -372,17 +373,26 @@ impl CliApprovalState {
         &self,
         input: CliDecisionInput,
         allowance_revision: u64,
+        presence_ready: bool,
     ) -> Result<(), &'static str> {
         let mut inner = self.lock();
-        let (offered, not_found, terminal_allowed) = {
+        let (offered, not_found, terminal_allowed, hidden) = {
             let pending = inner.pending.as_ref().ok_or(APPROVAL_EXPIRED)?;
             if pending.approval_id != input.approval_id || pending.deadline <= Instant::now() {
                 return Err(APPROVAL_EXPIRED);
             }
+            let hidden: Vec<String> = pending
+                .event
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.field_hidden)
+                .map(|candidate| candidate.id.clone())
+                .collect();
             (
                 pending.offered.clone(),
                 pending.not_found,
                 pending.terminal_allowed,
+                hidden,
             )
         };
         let decision = match input.decision {
@@ -405,6 +415,13 @@ impl CliApprovalState {
                     (None, []) => None,
                     (None, _) => return Err(SELECTION_NOT_OFFERED),
                 };
+                if !presence_ready
+                    && item_id
+                        .as_ref()
+                        .is_some_and(|id| hidden.iter().any(|hidden| hidden == id))
+                {
+                    return Err(PRESENCE_NEEDED);
+                }
                 CliDecision::Allow {
                     item_id,
                     terminal_grant: (terminal_allowed && input.allow_terminal.unwrap_or(false))
@@ -412,20 +429,32 @@ impl CliApprovalState {
                 }
             }
         };
-        if let Some(seconds) = input.clear_after_seconds {
-            if CLEAR_AFTER_CHOICES.contains(&seconds) {
-                inner.clear_after_seconds = seconds;
+        let pending = inner.pending.as_ref().ok_or(APPROVAL_EXPIRED)?;
+        let committed = pending._slot.while_held(|| {
+            if pending.deadline <= Instant::now() {
+                None
+            } else {
+                Some(pending.sender.send(decision).is_ok())
             }
-        }
-        let pending = inner.pending.take().ok_or(APPROVAL_EXPIRED)?;
-        let sent = pending
-            ._slot
-            .while_held(|| pending.sender.send(decision).is_ok());
-        match sent {
-            Some(true) => Ok(()),
-            Some(false) => Err(APPROVAL_EXPIRED),
+        });
+        match committed {
+            Some(None) => Err(APPROVAL_EXPIRED),
+            Some(Some(sent)) => {
+                inner.pending = None;
+                if !sent {
+                    return Err(APPROVAL_EXPIRED);
+                }
+                if let Some(seconds) = input.clear_after_seconds {
+                    if CLEAR_AFTER_CHOICES.contains(&seconds) {
+                        inner.clear_after_seconds = seconds;
+                    }
+                }
+                Ok(())
+            }
             None => {
-                let _ = pending.sender.send(CliDecision::Preempted);
+                if let Some(pending) = inner.pending.take() {
+                    let _ = pending.sender.send(CliDecision::Preempted);
+                }
                 Err(APPROVAL_EXPIRED)
             }
         }

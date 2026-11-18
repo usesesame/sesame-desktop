@@ -1,10 +1,13 @@
 use tauri::{AppHandle, State};
 
 use crate::application::browser_fill::{APPROVAL_TOO_SOON, APPROVAL_TOO_SOON_MESSAGE};
-use crate::application::cli_broker::{CliApprovalRequestEvent, CliDecisionInput};
+use crate::application::cli_broker::{CliApprovalRequestEvent, CliDecisionInput, PRESENCE_NEEDED};
 use crate::application::terminal_allowances::TerminalAllowanceList;
+use crate::release::ReleasePresence;
 use crate::terminal::{CliApprovalState, TerminalAllowances, TerminalListener, TerminalToolStatus};
 use crate::vault::{VaultResult, VaultState};
+
+const PRESENCE_NEEDED_MESSAGE: &str = "Enter your master password to send a hidden value.";
 
 #[tauri::command]
 pub fn get_pending_terminal_request(
@@ -23,11 +26,15 @@ pub fn resolve_terminal_request(
     decision: CliDecisionInput,
     approvals: State<'_, CliApprovalState>,
     allowances: State<'_, TerminalAllowances>,
+    vault: State<'_, VaultState>,
+    presence: State<'_, ReleasePresence>,
 ) -> VaultResult<()> {
+    let presence_ready = presence.require(vault.session_epoch()).is_ok();
     approvals
-        .decide(decision, allowances.revision())
+        .decide(decision, allowances.revision(), presence_ready)
         .map_err(|error| match error {
             APPROVAL_TOO_SOON => APPROVAL_TOO_SOON_MESSAGE.to_string(),
+            PRESENCE_NEEDED => PRESENCE_NEEDED_MESSAGE.to_string(),
             "selectionNotOffered" => "Choose one of the items Sesame offered.".to_string(),
             _ => "This terminal request is no longer waiting in Sesame.".to_string(),
         })

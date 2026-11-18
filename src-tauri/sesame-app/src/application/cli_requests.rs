@@ -32,7 +32,7 @@ const PRESENCE_MESSAGE: &str =
     "Sesame needs your master password before it releases this value. Try again and enter it in Sesame.";
 const EMPTY_FIELD_ERROR: &str = "Nothing is saved in that field for this item.";
 const PREEMPTED_MESSAGE: &str =
-    "Sesame set this request aside to answer your browser. Try again in a moment.";
+    "Sesame set this request aside to answer your browser. Try again shortly.";
 const ITEM_TOO_LARGE: &str =
     "This item is too large to send at once. Ask for one field at a time instead.";
 const LIST_TOO_LARGE: &str =
@@ -58,6 +58,7 @@ pub struct CliContext<'a> {
     pub host: &'a dyn CliHost,
     pub poll: Duration,
     pub unlock_timeout: Duration,
+    pub list_budget: usize,
 }
 
 impl<'a> CliContext<'a> {
@@ -78,6 +79,7 @@ impl<'a> CliContext<'a> {
             host,
             poll: CLI_POLL,
             unlock_timeout: CLI_UNLOCK_TIMEOUT,
+            list_budget: LIST_BUDGET_BYTES,
         }
     }
 }
@@ -204,7 +206,8 @@ fn wait_for_unlock(
         );
         let observed = Instant::now();
         if observed < deadline {
-            if let Some(epoch) = unlocked_epoch(context.vault) {
+            if let Some(epoch) = unlocked_epoch(context.vault).filter(|_| Instant::now() < deadline)
+            {
                 context.host.unlock_ended("unlocked");
                 return Ok(Unlocked {
                     epoch,
@@ -336,7 +339,8 @@ fn answer(
     let epoch = unlocked.epoch;
     let fresh_password_since = unlocked.after_wait;
     let subject = resolve_subject(context.vault, epoch, command)?;
-    let allowed = context.allowances.covers(origin, epoch);
+    let allowed_revision = context.allowances.covering_revision(origin, epoch);
+    let allowed = allowed_revision.is_some();
     let needs_presence = subject.field_hidden
         && (fresh_password_since.is_some() || context.presence.require(epoch).is_err());
     let not_found = !matches!(command, CliCommand::List) && subject.candidates.is_empty();
@@ -424,9 +428,10 @@ fn answer(
             password_since: fresh_password_since,
         },
     )?;
-    if !prompt_needed {
+    if let Some(revision) = allowed_revision.filter(|_| !prompt_needed) {
         context.allowances.note_request(
             origin,
+            revision,
             allowed_request(
                 command_name(command),
                 chosen
@@ -506,6 +511,9 @@ fn prompt(
                 return stop("vaultChanged", Stop::Reply(CliErrorCode::Stale));
             }
             Ok(CliDecision::Preempted) => return preempted(),
+            Ok(_) if !context.host.peer_connected() => {
+                return unanswered("connectionClosed", Stop::Gone);
+            }
             Ok(decision) => return Ok(decision),
             Err(RecvTimeoutError::Timeout) => {}
         }
@@ -524,6 +532,9 @@ fn prompt(
                     if context.vault.session_epoch() == epoch
                         && decision != CliDecision::Withdrawn =>
                 {
+                    if !context.host.peer_connected() {
+                        return unanswered("connectionClosed", Stop::Gone);
+                    }
                     return Ok(decision);
                 }
                 _ => {}
@@ -889,7 +900,7 @@ fn release(
 ) -> Result<Vec<CliReply>, Stop> {
     let epoch = freshness.epoch;
     match command {
-        CliCommand::List => list_frames(context.vault, epoch, request_id, LIST_BUDGET_BYTES),
+        CliCommand::List => list_frames(context.vault, epoch, request_id, context.list_budget),
         CliCommand::Get { field: None, .. } => {
             let chosen = chosen.ok_or(Stop::Reply(CliErrorCode::NotFound))?;
             let fields = with_session(context.vault, epoch, |session| {
