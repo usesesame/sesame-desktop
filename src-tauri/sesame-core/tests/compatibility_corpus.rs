@@ -510,6 +510,7 @@ fn every_format_10_fixture_upgrades_on_save_and_keeps_its_original_copy() {
         let file = VaultLoader::read(&vault).expect("fixture envelope");
         let opened = VaultLoader::open(&file, Credential::MasterPassword(password))
             .expect("opened the fixture");
+        assert!(opened.payload.email_aliases.is_none(), "{tag}");
         let mut session = UnlockedVault::from_opened(vault.clone(), &opened).expect("session");
         persist_session(&mut session).expect("saved the upgrade");
 
@@ -535,6 +536,7 @@ fn every_format_10_fixture_upgrades_on_save_and_keeps_its_original_copy() {
             let reopened = VaultLoader::open(&upgraded, credential)
                 .unwrap_or_else(|error| panic!("{tag} upgrade did not reopen: {error:?}"));
             assert!(!reopened.migrated, "{tag}");
+            assert!(reopened.payload.email_aliases.is_none(), "{tag}");
             assert_eq!(reopened.payload.vault_id, opened.payload.vault_id, "{tag}");
             assert_eq!(
                 counts_of(&reopened.payload),
@@ -547,6 +549,13 @@ fn every_format_10_fixture_upgrades_on_save_and_keeps_its_original_copy() {
                 "{tag}"
             );
         }
+        let written: Value = serde_json::from_slice(
+            VaultLoader::authenticate(&upgraded, Credential::MasterPassword(password))
+                .expect("upgraded payload")
+                .bytes(),
+        )
+        .expect("upgraded payload json");
+        assert!(written.get("emailAliases").is_none(), "{tag}");
         let _ = fs::remove_dir_all(&directory);
     }
 }
@@ -716,6 +725,7 @@ fn fixture_v0_5_3_upgrades_to_format_11_and_moves_login_legacy_fields() {
         )
         .expect("opened the fixture");
         assert!(opened.migrated);
+        assert!(opened.payload.email_aliases.is_none(), "{tag}");
         let mut session = UnlockedVault::from_opened(vault.clone(), &opened).expect("session");
         persist_session(&mut session).expect("saved the upgrade");
         drop(session);

@@ -6,12 +6,13 @@
   import Icon from '../Icon.svelte'
   import { generatorLabels, generatorOptionKeys } from '../generator'
   import { useAppStores } from '../stores/app-stores'
-  import { grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
+  import { createEmailAlias, grantPresence, PRESENCE_REQUIRED, revealLoginSecret, suggestFieldValues } from '../vault'
+  import { emailAliases, loadEmailAliases, serviceNames } from '../email-aliases'
   import { messageFor } from '../controllers/feedback-controller'
   import PasswordPresenceModal from './PasswordPresenceModal.svelte'
   import LoginCustomFields from './LoginCustomFields.svelte'
   import type { Folder, LoginInput, MatchRule } from '../types'
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
 
   const PASSWORD_HIDE_AFTER_MS = 30_000
 
@@ -37,6 +38,58 @@
   }
 
   const { generator, vault } = useAppStores()
+
+  let aliasWorking = false
+  let aliasNote = ''
+  let aliasError = ''
+  let offeredAlias = ''
+  $: aliasService = $emailAliases?.service
+
+  onMount(() => {
+    if (!$emailAliases) loadEmailAliases().catch(() => {})
+  })
+
+  let aliasRequest = 0
+  onDestroy(() => (aliasRequest += 1))
+
+  async function createAlias() {
+    const service = aliasService
+    if (aliasWorking || !service) return
+    const request = ++aliasRequest
+    aliasWorking = true
+    aliasError = ''
+    if (!offeredAlias) aliasNote = ''
+    const emailBefore = loginDraft.email
+    try {
+      const alias = await createEmailAlias(loginDraft.url || undefined)
+      if (request !== aliasRequest) return
+      if (loginDraft.email === emailBefore) {
+        useAlias(alias, service)
+      } else {
+        offeredAlias = alias
+        aliasNote = `${serviceNames[service]} made ${alias}. You changed the email while it was being made, so Sesame kept what you typed.`
+        offeredService = service
+      }
+    } catch (error) {
+      if (request === aliasRequest) aliasError = messageFor(error)
+    } finally {
+      aliasWorking = false
+    }
+  }
+
+  let offeredService: NonNullable<typeof aliasService> = 'addy'
+
+  function useAlias(alias: string, service: NonNullable<typeof aliasService>) {
+    loginDraft = { ...loginDraft, email: alias }
+    dirty = true
+    offeredAlias = ''
+    aliasNote = `${serviceNames[service]} made a new alias. Save the login to keep it.`
+  }
+
+  function submit() {
+    if (aliasWorking) return
+    onSubmit(totpEntered)
+  }
 
   export let loginDraft: LoginInput
   export let folderOptions: Folder[] = []
@@ -98,7 +151,7 @@
 
   function requestClose() {
     if (savingLogin) return
-    if (dirty) {
+    if (dirty || aliasWorking) {
       confirmingDiscard = true
       return
     }
@@ -261,7 +314,7 @@
   initialFocus={focusInitial}
   ariaBusy={savingLogin}
 >
-  <form on:submit|preventDefault={() => onSubmit(totpEntered)} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
+  <form on:submit|preventDefault={submit} on:input={() => (dirty = true)} on:change={() => (dirty = true)}>
   <header class="editor-header">
     <div><h2 id="login-editor-heading">{editorTitle}</h2></div>
     <button class="modal-close" type="button" disabled={savingLogin} on:click={requestClose} aria-label="Close login editor">×</button>
@@ -294,6 +347,14 @@
     <div class="editor-two-column">
       <label>Username <span class="field-hint">What the site calls a sign-in name, if it is not your email</span><input name="login-username" bind:value={loginDraft.username} maxlength="2048" autocomplete="off" spellcheck="false" list="username-suggestions" on:focus={() => loadSuggestions('username')} /></label>
       <label>Email <span class="field-hint">Only if the site asks for this separately from a username</span><input name="login-email" type="email" bind:value={loginDraft.email} maxlength="2048" autocomplete="off" spellcheck="false" list="email-suggestions" on:focus={() => loadSuggestions('email')} /></label>
+      {#if aliasService || aliasWorking || aliasNote || aliasError}
+        <p class="suggestion-note alias-action">
+          {#if aliasService || aliasWorking}<button type="button" class="text-button" disabled={aliasWorking || savingLogin} on:click={createAlias}>{aliasWorking ? 'Creating alias…' : 'Create alias'}</button>{/if}
+          {#if aliasError}<span class="alias-error" role="alert">{aliasError}</span>{/if}
+          {#if aliasNote && (!aliasError || offeredAlias)}<span role="status">{aliasNote}</span>{/if}
+          {#if offeredAlias}<button type="button" class="text-button" disabled={savingLogin} on:click={() => useAlias(offeredAlias, offeredService)}>Use the alias</button>{/if}
+        </p>
+      {/if}
       <datalist id="username-suggestions">{#each usernameSuggestions as value (value)}<option {value}></option>{/each}</datalist>
       <datalist id="email-suggestions">{#each emailSuggestions as value (value)}<option {value}></option>{/each}</datalist>
     </div>
@@ -353,7 +414,7 @@
 
   {#if confirmingDelete}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.</p>
+      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.{aliasWorking ? ' An alias is still being made, and deleting does not stop it.' : ''}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDelete = false)}>Keep editing</button>
         <button type="button" class="editor-delete" on:click={onDelete}>Delete login</button>
@@ -361,14 +422,14 @@
     </footer>
   {:else if confirmingDiscard}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Discard your changes?</strong> This login has edits that have not been saved.</p>
+      <p><strong>{dirty ? 'Discard your changes?' : 'Leave this login?'}</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : dirty ? 'This login has edits that have not been saved.' : 'Nothing has changed since you opened it.'}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDiscard = false)}>Keep editing</button>
-        <button type="button" class="editor-delete" on:click={discard}>Discard changes</button>
+        <button type="button" class="editor-delete" on:click={discard}>{dirty ? 'Discard changes' : 'Leave'}</button>
       </div>
     </footer>
   {:else}
-    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={() => (confirmingDelete = true)}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
+    <footer class="editor-footer">{#if loginDraft.id}<button type="button" class="editor-delete" disabled={savingLogin} on:click={() => (confirmingDelete = true)}>Delete login</button>{/if}<div class="editor-footer-actions"><button type="button" class="secondary-button" disabled={savingLogin} on:click={requestClose}>Cancel</button><button class="primary-button" type="submit" disabled={savingLogin || aliasWorking}>{savingLogin ? 'Saving…' : 'Save login'}</button></div></footer>
   {/if}
   </form>
 
@@ -376,3 +437,9 @@
     <PasswordPresenceModal bind:presenceSecret={presenceSecret} errorMessage={presenceError} onConfirm={confirmEditorPresence} onCancel={cancelEditorPresence} />
   {/if}
 </ModalShell>
+
+<style>
+  .alias-action { grid-column: -2; min-width: 0; overflow-wrap: anywhere; }
+  .alias-action .text-button { margin-left: calc(var(--space-1) * -1); }
+  .alias-error { color: var(--danger); }
+</style>

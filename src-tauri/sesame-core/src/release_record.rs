@@ -70,6 +70,7 @@ pub enum EntryKind {
     RecoveryKitSaved,
     AttachmentSaved,
     DevicePaired,
+    EmailAlias,
     Cleared,
     RetentionShortened,
     Unreadable,
@@ -349,6 +350,7 @@ pub struct ReleaseDraft {
     pub match_kind: Option<MatchKind>,
     pub count: u32,
     pub at: Option<u64>,
+    pub vault_id: Option<String>,
 }
 
 impl ReleaseDraft {
@@ -364,7 +366,13 @@ impl ReleaseDraft {
             match_kind: None,
             count: 1,
             at: None,
+            vault_id: None,
         }
+    }
+
+    pub fn for_vault(mut self, vault_id: &str) -> Self {
+        self.vault_id = Some(vault_id.to_string());
+        self
     }
 
     pub fn item(mut self, id: &str, kind: &str) -> Self {
@@ -450,6 +458,7 @@ impl ReleaseDraft {
             match_kind: None,
             count: self.count.max(1),
             at: Some(self.at.unwrap_or(at)),
+            vault_id: self.vault_id,
         }
     }
 }
@@ -1341,6 +1350,7 @@ impl Inner {
             queued.kind == draft.kind
                 && queued.host == draft.host
                 && queued.outcome == draft.outcome
+                && queued.vault_id == draft.vault_id
         }) {
             existing.count = existing.count.saturating_add(draft.count);
             existing.at = existing.at.max(draft.at);
@@ -1494,6 +1504,13 @@ impl Inner {
                 self.note_lost(now);
                 continue;
             };
+            if draft
+                .vault_id
+                .as_deref()
+                .is_some_and(|vault_id| vault_id != session_vault_id(session))
+            {
+                continue;
+            }
             let Some(open) = self.open.as_mut() else {
                 self.unwritten.push_front((draft, late));
                 self.mark_late();
@@ -1749,9 +1766,9 @@ mod tests {
             .host("example.com")
     }
 
-    fn alias_json(seq: u64, at: u64) -> String {
+    fn later_json(seq: u64, at: u64) -> String {
         format!(
-            r#"{{"seq":{seq},"at":{at},"kind":"emailAlias","outcome":"released","itemId":"item-0","host":"example.com","count":1}}"#
+            r#"{{"seq":{seq},"at":{at},"kind":"fictionalLaterKind","outcome":"released","itemId":"item-0","host":"example.com","count":1}}"#
         )
     }
 
@@ -1791,7 +1808,7 @@ mod tests {
     fn an_unknown_kind_in_the_middle_keeps_the_chain_and_the_entries_after_it() {
         let fixture = Fixture::new();
         fixture.seed(2);
-        fixture.seal(&alias_json(2, START + 5));
+        fixture.seal(&later_json(2, START + 5));
         fixture.seal(&format!(
             r#"{{"seq":3,"at":{},"kind":"copy","outcome":"released","itemId":"item-after","itemKind":"login","fields":["password"],"count":1}}"#,
             START + 6
@@ -1878,7 +1895,7 @@ mod tests {
     fn a_newer_entry_that_fails_authentication_is_still_damage() {
         let fixture = Fixture::new();
         fixture.seed(2);
-        fixture.seal(&alias_json(2, START + 5));
+        fixture.seal(&later_json(2, START + 5));
         fixture.state().append(&fixture.session, fill("item-after"));
         let mut lines = fixture.lines();
         let target = lines[3].len() - 10;
@@ -1904,7 +1921,7 @@ mod tests {
             (record_id, "fictional-other-vault", 2),
             (record_id, vault_id.as_str(), 3),
         ] {
-            let plaintext = padded(&alias_json(seq, START + 5), PLAINTEXT_BYTES);
+            let plaintext = padded(&later_json(seq, START + 5), PLAINTEXT_BYTES);
             let blob = encrypt_bytes(&key, &plaintext, &entry_aad(&record, vault, seq, &prev))
                 .expect("blob");
             let mut line = serde_json::to_vec(&blob).expect("line");
@@ -1925,7 +1942,7 @@ mod tests {
     fn a_newer_entry_with_the_wrong_sequence_number_is_still_damage() {
         let fixture = Fixture::new();
         fixture.seed(2);
-        fixture.seal(&alias_json(7, START + 5));
+        fixture.seal(&later_json(7, START + 5));
         assert_damaged_after(&fixture, 2);
     }
 
@@ -1952,7 +1969,7 @@ mod tests {
     fn a_vault_key_change_reseals_a_newer_entry_byte_for_byte() {
         let mut fixture = Fixture::new();
         fixture.seed(2);
-        fixture.seal(&alias_json(2, START + 5));
+        fixture.seal(&later_json(2, START + 5));
         let state = fixture.state();
         state.entries(&fixture.session).expect("entries");
         let header = fixture.lines()[0].clone();
@@ -1966,7 +1983,7 @@ mod tests {
         assert_ne!(fixture.lines()[0], header);
         assert_eq!(
             fixture.plaintexts()[2],
-            padded(&alias_json(2, START + 5), PLAINTEXT_BYTES)
+            padded(&later_json(2, START + 5), PLAINTEXT_BYTES)
         );
         let (state, entries) = fixture.reopen();
         assert_newer(&entries[2], 2, START + 5);
@@ -1978,7 +1995,7 @@ mod tests {
     fn damage_after_a_newer_entry_keeps_it_byte_for_byte() {
         let fixture = Fixture::new();
         fixture.seed(1);
-        fixture.seal(&alias_json(1, START + 5));
+        fixture.seal(&later_json(1, START + 5));
         let mut lines = fixture.lines();
         lines.push(b"not an entry\n".to_vec());
         fixture.write_lines(&lines);
@@ -1989,7 +2006,7 @@ mod tests {
         assert_eq!(state.status().notice, Some(RecordNotice::Unreadable));
         assert_eq!(
             fixture.plaintexts()[1],
-            padded(&alias_json(1, START + 5), PLAINTEXT_BYTES)
+            padded(&later_json(1, START + 5), PLAINTEXT_BYTES)
         );
     }
 
@@ -1997,7 +2014,7 @@ mod tests {
     fn a_file_changed_outside_sesame_is_written_again_with_the_newer_entry() {
         let fixture = Fixture::new();
         fixture.seed(1);
-        fixture.seal(&alias_json(1, START + 5));
+        fixture.seal(&later_json(1, START + 5));
         let state = fixture.state();
         state.entries(&fixture.session).expect("entries");
         let mut lines = fixture.lines();
@@ -2011,7 +2028,7 @@ mod tests {
         assert_eq!(entries[2].kind, EntryKind::FileChanged);
         assert_eq!(
             fixture.plaintexts()[1],
-            padded(&alias_json(1, START + 5), PLAINTEXT_BYTES)
+            padded(&later_json(1, START + 5), PLAINTEXT_BYTES)
         );
     }
 
@@ -2021,7 +2038,7 @@ mod tests {
         let state = fixture.seed(3);
         fixture.advance(40 * DAY_SECS);
         let at = START + 40 * DAY_SECS;
-        fixture.seal(&alias_json(3, at));
+        fixture.seal(&later_json(3, at));
         drop(state);
         let state = fixture.state();
         state.append(&fixture.session, fill("item-new"));
@@ -2033,7 +2050,7 @@ mod tests {
         assert_newer(&entries[0], 0, at);
         assert_eq!(entries[1].item_id.as_deref(), Some("item-new"));
         assert_eq!(state.status().notice, None);
-        let mut expected = json_fields(alias_json(3, at).as_bytes());
+        let mut expected = json_fields(later_json(3, at).as_bytes());
         expected.insert("seq".into(), 0.into());
         let sealed = &fixture.plaintexts()[0];
         assert_eq!(sealed.len(), PLAINTEXT_BYTES);
@@ -2044,7 +2061,7 @@ mod tests {
     fn shortening_retention_counts_an_old_newer_entry_and_keeps_a_recent_one() {
         let fixture = Fixture::new();
         let state = fixture.seed(1);
-        fixture.seal(&alias_json(1, START + 1));
+        fixture.seal(&later_json(1, START + 1));
         fixture.advance(40 * DAY_SECS);
         let at = START + 40 * DAY_SECS;
         fixture.seal(&format!(
@@ -2072,7 +2089,7 @@ mod tests {
     fn clearing_removes_and_counts_a_newer_entry() {
         let fixture = Fixture::new();
         fixture.seed(2);
-        fixture.seal(&alias_json(2, START + 5));
+        fixture.seal(&later_json(2, START + 5));
         let state = fixture.state();
         let before = state.entries(&fixture.session).expect("entries");
         assert_newer(&before[2], 2, START + 5);
@@ -2153,6 +2170,159 @@ mod tests {
             assert_newer(entry, index as u64, START + first + index as u64);
         }
         newer.len()
+    }
+
+    fn alias(outcome: Outcome) -> ReleaseDraft {
+        ReleaseDraft::new(EntryKind::EmailAlias, outcome).host("app.addy.io")
+    }
+
+    fn assert_alias(entry: &RecordEntry, seq: u64, outcome: Outcome) {
+        assert_eq!(entry.kind, EntryKind::EmailAlias);
+        assert_eq!((entry.seq, entry.outcome), (seq, outcome));
+        assert_eq!(entry.host.as_deref(), Some("app.addy.io"));
+        assert_eq!(entry.item_id, None);
+        assert!(entry.newer.is_none());
+    }
+
+    #[test]
+    fn an_entry_kept_for_one_vault_is_never_written_into_another() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(1);
+        let own = session_vault_id(&fixture.session);
+        assert!(!own.is_empty());
+        state.append_locked(alias(Outcome::Released).for_vault("fictional-other-vault"));
+        state.append_locked(alias(Outcome::Released).for_vault(&own));
+        state.append_locked(alias(Outcome::Withdrawn).for_vault("fictional-other-vault"));
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        let (_, entries) = fixture.reopen();
+        let aliases: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::EmailAlias)
+            .collect();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].outcome, Outcome::Released);
+        assert_eq!(aliases[0].count, 1);
+        assert!(aliases[0].late);
+        assert_eq!(
+            entries.last().and_then(|entry| entry.item_id.as_deref()),
+            Some("item-after")
+        );
+
+        state.append(
+            &fixture.session,
+            alias(Outcome::Withdrawn).for_vault("fictional-other-vault"),
+        );
+        let (_, entries) = fixture.reopen();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.kind == EntryKind::EmailAlias)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_alias_entry_reads_back_as_an_alias_in_a_standard_line() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(1);
+        assert_eq!(
+            state.append(&fixture.session, alias(Outcome::Released)),
+            Appended::Written
+        );
+        assert_eq!(
+            state.append(&fixture.session, alias(Outcome::Withdrawn)),
+            Appended::Written
+        );
+
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 3);
+        assert_alias(&entries[1], 1, Outcome::Released);
+        assert_alias(&entries[2], 2, Outcome::Withdrawn);
+        assert_eq!(state.status().notice, None);
+        assert!(entries[1..]
+            .iter()
+            .all(|entry| entry_bytes(entry) == sealed_line_len(PLAINTEXT_BYTES)));
+        assert!(fixture
+            .plaintexts()
+            .iter()
+            .all(|plaintext| plaintext.len() == PLAINTEXT_BYTES));
+    }
+
+    #[test]
+    fn retention_renumbers_alias_entries_and_keeps_them_aliases() {
+        let fixture = Fixture::new();
+        let state = fixture.seed(3);
+        fixture.advance(40 * DAY_SECS);
+        state.append(&fixture.session, alias(Outcome::Released));
+        state.append(&fixture.session, alias(Outcome::Withdrawn));
+        state.set_retention_days(30);
+        state.apply_retention(&fixture.session).expect("trimmed");
+
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 2);
+        assert_alias(&entries[0], 0, Outcome::Released);
+        assert_alias(&entries[1], 1, Outcome::Withdrawn);
+        assert_eq!(state.status().notice, None);
+    }
+
+    #[test]
+    fn a_vault_key_change_reseals_alias_entries_as_aliases() {
+        let mut fixture = Fixture::new();
+        let state = fixture.seed(1);
+        state.append(&fixture.session, alias(Outcome::Released));
+        state.append(&fixture.session, alias(Outcome::Withdrawn));
+        state.entries(&fixture.session).expect("entries");
+        let header = fixture.lines()[0].clone();
+
+        fixture.rotate();
+        assert_eq!(
+            state.append(&fixture.session, fill("item-after")),
+            Appended::Written
+        );
+
+        assert_ne!(fixture.lines()[0], header);
+        let (state, entries) = fixture.reopen();
+        assert_eq!(entries.len(), 4);
+        assert_alias(&entries[1], 1, Outcome::Released);
+        assert_alias(&entries[2], 2, Outcome::Withdrawn);
+        assert_eq!(entries[3].item_id.as_deref(), Some("item-after"));
+        assert_eq!(state.status().notice, None);
+    }
+
+    #[test]
+    fn a_rewrite_over_the_byte_budget_keeps_the_newest_alias_entries() {
+        let fixture = Fixture::new();
+        let mut entries: Vec<RecordEntry> = (0..LARGE_ENTRIES + 100)
+            .map(|seq| {
+                let json = large_json(seq, START + seq, MAX_NEWER_PLAINTEXT_BYTES);
+                NewerEntry::open(&json, MAX_NEWER_PLAINTEXT_BYTES).expect("newer entry")
+            })
+            .collect();
+        let at = START + LARGE_ENTRIES + 100;
+        entries.push(alias(Outcome::Released).into_entry(0, at, false));
+        entries.push(alias(Outcome::Withdrawn).into_entry(0, at + 1, false));
+        assert!(entries_bytes(&entries) > MAX_RECORD_FILE_BYTES);
+        let vault_id = session_vault_id(&fixture.session);
+
+        fixture
+            .session
+            .expose_vault_key(|vault_key| {
+                write_fresh(&fixture.file(), vault_key, &vault_id, &mut entries, START)
+            })
+            .expect("rewritten");
+
+        assert!(file_len(&fixture) <= KEEP_BYTES + 1_024);
+        let (state, read) = fixture.reopen();
+        assert_eq!(state.status().notice, None);
+        let kept = assert_newest_large_entries_survive(&read);
+        assert_eq!(read.len(), kept + 2);
+        assert_alias(&read[kept], kept as u64, Outcome::Released);
+        assert_alias(&read[kept + 1], kept as u64 + 1, Outcome::Withdrawn);
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub mod backup;
 pub mod card_expiry;
 pub mod crypto;
 pub mod custom_fields;
+pub mod email_aliases;
 pub mod ffi;
 pub mod generator;
 pub mod history;
@@ -37,6 +38,8 @@ pub use card_expiry::*;
 #[allow(unused_imports)]
 pub use crypto::*;
 // `capabilities` stays in the desktop crate: it reaches out over HTTP, which a mobile build would not need.
+#[allow(unused_imports)]
+pub use email_aliases::*;
 #[allow(unused_imports)]
 pub use history::*;
 #[allow(unused_imports)]

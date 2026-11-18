@@ -141,6 +141,7 @@ test.each([
   ['security', ['This device', 'Your vault key']],
   ['browser', ['Extension', 'Saving']],
   ['sync', ['Sesame account', 'Sesame Sync', 'Your own server']],
+  ['extras', ['Email aliases']],
   ['data', ['Your vault', 'Diagnostics']],
 ])('the %s tab shows its own groups and no other tab\'s', (tab, headings) => {
   renderSettings({ tab })
@@ -178,6 +179,13 @@ test('each setting sits on its own tab', () => {
   expect(screen.queryByText('Sites Sesame never saves')).toBeNull()
   expect(screen.queryByText('Browser autofill setup')).toBeNull()
   expect(screen.queryByText('Theme')).toBeNull()
+  expect(screen.queryByRole('switch', { name: 'Email aliases' })).toBeNull()
+  cleanup()
+
+  renderSettings({ tab: 'extras' })
+  expect(screen.getAllByRole('switch', { name: 'Email aliases' })).toHaveLength(1)
+  expect(screen.queryByText('Sites Sesame never saves')).toBeNull()
+  expect(screen.queryByText('Pairing link or server address')).toBeNull()
 })
 
 test('the quick access shortcut joins the Shortcuts group where the platform has one', () => {
@@ -249,6 +257,20 @@ test('arrow keys, Home and End move between tabs and focus the new tab', async (
   await fireEvent.keyDown(screen.getByRole('tab', { name: 'Security' }), { key: 'End' })
   expect(selected()).toEqual([names.at(-1)])
   expect(document.activeElement).toBe(screen.getByRole('tab', { name: names.at(-1) }))
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Data' }), { key: 'ArrowLeft' })
+  expect(selected()).toEqual(['Extras'])
+  expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Extras' }))
+  expect(screen.getByRole('heading', { name: 'Email aliases' })).toBeTruthy()
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Extras' }), { key: 'ArrowLeft' })
+  expect(selected()).toEqual(['Sync'])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Sync' }), { key: 'ArrowRight' })
+  expect(selected()).toEqual(['Extras'])
+
+  await fireEvent.keyDown(screen.getByRole('tab', { name: 'Extras' }), { key: 'End' })
+  expect(selected()).toEqual([names.at(-1)])
 
   await fireEvent.keyDown(screen.getByRole('tab', { name: names.at(-1) }), { key: 'ArrowRight' })
   expect(selected()).toEqual(['General'])

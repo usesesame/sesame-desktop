@@ -9,7 +9,7 @@ function entry(partial: Partial<ReleaseEntryView>): ReleaseEntryView {
   return { seq: 1, at: 1_800_000_000, kind: 'browserFill', outcome: 'released', fields: [], count: 1, late: false, ...partial }
 }
 
-const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
+const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'emailAlias', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
 const ALL_OUTCOMES: Outcome[] = ['released', 'saved', 'updated', 'denied', 'timedOut', 'connectionClosed', 'vaultChanged', 'withdrawn', 'lookalike', 'noMatch', 'locked', 'busy', 'mismatch', 'replayed', 'neverSave', 'noted']
 
 function readable(text: string) {
@@ -64,6 +64,13 @@ describe('activity sentences', () => {
     expect(entrySentence(entry({ kind: 'retentionShortened', outcome: 'noted', count: 4 }), () => null)).toBe('You shortened how long Sesame keeps activity')
     expect(entryDetails(entry({ kind: 'retentionShortened', outcome: 'noted', count: 4 }))).toContain('4 entries removed')
     expect(entryDetails(entry({ kind: 'csvExport', count: 40 }))).not.toContain('40 times')
+  })
+
+  test('an alias request says whether the token was sent', () => {
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released', host: 'app.addy.io' }), titleFor)).toBe('Sent your alias API token to app.addy.io to make a new alias')
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'withdrawn', host: 'app.simplelogin.io' }), titleFor)).toBe('Sesame tried to make a new alias but did not send your API token to app.simplelogin.io')
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released' }), titleFor)).toBe('Sent your alias API token to the alias service to make a new alias')
+    expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'connectionClosed', host: 'app.addy.io' }), titleFor)).toBe('Sesame may have sent your alias API token to app.addy.io, but the connection ended before an answer')
   })
 
   test('an entry from a newer version is one plain line with its time', () => {
