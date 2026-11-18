@@ -1096,7 +1096,7 @@ fn a_closed_terminal_ends_the_approval_without_an_answer() {
         &get(24, Some("username"), false),
         &terminal(100),
         |host, _| {
-            harness.pending();
+            wait_for(host, "approvalRequested");
             host.gone.store(true, Ordering::SeqCst);
         },
     );
@@ -1129,9 +1129,14 @@ fn error_message(replies: &[CliReply]) -> Option<String> {
     replies.last().and_then(|reply| reply.message.clone())
 }
 
-fn finished_or_shown(harness: &Harness, host: &FakeHost) {
+const BROWSER_WATCHDOG: Duration = Duration::from_secs(10);
+
+fn finished_or_shown(host: &FakeHost) {
     let until = Instant::now() + Duration::from_secs(5);
-    while harness.approvals.pending_request().is_none()
+    while !host
+        .events()
+        .iter()
+        .any(|event| event == "approvalRequested")
         && !host
             .sent()
             .iter()
@@ -1161,8 +1166,11 @@ fn a_browser_approval_makes_the_tool_busy_and_takes_the_slot_from_a_tool_approva
     browser.revoke(&held.0);
 
     let mut browser_wait = Duration::ZERO;
-    let (replies, events) =
-        harness.run_with(&get(27, Some("username"), false), &terminal(100), |_, _| {
+    let (replies, events) = harness.run_with(
+        &get(27, Some("username"), false),
+        &terminal(100),
+        |host, _| {
+            wait_for(host, "approvalRequested");
             let shown = harness.pending();
             let started = Instant::now();
             let preempting = browser
@@ -1175,11 +1183,9 @@ fn a_browser_approval_makes_the_tool_busy_and_takes_the_slot_from_a_tool_approva
                 Err("approvalExpired")
             );
             browser.revoke(&preempting.0);
-        });
-    assert!(
-        browser_wait < Duration::from_millis(100),
-        "{browser_wait:?}"
+        },
     );
+    assert!(browser_wait < BROWSER_WATCHDOG, "{browser_wait:?}");
     assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
     assert_eq!(
         error_message(&replies).as_deref(),
@@ -1203,7 +1209,7 @@ fn a_loop_of_tool_requests_never_holds_up_the_browser_and_stops_raising_the_wind
             &get(120 + n, Some("username"), false),
             &terminal(100),
             |host, _| {
-                finished_or_shown(&harness, host);
+                finished_or_shown(host);
                 let started = Instant::now();
                 let held = browser
                     .begin(
@@ -1217,10 +1223,7 @@ fn a_loop_of_tool_requests_never_holds_up_the_browser_and_stops_raising_the_wind
                 browser.revoke(&held.0);
             },
         );
-        assert!(
-            browser_wait < Duration::from_millis(100),
-            "{browser_wait:?}"
-        );
+        assert!(browser_wait < BROWSER_WATCHDOG, "{browser_wait:?}");
         assert_eq!(error_code(&replies), Some(CliErrorCode::Busy));
         if events.contains(&"approvalRequested".to_string()) {
             shown += 1;

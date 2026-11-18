@@ -891,8 +891,13 @@ mod tests {
             CliReply::waiting(ID, WaitReason::Unlock),
             CliReply::waiting(ID, WaitReason::Approval),
             CliReply::waiting(ID, WaitReason::Approval),
+            CliReply::done(ID),
         ];
-        assert_eq!(talk(&CliCommand::List, &waits, false).0, EXIT_FAILED);
+        let (code, out, err) = talk(&CliCommand::List, &waits, false);
+        assert_eq!(code, EXIT_FAILED);
+        assert!(out.is_empty());
+        assert!(err.contains(UNREADABLE_REPLY));
+        assert_eq!(talk(&CliCommand::List, &waits[1..], false).0, EXIT_OK);
     }
 
     struct ShortWrite {
