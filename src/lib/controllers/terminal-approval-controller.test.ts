@@ -62,6 +62,7 @@ describe('terminal approvals in the window', () => {
     feedback = createFeedbackController()
     vi.spyOn(feedback, 'showRefusal')
     presenceOpen = false
+    onboarding = false
     terminalApi.subscribeTerminalApproval.mockImplementation(async (next) => {
       handlers = next
       return () => {}
@@ -88,9 +89,11 @@ describe('terminal approvals in the window', () => {
     return stores.terminalApproval.value()
   }
 
+  let onboarding: boolean
+
   async function started() {
     const modal = createModalController({ stores, feedback })
-    const controller = createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive: () => false, presenceOpen: () => presenceOpen })
+    const controller = createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive: () => onboarding, presenceOpen: () => presenceOpen, overlayOpen: () => onboarding })
     const stop = controller.start()
     await flush()
     return { controller, stop, modal }
@@ -347,6 +350,31 @@ describe('terminal approvals in the window', () => {
       { approvalId: 'approval-1', decision: 'dismiss' },
       { approvalId: 'approval-2', decision: 'dismiss' },
     ])
+    stop()
+  })
+
+  it('waits behind onboarding instead of opening over it or turning the request down', async () => {
+    const { controller, stop } = await started()
+    onboarding = true
+    terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().request).toBeNull()
+    expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
+
+    onboarding = false
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().request?.approvalId).toBe('approval-1')
+
+    onboarding = true
+    controller.setAside()
+    expect(state().request).toBeNull()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().request).toBeNull()
+    onboarding = false
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
     stop()
   })
 

@@ -10,6 +10,7 @@ interface ApprovalStore<R> {
 interface ApprovalFlow<R extends { approvalId: string }, C extends { approvalId: string } = BrowserApprovalCancelled> {
   store: ApprovalStore<R>
   mayShow: () => boolean
+  held?: () => boolean
   offersNothing?: (request: R) => boolean
   initialSelection: (request: R) => string
   decline: (approvalId: string) => Promise<void>
@@ -33,6 +34,7 @@ export function approvalLoop<R extends { approvalId: string }, C extends { appro
   let stopLockedListener: (() => void) | undefined
 
   function receive(request: R) {
+    if (flow.held?.()) return
     if (flow.offersNothing?.(request) || !flow.mayShow() || blockingOverlayActive()) {
       void flow.decline(request.approvalId)
       return

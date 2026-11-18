@@ -28,6 +28,7 @@ interface TerminalApprovalControllerOptions {
   modal: ModalController
   blockingOverlayActive: () => boolean
   presenceOpen: () => boolean
+  overlayOpen?: () => boolean
 }
 
 type Patch = Partial<TerminalApprovalStoreState>
@@ -44,7 +45,7 @@ function freshFields(request: CliApprovalRequestEvent | null): Patch {
   }
 }
 
-export function createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive, presenceOpen }: TerminalApprovalControllerOptions) {
+export function createTerminalApprovalController({ stores, feedback, modal, blockingOverlayActive, presenceOpen, overlayOpen = () => false }: TerminalApprovalControllerOptions) {
   const store = stores.terminalApproval
   let closedQuietly: string | null = null
   let reported: string | null = null
@@ -156,6 +157,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   const loop = approvalLoop<CliApprovalRequestEvent, CliApprovalCancelledEvent>({
     store: loopStore,
     mayShow: () => modal.terminalMayShow() && !presenceOpen(),
+    held: overlayOpen,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),
     decline,
     pending: pendingNow,
@@ -277,6 +279,11 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     report(approvalId, 'expired')
   }
 
+  function setAside() {
+    const current = store.value().request
+    if (current && !store.value().working) closeQuietly(current.approvalId)
+  }
+
   function select(itemId: string) {
     const request = store.value().request
     if (!request || store.value().working || !offered(request, itemId)) return
@@ -333,7 +340,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
     store.patch({ ...freshFields(null), request: null, syncWorking: false, unlock: store.value().unlock })
   }
 
-  return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }
+  return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, setAside, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }
 }
 
 export type TerminalApprovalController = ReturnType<typeof createTerminalApprovalController>
