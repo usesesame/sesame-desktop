@@ -259,3 +259,40 @@ test('an alias that arrives after the editor was left never reaches the next log
   expect(onSubmit).toHaveBeenCalledOnce()
   expect(host.current().email).toBe('')
 })
+
+test('an earlier alias offer stays when a later request fails', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const first = pendingAlias()
+  renderEditor(draft())
+  const email = screen.getByLabelText(/^Email/) as HTMLInputElement
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.input(email, { target: { value: 'typed@example.test' } })
+  first.finish('quiet.harbor@anonaddy.me')
+  await screen.findByRole('button', { name: 'Use the alias' })
+
+  const second = pendingAlias()
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  expect(screen.getByRole('button', { name: 'Use the alias' })).toBeTruthy()
+  second.fail(new Error('The alias service is having trouble. Try again later.'))
+
+  expect((await screen.findByRole('alert')).textContent).toBe('The alias service is having trouble. Try again later.')
+  expect(screen.getByRole('status').textContent).toContain('quiet.harbor@anonaddy.me')
+  await fireEvent.click(screen.getByRole('button', { name: 'Use the alias' }))
+  expect(email.value).toBe('quiet.harbor@anonaddy.me')
+})
+
+test('the alias offer cannot change the email while the login is saving', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const request = pendingAlias()
+  const props = { loginDraft: draft(), onSubmit: vi.fn(), onClose: vi.fn(), onDelete: vi.fn(), savingLogin: false }
+  const { rerender } = render(LoginEditor, { props, context: new Map([[APP_STORES, createAppStores()]]) } as never)
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.input(screen.getByLabelText(/^Email/), { target: { value: 'typed@example.test' } })
+  request.finish('quiet.harbor@anonaddy.me')
+  const use = await screen.findByRole('button', { name: 'Use the alias' }) as HTMLButtonElement
+
+  await rerender({ savingLogin: true })
+  expect(use.disabled).toBe(true)
+  await rerender({ savingLogin: false })
+  expect(use.disabled).toBe(false)
+})

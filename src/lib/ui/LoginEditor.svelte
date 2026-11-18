@@ -57,9 +57,8 @@
     if (aliasWorking || !service) return
     const request = ++aliasRequest
     aliasWorking = true
-    aliasNote = ''
     aliasError = ''
-    offeredAlias = ''
+    if (!offeredAlias) aliasNote = ''
     const emailBefore = loginDraft.email
     try {
       const alias = await createEmailAlias(loginDraft.url || undefined)
@@ -351,8 +350,9 @@
       {#if aliasService || aliasWorking || aliasNote || aliasError}
         <p class="suggestion-note alias-action">
           {#if aliasService || aliasWorking}<button type="button" class="text-button" disabled={aliasWorking || savingLogin} on:click={createAlias}>{aliasWorking ? 'Creating alias…' : 'Create alias'}</button>{/if}
-          {#if aliasError}<span class="alias-error" role="alert">{aliasError}</span>{:else if aliasNote}<span role="status">{aliasNote}</span>{/if}
-          {#if offeredAlias}<button type="button" class="text-button" on:click={() => useAlias(offeredAlias, offeredService)}>Use the alias</button>{/if}
+          {#if aliasError}<span class="alias-error" role="alert">{aliasError}</span>{/if}
+          {#if aliasNote && (!aliasError || offeredAlias)}<span role="status">{aliasNote}</span>{/if}
+          {#if offeredAlias}<button type="button" class="text-button" disabled={savingLogin} on:click={() => useAlias(offeredAlias, offeredService)}>Use the alias</button>{/if}
         </p>
       {/if}
       <datalist id="username-suggestions">{#each usernameSuggestions as value (value)}<option {value}></option>{/each}</datalist>
