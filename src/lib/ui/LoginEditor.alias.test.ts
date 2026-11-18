@@ -296,3 +296,35 @@ test('the alias offer cannot change the email while the login is saving', async 
   await rerender({ savingLogin: false })
   expect(use.disabled).toBe(false)
 })
+
+test('the delete prompt says a pending alias keeps going, whichever came first', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const warning = 'An alias is still being made, and deleting does not stop it.'
+  pendingAlias()
+  renderEditor(draft({ id: 'login-northwind' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete login' }))
+  expect(document.body.textContent).toContain(warning)
+  cleanup()
+
+  const later = pendingAlias()
+  renderEditor(draft({ id: 'login-northwind' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Delete login' }))
+  expect(document.body.textContent).not.toContain(warning)
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  expect(document.body.textContent).toContain(warning)
+  later.fail(new Error('The alias service is having trouble. Try again later.'))
+  await waitFor(() => expect(document.body.textContent).not.toContain(warning))
+})
+
+test('the leave prompt does not claim edits after a request fails on an unchanged login', async () => {
+  emailAliases.set({ service: 'addy', domain: 'anonaddy.me', nameSite: false })
+  const request = pendingAlias()
+  renderEditor(draft())
+  await fireEvent.click(screen.getByRole('button', { name: 'Create alias' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Close login editor' }))
+  request.fail(new Error('The alias service is having trouble. Try again later.'))
+
+  await waitFor(() => expect(document.body.textContent).toContain('Leave this login? Nothing has changed since you opened it.'))
+  expect(document.body.textContent).not.toContain('This login has edits that have not been saved.')
+})

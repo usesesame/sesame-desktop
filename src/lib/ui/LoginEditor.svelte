@@ -414,7 +414,7 @@
 
   {#if confirmingDelete}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.</p>
+      <p><strong>Delete {loginDraft.title || 'this login'}?</strong> It stays in Trash for 30 days.{aliasWorking ? ' An alias is still being made, and deleting does not stop it.' : ''}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDelete = false)}>Keep editing</button>
         <button type="button" class="editor-delete" on:click={onDelete}>Delete login</button>
@@ -422,7 +422,7 @@
     </footer>
   {:else if confirmingDiscard}
     <footer class="editor-footer discard-confirm">
-      <p><strong>{dirty ? 'Discard your changes?' : 'Leave this login?'}</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : 'This login has edits that have not been saved.'}</p>
+      <p><strong>{dirty ? 'Discard your changes?' : 'Leave this login?'}</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : dirty ? 'This login has edits that have not been saved.' : 'Nothing has changed since you opened it.'}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDiscard = false)}>Keep editing</button>
         <button type="button" class="editor-delete" on:click={discard}>{dirty ? 'Discard changes' : 'Leave'}</button>
