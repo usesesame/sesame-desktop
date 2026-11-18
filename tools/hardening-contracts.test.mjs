@@ -1972,7 +1972,27 @@ function attributeInterpolations(source) {
 }
 
 const VAULT_WORDS = /\b(title|username|email|site|subtitle|folder|folderName|initials|notes|filename|brand|label|value|name|tag|url|urls|recoveryEmail|recoveryPhone|detail|savedOrigin|deviceLabel|deviceName|origin|revealedPassword|revealed|groupTitle|titleFor|shown|shownValue|displayInitials|listHeading|collectionHeading|bulkFolderLabel|fullName|ssid|cardholderName|selectedLabel)\b/
-const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/
+const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/g
+
+function withoutHelperCalls(expression) {
+  let rest = expression
+  for (let match = VAULT_HELPERS.exec(rest); match; match = VAULT_HELPERS.exec(rest)) {
+    let depth = 0
+    let end = match.index + match[0].length - 1
+    for (; end < rest.length; end += 1) {
+      if (rest[end] === '(') depth += 1
+      else if (rest[end] === ')' && --depth === 0) break
+    }
+    rest = `${rest.slice(0, match.index)}${rest.slice(end + 1)}`
+    VAULT_HELPERS.lastIndex = 0
+  }
+  VAULT_HELPERS.lastIndex = 0
+  return rest
+}
+
+function unprotectedVaultValue(expression) {
+  return expressionPieces(expression).some((piece) => VAULT_WORDS.test(withoutHelperCalls(piece)))
+}
 const NOT_FROM_THE_VAULT = {
   'src/lib/ui/BackupDrillModal.svelte': ['formatCopy?.label', 'formatCopy?.detail', 'verifiedCopy?.label'],
   'src/lib/ui/CardEditor.svelte': ['network.name', 'network?.name'],
@@ -2025,7 +2045,7 @@ test('every value from the vault that a component draws goes through the directi
   for (const file of svelteFiles('src')) {
     const allowed = NOT_FROM_THE_VAULT[file.split('\\').join('/')] ?? []
     for (const expression of textInterpolations(read(file))) {
-      if (VAULT_WORDS.test(expression) && !VAULT_HELPERS.test(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
+      if (unprotectedVaultValue(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
     }
   }
   assert.deepEqual(unprotected, [], 'a component draws a vault value without vaultText, noteText or SecretText')
@@ -2034,12 +2054,15 @@ test('every value from the vault that a component draws goes through the directi
     const allowed = NOT_FROM_THE_VAULT_IN_ATTRIBUTES[file.split('\\').join('/')] ?? []
     for (const piece of attributeInterpolations(read(file))) {
       const expression = piece.slice(piece.indexOf(': ') + 2)
-      if (VAULT_WORDS.test(expression) && !VAULT_HELPERS.test(expression) && !allowed.includes(piece)) unprotectedAttributes.push(`${file}: ${piece}`)
+      if (unprotectedVaultValue(expression) && !allowed.includes(piece)) unprotectedAttributes.push(`${file}: ${piece}`)
     }
   }
   assert.deepEqual(unprotectedAttributes, [], 'a tooltip, label or placeholder carries a vault value without vaultText')
   const planted = attributeInterpolations('<button title={`Copy ${field.label}`} aria-label="Remove {folder.name}" placeholder={vaultText(entry.title)}></button>')
   assert.deepEqual(planted, ['title: field.label', 'aria-label: folder.name', 'placeholder: vaultText(entry.title)'], 'the attribute check no longer reads every attribute form')
+  const mixed = attributeInterpolations('<span title={vaultText(entry.title) + folder.name} aria-label={`${vaultText(entry.title)} in ${vaultText(folder.name)}`} placeholder={vaultText(isolatedVaultText(entry.title))}></span>')
+  assert.deepEqual(mixed.filter((piece) => unprotectedVaultValue(piece.slice(piece.indexOf(': ') + 2))), ['title: vaultText(entry.title) + folder.name'], 'one protected operand hides an unprotected one in the same attribute')
+  assert.equal(unprotectedVaultValue('vaultText(entry.title) || folder.name'), true, 'one protected operand hides an unprotected one in the same text')
   const secret = read('src', 'lib', 'ui', 'SecretText.svelte')
   assert.match(secret, /<bdi>\{value\}<\/bdi>/, 'a revealed secret is not isolated or is altered')
   assert.match(secret, /hasHiddenCharacters\(value\)/, 'a revealed secret with a hidden character is not called out')
