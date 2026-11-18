@@ -358,7 +358,6 @@ test('the Windows command line program is staged before the bundle needs it', ()
   const helper = read('tools', 'browser-host.mjs')
   assert.match(helper, /UNSTAGED_TAURI_CONFIG = '\{"bundle":\{"externalBin":\[\],"resources":\[\]\}\}'/)
   assert.match(helper, /feature: 'terminal-client', bin: 'sesame-cli'/)
-  for (const file of ['generate-types.mjs', 'test-browser-host-pipe.mjs']) {
-    assert.match(read('tools', file), /"externalBin":\[\],"resources":\[\]/, `${file} must build without the staged Windows resource`)
-  }
+  assert.match(read('tools', 'generate-types.mjs'), /import \{ UNSTAGED_TAURI_CONFIG \} from '\.\/browser-host\.mjs'[\s\S]*TAURI_CONFIG: UNSTAGED_TAURI_CONFIG/, 'generate-types.mjs must build without the staged Windows resource')
+  assert.match(read('tools', 'test-browser-host-pipe.mjs'), /"externalBin":\[\],"resources":\[\]/, 'test-browser-host-pipe.mjs must build without the staged Windows resource')
 })

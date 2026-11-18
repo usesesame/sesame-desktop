@@ -547,7 +547,7 @@ test('every Linux package answers the command line verbs from the installed sesa
 })
 
 test('the command line checks run without a display and judge exit codes and streams', () => {
-  const quiet = terminalVerbEnvironment({ XDG_RUNTIME_DIR: '/run/fictional-runtime' }, { APPIMAGE_EXTRACT_AND_RUN: '1' })
+  const quiet = terminalVerbEnvironment({ XDG_RUNTIME_DIR: '/run/fictional-runtime', DISPLAY: ':7', WAYLAND_DISPLAY: 'wayland-fictional' }, { APPIMAGE_EXTRACT_AND_RUN: '1' })
   assert.equal(quiet.DISPLAY, undefined)
   assert.equal(quiet.WAYLAND_DISPLAY, undefined)
   assert.equal(quiet.XDG_RUNTIME_DIR, '/run/fictional-runtime')
@@ -555,6 +555,7 @@ test('the command line checks run without a display and judge exit codes and str
   const usage = 'Usage:\n  sesame list\n  sesame get <item> [field] [--copy]\n  sesame totp <item> [--copy]\n'
   assert.equal(judgeTerminalHelp({ code: 0, stdout: usage, stderr: '' }), true)
   assert.equal(judgeTerminalHelp({ code: 0, stdout: 'Sesame', stderr: '' }), false)
+  assert.equal(judgeTerminalHelp({ code: 0, stdout: usage.replace('  sesame list\n', ''), stderr: '' }), false)
   assert.equal(judgeTerminalHelp({ code: 1, stdout: usage, stderr: '' }), false)
   assert.equal(judgeTerminalNotRunning({ code: 3, stdout: '', stderr: 'Sesame is not running. Open Sesame and try again.\n' }), true)
   assert.equal(judgeTerminalNotRunning({ code: 0, stdout: 'Northwind mail\n', stderr: '' }), false)
