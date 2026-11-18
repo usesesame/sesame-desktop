@@ -1,6 +1,9 @@
 use tauri::State;
 
-use crate::application::record_writes::set_secure_note_lock_in_state;
+use crate::application::record_writes::{
+    check_note_length, check_tag_lengths, normalised_tags, record_title,
+    set_secure_note_lock_in_state,
+};
 use crate::commands::record_commands::impl_record_commands;
 use crate::release::ReleasePresence;
 use crate::vault::types::{
@@ -10,21 +13,13 @@ use crate::vault::util::{random_id, unix_timestamp};
 use crate::vault::{VaultResult, VaultState};
 
 fn secure_note_from_input(input: SecureNoteInput) -> VaultResult<SecureNote> {
-    let title = input.title.trim();
-    if title.is_empty() {
-        return Err("Give this note a title so you can find it again.".into());
-    }
-    if title.chars().count() > 160 {
-        return Err("That note title is too long.".into());
-    }
-    if input.content.chars().count() > 20_000 {
-        return Err("That note is too long.".into());
-    }
-    for tag in &input.tags {
-        if tag.chars().count() > 64 {
-            return Err("A tag is too long.".into());
-        }
-    }
+    let title = record_title(
+        &input.title,
+        "Give this note a title so you can find it again.",
+        "That note title is too long.",
+    )?;
+    check_note_length(&input.content, 20_000)?;
+    check_tag_lengths(&input.tags)?;
     let now = unix_timestamp();
     Ok(SecureNote {
         id: input
@@ -34,12 +29,7 @@ fn secure_note_from_input(input: SecureNoteInput) -> VaultResult<SecureNote> {
         title: title.to_string(),
         content: input.content.trim().to_string(),
         locked: input.locked,
-        tags: input
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_string())
-            .filter(|tag| !tag.is_empty())
-            .collect(),
+        tags: normalised_tags(input.tags),
         legacy_fields: Vec::new(),
         folder_id: None,
         favourite: false,

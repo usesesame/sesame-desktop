@@ -120,6 +120,46 @@ impl_record_write_item! {
     CustomRecord => CustomRecord,
 }
 
+const MAX_RECORD_TITLE_CHARS: usize = 160;
+const MAX_TAG_CHARS: usize = 64;
+pub const MAX_RECORD_NOTE_CHARS: usize = 4_000;
+
+pub fn record_title<'a>(
+    title: &'a str,
+    empty_message: &str,
+    too_long_message: &str,
+) -> VaultResult<&'a str> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(empty_message.into());
+    }
+    if title.chars().count() > MAX_RECORD_TITLE_CHARS {
+        return Err(too_long_message.into());
+    }
+    Ok(title)
+}
+
+pub fn check_note_length(note: &str, limit: usize) -> VaultResult<()> {
+    if note.chars().count() > limit {
+        return Err("That note is too long.".into());
+    }
+    Ok(())
+}
+
+pub fn check_tag_lengths(tags: &[String]) -> VaultResult<()> {
+    if tags.iter().any(|tag| tag.chars().count() > MAX_TAG_CHARS) {
+        return Err("A tag is too long.".into());
+    }
+    Ok(())
+}
+
+pub fn normalised_tags(tags: Vec<String>) -> Vec<String> {
+    tags.into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect()
+}
+
 pub fn save_record_in_state<I, T>(
     input: I,
     state: &VaultState,
@@ -355,4 +395,61 @@ pub fn set_secure_note_lock_in_state(
         id: id.to_string(),
         snapshot: session.snapshot(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_title_is_trimmed_and_bounded() {
+        let empty = "Give this card a name so you can find it again.";
+        let long = "That card name is too long.";
+        assert_eq!(
+            record_title("  Travel card  ", empty, long),
+            Ok("Travel card")
+        );
+        assert_eq!(record_title("   ", empty, long), Err(empty.to_string()));
+        let at_limit = "é".repeat(160);
+        assert_eq!(record_title(&at_limit, empty, long), Ok(at_limit.as_str()));
+        assert_eq!(
+            record_title(&"é".repeat(161), empty, long),
+            Err(long.to_string())
+        );
+    }
+
+    #[test]
+    fn a_note_over_its_limit_is_refused() {
+        assert_eq!(
+            check_note_length(&"n".repeat(4_000), MAX_RECORD_NOTE_CHARS),
+            Ok(())
+        );
+        assert_eq!(
+            check_note_length(&"n".repeat(4_001), MAX_RECORD_NOTE_CHARS),
+            Err("That note is too long.".to_string())
+        );
+        assert_eq!(check_note_length(&"n".repeat(20_000), 20_000), Ok(()));
+        assert_eq!(
+            check_note_length(&"n".repeat(20_001), 20_000),
+            Err("That note is too long.".to_string())
+        );
+    }
+
+    #[test]
+    fn tags_are_bounded_trimmed_and_blank_ones_dropped() {
+        assert_eq!(check_tag_lengths(&["t".repeat(64)]), Ok(()));
+        assert_eq!(
+            check_tag_lengths(&["travel".to_string(), "t".repeat(65)]),
+            Err("A tag is too long.".to_string())
+        );
+        assert_eq!(
+            normalised_tags(vec![
+                " travel ".to_string(),
+                "   ".to_string(),
+                String::new(),
+                "work".to_string(),
+            ]),
+            vec!["travel".to_string(), "work".to_string()]
+        );
+    }
 }

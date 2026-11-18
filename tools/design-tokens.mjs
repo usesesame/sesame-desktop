@@ -58,8 +58,8 @@ function fail(message, problems) {
 }
 
 const mode = process.argv[2]
-if (mode !== 'check' && mode !== 'sync') {
-  console.error('Usage: node tools/design-tokens.mjs sync|check')
+if (mode !== 'check') {
+  console.error('Usage: node tools/design-tokens.mjs check')
   process.exit(1)
 }
 
@@ -85,11 +85,6 @@ const missing = REQUIRED_TOKENS.filter((name) => !light.has(name))
 if (missing.length) {
   console.error(`design tokens: design/tokens.css is missing ${missing.join(', ')}`)
   process.exit(1)
-}
-
-if (mode === 'sync') {
-  console.log('design tokens: nothing to sync, every other surface owns its snapshot in its own repository')
-  process.exit(0)
 }
 
 const rootBlock = block(css, REQUIRED_BLOCKS[0])

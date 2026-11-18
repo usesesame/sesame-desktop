@@ -187,35 +187,6 @@ jobs:
       - name: Run the vault core tests
         run: npm run desktop:test:rust
 
-  windows-rust-test-sync:
-    needs: [lint, typecheck]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .node-version
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          workspaces: src-tauri
-          key: sync
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - run: npm ci
-
-      - name: Build the frontend
-        run: npm run desktop:build
-
-      - name: Run the vault core tests with Sync
-        run: npm run desktop:test:rust:sync
-
   windows-installer:
     needs: [lint, typecheck]
     runs-on: windows-latest
@@ -256,7 +227,7 @@ jobs:
           ./tools/test-windows-installer.ps1 -InstallerPath $installers[0].FullName
 
   desktop:
-    needs: [windows-js, windows-rust-lint, windows-rust-test, windows-rust-test-sync, windows-installer]
+    needs: [windows-js, windows-rust-lint, windows-rust-test, windows-installer]
     if: always()
     runs-on: ubuntu-latest
     steps:

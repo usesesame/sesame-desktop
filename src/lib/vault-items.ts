@@ -88,12 +88,6 @@ export function vaultItems(snapshot: VaultSnapshot | null): VaultItem[] {
   return [...logins, ...records]
 }
 
-export function itemCounts(items: VaultItem[]): Map<ItemKind, number> {
-  const counts = new Map<ItemKind, number>()
-  for (const item of items) counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1)
-  return counts
-}
-
 export function itemTags(items: VaultItem[]): string[] {
   const seen = new Map<string, string>()
   for (const item of items) {

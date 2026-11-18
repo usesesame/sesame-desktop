@@ -418,5 +418,3 @@ export function createItemController({ stores, feedback, login, presence, editor
     },
   }
 }
-
-export type ItemController = ReturnType<typeof createItemController>
