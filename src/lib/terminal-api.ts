@@ -134,19 +134,28 @@ export async function getTerminalStatus(): Promise<TerminalToolStatus> {
   return invoke<TerminalToolStatus>('get_terminal_status')
 }
 
+async function listenToBoth(first: Promise<UnlistenFn>, second: Promise<UnlistenFn>): Promise<UnlistenFn> {
+  const results = await Promise.allSettled([first, second])
+  const stops = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
+  const failure = results.find((result) => result.status === 'rejected')
+  if (failure) {
+    for (const stop of stops) stop()
+    throw failure.reason
+  }
+  return () => {
+    for (const stop of stops) stop()
+  }
+}
+
 export async function subscribeTerminalApproval(handlers: {
   request: (payload: CliApprovalRequestEvent) => void
   cancelled: (payload: CliApprovalCancelledEvent) => void
 }): Promise<UnlistenFn> {
   if (previewMode) return () => {}
-  const [stopRequests, stopCancellations] = await Promise.all([
+  return listenToBoth(
     listen<CliApprovalRequestEvent>('terminal-approval-request', ({ payload }) => handlers.request(payload)),
     listen<CliApprovalCancelledEvent>('terminal-approval-cancelled', ({ payload }) => handlers.cancelled(payload)),
-  ])
-  return () => {
-    stopRequests()
-    stopCancellations()
-  }
+  )
 }
 
 export async function subscribeTerminalUnlock(handlers: {
@@ -154,14 +163,10 @@ export async function subscribeTerminalUnlock(handlers: {
   ended: (payload: CliUnlockEndedEvent) => void
 }): Promise<UnlistenFn> {
   if (previewMode) return () => {}
-  const [stopRequests, stopEnded] = await Promise.all([
+  return listenToBoth(
     listen<CliUnlockRequestEvent>('terminal-unlock-request', ({ payload }) => handlers.request(payload)),
     listen<CliUnlockEndedEvent>('terminal-unlock-ended', ({ payload }) => handlers.ended(payload)),
-  ])
-  return () => {
-    stopRequests()
-    stopEnded()
-  }
+  )
 }
 
 export async function onTerminalPermissionsChanged(handler: () => void): Promise<UnlistenFn> {
