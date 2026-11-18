@@ -26,7 +26,6 @@ jobs:
           - desktop:ci:web
           - desktop:build desktop:lint:rust
           - desktop:build desktop:test:rust
-          - desktop:build desktop:test:rust:sync
           - desktop:build desktop:host:stage desktop:test:glib
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

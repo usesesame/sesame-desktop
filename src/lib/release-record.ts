@@ -179,6 +179,8 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
       return 'Some refused requests were counted but not listed one by one'
     case 'writesLost':
       return 'Some entries could not be written and were lost'
+    case 'newer':
+      return 'Something a newer version of Sesame recorded'
     default:
       return 'Sesame recorded an event'
   }

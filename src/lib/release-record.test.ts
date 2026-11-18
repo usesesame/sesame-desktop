@@ -9,7 +9,7 @@ function entry(partial: Partial<ReleaseEntryView>): ReleaseEntryView {
   return { seq: 1, at: 1_800_000_000, kind: 'browserFill', outcome: 'released', fields: [], count: 1, late: false, ...partial }
 }
 
-const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'emailAlias', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost']
+const ALL_KINDS: EntryKind[] = ['browserFill', 'browserSave', 'browserTotp', 'browserCard', 'browserIdentity', 'browserChange', 'browserCreate', 'reveal', 'copy', 'autoType', 'quickAccess', 'csvExport', 'jsonExport', 'backupExport', 'backupCreated', 'recoveryKitSaved', 'attachmentSaved', 'devicePaired', 'emailAlias', 'cleared', 'retentionShortened', 'unreadable', 'interrupted', 'fileChanged', 'lockedOverflow', 'refusalLimit', 'writesLost', 'newer']
 const ALL_OUTCOMES: Outcome[] = ['released', 'saved', 'updated', 'denied', 'timedOut', 'connectionClosed', 'vaultChanged', 'withdrawn', 'lookalike', 'noMatch', 'locked', 'busy', 'mismatch', 'replayed', 'neverSave', 'noted']
 
 function readable(text: string) {
@@ -70,6 +70,13 @@ describe('activity sentences', () => {
     expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released', host: 'app.addy.io' }), titleFor)).toBe('Sent your alias API token to app.addy.io to make a new alias')
     expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'withdrawn', host: 'app.simplelogin.io' }), titleFor)).toBe('Sesame tried to make a new alias but did not send your API token to app.simplelogin.io')
     expect(entrySentence(entry({ kind: 'emailAlias', outcome: 'released' }), titleFor)).toBe('Sent your alias API token to the alias service to make a new alias')
+  })
+
+  test('an entry from a newer version is one plain line with its time', () => {
+    const newer = entry({ kind: 'newer', outcome: 'noted' })
+    expect(entrySentence(newer, titleFor)).toBe('Something a newer version of Sesame recorded')
+    expect(entryDetails(newer)).toBe(entryDetails(entry({ kind: 'backupCreated' })))
+    expect(isRefusal(newer.outcome)).toBe(false)
   })
 
   test('refusals are told apart from releases', () => {

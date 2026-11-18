@@ -94,10 +94,13 @@ test('signing and key agreement use separate keys', () => {
 })
 
 test('the Settings screen shows the Sync panel and the storage row, and says no review has happened', () => {
-  const settings = read('src', 'lib', 'ui', 'SettingsView.svelte')
-  assert.match(settings, /<SyncPanel\s*\/>/, 'Settings no longer renders the Sync panel')
-  assert.match(settings, /<SyncVaultStorageRow\s*\/>/, 'Settings no longer renders the storage row')
-  assert.doesNotMatch(settings, /SYNC_PREVIEW_AVAILABLE|syncStatusUrl/, 'Settings still reads the old preview gate')
+  const syncTab = read('src', 'lib', 'ui', 'SyncSettings.svelte')
+  const dataTab = read('src', 'lib', 'ui', 'DataSettings.svelte')
+  assert.match(syncTab, /<SyncPanel\s*\/>/, 'Settings no longer renders the Sync panel')
+  assert.match(dataTab, /<SyncVaultStorageRow\s*\/>/, 'Settings no longer renders the storage row')
+  for (const source of [read('src', 'lib', 'ui', 'SettingsView.svelte'), syncTab, dataTab]) {
+    assert.doesNotMatch(source, /SYNC_PREVIEW_AVAILABLE|syncStatusUrl/, 'Settings still reads the old preview gate')
+  }
   const panel = read('src', 'lib', 'ui', 'SyncPanel.svelte')
   assert.match(panel, /Not independently reviewed/)
   assert.match(panel, /has not had an independent security review/)
@@ -132,7 +135,13 @@ test('the Sync client no longer hides behind a build feature, and nothing of the
   for (const name of Object.keys(scripts)) {
     assert.ok(!/sync:preview/.test(name), `the ${name} script is left over from the old gate`)
   }
-  assert.equal(scripts['desktop:test:rust:sync'], 'npm run desktop:test:rust')
+  assert.equal(scripts['desktop:test:rust:sync'], undefined)
+  assert.match(scripts['desktop:test:rust'], /cargo test --manifest-path src-tauri\/Cargo\.toml --locked$/)
+  const defaultMembers = manifest.match(/^default-members = \[(.*)\]$/m)
+  assert.ok(defaultMembers, 'the workspace names no default members')
+  for (const crate of ['"sesame-sync"', '"sesame-app"']) {
+    assert.ok(defaultMembers[1].split(', ').includes(crate), `cargo test without --workspace skips ${crate}`)
+  }
   const vite = read('vite.config.ts')
   assert.doesNotMatch(vite, /SYNC_PREVIEW/)
   const module = read('src-tauri', 'sesame-app', 'src', 'sync', 'mod.rs')
@@ -264,6 +273,7 @@ test('the Sync screens are rendered by the panel alone, and one shared controlle
   const callers = [
     ['App.svelte', app],
     ['SettingsView.svelte', settings],
+    ['SyncSettings.svelte', read('src', 'lib', 'ui', 'SyncSettings.svelte')],
   ]
   for (const screen of ['SyncEnableModal', 'SyncPairingModal', 'SyncJoinModal', 'SyncConflictModal']) {
     read('src', 'lib', 'ui', `${screen}.svelte`)

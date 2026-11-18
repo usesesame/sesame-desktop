@@ -158,5 +158,3 @@ export function createDocumentController(options: RecordControllerOptions) {
     },
   }
 }
-
-export type DocumentController = ReturnType<typeof createDocumentController>
