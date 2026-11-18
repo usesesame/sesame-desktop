@@ -164,7 +164,7 @@
                   <input type="radio" name={`merge-${field.field}`} value={option.entryId} checked={mergeChoices[field.field] === option.entryId} on:change={() => (mergeChoices = { ...mergeChoices, [field.field]: option.entryId })} />
                   <span>
                     <small><bdi>{vaultText(titleFor(option.entryId))}</bdi></small>
-                    <code class:empty={!option.present || (field.secret && revealed?.entryId !== option.entryId)}>{#if field.secret && option.present && revealed?.entryId === option.entryId && field.field === 'password'}<SecretText value={revealed.value} />{:else}<bdi>{vaultText(shown(field, option, revealed))}</bdi>{/if}</code>
+                    <code class:empty={!option.present || (field.secret && revealed?.entryId !== option.entryId)} class:revealed={field.secret && option.present && revealed?.entryId === option.entryId}>{#if field.secret && option.present && revealed?.entryId === option.entryId && field.field === 'password'}<SecretText value={revealed.value} />{:else}<bdi>{vaultText(shown(field, option, revealed))}</bdi>{/if}</code>
                   </span>
                 </label>
                 {#if canShow(field, option)}

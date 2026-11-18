@@ -33,7 +33,7 @@
             {#if !stored}
               <code class="login-field-empty">Empty</code>
             {:else if shown}
-              <code><SecretText value={revealed[key]} /></code>
+              <code class="revealed"><SecretText value={revealed[key]} /></code>
             {:else}
               <code class="concealed">••••••••••••••••</code>
             {/if}

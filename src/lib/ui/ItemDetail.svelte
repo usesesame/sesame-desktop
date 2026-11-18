@@ -81,7 +81,7 @@
         {#if field.secret && !isShown(field)}
           <code class="concealed">••••••••••••••••</code>
         {:else}
-          <code>{#if field.secretKey}<SecretText value={shownValue(field)} />{:else}<bdi>{vaultText(shownValue(field))}</bdi>{/if}</code>
+          <code class:revealed={field.secret}>{#if field.secretKey}<SecretText value={shownValue(field)} />{:else}<bdi>{vaultText(shownValue(field))}</bdi>{/if}</code>
         {/if}
         {#if field.secret}
           <button type="button" class="credential-button" aria-label={isShown(field) ? `Hide ${vaultText(field.label)}` : `Show ${vaultText(field.label)}`} title={isShown(field) ? `Hide ${vaultText(field.label)}` : `Show ${vaultText(field.label)}`} aria-pressed={isShown(field)} on:click={() => toggle(field)}><Icon name={isShown(field) ? 'eye-off' : 'eye'} size={16} /></button>
