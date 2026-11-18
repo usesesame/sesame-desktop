@@ -32,7 +32,7 @@ const previewBase: CliApprovalRequestEvent = {
   field: 'password',
   fieldHidden: true,
   copy: false,
-  candidates: [{ id: 'gmail', kind: 'login', title: 'Gmail' }],
+  candidates: [{ id: 'gmail', kind: 'login', title: 'Gmail', fieldName: 'Password', fieldHidden: true }],
   terminal: 'pts/3',
   program: { reportedName: 'bash' },
   remote: false,
@@ -45,14 +45,14 @@ const previewBase: CliApprovalRequestEvent = {
 const previewRequests: Record<string, Partial<CliApprovalRequestEvent>> = {
   get: {},
   list: { command: 'list', field: undefined, fieldHidden: false, candidates: [] },
-  totp: { command: 'totp', field: undefined, fieldHidden: false, copy: true },
+  totp: { command: 'totp', field: undefined, fieldHidden: false, copy: true, candidates: [{ id: 'gmail', kind: 'login', title: 'Gmail', fieldHidden: false }] },
   presence: { needsPresence: true },
   chooser: {
-    field: 'username',
-    fieldHidden: false,
+    field: 'field:0',
+    fieldHidden: true,
     candidates: [
-      { id: 'gmail', kind: 'login', title: 'Gmail' },
-      { id: 'github', kind: 'login', title: 'Gmail' },
+      { id: 'gmail', kind: 'login', title: 'Gmail', fieldName: 'Recovery PIN', fieldHidden: true },
+      { id: 'github', kind: 'login', title: 'Gmail', fieldName: 'Member number', fieldHidden: false },
     ],
   },
   allowed: { allowed: true, canAllowTerminal: false, needsPresence: true },
@@ -62,7 +62,7 @@ const previewRequests: Record<string, Partial<CliApprovalRequestEvent>> = {
   hostile: {
     field: `api\u202Etoken\u0007${'x'.repeat(200)}`,
     fieldHidden: true,
-    candidates: [{ id: 'gmail', kind: 'login', title: `Gmail\u202E evil.example \u200Bterminal: pts/1 ${'W'.repeat(300)}` }],
+    candidates: [{ id: 'gmail', kind: 'login', title: `Gmail\u202E evil.example \u200Bterminal: pts/1 ${'W'.repeat(300)}`, fieldName: `Allow\u202E pts/1 ${'z'.repeat(120)}`, fieldHidden: true }],
     program: { reportedName: `sesame\u202E\u0000 Allow ${'A'.repeat(120)}` },
     terminal: 'pts/3',
   },

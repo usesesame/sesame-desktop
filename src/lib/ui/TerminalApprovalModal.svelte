@@ -51,6 +51,8 @@
   $: allowDisabled = working || remaining === 0 || !armed || !chosenValid || (askSecret && !secret)
   $: items = vaultItems($vault.snapshot)
   $: single = request.candidates.length === 1 ? request.candidates[0] : null
+  $: resolved = single ?? request.candidates.find((candidate) => candidate.id === state.selectedId) ?? null
+  $: askedDiffers = Boolean(request.field && resolved?.fieldName && request.field.trim().toLowerCase() !== resolved.fieldName.trim().toLowerCase())
   $: program = request.program ? shownText(request.program.reportedName, 48) : null
   $: presenceText = request.copy ? presenceCopy['copy-field'].description : presenceCopy['reveal-field'].description
 
@@ -96,7 +98,22 @@
       <div><dt>Item</dt><dd><span class="terminal-value"><bdi>{shownText(single.title)}</bdi></span><small>{kindWords(single.kind)}</small></dd></div>
     {/if}
     {#if request.field}
-      <div><dt>Field</dt><dd><code class="terminal-value"><bdi>{shownText(request.field, 48)}</bdi></code>{#if request.fieldHidden}<small>Hidden value</small>{/if}</dd></div>
+      <div>
+        <dt>Field</dt>
+        <dd>
+          {#if notFound}
+            <code class="terminal-value"><bdi>{shownText(request.field, 48)}</bdi></code>
+          {:else if !resolved}
+            <span>Choose an item to see which field it sends</span>
+          {:else if resolved.fieldName}
+            <span class="terminal-value terminal-field"><bdi>{shownText(resolved.fieldName, 48)}</bdi></span>{#if resolved.fieldHidden}<small>Hidden value</small>{/if}
+            {#if askedDiffers}<small class="terminal-asked">Asked for as <code><bdi>{shownText(request.field, 48)}</bdi></code></small>{/if}
+          {:else}
+            <span>This item has no field by that name</span>
+            <small class="terminal-asked">Asked for as <code><bdi>{shownText(request.field, 48)}</bdi></code></small>
+          {/if}
+        </dd>
+      </div>
     {/if}
     {#if !notFound && request.command !== 'list' && request.copy}
       <div><dt>Sent to</dt><dd><span>{outputWords(true, $settings.clipboardClearSeconds)}</span></dd></div>
@@ -118,6 +135,7 @@
           <span>
             <strong><bdi>{shownText(candidate.title)}</bdi></strong>
             <small><bdi>{[kindWords(candidate.kind), details(candidate.id)].filter(Boolean).join(' · ')}</bdi></small>
+            {#if request.field}<small class="terminal-choice-field">{#if candidate.fieldName}Sends <bdi>{shownText(candidate.fieldName, 48)}</bdi>{candidate.fieldHidden ? ', a hidden value' : ''}{:else}No field by that name{/if}</small>{/if}
           </span>
         </label>
       {/each}
@@ -170,6 +188,8 @@
   .terminal-request dt { color: var(--text-muted); font-size: var(--type-2); }
   .terminal-request dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); min-width: 0; margin: 0; color: var(--text); font-size: var(--type-3); }
   .terminal-request small { color: var(--text-muted); font-size: var(--type-2); }
+  .terminal-asked { flex-basis: 100%; }
+  .terminal-asked code { font-family: var(--font-code); }
   .terminal-request .status-pill { margin-left: 0; }
   .terminal-value { min-width: 0; max-width: 100%; color: var(--text); overflow-wrap: anywhere; unicode-bidi: isolate; }
   code.terminal-value { font-family: var(--font-code); font-size: var(--type-2); }

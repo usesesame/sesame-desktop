@@ -230,11 +230,13 @@ fn all_items(session: &crate::vault::UnlockedVault) -> Vec<CliCandidate> {
             id: entry.id.clone(),
             kind: "login".to_string(),
             title: entry.title.clone(),
+            ..CliCandidate::default()
         })
         .chain(snapshot.items.iter().map(|item| CliCandidate {
             id: item.id.clone(),
             kind: item.kind.to_string(),
             title: item.title.clone(),
+            ..CliCandidate::default()
         }))
         .collect();
     items.sort_by(|left, right| {
@@ -271,15 +273,19 @@ fn resolve_subject(vault: &VaultState, command: &CliCommand) -> Result<Subject, 
         CliCommand::Totp { item, .. } => (item, None),
     };
     with_session(vault, |session| {
-        let candidates = matching_items(session, item);
+        let mut candidates = matching_items(session, item);
         let mut field_hidden = false;
         if let Some(field) = field {
-            for candidate in &candidates {
+            for candidate in &mut candidates {
                 let opened = session
                     .open_item(&candidate.id)
                     .map_err(|_| Stop::Reply(CliErrorCode::Unavailable))?;
-                field_hidden |= find_field(&described_fields(&opened), field)
-                    .is_some_and(|described| described.hidden);
+                let fields = described_fields(&opened);
+                if let Some(described) = find_field(&fields, field) {
+                    candidate.field_name = Some(display_name(described));
+                    candidate.field_hidden = described.hidden;
+                    field_hidden |= described.hidden;
+                }
             }
         }
         Ok(Subject {
@@ -693,6 +699,73 @@ fn described_fields(item: &TaggedItem) -> Vec<DescribedField> {
         fields.push(labelled_field(described, &field.label));
     }
     unconfusable(fields)
+}
+
+fn built_in_name(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "username" => "Username",
+        "email" => "Email",
+        "url" => "Website",
+        "notes" => "Notes",
+        "recoveryEmail" => "Recovery email",
+        "recoveryPhone" => "Recovery phone",
+        "password" => "Password",
+        "backupCodes" => "Backup codes",
+        "fullName" => "Full name",
+        "phone" => "Phone",
+        "addressLine1" => "Address line 1",
+        "addressLine2" => "Address line 2",
+        "city" => "City",
+        "region" => "Region",
+        "postalCode" => "Postal code",
+        "country" => "Country",
+        "content" => "Note",
+        "cardholderName" => "Cardholder name",
+        "expiryMonth" => "Expiry month",
+        "expiryYear" => "Expiry year",
+        "brand" => "Brand",
+        "number" => "Card number",
+        "securityCode" => "Security code",
+        "ssid" => "Network name",
+        "securityType" => "Security type",
+        "keyType" => "Key type",
+        "publicKey" => "Public key",
+        "privateKey" => "Private key",
+        "passphrase" => "Passphrase",
+        "productName" => "Product name",
+        "purchasedFrom" => "Purchased from",
+        "purchaseDate" => "Purchase date",
+        "licenseKey" => "Licence key",
+        "documentType" => "Document type",
+        "issuingAuthority" => "Issuing authority",
+        "issueDate" => "Issue date",
+        "expiryDate" => "Expiry date",
+        "documentNumber" => "Document number",
+        _ => return None,
+    })
+}
+
+fn display_name(field: &DescribedField) -> String {
+    if let Some(name) = built_in_name(&field.key) {
+        return name.to_string();
+    }
+    if field.name != field.key {
+        return field.name.clone();
+    }
+    let position = |prefix: &str| {
+        field
+            .key
+            .strip_prefix(prefix)
+            .and_then(|index| index.parse::<usize>().ok())
+            .map(|index| index + 1)
+    };
+    if let Some(number) = position("field:") {
+        format!("Custom field {number}")
+    } else if let Some(number) = position("legacy:") {
+        format!("Older field {number}")
+    } else {
+        field.key.clone()
+    }
 }
 
 fn find_field<'a>(fields: &'a [DescribedField], wanted: &str) -> Option<&'a DescribedField> {

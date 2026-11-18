@@ -781,6 +781,103 @@ fn several_matches_open_the_chooser_and_refuse_an_item_it_did_not_offer() {
     );
 }
 
+fn shown_fields(harness: &Harness, n: u8, field: &str) -> Vec<(String, Option<String>, bool)> {
+    let mut shown = Vec::new();
+    harness.run_with(&get(n, Some(field), false), &terminal(100), |_, _| {
+        let event = harness.pending();
+        assert_eq!(event.field.as_deref(), Some(field));
+        shown = event
+            .candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.id.clone(),
+                    candidate.field_name.clone(),
+                    candidate.field_hidden,
+                )
+            })
+            .collect();
+        harness.deny();
+    });
+    harness.clock.advance(Duration::from_secs(301));
+    shown
+}
+
+#[test]
+fn the_approval_names_the_field_the_vault_resolved_not_the_spelling_asked_for() {
+    let harness = Harness::new();
+    let one = |n, field| shown_fields(&harness, n, field)[0].clone();
+    assert_eq!(
+        one(150, "field:1"),
+        (
+            "fictional-login".to_string(),
+            Some("Security answer".to_string()),
+            true
+        )
+    );
+    assert_eq!(
+        one(151, "PASSWORD"),
+        (
+            "fictional-login".to_string(),
+            Some("Password".to_string()),
+            true
+        )
+    );
+    assert_eq!(
+        one(152, "member NUMBER"),
+        (
+            "fictional-login".to_string(),
+            Some("Member number".to_string()),
+            false
+        )
+    );
+    assert_eq!(
+        one(153, "username"),
+        (
+            "fictional-login".to_string(),
+            Some("Username".to_string()),
+            false
+        )
+    );
+    assert_eq!(
+        one(154, "Nothing like it"),
+        ("fictional-login".to_string(), None, false)
+    );
+}
+
+#[test]
+fn the_chooser_names_the_resolved_field_for_each_item() {
+    let harness = Harness::new();
+    harness.vault.seed(|payload| {
+        let mut twin = VaultEntry::default();
+        twin.id = "fictional-twin".to_string();
+        twin.title = "Northwind Mail".to_string();
+        twin.custom_fields = vec![CustomFieldEntry {
+            label: "Recovery PIN".to_string(),
+            value: "fictional-pin".to_string(),
+            kind: "secret".to_string(),
+        }];
+        payload.entries.push(twin);
+    });
+    let mut shown = shown_fields(&harness, 155, "field:0");
+    shown.sort();
+    assert_eq!(
+        shown,
+        vec![
+            (
+                "fictional-login".to_string(),
+                Some("Member number".to_string()),
+                false
+            ),
+            (
+                "fictional-twin".to_string(),
+                Some("Recovery PIN".to_string()),
+                true
+            ),
+        ]
+    );
+}
+
 fn allow_terminal_for_five_minutes_on(harness: &Harness, origin: &TerminalOrigin) {
     let by_id = request(
         201,

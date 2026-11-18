@@ -31,7 +31,7 @@ function request(approvalId: string, partial: Partial<CliApprovalRequestEvent> =
     field: 'password',
     fieldHidden: true,
     copy: false,
-    candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail' }],
+    candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldHidden: false }],
     terminal: 'pts/3',
     program: { reportedName: 'bash' },
     remote: false,
@@ -140,8 +140,8 @@ describe('terminal approvals in the window', () => {
     const { controller, stop } = await started()
     handlers.request(request('approval-1', {
       candidates: [
-        { id: 'northwind-a', kind: 'login', title: 'Northwind mail' },
-        { id: 'northwind-b', kind: 'login', title: 'Northwind mail' },
+        { id: 'northwind-a', kind: 'login', title: 'Northwind mail', fieldHidden: false },
+        { id: 'northwind-b', kind: 'login', title: 'Northwind mail', fieldHidden: false },
       ],
     }))
     expect(state().selectedId).toBe('')
@@ -163,7 +163,7 @@ describe('terminal approvals in the window', () => {
     const { controller, stop } = await started()
     handlers.request(request('approval-1'))
     controller.setAllowTerminal(true)
-    handlers.request(request('approval-1', { candidates: [{ id: 'contoso', kind: 'login', title: 'Contoso bank' }] }))
+    handlers.request(request('approval-1', { candidates: [{ id: 'contoso', kind: 'login', title: 'Contoso bank', fieldHidden: false }] }))
     expect(state().allowTerminal).toBe(true)
     expect(state().request?.candidates[0].id).toBe('northwind')
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
@@ -175,7 +175,7 @@ describe('terminal approvals in the window', () => {
     handlers.request(request('approval-1'))
     controller.setAllowTerminal(true)
     controller.setSecret('fictional-master-password')
-    const second = request('approval-2', { candidates: [{ id: 'contoso', kind: 'login', title: 'Contoso bank' }] })
+    const second = request('approval-2', { candidates: [{ id: 'contoso', kind: 'login', title: 'Contoso bank', fieldHidden: false }] })
     terminalApi.getPendingTerminalRequest.mockResolvedValue(second)
     handlers.request(second)
     expect(state().request).toBeNull()

@@ -36,13 +36,16 @@ pub enum CliCommandKind {
     Totp,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
-#[ts(export)]
+#[derive(Serialize, Clone, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, optional_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CliCandidate {
     pub id: String,
     pub kind: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_name: Option<String>,
+    pub field_hidden: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]

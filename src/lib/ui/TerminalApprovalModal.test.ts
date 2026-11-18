@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte'
+import { tick } from 'svelte'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { APP_STORES, createAppStores } from '../stores/app-stores'
 import type { CliApprovalRequestEvent } from '../terminal-api'
@@ -32,7 +33,7 @@ function request(partial: Partial<CliApprovalRequestEvent> = {}): CliApprovalReq
     field: 'password',
     fieldHidden: true,
     copy: false,
-    candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail' }],
+    candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldName: 'Password', fieldHidden: true }],
     terminal: 'pts/3',
     program: { reportedName: 'bash' },
     remote: false,
@@ -75,8 +76,9 @@ test('names the command, the item, the field and where the request came from', a
   show({ copy: true })
   expect(screen.getByRole('heading', { name: 'A terminal wants to copy the password of an item' })).toBeTruthy()
   expect(screen.getByText('Northwind mail')).toBeTruthy()
-  expect(screen.getByText('password')).toBeTruthy()
+  expect(screen.getByText('Password')).toBeTruthy()
   expect(screen.getByText('Hidden value')).toBeTruthy()
+  expect(screen.queryByText(/Asked for as/)).toBeNull()
   expect(screen.getByText('pts/3')).toBeTruthy()
   expect(screen.getByText('bash')).toBeTruthy()
   expect(screen.getByText('Name the program gave itself')).toBeTruthy()
@@ -163,8 +165,8 @@ test('the chooser needs a pick before allow and offers only the items Sesame sen
   vi.useFakeTimers()
   const { props } = show({
     candidates: [
-      { id: 'northwind-a', kind: 'login', title: 'Northwind mail' },
-      { id: 'northwind-b', kind: 'secure_note', title: 'Northwind mail' },
+      { id: 'northwind-a', kind: 'login', title: 'Northwind mail', fieldHidden: false },
+      { id: 'northwind-b', kind: 'secure_note', title: 'Northwind mail', fieldHidden: false },
     ],
   })
   await armed()
@@ -204,7 +206,7 @@ const hostile = [
 test.each(hostile)('hostile text in every field renders as plain, bounded text: %#', (value) => {
   show({
     field: value,
-    candidates: [{ id: 'northwind', kind: 'login', title: value }],
+    candidates: [{ id: 'northwind', kind: 'login', title: value, fieldName: value, fieldHidden: true }],
     terminal: value,
     program: { reportedName: value },
   })
@@ -224,8 +226,8 @@ test.each(hostile)('hostile text in every field renders as plain, bounded text: 
 test('hostile chooser titles and a missing name stay plain text', () => {
   show({
     candidates: [
-      { id: 'a', kind: 'login', title: `<b>Allow</b>\u202E` },
-      { id: 'b', kind: 'login', title: `${'x'.repeat(500)}` },
+      { id: 'a', kind: 'login', title: `<b>Allow</b>\u202E`, fieldHidden: false },
+      { id: 'b', kind: 'login', title: `${'x'.repeat(500)}`, fieldHidden: false },
     ],
   })
   const dialog = screen.getByRole('dialog')
@@ -236,4 +238,39 @@ test('hostile chooser titles and a missing name stay plain text', () => {
   const notice = screen.getByRole('dialog')
   expect(notice.querySelector('script')).toBeNull()
   expect(notice.textContent).not.toContain('\u202E')
+})
+
+test('the field row names the field the vault resolved and the spelling the terminal used below it', () => {
+  show({ field: 'field:0', candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldName: 'Security answer', fieldHidden: true }] })
+  const row = screen.getByText('Field').closest('div') as HTMLElement
+  expect(row.querySelector('.terminal-field')?.textContent).toBe('Security answer')
+  expect(row.textContent).toContain('Asked for as field:0')
+  expect(row.textContent).toContain('Hidden value')
+})
+
+test('the field row says so when the item has no field by that name', () => {
+  show({ field: 'Recovery PIN', fieldHidden: false, candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldHidden: false }] })
+  const row = screen.getByText('Field').closest('div') as HTMLElement
+  expect(row.textContent).toContain('This item has no field by that name')
+  expect(row.textContent).toContain('Asked for as Recovery PIN')
+})
+
+test('the chooser shows which field each item sends and the field row follows the pick', async () => {
+  const { stores } = show({
+    field: 'field:0',
+    candidates: [
+      { id: 'northwind-a', kind: 'login', title: 'Northwind mail', fieldName: 'Member number', fieldHidden: false },
+      { id: 'northwind-b', kind: 'login', title: 'Northwind mail', fieldName: 'Recovery PIN', fieldHidden: true },
+    ],
+  })
+  const row = () => screen.getByText('Field').closest('div') as HTMLElement
+  expect(row().textContent).toContain('Choose an item to see which field it sends')
+  expect([...document.querySelectorAll('.terminal-choice-field')].map((element) => element.textContent)).toEqual(['Sends Member number', 'Sends Recovery PIN, a hidden value'])
+  stores.terminalApproval.patch({ selectedId: 'northwind-b' })
+  await tick()
+  expect(row().querySelector('.terminal-field')?.textContent).toBe('Recovery PIN')
+  expect(row().textContent).toContain('Asked for as field:0')
+  stores.terminalApproval.patch({ selectedId: 'northwind-a' })
+  await tick()
+  expect(row().querySelector('.terminal-field')?.textContent).toBe('Member number')
 })
