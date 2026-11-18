@@ -107,6 +107,11 @@ describe('activity sentences', () => {
     }
   })
 
+  test('a counter of unlisted refusals says whether they came from browsers or terminals', () => {
+    expect(entrySentence(entry({ kind: 'refusalLimit', outcome: 'noted', count: 10 }), titleFor)).toBe('Some refused browser requests were counted but not listed one by one')
+    expect(entrySentence(entry({ kind: 'refusalLimit', outcome: 'noted', count: 10, host: 'terminal' }), titleFor)).toBe('Some refused terminal requests were counted but not listed one by one')
+  })
+
   test('older terminal entries still read the way they did', () => {
     expect(entrySentence(entry({ kind: 'reveal', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)).toBe('Read the password of \u2068Northwind\u2069 for a terminal')
     expect(entrySentence(entry({ kind: 'copy', itemId: 'login-a', itemKind: 'login', fields: ['password'], host: 'terminal' }), titleFor)).toBe('Copied the password of \u2068Northwind\u2069 for a terminal')

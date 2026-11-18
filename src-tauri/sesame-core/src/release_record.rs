@@ -588,12 +588,30 @@ struct Window {
 }
 
 #[derive(Default)]
-struct Coalescer {
-    windows: HashMap<(EntryKind, String, Outcome), Window>,
+struct RefusalBudget {
     written: VecDeque<u64>,
     over_limit: u32,
     over_limit_at: u64,
 }
+
+#[derive(Default)]
+struct Coalescer {
+    windows: HashMap<(EntryKind, String, Outcome), Window>,
+    browser: RefusalBudget,
+    terminal: RefusalBudget,
+}
+
+impl Coalescer {
+    fn budget(&mut self, kind: EntryKind) -> &mut RefusalBudget {
+        if kind.is_terminal() {
+            &mut self.terminal
+        } else {
+            &mut self.browser
+        }
+    }
+}
+
+const TERMINAL_REFUSAL_HOST: &str = "terminal";
 
 type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
@@ -1411,22 +1429,22 @@ impl Inner {
         if let Some(expired) = self.coalescer.windows.remove(&key) {
             self.write_out_window(key.clone(), expired);
         }
-        while self
-            .coalescer
+        let budget = self.coalescer.budget(draft.kind);
+        while budget
             .written
             .front()
             .is_some_and(|at| now.saturating_sub(*at) >= HOUR_SECS)
         {
-            self.coalescer.written.pop_front();
+            budget.written.pop_front();
         }
-        if self.coalescer.written.len() >= REFUSALS_PER_HOUR {
-            if self.coalescer.over_limit == 0 {
-                self.coalescer.over_limit_at = now;
+        if budget.written.len() >= REFUSALS_PER_HOUR {
+            if budget.over_limit == 0 {
+                budget.over_limit_at = now;
             }
-            self.coalescer.over_limit = self.coalescer.over_limit.saturating_add(draft.count);
+            budget.over_limit = budget.over_limit.saturating_add(draft.count);
             return true;
         }
-        self.coalescer.written.push_back(now);
+        budget.written.push_back(now);
         self.coalescer.windows.insert(
             key,
             Window {
@@ -1453,13 +1471,24 @@ impl Inner {
             self.coalescer.windows.remove(&key);
             self.write_out_window(key, window);
         }
-        if self.coalescer.over_limit > 0
-            && (closing || now.saturating_sub(self.coalescer.over_limit_at) >= HOUR_SECS)
-        {
-            let mut draft = ReleaseDraft::new(EntryKind::RefusalLimit, Outcome::Noted)
-                .count(self.coalescer.over_limit);
-            draft.at = Some(self.coalescer.over_limit_at);
-            self.coalescer.over_limit = 0;
+        for terminal in [false, true] {
+            let budget = if terminal {
+                &mut self.coalescer.terminal
+            } else {
+                &mut self.coalescer.browser
+            };
+            if budget.over_limit == 0
+                || !(closing || now.saturating_sub(budget.over_limit_at) >= HOUR_SECS)
+            {
+                continue;
+            }
+            let mut draft =
+                ReleaseDraft::new(EntryKind::RefusalLimit, Outcome::Noted).count(budget.over_limit);
+            draft.at = Some(budget.over_limit_at);
+            if terminal {
+                draft.host = Some(TERMINAL_REFUSAL_HOST.to_string());
+            }
+            budget.over_limit = 0;
             self.push_unwritten(draft, false);
         }
         while let Some(draft) = self.queue.pop_front() {
@@ -2655,5 +2684,37 @@ mod tests {
             assert_eq!(entries[2].item_id.as_deref(), Some("item-after"));
             assert_eq!(state.status().notice, None);
         }
+    }
+
+    #[test]
+    fn a_loop_of_terminal_refusals_cannot_hide_a_browser_denial() {
+        let fixture = Fixture::new();
+        let state = fixture.state();
+        for index in 0..REFUSALS_PER_HOUR + 10 {
+            state.append(
+                &fixture.session,
+                ReleaseDraft::new(EntryKind::TerminalRead, Outcome::Busy)
+                    .host(&format!("terminal-{index}")),
+            );
+        }
+        state.append(
+            &fixture.session,
+            ReleaseDraft::new(EntryKind::BrowserFill, Outcome::Denied).host("example.com"),
+        );
+        state.close(Some(&fixture.session));
+
+        let (_, entries) = fixture.reopen();
+        assert!(entries
+            .iter()
+            .any(|entry| entry.kind == EntryKind::BrowserFill
+                && entry.outcome == Outcome::Denied
+                && entry.host.as_deref() == Some("example.com")));
+        let limits: Vec<&RecordEntry> = entries
+            .iter()
+            .filter(|entry| entry.kind == EntryKind::RefusalLimit)
+            .collect();
+        assert_eq!(limits.len(), 1, "{limits:?}");
+        assert_eq!(limits[0].count, 10);
+        assert_eq!(limits[0].host.as_deref(), Some("terminal"));
     }
 }

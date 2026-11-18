@@ -233,7 +233,7 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
     case 'lockedOverflow':
       return 'More requests arrived while Sesame was locked than it could keep'
     case 'refusalLimit':
-      return 'Some refused requests were counted but not listed one by one'
+      return entry.host === TERMINAL_HOST ? 'Some refused terminal requests were counted but not listed one by one' : 'Some refused browser requests were counted but not listed one by one'
     case 'writesLost':
       return 'Some entries could not be written and were lost'
     case 'newer':
