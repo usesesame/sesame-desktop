@@ -20,9 +20,10 @@
   const vault = stores?.vault
 
   let status: TerminalToolStatus | null = null
-  let permissions: TerminalAllowanceList = { allowances: [], requests: [] }
-  let fetchedAt = Date.now()
-  let now = Date.now()
+  let permissions: TerminalAllowanceList | null = null
+  let permissionsFailed = false
+  let fetchedAt = performance.now()
+  let now = fetchedAt
   let working = false
   let errorMessage = ''
   let disposed = false
@@ -31,10 +32,11 @@
   $: windows = $platformCapabilities.os === 'windows'
   $: snapshot = vault ? $vault?.snapshot ?? null : null
   $: items = vaultItems(snapshot)
-  $: live = permissions.allowances
+  $: live = (permissions?.allowances ?? [])
     .map((allowance) => ({ ...allowance, left: allowance.expiresInMs - (now - fetchedAt) }))
     .filter((allowance) => allowance.left > 0)
-  $: nothingToForget = live.length === 0 && permissions.requests.length === 0
+  $: requests = permissions?.requests ?? []
+  $: nothingToForget = permissions !== null && live.length === 0 && requests.length === 0
   $: statusLabel = !status
     ? 'Checking…'
     : status.code === 'ready'
@@ -48,13 +50,14 @@
             : 'Not on this system'
   $: statusTone = status?.code === 'ready' ? '' : status?.code === 'servedElsewhere' || status?.code === 'failed' ? 'warning' : 'neutral'
 
-  function description(current: TerminalToolStatus | null): string {
+  function description(current: TerminalToolStatus | null, onWindows: boolean): string {
     if (!current) return 'Checking the command line tool.'
     if (current.code === 'unsupported') return 'The command line tool does not work on this operating system.'
     if (current.code === 'servedElsewhere') return 'Another Sesame on this computer already answers the command line tool, so commands reach that one. Close the other Sesame and restart this one to use it here.'
     if (current.code === 'failed') return 'Sesame could not start listening for the command line tool. Restart Sesame to try again.'
     if (current.code === 'starting') return 'Sesame is getting ready to answer the command line tool.'
-    return 'Run sesame list, sesame get or sesame totp in a terminal, and Sesame asks in this window before it answers.'
+    if (onWindows) return 'Run sesame list, sesame get or sesame totp in a terminal, and Sesame asks in this window before it answers.'
+    return 'Run sesame list, sesame get or sesame totp in a terminal, and Sesame asks in this window before it answers. A terminal you allowed is answered without asking, unless the request needs your master password or a choice between items.'
   }
 
   function titleFor(itemId: string | undefined): string | null {
@@ -68,10 +71,13 @@
       const next = await listTerminalPermissions()
       if (disposed) return
       permissions = next
-      fetchedAt = Date.now()
+      permissionsFailed = false
+      fetchedAt = performance.now()
       now = fetchedAt
     } catch (error) {
-      if (!disposed) errorMessage = messageFor(error)
+      if (disposed) return
+      errorMessage = messageFor(error)
+      permissionsFailed = true
     }
   }
 
@@ -103,16 +109,19 @@
     else stops.push(stop)
   }
 
+  async function retry() {
+    errorMessage = ''
+    await refreshPermissions()
+  }
+
   const ticker = window.setInterval(() => {
-    now = Date.now()
-    if (permissions.allowances.some((allowance) => allowance.expiresInMs - (now - fetchedAt) <= 0)) void refreshPermissions()
+    now = performance.now()
+    if (permissions?.allowances.some((allowance) => allowance.expiresInMs - (now - fetchedAt) <= 0)) void refreshPermissions()
   }, 1_000)
 
   onMount(() => {
-    void refreshStatus()
-    void refreshPermissions()
-    void onTerminalPermissionsChanged(() => void refreshPermissions()).then(keep).catch(() => {})
-    void onTerminalStatusChanged((next) => (status = next)).then(keep).catch(() => {})
+    void onTerminalStatusChanged((next) => (status = next)).then(keep).catch(() => {}).finally(() => void refreshStatus())
+    void onTerminalPermissionsChanged(() => void refreshPermissions()).then(keep).catch(() => {}).finally(() => void refreshPermissions())
   })
 
   onDestroy(() => {
@@ -126,7 +135,7 @@
   <article>
     <div class="setting-copy">
       <strong>Command line tool</strong>
-      <p>{description(status)}</p>
+      <p>{description(status, windows)}</p>
       {#if windows && status?.supported}<p>On Windows, Sesame asks in this window every time a terminal makes a request.</p>{/if}
       {#if errorMessage}<p class="form-error" role="alert">{errorMessage}</p>{/if}
     </div>
@@ -136,9 +145,11 @@
     <article class="terminal-setting-list">
       <div class="setting-copy">
         <strong>Allowed terminals</strong>
-        {#if live.length}
+        {#if permissions === null}
+          <p>{permissionsFailed ? 'Sesame could not read which terminals are allowed.' : 'Checking which terminals are allowed…'}</p>
+        {:else if live.length}
           <ul aria-label="Allowed terminals">
-            {#each live as allowance, index (allowance.terminal + index)}
+            {#each live as allowance, index (index)}
               <li>
                 <span class="terminal-line"><code><bdi>{shownText(allowance.terminal, 24)}</bdi></code>{#if allowance.remote}<span class="status-pill warning">Remote session</span>{/if}</span>
                 <small>Allowed for {remainingWords(allowance.left)}</small>
@@ -154,9 +165,11 @@
     <article class="terminal-setting-list">
       <div class="setting-copy">
         <strong>Answered without asking</strong>
-        {#if permissions.requests.length}
+        {#if permissions === null}
+          <p>{permissionsFailed ? 'Sesame could not read the requests it answered.' : 'Checking the requests Sesame answered…'}</p>
+        {:else if requests.length}
           <ul aria-label="Requests answered without asking">
-            {#each permissions.requests as request, index (request.at + ':' + index)}
+            {#each requests as request, index (request.at + ':' + index)}
               <li>
                 <span class="terminal-line"><bdi>{allowedRequestWords(request.command, request.field, titleFor(request.itemId), request.itemKind)}</bdi></span>
                 <small><code><bdi>{shownText(request.terminal, 24)}</bdi></code> at {entryTime(request.at)}</small>
@@ -173,7 +186,10 @@
         <strong>Forget terminal permissions</strong>
         <p>Every allowed terminal asks again from its next request.</p>
       </div>
-      <button type="button" class="secondary-button settings-manage" disabled={working || nothingToForget} on:click={forget}>{working ? 'Forgetting…' : 'Forget'}</button>
+      <div class="terminal-actions">
+        {#if permissionsFailed}<button type="button" class="secondary-button settings-manage" disabled={working} on:click={retry}>Try again</button>{/if}
+        <button type="button" class="secondary-button settings-manage" disabled={working || nothingToForget} on:click={forget}>{working ? 'Forgetting…' : 'Forget'}</button>
+      </div>
     </article>
   {/if}
 </div>
@@ -187,5 +203,6 @@
   .terminal-program { flex-basis: 100%; min-width: 0; color: var(--text-muted); font-size: var(--type-2); overflow-wrap: anywhere; }
   .terminal-line .status-pill { margin-left: 0; }
   .terminal-setting-list small { color: var(--text-muted); font-size: var(--type-2); white-space: nowrap; }
+  .terminal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
   bdi { unicode-bidi: isolate; }
 </style>

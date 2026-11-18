@@ -119,3 +119,56 @@ test('on Windows it says every request asks and offers no allowance list', async
   expect(screen.queryByText('Allowed terminals')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Forget' })).toBeNull()
 })
+
+test('a failed permission read says so, keeps Forget available and offers to try again', async () => {
+  terminalApi.listTerminalPermissions.mockRejectedValueOnce(new Error('Sesame could not read the terminal permissions.'))
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.queryByText(/No terminal is allowed right now/)).toBeNull()
+  expect(screen.getByText('Sesame could not read which terminals are allowed.')).toBeTruthy()
+  expect((screen.getByRole('button', { name: 'Forget' }) as HTMLButtonElement).disabled).toBe(false)
+
+  await fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.getByText(/No terminal is allowed right now/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+})
+
+test('the listeners are registered before the first reads', async () => {
+  let permissionsReady: (stop: () => void) => void = () => {}
+  let statusReady: (stop: () => void) => void = () => {}
+  terminalApi.onTerminalPermissionsChanged.mockImplementation((handler) => { permissionsChanged = handler; return new Promise((resolve) => { permissionsReady = resolve }) })
+  terminalApi.onTerminalStatusChanged.mockImplementation((handler) => { statusChanged = handler; return new Promise((resolve) => { statusReady = resolve }) })
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(terminalApi.listTerminalPermissions).not.toHaveBeenCalled()
+  expect(terminalApi.getTerminalStatus).not.toHaveBeenCalled()
+  permissionsReady(() => {})
+  statusReady(() => {})
+  await vi.advanceTimersByTimeAsync(0)
+  expect(terminalApi.listTerminalPermissions).toHaveBeenCalledTimes(1)
+  expect(terminalApi.getTerminalStatus).toHaveBeenCalledTimes(1)
+})
+
+test('terminals whose names and positions run together are each listed', async () => {
+  const allowances = Array.from({ length: 12 }, (_, index) => ({ terminal: index === 1 ? 'pts/11' : index === 11 ? 'pts/1' : `pts/${20 + index}`, remote: false, expiresInMs: 200_000 }))
+  terminalApi.listTerminalPermissions.mockResolvedValueOnce({ allowances, requests: [] })
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.getAllByText(/Allowed for/)).toHaveLength(12)
+})
+
+test('the countdown follows elapsed time, not the wall clock', async () => {
+  terminalApi.listTerminalPermissions.mockResolvedValueOnce({ allowances: [{ terminal: 'pts/5', remote: false, expiresInMs: 30_000 }], requests: [] })
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  vi.setSystemTime(Date.now() - 120_000)
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(screen.getByText('Allowed for 29 more seconds')).toBeTruthy()
+})
+
+test('says that an allowed terminal skips the question only when nothing more is needed', async () => {
+  renderSetting()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.getByText(/A terminal you allowed is answered without asking, unless the request needs your master password or a choice between items\./)).toBeTruthy()
+})
