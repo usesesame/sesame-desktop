@@ -56,6 +56,7 @@ commands.allow = [
   "preview_history_version",
   "get_merge_comparison",
   "list_never_save_sites",
+  "get_email_alias_settings",
 ]
 
 [[permission]]
@@ -98,17 +99,20 @@ commands.allow = [
   "restore_history_version",
   "merge_duplicate_logins",
   "remove_never_save_site",
+  "save_email_alias_settings",
+  "remove_email_alias_settings",
 ]
 
 [[permission]]
 identifier = "vault-tools"
-description = "Local password analysis, deliberate breach checking, and auto-type for the main window."
+description = "Local password analysis, deliberate breach checking, email alias requests, and auto-type for the main window."
 commands.allow = [
   "check_password_strength",
   "check_password_breach",
   "start_login_breach_scan",
   "get_login_breach_scan_status",
   "cancel_login_breach_scan",
+  "create_email_alias",
   "auto_type",
 ]
 

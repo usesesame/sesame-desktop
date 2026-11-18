@@ -441,10 +441,10 @@
           "markdownDescription": "Redacted vault snapshots and explicit item reads for the main window."
         },
         {
-          "description": "Local password analysis, deliberate breach checking, and auto-type for the main window.",
+          "description": "Local password analysis, deliberate breach checking, email alias requests, and auto-type for the main window.",
           "type": "string",
           "const": "vault-tools",
-          "markdownDescription": "Local password analysis, deliberate breach checking, and auto-type for the main window."
+          "markdownDescription": "Local password analysis, deliberate breach checking, email alias requests, and auto-type for the main window."
         },
         {
           "description": "Opt-in website-icon fetching and local cache controls for the main window.",

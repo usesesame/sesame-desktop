@@ -17,6 +17,7 @@ pub mod browser_fill_broker;
 pub mod browser_replies;
 pub mod cli_broker;
 pub mod cli_requests;
+pub mod email_aliases;
 pub mod file_choices;
 pub mod history;
 pub mod imports;

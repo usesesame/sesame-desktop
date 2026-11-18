@@ -1233,8 +1233,8 @@ button.no-totp:hover { filter: brightness(.97); }
 .editor-generator-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--text-muted); font-size: var(--type-2); }
 .editor-generator .generator-toggles { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; }
 .editor-footer { display: flex; justify-content: space-between; gap: 10px; padding: var(--space-4) 28px; border-top: 1px solid var(--border-soft); background: var(--surface-2); }
-.editor-footer.discard-confirm { align-items: center; }
-.editor-footer.discard-confirm p { margin: 0; color: var(--text-muted); font-size: var(--type-2); }
+.editor-footer.discard-confirm { align-items: center; flex-wrap: wrap; }
+.editor-footer.discard-confirm p { flex: 1 1 16rem; margin: 0; color: var(--text-muted); font-size: var(--type-2); }
 .editor-footer.discard-confirm strong { color: var(--text); }
 .editor-footer-actions { display: flex; gap: var(--space-2); margin-left: auto; }
 .editor-footer.discard-confirm .editor-footer-actions button { white-space: nowrap; }

@@ -2,7 +2,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { uniqueTags } from './vault-items'
-import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserApprovalCancelled, BrowserChangeRequest, BrowserCreateRequest, PendingChangeList, PendingChangeView, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
+import type { BackupInspection, BackupSelection, BackupVerification, BreachCheckResult, BreachScanProgress, BreachScanReport, BrowserApprovalCancelled, BrowserChangeRequest, BrowserCreateRequest, PendingChangeList, PendingChangeView, BrowserCardFillCancelled, BrowserCardFillRequest, BrowserFillCancelled, BrowserFillRequest, BrowserIdentityFillCancelled, BrowserIdentityFillRequest, BrowserIntegrationStatus, BrowserSaveCancelled, BrowserSaveRequest, BrowserTotpFillCancelled, BrowserTotpFillRequest, Card, CardInput, ChangeMasterPasswordResult, ChosenFile, CustomRecord, CustomRecordInput, DeleteCardResult, DeleteCustomRecordResult, DeleteDocumentMetadataResult, DeleteIdentityResult, DeleteLoginResult, DeleteSecureNoteResult, DeleteSoftwareLicenseResult, DeleteSshKeyResult, DeleteWifiNetworkResult, DesktopUpdateProgress, DiagnosticStatus, DocumentMetadata, DocumentMetadataInput, DuplicateGroup, EmailAliasSettingsInput, EmailAliasStatus, Identity, IdentityInput, ImportAccounting, ImportPreviewResult, ImportResult, ImportSource, ItemPreview, LoginCard, LoginInput, LoginSummary, MasterPasswordRequest, MergeChoices, MergeComparison, MergeDuplicateLoginsResult, PasswordAnalysis, ItemKind, PlatformCapabilities, QuickAccessItem, QuickAccessStatus, RecoveryHealth, RecoveryReplacementResult, RecoveryReplacementStatus, RestoreBackupResult, RestoreHistoryVersionResult, RestoreTrashedItemResult, SaveCardResult, SecretView, SaveCustomRecordResult, SaveDocumentMetadataResult, SaveIdentityResult, SaveLoginResult, SaveSecureNoteResult, SaveSoftwareLicenseResult, SaveSshKeyResult, SaveWifiNetworkResult, SecureNote, SecureNoteInput, DisconnectOutcome, ServerInspection, ServiceConnectionStatus, SoftwareLicense, SoftwareLicenseInput, SshKey, SshKeyInput, TotpCodeEntry, TotpRefresh, VaultEntry, VaultItemSummary, VaultSetup, VaultSnapshot, VaultStatus, WebsiteIconCacheStatus, WifiNetwork, WifiNetworkInput } from './types'
 
 const hasTauriInternals = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
 export const previewMode = !hasTauriInternals
@@ -1679,6 +1679,50 @@ export async function removeNeverSaveSite(origin: string): Promise<string[]> {
     return [...previewNeverSaveSites]
   }
   return invoke<string[]>('remove_never_save_site', { origin })
+}
+
+let previewEmailAliases: EmailAliasStatus = { nameSite: false }
+
+function previewAliasDomain(input: string | undefined): string | undefined {
+  const domain = (input ?? '').trim().replace(/\.+$/, '').toLowerCase()
+  if (!domain) return undefined
+  const labels = domain.split('.')
+  const valid = domain.length <= 253
+    && labels.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+    && /[a-z]/.test(labels[labels.length - 1])
+  if (!valid) throw new Error('Enter the domain your aliases use, such as anonaddy.me.')
+  return domain
+}
+
+export async function getEmailAliasSettings(): Promise<EmailAliasStatus> {
+  if (previewMode) return { ...previewEmailAliases }
+  return invoke<EmailAliasStatus>('get_email_alias_settings')
+}
+
+export async function saveEmailAliasSettings(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
+  if (previewMode) {
+    if (!settings.token?.trim() && previewEmailAliases.service !== settings.service) throw new Error('Paste the API token from your alias service.')
+    previewEmailAliases = { service: settings.service, domain: settings.service === 'addy' ? previewAliasDomain(settings.domain) : undefined, nameSite: settings.nameSite }
+    return { ...previewEmailAliases }
+  }
+  return invoke<EmailAliasStatus>('save_email_alias_settings', { settings })
+}
+
+export async function removeEmailAliasSettings(): Promise<EmailAliasStatus> {
+  if (previewMode) {
+    previewEmailAliases = { nameSite: false }
+    return { ...previewEmailAliases }
+  }
+  return invoke<EmailAliasStatus>('remove_email_alias_settings')
+}
+
+export async function createEmailAlias(site?: string): Promise<string> {
+  if (previewMode) {
+    if (!previewEmailAliases.service) throw new Error('Turn on email aliases in Settings first.')
+    return previewEmailAliases.service === 'addy' ? `quiet.harbor.42@${previewEmailAliases.domain ?? 'anonaddy.me'}` : 'quiet_harbor42@simplelogin.com'
+  }
+  return invoke<string>('create_email_alias', { site })
 }
 
 function previewQuery(name: string): string | null {
