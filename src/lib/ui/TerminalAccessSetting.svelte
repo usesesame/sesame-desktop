@@ -140,8 +140,9 @@
           <ul aria-label="Allowed terminals">
             {#each live as allowance, index (allowance.terminal + index)}
               <li>
-                <span class="terminal-line"><code><bdi>{shownText(allowance.terminal, 24)}</bdi></code>{#if allowance.program}<span class="terminal-program"><bdi>{shownText(allowance.program.reportedName, 48)}</bdi></span>{/if}{#if allowance.remote}<span class="status-pill warning">Remote session</span>{/if}</span>
+                <span class="terminal-line"><code><bdi>{shownText(allowance.terminal, 24)}</bdi></code>{#if allowance.remote}<span class="status-pill warning">Remote session</span>{/if}</span>
                 <small>Allowed for {remainingWords(allowance.left)}</small>
+                <span class="terminal-program">Covers this terminal and anything started from it.{#if allowance.program}&#32;The program that asked named itself <bdi>{shownText(allowance.program.reportedName, 48)}</bdi>.{/if}</span>
               </li>
             {/each}
           </ul>
@@ -183,7 +184,7 @@
   .terminal-setting-list li + li { border-top: 1px solid var(--border-soft); }
   .terminal-line { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); min-width: 0; color: var(--text); font-size: var(--type-3); overflow-wrap: anywhere; }
   .terminal-line code, .terminal-setting-list small code { font-family: var(--font-code); font-size: var(--type-2); }
-  .terminal-program { color: var(--text-muted); font-size: var(--type-2); }
+  .terminal-program { flex-basis: 100%; min-width: 0; color: var(--text-muted); font-size: var(--type-2); overflow-wrap: anywhere; }
   .terminal-line .status-pill { margin-left: 0; }
   .terminal-setting-list small { color: var(--text-muted); font-size: var(--type-2); white-space: nowrap; }
   bdi { unicode-bidi: isolate; }
