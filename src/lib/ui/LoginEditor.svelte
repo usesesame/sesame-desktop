@@ -417,10 +417,10 @@
     </footer>
   {:else if confirmingDiscard}
     <footer class="editor-footer discard-confirm">
-      <p><strong>Discard your changes?</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : 'This login has edits that have not been saved.'}</p>
+      <p><strong>{dirty ? 'Discard your changes?' : 'Leave this login?'}</strong> {aliasWorking ? 'An alias is still being made. Leaving does not stop it, and the new address will not be saved here.' : 'This login has edits that have not been saved.'}</p>
       <div class="editor-footer-actions">
         <button type="button" class="secondary-button" on:click={() => (confirmingDiscard = false)}>Keep editing</button>
-        <button type="button" class="editor-delete" on:click={discard}>Discard changes</button>
+        <button type="button" class="editor-delete" on:click={discard}>{dirty ? 'Discard changes' : 'Leave'}</button>
       </div>
     </footer>
   {:else}
@@ -434,7 +434,7 @@
 </ModalShell>
 
 <style>
-  .alias-action { grid-column: -2; }
+  .alias-action { grid-column: -2; min-width: 0; overflow-wrap: anywhere; }
   .alias-action .text-button { margin-left: calc(var(--space-1) * -1); }
   .alias-error { color: var(--danger); }
 </style>

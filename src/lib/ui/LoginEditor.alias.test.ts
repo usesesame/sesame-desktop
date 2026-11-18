@@ -184,7 +184,8 @@ test('closing an unchanged login while an alias is being made asks first', async
 
   expect(props.onClose).not.toHaveBeenCalled()
   expect(document.body.textContent).toContain('An alias is still being made. Leaving does not stop it, and the new address will not be saved here.')
-  await fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+  expect(document.body.textContent).toContain('Leave this login?')
+  await fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
   expect(props.onClose).toHaveBeenCalledOnce()
 })
 
