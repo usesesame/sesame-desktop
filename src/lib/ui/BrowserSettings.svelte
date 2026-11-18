@@ -2,7 +2,6 @@
   import type { BrowserIntegrationStatus } from '../types'
   import BrowserIntegrationSetting from './BrowserIntegrationSetting.svelte'
   import NeverSaveSitesSetting from './NeverSaveSitesSetting.svelte'
-  import EmailAliasesSetting from './EmailAliasesSetting.svelte'
 
   export let browserIntegration: BrowserIntegrationStatus | null = null
   export let browserIntegrationWorking = false
@@ -32,5 +31,4 @@
       <NeverSaveSitesSetting />
     </div>
   </section>
-  <EmailAliasesSetting />
 </div>
