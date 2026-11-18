@@ -37,6 +37,7 @@ pub enum AliasFailure {
     ServiceDown,
     Refused,
     UnusableAnswer,
+    UnreadableAlias,
 }
 
 impl AliasFailure {
@@ -65,6 +66,9 @@ impl AliasFailure {
             Self::Refused => "The alias service turned down the request, so no alias was made.",
             Self::UnusableAnswer => {
                 "The alias service sent an answer Sesame could not use, so no alias was added."
+            }
+            Self::UnreadableAlias => {
+                "The alias service answered, but Sesame could not read the new alias, so the email field was not filled. An alias may have been made, so check your alias service before you try again."
             }
         }
     }
@@ -182,8 +186,8 @@ async fn create_alias_at(
     }
     let body = read_limited(response, ALIAS_MAX_BODY_BYTES)
         .await
-        .ok_or(AliasFailure::UnusableAnswer)?;
-    alias_from_body(request.service, &body)
+        .ok_or(AliasFailure::UnreadableAlias)?;
+    alias_from_body(request.service, &body).map_err(|_| AliasFailure::UnreadableAlias)
 }
 
 fn send_failure(error: &reqwest::Error) -> AliasFailure {
@@ -510,7 +514,7 @@ mod tests {
         });
         assert_eq!(
             create_against(&server, &request(EmailAliasService::Addy, None)),
-            Err(AliasFailure::UnusableAnswer)
+            Err(AliasFailure::UnreadableAlias)
         );
     }
 
@@ -551,7 +555,7 @@ mod tests {
                 let server = TestServer::start(move |_| Reply::bytes(201, reply.clone()));
                 assert_eq!(
                     create_against(&server, &request(service, None)),
-                    Err(AliasFailure::UnusableAnswer),
+                    Err(AliasFailure::UnreadableAlias),
                     "{service:?} {}",
                     String::from_utf8_lossy(&body)
                 );
@@ -573,14 +577,14 @@ mod tests {
             let addy = TestServer::start(move |_| addy_answer(&addy_alias));
             assert_eq!(
                 create_against(&addy, &request(EmailAliasService::Addy, None)),
-                Err(AliasFailure::UnusableAnswer),
+                Err(AliasFailure::UnreadableAlias),
                 "{alias:?}"
             );
             let simplelogin_alias = alias.to_string();
             let simplelogin = TestServer::start(move |_| simplelogin_answer(&simplelogin_alias));
             assert_eq!(
                 create_against(&simplelogin, &request(EmailAliasService::SimpleLogin, None)),
-                Err(AliasFailure::UnusableAnswer),
+                Err(AliasFailure::UnreadableAlias),
                 "{alias:?}"
             );
         }
@@ -679,7 +683,7 @@ mod tests {
             answer_declaring(0),
             Ok("fictional.alias@anonaddy.me".to_string())
         );
-        assert_eq!(answer_declaring(40), Err(AliasFailure::UnusableAnswer));
+        assert_eq!(answer_declaring(40), Err(AliasFailure::UnreadableAlias));
     }
 
     #[test]
@@ -710,6 +714,15 @@ mod tests {
         let unsure = AliasFailure::Unreachable.message();
         assert!(unsure.contains("may have been made"));
         assert!(unsure.contains("Check your alias service before you try again"));
+        let unread = AliasFailure::UnreadableAlias;
+        assert!(unread.token_may_have_left());
+        assert!(unread.message().contains("the email field was not filled"));
+        assert!(unread
+            .message()
+            .contains("check your alias service before you try again"));
+        assert!(!AliasFailure::UnusableAnswer
+            .message()
+            .contains("may have been made"));
     }
 
     #[test]

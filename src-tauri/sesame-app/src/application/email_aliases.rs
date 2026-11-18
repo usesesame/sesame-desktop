@@ -579,6 +579,7 @@ mod tests {
             Ok("fictional.alias@anonaddy.me".to_string()),
             Err(AliasFailure::TokenRefused),
             Err(AliasFailure::UnusableAnswer),
+            Err(AliasFailure::UnreadableAlias),
             Err(AliasFailure::ServiceDown),
         ] {
             let vault = vault_with_addy(false);
