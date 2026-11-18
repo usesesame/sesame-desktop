@@ -1691,7 +1691,7 @@ export async function getEmailAliasSettings(): Promise<EmailAliasStatus> {
 export async function saveEmailAliasSettings(settings: EmailAliasSettingsInput): Promise<EmailAliasStatus> {
   if (previewMode) {
     if (!settings.token?.trim() && previewEmailAliases.service !== settings.service) throw new Error('Paste the API token from your alias service.')
-    previewEmailAliases = { service: settings.service, domain: settings.service === 'addy' ? settings.domain?.trim().toLowerCase() : undefined, nameSite: settings.nameSite }
+    previewEmailAliases = { service: settings.service, domain: settings.service === 'addy' ? settings.domain?.trim().toLowerCase() || undefined : undefined, nameSite: settings.nameSite }
     return { ...previewEmailAliases }
   }
   return invoke<EmailAliasStatus>('save_email_alias_settings', { settings })
