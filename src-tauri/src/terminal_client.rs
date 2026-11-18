@@ -35,7 +35,7 @@ const NOT_RUNNING: &str = "Sesame is not running. Open Sesame and try again.";
 const NOT_SESAME: &str = "This is not the Sesame app this command belongs to.";
 const UNREADABLE_REPLY: &str = "Sesame sent a reply this command does not understand.";
 
-const USAGE: &str = "Usage:
+const USAGE_COMMON: &str = "Usage:
   sesame list
   sesame get <item> [field] [--copy]
   sesame totp <item> [--copy]
@@ -43,8 +43,21 @@ const USAGE: &str = "Usage:
 Each request waits for your approval in the Sesame window. A hidden value also needs your master password, as it does in the window.
 With --copy Sesame puts the value on the clipboard instead of printing it, and clears it again after a while.
 Sesame never takes a secret as an argument, but the item and field names you type stay in your shell history.
-When you allow a terminal for five minutes, any program started from that terminal can read what it asks for during that time.
+Anything printed in a terminal can be read by other programs that run as you.
 ";
+
+#[cfg(not(windows))]
+const USAGE_PLATFORM: &str = "When you allow a terminal for five minutes, any program started from that terminal can read what it asks for during that time. The allowance ends early when the vault locks.
+With the AppImage, run ./Sesame.AppImage list, or add an alias such as alias sesame=~/Applications/Sesame.AppImage to your shell.
+";
+
+#[cfg(windows)]
+const USAGE_PLATFORM: &str = "On Windows every request asks in the Sesame window, because Sesame cannot tell one terminal from another there.
+";
+
+fn usage() -> String {
+    format!("{USAGE_COMMON}{USAGE_PLATFORM}")
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Invocation {
@@ -456,7 +469,7 @@ fn send_request(_command: &CliCommand, streams: &mut Streams<'_>) -> i32 {
 pub fn run_with(arguments: &[OsString], streams: &mut Streams<'_>) -> i32 {
     match parse_arguments(arguments) {
         Ok(Invocation::Help) => {
-            let _ = streams.out.write_all(USAGE.as_bytes());
+            let _ = streams.out.write_all(usage().as_bytes());
             EXIT_OK
         }
         Ok(Invocation::Version) => {
@@ -466,7 +479,7 @@ pub fn run_with(arguments: &[OsString], streams: &mut Streams<'_>) -> i32 {
         Ok(Invocation::Run(command)) => send_request(&command, streams),
         Err(problem) => {
             streams.say(&problem);
-            let _ = streams.err.write_all(USAGE.as_bytes());
+            let _ = streams.err.write_all(usage().as_bytes());
             EXIT_USAGE
         }
     }
@@ -645,6 +658,33 @@ mod tests {
             parse_arguments(&args(&["--version"])),
             Ok(Invocation::Version)
         );
+    }
+
+    #[test]
+    fn the_help_text_states_the_limits_for_this_platform() {
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let mut streams = Streams {
+            out: &mut out,
+            err: &mut err,
+            out_terminal: false,
+            err_terminal: false,
+        };
+        assert_eq!(run_with(&args(&["--help"]), &mut streams), EXIT_OK);
+        let help = String::from_utf8(out).expect("help is text");
+        assert!(err.is_empty());
+        assert!(help.contains("sesame get <item> [field] [--copy]"));
+        assert!(help.contains("stay in your shell history"));
+        assert!(help.contains("can be read by other programs that run as you"));
+        if cfg!(windows) {
+            assert!(help.contains("On Windows every request asks in the Sesame window"));
+            assert!(!help.contains("five minutes"));
+            assert!(!help.contains("AppImage"));
+        } else {
+            assert!(help.contains("any program started from that terminal"));
+            assert!(help.contains("./Sesame.AppImage list"));
+        }
+        assert!(!help.contains('\u{2014}') && !help.contains('(') && !help.contains(')'));
     }
 
     #[test]
