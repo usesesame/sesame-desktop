@@ -28,6 +28,10 @@ describe('text a terminal sent', () => {
     expect(marked.endsWith('x\u0301\u0301…')).toBe(true)
     expect(shownText('x\u0301\u0301'.repeat(26))).toBe('x\u0301\u0301'.repeat(26))
     expect(shownText(undefined)).toBe(UNREADABLE_NAME)
+    expect(shownText('\u3164\u3164', 10)).toBe('Unreadabl…')
+    expect(shownText('\u3164', 15)).toBe(UNREADABLE_NAME)
+    expect(shownText('Readable', 0)).toBe('')
+    expect(shownText('Readable', 1)).toBe('…')
   })
 })
 

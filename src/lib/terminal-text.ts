@@ -48,20 +48,25 @@ function codePoints(unit: string): number {
   return [...unit].length
 }
 
-export function shownText(value: string | null | undefined, max = MAX_SHOWN_CHARS): string {
-  const plain = cleaned(value ?? '')
-  const joined = plain.join('')
-  if (!READABLE.test(joined)) return UNREADABLE_NAME
+function capped(units: string[], max: number): string {
+  const joined = units.join('')
   if (codePoints(joined) <= max) return joined
+  if (max < 1) return ''
   let kept = ''
   let used = 0
-  for (const unit of plain) {
+  for (const unit of units) {
     const size = codePoints(unit)
     if (used + size > max - 1) break
     kept += unit
     used += size
   }
   return `${kept}…`
+}
+
+export function shownText(value: string | null | undefined, max = MAX_SHOWN_CHARS): string {
+  const plain = cleaned(value ?? '')
+  if (!READABLE.test(plain.join(''))) return capped([...UNREADABLE_NAME], max)
+  return capped(plain, max)
 }
 
 const knownFields: Record<string, string> = {
