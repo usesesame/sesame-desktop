@@ -98,6 +98,28 @@ test('a focus change during a read waits for a fresh read and keeps one poll goi
   stop()
 })
 
+test('a focus change takes back a ready state at once, before any read returns', async () => {
+  const answers: Array<(ms: number) => void> = []
+  const fetchWait = vi.fn(() => new Promise<number>((resolve) => answers.push(resolve)))
+  const wait = createApprovalWait(fetchWait)
+  const stop = wait.subscribe(() => {})
+  answers[0](0)
+  await settle()
+  expect(get(wait).ms).toBe(0)
+  await vi.advanceTimersByTimeAsync(300)
+  expect(fetchWait).toHaveBeenCalledTimes(2)
+
+  window.dispatchEvent(new Event('blur'))
+  expect(get(wait).ms).toBeGreaterThan(0)
+  answers[1](0)
+  await settle()
+  expect(get(wait).ms).toBeGreaterThan(0)
+  answers[2](0)
+  await settle()
+  expect(get(wait).ms).toBe(0)
+  stop()
+})
+
 test('the footer says when approval opens, when to click the window, and how long is left', () => {
   expect(approvalFooterText(20, { ms: 400, windowFocused: true })).toBe('Ready in a moment')
   expect(approvalFooterText(20, { ms: 750, windowFocused: false })).toBe('Click this window to approve')

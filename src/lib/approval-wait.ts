@@ -42,7 +42,10 @@ export function createApprovalWait(fetchWait: () => Promise<number>): Readable<A
       timer = setTimeout(() => void refresh(), ms > 0 ? WAIT_POLL_MS : READY_POLL_MS)
     }
 
-    const onFocusChange = () => void refresh()
+    const onFocusChange = () => {
+      set({ ...unknownWait, windowFocused: document.hasFocus() })
+      void refresh()
+    }
     window.addEventListener('focus', onFocusChange)
     window.addEventListener('blur', onFocusChange)
     void refresh()

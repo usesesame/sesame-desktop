@@ -112,13 +112,21 @@ test('the allow button waits for the backend and for the dialog to be on screen'
   expect(allowButton().disabled).toBe(false)
 })
 
-test('an unreadable backend wait keeps Allow and the terminal box disabled', async () => {
+test('an unreadable backend wait takes back an enabled Allow until a read succeeds', async () => {
   vi.useFakeTimers()
-  terminalApi.getTerminalApprovalWait.mockRejectedValue(new Error('fictional wait failure'))
+  const box = () => screen.getByRole('checkbox', { name: /Allow this terminal for five minutes/ }) as HTMLInputElement
   show()
-  await vi.advanceTimersByTimeAsync(2_000)
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(allowButton().disabled).toBe(false)
+  expect(box().disabled).toBe(false)
+  terminalApi.getTerminalApprovalWait.mockRejectedValue(new Error('fictional wait failure'))
+  await vi.advanceTimersByTimeAsync(400)
   expect(allowButton().disabled).toBe(true)
-  expect((screen.getByRole('checkbox', { name: /Allow this terminal for five minutes/ }) as HTMLInputElement).disabled).toBe(true)
+  expect(box().disabled).toBe(true)
+  terminalApi.getTerminalApprovalWait.mockResolvedValue(0)
+  await vi.advanceTimersByTimeAsync(400)
+  expect(allowButton().disabled).toBe(false)
+  expect(box().disabled).toBe(false)
 })
 
 test('a stray Enter or Space cannot allow, because nothing that allows has focus', async () => {
