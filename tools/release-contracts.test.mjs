@@ -42,6 +42,9 @@ test('the release sentinel and the grant command agree across the seam', () => {
   assert.match(vault, /PRESENCE_REQUIRED = 'presenceRequired'/)
   assert.match(vault, /invoke\('grant_presence', \{ secret \}\)/)
 
+  const command = read('src-tauri', 'src', 'commands', 'release.rs')
+  assert.match(command, /#\[tauri::command\(async\)\]\npub fn grant_presence\(/, 'the master password check runs on the window thread and freezes the window')
+
   const registered = read('src-tauri', 'src', 'lib.rs')
   assert.match(registered, /commands::grant_presence,/)
   assert.match(registered, /\.manage\(release::ReleasePresence::default\(\)\)/)

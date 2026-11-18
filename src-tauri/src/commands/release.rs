@@ -6,7 +6,7 @@ use crate::vault::{VaultResult, VaultState};
 
 pub(crate) use crate::application::release::require_release_presence;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn grant_presence(
     secret: String,
     state: State<'_, VaultState>,
