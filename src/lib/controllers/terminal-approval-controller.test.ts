@@ -321,6 +321,19 @@ describe('terminal approvals in the window', () => {
     stop()
   })
 
+  it('leaves a waiting request to the lock instead of denying it', async () => {
+    const { controller, stop } = await started()
+    handlers.request(request('approval-1', { needsPresence: true }))
+    controller.setSecret('fictional-master-password')
+    controller.clearSecrets()
+    expect(state()).toMatchObject({ request: null, secret: '' })
+    await flush()
+    expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()
+    handlers.cancelled({ approvalId: 'approval-1', reason: 'vaultChanged' })
+    expect(feedback.showNotice).toHaveBeenCalledWith('Terminal request closed', 'The vault locked or changed, so Sesame closed the terminal request.')
+    stop()
+  })
+
   it('gives way to a browser request at once and says why when Sesame reports the preemption', async () => {
     const { stop } = await started()
     handlers.request(request('approval-1'))

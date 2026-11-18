@@ -511,6 +511,9 @@ fn prompt(
                 return stop("vaultChanged", Stop::Reply(CliErrorCode::Stale));
             }
             Ok(CliDecision::Preempted) => return preempted(),
+            Ok(_) if context.vault.session_epoch() != epoch => {
+                return stop("vaultChanged", Stop::Reply(CliErrorCode::Stale));
+            }
             Ok(_) if !context.host.peer_connected() => {
                 return unanswered("connectionClosed", Stop::Gone);
             }

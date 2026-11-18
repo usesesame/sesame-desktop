@@ -491,7 +491,6 @@
       if (browserSave.value().request) await browserSaveController.resolve(false)
       if (browserChange.value().request) await browserChangeController.resolve(null)
       if (browserCreate.value().request) await browserCreateController.resolve(false)
-      if (terminalApproval.value().request) await terminalApprovalController.deny()
     },
     refreshActiveView,
     openPinSetup: settingsController.openPinSetup,

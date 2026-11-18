@@ -316,8 +316,7 @@ export function createTerminalApprovalController({ stores, feedback, modal, bloc
   function clearSecrets() {
     const current = store.value().request
     if (current) closedQuietly = current.approvalId
-    loop.clearSecrets()
-    store.patch({ ...freshFields(null), unlock: store.value().unlock })
+    store.patch({ ...freshFields(null), request: null, syncWorking: false, unlock: store.value().unlock })
   }
 
   return { receive: loop.receive, syncPending: loop.syncPending, start, clearSecrets, allow, deny, dismiss, expire, select, setAllowTerminal, setSecret }

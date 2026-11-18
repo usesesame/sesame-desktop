@@ -650,6 +650,33 @@ fn a_lock_during_a_pending_approval_is_stale_and_its_decision_expires() {
 }
 
 #[test]
+fn a_denial_sent_after_a_lock_is_a_lock_and_does_not_turn_the_next_request_away() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    let (replies, events) =
+        harness.run_with(&get(9, Some("username"), false), &origin, |_, effects| {
+            let event = harness.pending();
+            harness.lock(effects);
+            let _ = harness.decide(&event, CliDecisionKind::Deny, None, false);
+        });
+    assert_eq!(error_code(&replies), Some(CliErrorCode::Stale));
+    assert!(events.contains(&"approvalCancelled:vaultChanged".to_string()));
+
+    harness.vault.reopen();
+    let (replies, events) = harness.run_with(&get(10, Some("username"), false), &origin, |_, _| {
+        harness.allow(false)
+    });
+    assert!(events.contains(&"approvalRequested".to_string()));
+    assert_eq!(
+        replies
+            .last()
+            .and_then(|reply| reply.value.clone())
+            .as_deref(),
+        Some("casey@northwind.example")
+    );
+}
+
+#[test]
 fn an_allowance_skips_the_click_and_lists_the_request() {
     let harness = Harness::new();
     let origin = terminal(100);
