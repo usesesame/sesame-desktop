@@ -42,11 +42,11 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
 })
 
 test('the extension host tests build without the staged Windows resource', () => {
-  for (const file of ['test-extension-native-host.mjs', 'test-extension-native-host.ps1']) {
-    assert.match(
-      readFileSync(join(root, 'tools', file), 'utf8'),
-      /"externalBin":\[\],"resources":\[\]/,
-      `${file} must build without the staged Windows resource`,
-    )
-  }
+  assert.match(read('tools', 'browser-host.mjs'), /UNSTAGED_TAURI_CONFIG = '\{"bundle":\{"externalBin":\[\],"resources":\[\]\}\}'/)
+  assert.match(read('tools', 'test-extension-native-host.mjs'), /import \{[^}]*UNSTAGED_TAURI_CONFIG[^}]*\} from '\.\/browser-host\.mjs'/)
+  assert.match(
+    read('tools', 'test-extension-native-host.ps1'),
+    /"externalBin":\[\],"resources":\[\]/,
+    'test-extension-native-host.ps1 must build without the staged Windows resource',
+  )
 })
