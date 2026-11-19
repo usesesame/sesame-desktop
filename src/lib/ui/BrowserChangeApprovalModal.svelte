@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
@@ -34,6 +35,9 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
+  settleKey={settleKeyFor(request, $browserChange.selectedId)}
   open={true}
   onClose={cancel}
   labelledby="browser-change-heading"
@@ -49,7 +53,7 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   {#if selectedWaiting}
@@ -79,7 +83,7 @@
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
-      <button type="button" class="primary-button" disabled={!$browserChange.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>
+      <button type="button" class="primary-button" disabled={!$browserChange.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>
         {working ? 'Changing…' : 'Change password'}
       </button>
     </div>

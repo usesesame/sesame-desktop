@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { handleMenuItemKeydown, handleMenuTriggerKeydown, menuItemsIn } from '../menu-keys'
@@ -45,7 +46,7 @@
     <Icon name="plus" size={15} strokeWidth={2.2} /><span>Add</span>
   </button>
   {#if open}
-    <div id="add-item-options" class="add-item-options" role="menu" aria-label="Add an item">
+    <div use:holdsApprovals id="add-item-options" class="add-item-options" role="menu" aria-label="Add an item">
       {#each ITEM_KINDS as kind (kind.id)}
         <button type="button" role="menuitem" tabindex="-1" on:click={() => onAdd(kind.id)} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
           <Icon name={kind.icon} size={15} />{kind.addLabel}

@@ -332,7 +332,7 @@
     <p class="suggestion-note">{matchRuleNote}</p>
     <label>Tags <span class="field-hint">Optional. Separate tags with commas.</span><input name="login-tags" value={(loginDraft.tags ?? []).join(', ')} on:input={(event) => (loginDraft = { ...loginDraft, tags: parseTags(event.currentTarget.value) })} maxlength="10000" autocomplete="off" /></label>
     {#if tagHints.length}
-      <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${tag}`} on:click={() => addTag(tag)}><bdi>{vaultText(tag)}</bdi></button>{/each}</p>
+      <p class="suggestion-note">Used before: {#each tagHints as tag (tag)}<button type="button" class="text-button" aria-label={`Add tag ${vaultText(tag)}`} on:click={() => addTag(tag)}><bdi>{vaultText(tag)}</bdi></button>{/each}</p>
     {/if}
     <label>Folder <span class="field-hint">Optional. Create and rename folders from the vault organizer.</span>
       <SelectMenu

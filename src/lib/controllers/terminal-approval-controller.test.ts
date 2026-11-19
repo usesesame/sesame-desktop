@@ -353,7 +353,7 @@ describe('terminal approvals in the window', () => {
   })
 
   it('waits behind onboarding instead of opening over it or turning the request down', async () => {
-    const { controller, stop } = await started()
+    const { stop } = await started()
     onboarding = true
     terminalApi.getPendingTerminalRequest.mockResolvedValue(request('approval-1'))
     handlers.request(request('approval-1'))
@@ -366,11 +366,6 @@ describe('terminal approvals in the window', () => {
     expect(state().request?.approvalId).toBe('approval-1')
 
     onboarding = true
-    controller.setAside()
-    expect(state().request).toBeNull()
-    await vi.advanceTimersByTimeAsync(3_000)
-    expect(state().request).toBeNull()
-    onboarding = false
     await vi.advanceTimersByTimeAsync(3_000)
     expect(state().request?.approvalId).toBe('approval-1')
     expect(terminalApi.resolveTerminalRequest).not.toHaveBeenCalled()

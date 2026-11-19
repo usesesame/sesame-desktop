@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import ModalShell from './ModalShell.svelte'
   import type { SyncConflictSide } from '../types'
 
@@ -44,7 +45,7 @@
 
         <label class="sync-conflict-side" class:selected={choice === 'other'}>
           <input type="radio" name="sync-conflict" value="other" bind:group={choice} disabled={working} />
-          <span class="sync-conflict-head">{otherDevice.deviceLabel || 'Other device'}</span>
+          <span class="sync-conflict-head"><bdi>{vaultText(otherDevice.deviceLabel) || 'Other device'}</bdi></span>
           <span class="sync-conflict-meta">Revision {otherDevice.revision}</span>
           {#if otherDevice.changedAt}<span class="sync-conflict-meta">Uploaded {formatWhen(otherDevice.changedAt)}</span>{/if}
           <span class="sync-conflict-count">{otherDevice.entryCount} logins</span>
