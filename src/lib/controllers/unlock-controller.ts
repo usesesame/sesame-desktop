@@ -1,6 +1,6 @@
 import { isValidPinLength } from '../pin-rules'
 import type { AppStores } from '../stores/app-stores'
-import type { ItemKind, VaultSnapshot } from '../types'
+import type { ItemKind, VaultSnapshot, VaultStatus } from '../types'
 import {
   completeRecoverySetup,
   createVault,
@@ -95,8 +95,15 @@ export function createUnlockController(options: UnlockControllerOptions) {
     }
   }
 
+  function dropUnlockLockedMeanwhile(status: VaultStatus): boolean {
+    if (status.unlocked) return false
+    vault.patch({ snapshot: null, loginCard: null, status })
+    return true
+  }
+
   async function installExistingUnlock(snapshot: VaultSnapshot): Promise<boolean> {
     let status = await getVaultStatus()
+    if (dropUnlockLockedMeanwhile(status)) return false
     if (status.onboardingRequired) {
       let recoveryKit: string
       try {
@@ -106,6 +113,7 @@ export function createUnlockController(options: UnlockControllerOptions) {
         await lockVault().catch(() => undefined)
         throw error
       }
+      if (dropUnlockLockedMeanwhile(status)) return false
       vault.patch({ snapshot, status })
       state.patch({ recoveryKit, recoveryConfirmed: false, masterPassword: '', confirmPassword: '' })
       onboarding.startAfterVaultCreation()
@@ -208,6 +216,8 @@ export function createUnlockController(options: UnlockControllerOptions) {
       try {
         if (!status.exists) {
           const setup = await createVault({ masterPassword: current.masterPassword })
+          state.patch({ masterPassword: '', confirmPassword: '' })
+          if (dropUnlockLockedMeanwhile(await getVaultStatus())) return
           vault.patch({ snapshot: setup.snapshot, status: { ...status, exists: true, unlocked: true, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: true, vaultId: setup.snapshot.vaultId, revision: setup.snapshot.revision } })
           state.patch({ recoveryKit: setup.recoveryKit, recoveryConfirmed: false, masterPassword: '', confirmPassword: '' })
           onboarding.startAfterVaultCreation()

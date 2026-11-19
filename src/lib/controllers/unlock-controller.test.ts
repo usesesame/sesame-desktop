@@ -187,3 +187,79 @@ describe('unlocking with the master password', () => {
     expect(controller.state.value().isWorking).toBe(false)
   })
 })
+
+describe('an unlock answer that arrives after the vault locked again', () => {
+  const lockedStatus = { exists: true, unlocked: false, preview: false, pinUnlockAvailable: false, helloUnlockAvailable: false, onboardingRequired: false, revision: 0 }
+
+  function lockedHarness() {
+    const result = harness({ unlocked: false })
+    result.stores.vault.patch({ snapshot: null, status: { ...result.stores.vault.value().status, exists: true, unlocked: false } })
+    result.controller.state.patch({ isWorking: false })
+    return result
+  }
+
+  it('keeps no snapshot and says nothing about an unlock with the master password', async () => {
+    const { controller, stores, feedback } = lockedHarness()
+    controller.state.patch({ masterPassword: 'fictional master password' })
+    vaultApi.unlockVault.mockResolvedValue(snapshotOf(['first']))
+    vaultApi.getVaultStatus.mockResolvedValue(lockedStatus)
+
+    await controller.submitMasterPassword()
+
+    expect(stores.vault.value().snapshot).toBeNull()
+    expect(stores.vault.value().status.unlocked).toBe(false)
+    expect(feedback.state.value().notice).toBeNull()
+  })
+
+  it('keeps no snapshot from a PIN unlock', async () => {
+    const { controller, stores } = lockedHarness()
+    controller.state.patch({ unlockPin: '135790' })
+    vaultApi.unlockWithPin.mockResolvedValue(snapshotOf(['first']))
+    vaultApi.getVaultStatus.mockResolvedValue(lockedStatus)
+
+    await controller.unlockUsingPin()
+
+    expect(stores.vault.value().snapshot).toBeNull()
+  })
+
+  it('keeps no snapshot or recovery kit when the vault locked while setup resumed', async () => {
+    const { controller, stores } = lockedHarness()
+    controller.state.patch({ masterPassword: 'fictional master password' })
+    vaultApi.unlockVault.mockResolvedValue(snapshotOf([]))
+    vaultApi.resumeRecoverySetup.mockResolvedValue('FICTIONAL-KIT')
+    vaultApi.getVaultStatus.mockResolvedValueOnce({ ...lockedStatus, unlocked: true, onboardingRequired: true })
+    vaultApi.getVaultStatus.mockResolvedValue({ ...lockedStatus, onboardingRequired: true })
+
+    await controller.submitMasterPassword()
+
+    expect(stores.vault.value().snapshot).toBeNull()
+    expect(controller.state.value().recoveryKit).toBe('')
+  })
+
+  it('keeps no snapshot or recovery kit from a new vault that locked before the answer arrived', async () => {
+    const { controller, stores } = lockedHarness()
+    stores.vault.patch({ status: { ...stores.vault.value().status, exists: false } })
+    controller.state.patch({ masterPassword: 'fictional master password', confirmPassword: 'fictional master password' })
+    vaultApi.createVault.mockResolvedValue({ snapshot: snapshotOf([]), recoveryKit: 'FICTIONAL-KIT' })
+    vaultApi.getVaultStatus.mockResolvedValue({ ...lockedStatus, onboardingRequired: true })
+
+    await controller.submitMasterPassword()
+
+    expect(stores.vault.value().snapshot).toBeNull()
+    expect(stores.vault.value().status.unlocked).toBe(false)
+    expect(controller.state.value().recoveryKit).toBe('')
+    expect(controller.state.value().masterPassword).toBe('')
+  })
+
+  it('installs the snapshot when the vault is still unlocked', async () => {
+    const { controller, stores, feedback } = lockedHarness()
+    controller.state.patch({ masterPassword: 'fictional master password' })
+    vaultApi.unlockVault.mockResolvedValue(snapshotOf(['first']))
+    vaultApi.getVaultStatus.mockResolvedValue({ ...lockedStatus, unlocked: true })
+
+    await controller.submitMasterPassword()
+
+    expect(stores.vault.value().snapshot?.entries.map((entry) => entry.id)).toEqual(['first'])
+    expect(feedback.state.value().notice).not.toBeNull()
+  })
+})
