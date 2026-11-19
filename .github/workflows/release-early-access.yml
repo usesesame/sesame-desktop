@@ -541,8 +541,6 @@ jobs:
             exit 1
           fi
           {
-            echo "$changes"
-            echo
             echo "Early access build for Windows 10 and 11, x64."
             echo
             echo "This installer is not Authenticode signed, so SmartScreen will warn you."
@@ -576,10 +574,15 @@ jobs:
             echo
             echo "SHA-256 of $installer"
             echo "    $sha256"
+          } > release-section.md
+          {
+            echo "$changes"
+            echo
+            cat release-section.md
             echo
             echo "Release set digest: $setdigest"
           } > release-notes.md
-          node tools/reconcile-github-release.mjs release-handoff public-release-evidence "$MANIFEST" "$(ls release-handoff/*.candidate.json)" release-notes.md
+          node tools/reconcile-github-release.mjs release-handoff public-release-evidence "$MANIFEST" "$(ls release-handoff/*.candidate.json)" release-notes.md release-section.md
 
       - name: Prove the release stays unpublished
         env:

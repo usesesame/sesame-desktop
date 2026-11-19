@@ -60,7 +60,8 @@ jobs:
       - name: Verify the desktop boundary
         env:
           TMPDIR: ${{ runner.temp }}
-        run: npm run desktop:boundary:verify -- --script ${{ matrix.script }}
+          BOUNDARY_SCRIPTS: ${{ matrix.script }}
+        run: npm run desktop:boundary:verify -- --script "$BOUNDARY_SCRIPTS"
 
   boundary:
     needs: [boundary-part]

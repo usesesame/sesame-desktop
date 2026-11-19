@@ -334,18 +334,21 @@ jobs:
             exit 1
           fi
           {
-            echo "$changes"
-            echo
             echo "Early access build for Linux x86_64: deb, rpm, and AppImage packages."
             echo
             echo "The packages are not signed by a distribution key. Every file was built in"
             echo "public CI from tag $GITHUB_REF_NAME and signed keylessly with Sigstore."
             echo
             echo "SHA-256 digests are in SHA256SUMS-linux."
+          } > release-section.md
+          {
+            echo "$changes"
+            echo
+            cat release-section.md
             echo
             echo "Release set digest: $setdigest"
           } > release-notes.md
-          node tools/publish-linux-release.mjs release-handoff "$(basename "$manifest")" "$(ls release-artifacts/*.candidate.json)" release-notes.md
+          node tools/publish-linux-release.mjs release-handoff "$(basename "$manifest")" "$(ls release-artifacts/*.candidate.json)" release-notes.md release-section.md
 
       - name: Prove the release stays unpublished
         shell: bash
