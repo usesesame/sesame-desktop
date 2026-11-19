@@ -28,6 +28,19 @@ function Get-Sha256Hex {
   }
 }
 
+function Test-HeldByAnotherProcess {
+  param([Exception]$Exception)
+  $current = $Exception
+  while ($null -ne $current) {
+    if ($current -is [System.IO.IOException]) {
+      $code = $current.HResult -band 0xFFFF
+      return ($code -eq 32 -or $code -eq 33)
+    }
+    $current = $current.InnerException
+  }
+  return $false
+}
+
 $dataRoot = Join-Path $env:LOCALAPPDATA 'app.usesesame.desktop'
 # LOCALAPPDATA can arrive in 8.3 short form while the provider reports child
 # FullNames in long form, so the prefix arithmetic below needs one canonical form.
@@ -35,7 +48,7 @@ if (Test-Path -LiteralPath $dataRoot) {
   $dataRoot = (Get-Item -LiteralPath $dataRoot).FullName
 }
 $nativeManifest = Join-Path $dataRoot 'native-messaging\app.usesesame.browser.json'
-$excludedDataRoots = @('EBWebView', 'logs')
+$excludedDataRoots = @('EBWebView', 'quick-access-webview', 'logs')
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ')
 $output = Join-Path $OutputRoot "$stamp-$Label"
 New-Item -ItemType Directory -Force -Path $output | Out-Null
@@ -79,28 +92,39 @@ if (Test-Path -LiteralPath $dataRoot) {
   $files = @(Get-ChildItem -LiteralPath $dataRoot -Recurse -File -Force |
     Sort-Object FullName |
     ForEach-Object {
-      $relativePath = $_.FullName.Substring($dataRootPrefix.Length)
+      $file = $_
+      $relativePath = $file.FullName.Substring($dataRootPrefix.Length)
       $topLevel = ($relativePath -split '\\', 2)[0]
       if ($excludedDataRoots -contains $topLevel) {
         return
       }
+      $status = 'hashed'
+      $sha256 = ''
+      try {
+        $sha256 = Get-Sha256Hex -LiteralPath $file.FullName
+      } catch {
+        if (-not (Test-HeldByAnotherProcess $_.Exception)) { throw }
+        $status = 'locked'
+        Write-Warning "Another process holds $($file.FullName) open, so it is recorded as locked and not hashed."
+      }
       [pscustomobject][ordered]@{
         relativePath = $relativePath
-        length = $_.Length
-        lastWriteTimeUtc = $_.LastWriteTimeUtc.ToString('o')
-        sha256 = Get-Sha256Hex -LiteralPath $_.FullName
+        length = $file.Length
+        lastWriteTimeUtc = $file.LastWriteTimeUtc.ToString('o')
+        sha256 = $sha256
+        status = $status
       }
     })
 }
 $collectorPolicy = [ordered]@{
   dataRoot = $dataRoot
   excludedTopLevelRoots = $excludedDataRoots
-  reason = 'WebView cache/profile state and diagnostic logs are volatile runtime data, not lifecycle-preservation evidence. Every other file under the bundle-ID root must hash successfully.'
+  reason = 'EBWebView and quick-access-webview are the WebView2 profiles of the main and quick access windows, and logs holds diagnostics. They change and stay open while Sesame runs and hold no vault data, so they are not lifecycle-preservation evidence. Every other file under the bundle-ID root is hashed. A file another process holds open is recorded with status locked and no hash, and the comparison reports it as unverified instead of unchanged.'
 }
 $collectorPolicy | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $output 'collector-policy.json')
 $dataCsv = Join-Path $output 'data-files.csv'
 if ($files.Count -eq 0) {
-  '"relativePath","length","lastWriteTimeUtc","sha256"' | Set-Content -Encoding utf8 $dataCsv
+  '"relativePath","length","lastWriteTimeUtc","sha256","status"' | Set-Content -Encoding utf8 $dataCsv
 } else {
   $files | Export-Csv -NoTypeInformation -Encoding utf8 -LiteralPath $dataCsv
 }
@@ -109,6 +133,25 @@ $installed = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\U
   Where-Object { $_.DisplayName -like '*Sesame*' } |
   Select-Object DisplayName, DisplayVersion, InstallLocation, UninstallString
 $installed | ConvertTo-Json -Depth 3 | Set-Content -Encoding utf8 (Join-Path $output 'installed-product.json')
+
+$machinePath = [ordered]@{ exists = $false; kind = ''; length = 0; value = ''; terminalPathAdded = $null }
+$environmentKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $false)
+if ($environmentKey) {
+  try {
+    if ($environmentKey.GetValueNames() -contains 'Path') {
+      $pathValue = [string]$environmentKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      $machinePath.exists = $true
+      $machinePath.kind = $environmentKey.GetValueKind('Path').ToString()
+      $machinePath.length = $pathValue.Length
+      $machinePath.value = $pathValue
+    }
+  } finally {
+    $environmentKey.Close()
+  }
+}
+$machinePath.terminalPathAdded = @(Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\*\Sesame', 'HKLM:\SOFTWARE\*\Sesame' -Name 'TerminalPathAdded' -ErrorAction SilentlyContinue |
+  ForEach-Object { $_.TerminalPathAdded })
+$machinePath | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $output 'machine-path.json')
 
 $nativeHost = [ordered]@{
   chromeRegistered = Test-Path 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser'

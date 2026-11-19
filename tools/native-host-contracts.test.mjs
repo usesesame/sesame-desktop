@@ -25,7 +25,7 @@ test('the shipped browser host owns registration cleanup on every OS', () => {
   assert.match(hook, /\$UpdateMode <> 1/)
   assert.match(hook, /ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'/)
   assert.doesNotMatch(hook, /vault\.sesame|backups|recovery|RmDir|DeleteRegKey|DeleteRegValue|HKCU/i)
-  assert.match(hook, /^!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"$/m, 'the Path the hook edits is not the machine environment')
+  assert.match(hook, /ExecWait '"\$INSTDIR\\cli\\sesame\.exe" --add-to-machine-path' \$0/, 'the hook no longer leaves the system Path edit to the installed cli program')
   assert.deepEqual(unexpectedRegistryOperations(hook), [])
 
   const scriptLines = read('src-tauri', 'linux', 'pre-remove.sh')
