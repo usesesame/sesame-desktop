@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
 use crate::vault::crypto::unwrap_with_password;
+use crate::vault::key_proof::SecretProof;
 use crate::vault::{bytes_match, UnlockedVault, VaultResult, VaultState, WRAP_AAD};
 
 pub const PRESENCE_TTL: Duration = Duration::from_secs(120);
@@ -52,6 +53,33 @@ impl ReleasePresence {
             }
             _ => Err(PRESENCE_REQUIRED.into()),
         }
+    }
+
+    pub fn ready_for_password(&self) -> VaultResult<()> {
+        self.await_cooldown()
+    }
+
+    pub fn grant_with_proof(
+        &self,
+        session: &UnlockedVault,
+        epoch: u64,
+        proof: &SecretProof,
+    ) -> VaultResult<()> {
+        self.await_cooldown()?;
+        if !proof.opens(session)? {
+            self.record_failure()?;
+            return Err(WRONG_PASSWORD.into());
+        }
+        let mut grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        let now = Instant::now();
+        *grant = Some(Grant {
+            epoch,
+            expires_at: now + PRESENCE_TTL,
+            password_checked_at: Some(now),
+        });
+        let mut failures = self.failures.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        *failures = 0;
+        Ok(())
     }
 
     pub fn grant_with_password(

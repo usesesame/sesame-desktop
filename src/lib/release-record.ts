@@ -134,13 +134,61 @@ function capitalise(text: string): string {
 }
 
 export const TERMINAL_HOST = 'terminal'
+export const TERMINAL_ALLOWANCE_HOST = 'terminal-allowance'
+
+const TERMINAL_KINDS: EntryKind[] = ['terminalRead', 'terminalCopy', 'terminalList', 'terminalCode']
+
+export function isTerminalKind(kind: EntryKind): boolean {
+  return TERMINAL_KINDS.includes(kind)
+}
 
 function fromTerminal(entry: ReleaseEntryView): boolean {
   return entry.host === TERMINAL_HOST && (entry.kind === 'reveal' || entry.kind === 'copy')
 }
 
+function terminalWanted(entry: ReleaseEntryView, titleFor: TitleLookup): string {
+  if (entry.kind === 'terminalList') return 'the names of your items'
+  const title = entry.itemId ? itemTitle(entry, titleFor) : 'an item'
+  const fields = fieldList(entry.fields) || (entry.kind === 'terminalCode' ? 'one-time code' : '')
+  return fields ? `the ${fields} of ${title}` : title
+}
+
+function terminalSentence(entry: ReleaseEntryView, titleFor: TitleLookup): string {
+  const wanted = terminalWanted(entry, titleFor)
+  const terminal = entry.host === TERMINAL_ALLOWANCE_HOST ? 'a terminal you allowed' : 'a terminal'
+  switch (entry.outcome) {
+    case 'released':
+      if (entry.kind === 'terminalList') return `Sent the names of your items to ${terminal}`
+      if (entry.kind === 'terminalCopy') return `Copied ${wanted} for ${terminal}`
+      return `Read ${wanted} for ${terminal}`
+    case 'denied':
+      return `You refused a terminal's request for ${wanted}`
+    case 'timedOut':
+      return `A terminal's request for ${wanted} was not answered in time`
+    case 'connectionClosed':
+      return `A terminal stopped waiting for ${wanted} before it was answered`
+    case 'locked':
+      return `A terminal's request for ${wanted} ended because Sesame locked`
+    case 'vaultChanged':
+      return `A terminal's request for ${wanted} ended because the vault changed`
+    case 'busy':
+      return `Sesame turned away a terminal's request for ${wanted} while terminals had to wait after a refusal`
+    case 'withdrawn':
+      return `Sesame turned away a terminal's request for ${wanted}`
+    case 'noMatch':
+      return entry.itemId ? `A terminal asked for a field that ${itemTitle(entry, titleFor)} does not have` : 'A terminal asked for an item that is not in the vault'
+    case 'mismatch':
+      return `Sesame refused a terminal's request for ${wanted} because the choice did not match what it offered`
+    case 'replayed':
+      return `Sesame refused a repeated terminal request for ${wanted}`
+    default:
+      return `A terminal asked for ${wanted}`
+  }
+}
+
 export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): string {
   if (requestNouns[entry.kind]) return browserSentence(entry, titleFor)
+  if (isTerminalKind(entry.kind)) return terminalSentence(entry, titleFor)
   const title = itemTitle(entry, titleFor)
   const fields = fieldList(entry.fields) || 'secret'
   switch (entry.kind) {
@@ -185,7 +233,7 @@ export function entrySentence(entry: ReleaseEntryView, titleFor: TitleLookup): s
     case 'lockedOverflow':
       return 'More requests arrived while Sesame was locked than it could keep'
     case 'refusalLimit':
-      return 'Some refused requests were counted but not listed one by one'
+      return entry.host === TERMINAL_HOST ? 'Some refused terminal requests were counted but not listed one by one' : 'Some refused browser requests were counted but not listed one by one'
     case 'writesLost':
       return 'Some entries could not be written and were lost'
     case 'newer':
@@ -273,9 +321,9 @@ export function statusNotice(status: ReleaseRecordStatus | null): string | null 
 }
 
 export const RECORD_SCOPE_TEXT = [
-  'Sesame lists every time a password or other secret leaves your vault, including to a terminal, and every browser request it turned down. Terminal requests it turned down are not listed.',
+  'Sesame lists every time a password or other secret leaves your vault, and every request a browser or a terminal made, including the ones it turned down.',
   'The list is encrypted, stays on this device, and drops entries older than the time you choose above.',
-  'It leaves out one-time codes you only look at and breach checks.',
+  'It leaves out one-time codes you only look at in the window and breach checks.',
   'Another program on this computer could change or delete the list, so use it as a guide.',
 ]
 
