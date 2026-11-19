@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 
 import { cargoArguments, exactlyOneTestPassed, parseArguments as parseRunnerArguments, testEnvironment } from './run-real-sync-station.mjs'
@@ -30,8 +30,8 @@ const withTemporaryDirectory = async (run) => {
 }
 
 test('the provisioning script needs a server source path and takes one optional credentials file', () => {
-  assert.deepEqual(parseArguments(['--server', '/srv/source']), { server: '/srv/source', credentials: null })
-  assert.deepEqual(parseArguments(['--credentials', '/tmp/c.json', '--server', '/srv/source']), { server: '/srv/source', credentials: '/tmp/c.json' })
+  assert.deepEqual(parseArguments(['--server', '/srv/source']), { server: resolve('/srv/source'), credentials: null })
+  assert.deepEqual(parseArguments(['--credentials', '/tmp/c.json', '--server', '/srv/source']), { server: resolve('/srv/source'), credentials: resolve('/tmp/c.json') })
   assert.throws(() => parseArguments([]), /Usage/)
   assert.throws(() => parseArguments(['--server']), /needs a value/)
   assert.throws(() => parseArguments(['--server', '--credentials', 'x']), /needs a value/)
@@ -78,13 +78,23 @@ test('the credentials document refuses a missing test, a missing device and a sh
   assert.throws(() => credentialsDocument({ url: 'u', key: 'k', devices: shared }), /share a token/)
 })
 
-test('the credentials file is readable only by its owner', async () => {
+test('the credentials file holds the document and replaces a stale file', async () => {
+  await withTemporaryDirectory((directory) => {
+    const file = join(directory, 'nested', 'credentials.json')
+    writeCredentials(file, { url: 'u', key: 'k', tests: {} })
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { url: 'u', key: 'k', tests: {} })
+    writeFileSync(file, 'stale')
+    writeCredentials(file, { url: 'v', key: 'k', tests: {} })
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { url: 'v', key: 'k', tests: {} })
+  })
+})
+
+test('the credentials file is readable only by its owner', { skip: process.platform === 'win32' && 'Windows has no POSIX file modes to check' }, async () => {
   await withTemporaryDirectory((directory) => {
     const file = join(directory, 'nested', 'credentials.json')
     writeCredentials(file, { url: 'u', key: 'k', tests: {} })
     assert.equal(statSync(file).mode & 0o777, 0o600)
     assert.equal(statSync(join(directory, 'nested')).mode & 0o077, 0)
-    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { url: 'u', key: 'k', tests: {} })
     writeFileSync(file, 'stale', { mode: 0o644 })
     writeCredentials(file, { url: 'u', key: 'k', tests: {} })
     assert.equal(statSync(file).mode & 0o777, 0o600)
@@ -175,7 +185,8 @@ test('the runner runs one ignored test at a time against the locked app crate', 
   assert.ok(args.includes('sesame-app'))
   assert.equal(args.at(-1), '--ignored')
   assert.equal(args.at(-3), REAL_SERVER_TESTS[0])
-  assert.deepEqual(parseRunnerArguments(['--server', '/srv/source']), { server: '/srv/source' })
+  assert.deepEqual(parseRunnerArguments(['--server', '/srv/source']), { server: resolve('/srv/source') })
+  assert.deepEqual(parseRunnerArguments(['--server', 'relative']), { server: resolve('relative') })
   assert.throws(() => parseRunnerArguments([]), /Usage/)
   assert.throws(() => parseRunnerArguments(['--server', '--other']), /Usage/)
 })
