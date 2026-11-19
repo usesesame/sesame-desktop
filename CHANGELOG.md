@@ -69,6 +69,14 @@ release cannot be published without saying what changed in it.
   a fake app run as you could learn what you typed and print made-up values.
 - The AppImage does not put sesame on your path, so use an alias to the
   AppImage file.
+- The Windows installer puts sesame on the system Path and the uninstaller
+  takes it off again, leaving every other entry as it was. If adding the
+  folder would make the Path too long for Command Prompt to find commands,
+  the installer leaves the Path alone and says so.
+- A request from a terminal waits behind a dialog you are already answering
+  instead of covering it.
+- Activity records a terminal request that was denied, timed out or stopped
+  by a lock, next to the ones that were allowed.
 
 ### Settings
 
@@ -103,6 +111,8 @@ release cannot be published without saying what changed in it.
 ### Everyday use
 
 - The item list sorts once per change instead of on every redraw.
+- Unlocking no longer freezes the window while the master password is
+  checked, and locking during that check keeps the vault locked.
 - Import and merge backups keep the newest five.
 - A name, address or folder that hides a text direction character can no
   longer show a file name or a host backwards. Sesame shows the hidden
