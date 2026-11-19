@@ -4,9 +4,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { onlyResourceExhaustion } from './audit-sbom.mjs'
+import { readShippedPackages } from './shipped-packages.mjs'
+
 const root = path.resolve(import.meta.dirname, '..')
 
 export const exceptionsPath = path.join(root, 'tools', 'advisory-exceptions.json')
+export const shippedPackagesPath = path.join(root, 'dist', 'shipped-npm-packages.json')
+const npmLockPath = path.join(root, 'package-lock.json')
 
 const MAX_EXCEPTION_DAYS = 30
 const FAILING_NPM_SEVERITIES = new Set(['high', 'critical'])
@@ -77,10 +82,37 @@ export const npmFindings = (report) => {
         severity: source.severity,
         title: source.title ?? '',
         url: source.url ?? '',
+        cwe: source.cwe,
+        cvss: typeof source.cvss?.vectorString === 'string' ? [source.cvss.vectorString] : [],
       })
     }
   }
   return [...findings.values()]
+}
+
+const installedPackageName = (location) => location.slice(location.lastIndexOf('node_modules/') + 'node_modules/'.length)
+const lockPackageName = (location, entry) =>
+  typeof entry?.name === 'string' && entry.name ? entry.name : installedPackageName(location)
+
+export const npmShippedState = (lock, shippedPackages) => {
+  if (!(shippedPackages instanceof Set)) return () => true
+  const copies = new Map()
+  for (const [location, entry] of Object.entries(lock?.packages ?? {})) {
+    if (!location.includes('node_modules/')) continue
+    const installedName = installedPackageName(location)
+    for (const name of new Set([lockPackageName(location, entry), installedName])) {
+      if (!copies.has(name)) copies.set(name, [])
+      copies.get(name).push({ entry, installedName })
+    }
+  }
+  return (name) => {
+    const installed = copies.get(name) ?? []
+    return (
+      shippedPackages.has(name) ||
+      installed.length === 0 ||
+      installed.some(({ entry, installedName }) => entry?.dev !== true || shippedPackages.has(installedName))
+    )
+  }
 }
 
 export const cargoFindings = (report) => {
@@ -96,17 +128,29 @@ export const cargoFindings = (report) => {
   }))
 }
 
-export const evaluateFindings = (findings, exceptions) => {
+export const evaluateFindings = (findings, exceptions, { ships = () => true } = {}) => {
   const matches = (finding, entry) => entry.id === finding.id && entry.package === finding.package
   const accepted = []
   const blocking = []
+  const buildTools = []
   for (const finding of findings) {
     const entry = exceptions.find((candidate) => matches(finding, candidate))
     if (entry) accepted.push({ ...finding, expires: entry.expires })
+    else if (finding.ecosystem === 'npm' && !ships(finding.package) && onlyResourceExhaustion(finding.cwe, finding.cvss)) buildTools.push(finding)
     else blocking.push(finding)
   }
   const unused = exceptions.filter((entry) => !findings.some((finding) => matches(finding, entry)))
-  return { accepted, blocking, unused }
+  return { accepted, blocking, buildTools, unused }
+}
+
+const loadShippedState = async () => {
+  let shippedPackages = null
+  try {
+    shippedPackages = await readShippedPackages(shippedPackagesPath)
+  } catch (error) {
+    console.log(`Every npm package counts as shipped because ${path.relative(root, shippedPackagesPath)} cannot be used. ${error.message}`)
+  }
+  return npmShippedState(JSON.parse(readFileSync(npmLockPath, 'utf8')), shippedPackages)
 }
 
 const run = promisify(execFile)
@@ -128,9 +172,12 @@ const main = async () => {
     ...npmFindings(await reportFrom('npm', ['audit', '--json'], root)),
     ...cargoFindings(await reportFrom('cargo', ['audit', '--json', '--file', 'src-tauri/Cargo.lock'], root)),
   ]
-  const { accepted, blocking, unused } = evaluateFindings(findings, exceptions)
+  const { accepted, blocking, buildTools, unused } = evaluateFindings(findings, exceptions, { ships: await loadShippedState() })
   for (const finding of accepted) {
     console.log(`Accepted until ${finding.expires}: ${finding.id} in ${finding.ecosystem} package ${finding.package}.`)
+  }
+  for (const finding of buildTools) {
+    console.log(`Resource exhaustion in a build tool that never ships: ${finding.id} in npm package ${finding.package} with ${finding.cwe.join(', ')}.`)
   }
   for (const entry of unused) {
     console.log(`No longer reported, so the exception can be removed: ${entry.id} in ${entry.package}.`)

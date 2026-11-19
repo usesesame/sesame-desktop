@@ -422,6 +422,9 @@ jobs:
             libcurl3t64-gnutls \
             libcurl4t64 \
             libpcre2-8-0
+          apt list --upgradable 2>/dev/null \
+            | awk -F/ '/-security/ && /^lib/ { print $1 }' \
+            | xargs --no-run-if-empty sudo apt-get install --only-upgrade --no-install-recommends -y
 
       - name: Allow unprivileged user namespaces for the web view sandbox
         run: |

@@ -461,6 +461,22 @@ test('Linux bundle builders upgrade the existing PCRE2 runtime from vendor updat
   }
 })
 
+test('Linux bundle builders apply pending library security updates before building', async () => {
+  for (const [filename, name] of [['ci.yml', 'linux-bundles'], ['release-linux-early-access.yml', 'build-and-test']]) {
+    const workflow = await readFile(path.join(repository, '.github', 'workflows', filename), 'utf8')
+    const steps = workflowRunSteps(workflowJob(workflow, name))
+    const upgrade = steps.findIndex((script) =>
+      /apt list --upgradable[^|]*\|\s*awk -F\/ '\/-security\/ && \/\^lib\/ \{ print \$1 \}'[^|]*\|\s*xargs --no-run-if-empty sudo apt-get install --only-upgrade --no-install-recommends -y\s*$/m.test(
+        script,
+      ),
+    )
+    const build = steps.findIndex((script) => /^(?:npm run tauri -- build|npx tauri build) --bundles\b/m.test(script))
+    assert.ok(upgrade >= 0, `${filename} must install the pending library security updates`)
+    assert.ok(build >= 0, `${filename} must run the bundle build command`)
+    assert.ok(upgrade < build, `${filename} must install security updates before building the bundle`)
+  }
+})
+
 test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
   const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
