@@ -12,20 +12,40 @@ Var SesameTerminalPathLeft
 
 !macro SESAME_ADD_TERMINAL_PATH
   Push $0
+  Push $1
   ClearErrors
   ExecWait '"$INSTDIR\cli\sesame.exe" --add-to-machine-path' $0
   ${If} ${Errors}
     StrCpy $0 "not started"
   ${EndIf}
   ${If} $0 == "0"
+    ClearErrors
     WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}" "${SESAME_TERMINAL_FOLDER}"
-    DetailPrint "Sesame added ${SESAME_TERMINAL_FOLDER} to the system Path."
+    ${If} ${Errors}
+      ClearErrors
+      ExecWait '"$INSTDIR\cli\sesame.exe" --remove-from-machine-path' $1
+      ${If} ${Errors}
+        StrCpy $1 "not started"
+      ${EndIf}
+      ${If} $1 == "0"
+        StrCpy $0 "not recorded, taken off again"
+        DetailPrint "Sesame could not record that it added ${SESAME_TERMINAL_FOLDER} to the system Path, so it took the entry off again. Add it by hand to use the sesame command."
+      ${Else}
+        StrCpy $0 "not recorded, left in place"
+        DetailPrint "Sesame added ${SESAME_TERMINAL_FOLDER} to the system Path but could not record it, so uninstalling will not remove it. Remove the entry by hand when you uninstall Sesame."
+      ${EndIf}
+    ${Else}
+      DetailPrint "Sesame added ${SESAME_TERMINAL_FOLDER} to the system Path."
+    ${EndIf}
   ${ElseIf} $0 == "10"
     DetailPrint "The system Path already holds ${SESAME_TERMINAL_FOLDER}, so Sesame left it as it was."
+  ${ElseIf} $0 == "14"
+    DetailPrint "The system Path has no room for ${SESAME_TERMINAL_FOLDER}, so Sesame left it as it was. Remove entries you no longer need from the Path first, then add the folder to use the sesame command."
   ${Else}
     DetailPrint "Sesame could not add ${SESAME_TERMINAL_FOLDER} to the system Path. Add it by hand to use the sesame command."
   ${EndIf}
   WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_STATUS_VALUE}" "$0"
+  Pop $1
   Pop $0
 !macroend
 
@@ -67,8 +87,13 @@ Var SesameTerminalPathLeft
 
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $SesameTerminalPathLeft = 1
+    ClearErrors
     WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}" "${SESAME_TERMINAL_FOLDER}"
-    DetailPrint "Sesame kept its record of ${SESAME_TERMINAL_FOLDER} on the system Path, so the next install and uninstall can remove it."
+    ${If} ${Errors}
+      DetailPrint "Sesame could not keep its record of ${SESAME_TERMINAL_FOLDER} on the system Path. Remove the entry by hand."
+    ${Else}
+      DetailPrint "Sesame kept its record of ${SESAME_TERMINAL_FOLDER} on the system Path, so the next install and uninstall can remove it."
+    ${EndIf}
   ${EndIf}
 !macroend
 

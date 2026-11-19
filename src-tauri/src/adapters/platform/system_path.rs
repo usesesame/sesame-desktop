@@ -26,7 +26,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::machine_path::{
     left_alone_code, machine_reference, plan_add, plan_remove, registry_bytes,
     registry_failure_code, string_data, MachineValue, Mode, Plan, Request, ACCESS_DENIED,
-    COMMAND_SHELL_LIMIT, EXIT_CHANGED, EXIT_FAILED, EXIT_REFUSED, MAX_VALUE_UNITS,
+    COMMAND_SHELL_LIMIT, DEFAULT_USER_PATH_ALLOWANCE, EXIT_CHANGED, EXIT_FAILED, EXIT_REFUSED,
+    MAX_VALUE_UNITS,
 };
 
 const ENVIRONMENT_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
@@ -261,10 +262,10 @@ fn left_alone(plan: &Plan, folder: &str) -> String {
             "The system Path holds {folder} more than once, so Sesame left it. Remove the entries you no longer need by hand."
         ),
         Plan::TooLong => format!(
-            "Adding {folder} would make the system Path longer than {MAX_VALUE_UNITS} characters, so Sesame left it as it was. Shorten the system Path and add the folder by hand to use the sesame command."
+            "Adding {folder} would make the system Path longer than {MAX_VALUE_UNITS} characters, so Sesame left it as it was. Remove entries you no longer need from the Path first, then add the folder to use the sesame command."
         ),
         Plan::PastCommandShellLimit => format!(
-            "Adding {folder} would make the system Path longer than {COMMAND_SHELL_LIMIT} characters, and a new Command Prompt finds no command on a Path that long, so Sesame left it as it was. Add the folder yourself to use the sesame command, after you make room on the Path."
+            "Adding {folder} would leave less than {DEFAULT_USER_PATH_ALLOWANCE} of the {COMMAND_SHELL_LIMIT} characters a new Command Prompt can search for the user Path, so Sesame left the system Path as it was. Remove entries you no longer need from the Path first, then add the folder to use the sesame command."
         ),
         Plan::Write(_) => String::new(),
     }

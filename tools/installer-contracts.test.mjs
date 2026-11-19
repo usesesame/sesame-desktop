@@ -366,12 +366,16 @@ test('the command line install test guards the machine Path and checks what the 
     "Install-Sesame @('/S', '/UPDATE')",
     "Install-Sesame @('/P')",
     "foreach ($length in @(994, 995, 1022, 1023, 1024, 4096)) {",
-    'Path that reaches $commandShellLineLimit characters with the entry',
+    'Path that reaches $machinePathLimit characters with the entry',
+    "Confirm-LookupFromNewCommandShell 'the install with a default user Path' $joined",
+    "Remove-Item -LiteralPath $probeFolder -Recurse -Force",
+    'if ($script:halted) {',
+    'Wait-UninstallCopy $launched',
     "Confirm-LookupFromNewCommandShell 'the install' $session",
-    'Path one character too long to add the entry without passing $commandShellLineLimit characters',
-    "Confirm-Status \"an install that would pass $commandShellLineLimit characters\" $installed \"$statusRefused\"",
-    "Confirm-LookupFromNewCommandShell 'a refused install' (Get-MachineSessionPath $installed) -WithoutTool",
-    'Path already past $commandShellLineLimit characters',
+    'Path one character too long to add the entry without passing $machinePathLimit characters',
+    "Confirm-Status \"an install that would pass $machinePathLimit characters\" $installed $statusNoRoom",
+    "Confirm-LookupFromNewCommandShell 'a refused install' \"$(Get-MachineSessionPath $installed);$defaultUserPath\" -WithoutTool",
+    'Path already past $machinePathLimit characters',
     'keeps PATH but finds no command through it, not even in the first entry',
     "The runner's own Path",
     "Invoke-ExistingEntryScenario 'in quotes'",
@@ -392,7 +396,7 @@ test('the command line install test guards the machine Path and checks what the 
     "Invoke-SessionCommand 'whoami'",
     'the longest that leaves room for the entry',
     'too long to add the entry',
-    "Confirm-Status \"an install that would pass $environmentLimit characters\" $installed \"$statusRefused\"",
+    "Confirm-Status \"an install that would pass $environmentLimit characters\" $installed $statusNoRoom",
     'Invoke-CommandShellLimitScenario',
     'Register-BrowserHost',
     'a silent uninstall whose Path edit fails still removes the browser registration',
@@ -411,6 +415,11 @@ test('the command line install test guards the machine Path and checks what the 
   assert.ok(script.includes(`$statusUnchanged = '${status('EXIT_UNCHANGED')}'`))
   assert.ok(script.includes(`$statusRefused = ${status('EXIT_REFUSED')}`))
   assert.ok(script.includes(`$statusFailed = '${status('EXIT_FAILED')}'`))
+  assert.ok(script.includes(`$statusNoRoom = '${status('EXIT_NO_ROOM')}'`))
+  assert.ok(script.includes(`$longestUserName = ${pure.match(/pub const LONGEST_USER_NAME: usize = (\d+);/)[1]}`))
+  assert.ok(script.includes('$defaultUserPathAllowance = 67') && pure.includes('r"C:\\Users\\".len()') && pure.includes('r"\\AppData\\Local\\Microsoft\\WindowsApps".len()'), 'the test and the cli program no longer reserve the same room for a default user Path')
+  assert.match(pure, /pub const MACHINE_PATH_LIMIT: usize = COMMAND_SHELL_LIMIT - DEFAULT_USER_PATH_ALLOWANCE;/)
+  assert.match(pure, /if expanded_length\(value, lookup\) <= MACHINE_PATH_LIMIT\s+&& expanded_length\(&written, lookup\) > MACHINE_PATH_LIMIT/)
   assert.ok(script.includes(`$environmentLimit = ${pure.match(/pub const MAX_VALUE_UNITS: usize = ([\d_]+);/)[1].replaceAll('_', '')}`), 'the test no longer places its longest Path at the limit the cli program enforces')
   assert.ok(script.includes(`$commandShellLineLimit = ${pure.match(/pub const COMMAND_SHELL_LIMIT: usize = ([\d_]+);/)[1].replaceAll('_', '')}`), 'the test no longer checks the cmd.exe limit the cli program enforces')
   assert.match(script, /\$basePath = '%SystemRoot%\\system32;%SystemRoot%;/)
@@ -437,13 +446,15 @@ test('the Windows installer hands the system Path to the cli program and records
   const add = macro('SESAME_ADD_TERMINAL_PATH')
   assert.ok(add.includes(`ExecWait '"$INSTDIR\\cli\\sesame.exe" ${constant('ADD_ARGUMENT')}' $0`), 'setup no longer asks the cli program to add its folder')
   assert.match(add, /ClearErrors\s+ExecWait[^\n]+\s+\$\{If\} \$\{Errors\}\s+StrCpy \$0 "not started"/, 'a program that did not start could read as success')
-  assert.match(add, new RegExp(`\\$\\{If\\} \\$0 == "${constant('EXIT_CHANGED')}"\\s+WriteRegStr SHCTX "\\$\\{MANUPRODUCTKEY\\}" "\\$\\{SESAME_PATH_OWNER_VALUE\\}" "\\$\\{SESAME_TERMINAL_FOLDER\\}"`), 'Sesame records an entry it did not add')
+  assert.match(add, new RegExp(`\\$\\{If\\} \\$0 == "${constant('EXIT_CHANGED')}"\\s+ClearErrors\\s+WriteRegStr SHCTX "\\$\\{MANUPRODUCTKEY\\}" "\\$\\{SESAME_PATH_OWNER_VALUE\\}" "\\$\\{SESAME_TERMINAL_FOLDER\\}"\\s+\\$\\{If\\} \\$\\{Errors\\}\\s+ClearErrors\\s+ExecWait '"\\$INSTDIR\\\\cli\\\\sesame\\.exe" ${constant('REMOVE_ARGUMENT')}' \\$1`), 'Sesame records an entry it did not add, or keeps an entry it could not record')
+  assert.match(add, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_NO_ROOM')}"\\s+DetailPrint "[^"]*Remove entries you no longer need from the Path first, then add the folder[^"]*"`), 'a Path with no room must tell the person to make room before adding the folder')
+  assert.match(add, /Push \$0\s+Push \$1[\s\S]*Pop \$1\s+Pop \$0\s+!macroend/)
   assert.match(add, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_UNCHANGED')}"`))
   assert.match(add, /WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_STATUS_VALUE\}" "\$0"/, 'the outcome of the Path edit is not recorded where a test can read it')
   assert.doesNotMatch(add, /Abort|Quit|SetErrorLevel/, 'a failed Path edit must not fail the install')
   assert.match(add, /\$\{Else\}\s+DetailPrint "Sesame could not add \$\{SESAME_TERMINAL_FOLDER\} to the system Path\. Add it by hand to use the sesame command\."/, 'a refused or failed add must tell the person to add the folder themselves')
   assert.equal((hook.match(/WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/g) ?? []).length, 2)
-  assert.match(macro('NSIS_HOOK_POSTUNINSTALL'), /^!macro NSIS_HOOK_POSTUNINSTALL\s+\$\{If\} \$SesameTerminalPathLeft = 1\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"\s+DetailPrint "[^"]+"\s+\$\{EndIf\}\s+!macroend$/, 'the record of the entry may only come back after an uninstall that could not remove it')
+  assert.match(macro('NSIS_HOOK_POSTUNINSTALL'), /^!macro NSIS_HOOK_POSTUNINSTALL\s+\$\{If\} \$SesameTerminalPathLeft = 1\s+ClearErrors\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"\s+\$\{If\} \$\{Errors\}\s+DetailPrint "[^"]*Remove the entry by hand\."\s+\$\{Else\}\s+DetailPrint "[^"]+"\s+\$\{EndIf\}\s+\$\{EndIf\}\s+!macroend$/, 'the record of the entry may only come back after an uninstall that could not remove it')
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
   assert.match(remove, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"/, 'uninstall removes a Path entry Sesame did not add, or removes it during an update')

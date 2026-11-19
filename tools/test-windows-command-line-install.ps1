@@ -86,6 +86,11 @@ $statusRefused = 11
 $statusFailed = '12'
 $environmentLimit = 32767
 $commandShellLineLimit = 8191
+$statusNoRoom = '14'
+$longestUserName = 20
+$defaultUserPathAllowance = 67
+$machinePathLimit = $commandShellLineLimit - $defaultUserPathAllowance
+$defaultUserPath = "C:\Users\$('u' * $longestUserName)\AppData\Local\Microsoft\WindowsApps;"
 $uninstallKeys = @(
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$productName",
   "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$productName"
@@ -113,6 +118,7 @@ $script:failures = New-Object 'System.Collections.Generic.List[string]'
 $script:scenario = 'setup'
 $script:evidenceIndex = 0
 $script:scenarioCount = 0
+$script:halted = ''
 
 function Save-Evidence {
   param([string]$Name, $Data)
@@ -463,6 +469,8 @@ function Confirm-PathModeRefusals {
   Confirm-PathUnchanged 'a refused extra argument' $Expected (Get-MachinePath)
 
   $probeFolder = Join-Path $EvidenceRoot 'unelevated-probe'
+  Remove-Item -LiteralPath $probeFolder -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $probeFolder) { throw "$probeFolder is left from an earlier run and could not be removed." }
   New-Item -ItemType Directory -Force -Path $probeFolder | Out-Null
   $probe = Join-Path $probeFolder 'probe.cmd'
   $exitFile = Join-Path $probeFolder 'exit.txt'
@@ -604,17 +612,30 @@ function Reset-Install {
   }
 }
 
-function Wait-UninstallCopy {
+function Get-UninstallCopies {
+  param([datetime]$Since)
   $temp = [IO.Path]::GetFullPath($env:TEMP)
+  @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+      $path = $null
+      $started = $null
+      try { $path = $_.Path; $started = $_.StartTime } catch { $path = $null }
+      $path -and $started -and ($started -ge $Since) -and $path.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -and ((Split-Path -Leaf $path) -like 'Un_*.exe')
+    })
+}
+
+function Wait-UninstallCopy {
+  param([datetime]$Since)
   $watch = [Diagnostics.Stopwatch]::StartNew()
   while ($watch.Elapsed.TotalSeconds -lt 120) {
-    $copies = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $path = $null
-        try { $path = $_.Path } catch { $path = $null }
-        $path -and $path.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -and ((Split-Path -Leaf $path) -like 'Un_*.exe')
-      })
-    if ($copies.Count -eq 0) { return [math]::Round($watch.Elapsed.TotalSeconds, 1) }
+    if ((Get-UninstallCopies $Since).Count -eq 0) { return [math]::Round($watch.Elapsed.TotalSeconds, 1) }
     Start-Sleep -Milliseconds 500
+  }
+  foreach ($copy in Get-UninstallCopies $Since) {
+    Stop-Process -Id $copy.Id -Force -ErrorAction SilentlyContinue
+    $null = $copy.WaitForExit(15000)
+  }
+  if ((Get-UninstallCopies $Since).Count -gt 0) {
+    $script:halted = 'a temporary uninstaller copy could not be stopped'
   }
   throw 'The temporary uninstaller copy was still running after 120 seconds.'
 }
@@ -630,6 +651,10 @@ function Invoke-Scenario {
   $script:scenarioCount++
   Write-Host ''
   Write-Host "== $ScenarioName"
+  if ($script:halted) {
+    Add-Failure "the scenario did not start because $script:halted"
+    return
+  }
   try {
     if (Get-UninstallKey) { throw 'Sesame is still installed from an earlier step, so this scenario cannot start clean.' }
     if (Get-PathRecord) { throw 'A record of an added Path entry is left from an earlier step, so this scenario cannot start clean.' }
@@ -918,8 +943,9 @@ try {
     $broken = Get-State 'after the Path is changed to REG_MULTI_SZ'
     $command = (Get-ItemProperty -LiteralPath $installed.uninstallKey).UninstallString
     Confirm-That 'the registered uninstall command is the installed uninstaller' ($command -ieq "`"$uninstaller`"") "`"$uninstaller`"" "$command"
+    $launched = (Get-Date).AddSeconds(-1)
     $code = Invoke-Installer $uninstaller @('/S')
-    $waited = Wait-UninstallCopy
+    $waited = Wait-UninstallCopy $launched
     $ended = Get-State 'after a deployment uninstall that could not edit Path'
     Write-Host ("deployment uninstall: uninstall.exe /S exited {0}, its temporary copy ran {1} more seconds, uninstall key left {2}, cli\sesame.exe left {3}, record left {4}" -f $code, $waited, ($null -ne $ended.uninstallKey), $ended.terminalProgramExists, ($null -ne $ended.terminalPathRecord))
     Save-Evidence 'deployment uninstall outcome' ([ordered]@{ exitCode = $code; copySeconds = $waited; state = $ended })
@@ -1004,8 +1030,8 @@ try {
     Invoke-LongPathScenario $length
   }
 
-  $room = $commandShellLineLimit - $terminalFolder.Length - 1
-  Invoke-Scenario "Path that reaches $commandShellLineLimit characters with the entry" (Get-LongPathExpandedTo $room) 'ExpandString' {
+  $room = $machinePathLimit - $terminalFolder.Length - 1
+  Invoke-Scenario "Path that reaches $machinePathLimit characters with the entry" (Get-LongPathExpandedTo $room) 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
@@ -1013,30 +1039,33 @@ try {
     Confirm-RecordAdded 'the install' $installed
     Confirm-Status 'the install' $installed $statusChanged
     $session = Get-MachineSessionPath $installed
-    Confirm-That "the install leaves the expanded Path at $commandShellLineLimit characters" ($session.Length -eq $commandShellLineLimit) "$commandShellLineLimit" "$($session.Length)"
+    Confirm-That "the install leaves the expanded Path at $machinePathLimit characters" ($session.Length -eq $machinePathLimit) "$machinePathLimit" "$($session.Length)"
     Confirm-LookupFromNewCommandShell 'the install' $session
+    $joined = "$session;$defaultUserPath"
+    Confirm-That "the install leaves the Path joined with a default user Path at $commandShellLineLimit characters" ($joined.Length -eq $commandShellLineLimit) "$commandShellLineLimit" "$($joined.Length)"
+    Confirm-LookupFromNewCommandShell 'the install with a default user Path' $joined
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
     Confirm-TerminalRemoved 'the uninstall' $after
   }
 
-  Invoke-Scenario "Path one character too long to add the entry without passing $commandShellLineLimit characters" (Get-LongPathExpandedTo ($room + 1)) 'ExpandString' {
+  Invoke-Scenario "Path one character too long to add the entry without passing $machinePathLimit characters" (Get-LongPathExpandedTo ($room + 1)) 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
     Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
-    Confirm-PathUnchanged "an install that would pass $commandShellLineLimit characters" $before.machinePath $installed.machinePath
-    Confirm-NoRecord "an install that would pass $commandShellLineLimit characters" $installed
-    Confirm-Status "an install that would pass $commandShellLineLimit characters" $installed "$statusRefused"
-    Confirm-LookupFromNewCommandShell 'a refused install' (Get-MachineSessionPath $installed) -WithoutTool
+    Confirm-PathUnchanged "an install that would pass $machinePathLimit characters" $before.machinePath $installed.machinePath
+    Confirm-NoRecord "an install that would pass $machinePathLimit characters" $installed
+    Confirm-Status "an install that would pass $machinePathLimit characters" $installed $statusNoRoom
+    Confirm-LookupFromNewCommandShell 'a refused install' "$(Get-MachineSessionPath $installed);$defaultUserPath" -WithoutTool
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
     Confirm-TerminalRemoved 'the uninstall' $after
   }
 
-  Invoke-Scenario "Path already past $commandShellLineLimit characters" (Get-LongPathExpandedTo ($commandShellLineLimit + 1)) 'ExpandString' {
+  Invoke-Scenario "Path already past $machinePathLimit characters" (Get-LongPathExpandedTo ($machinePathLimit + 1)) 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
@@ -1071,7 +1100,7 @@ try {
     Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
     Confirm-PathUnchanged "an install that would pass $environmentLimit characters" $before.machinePath $installed.machinePath
     Confirm-NoRecord "an install that would pass $environmentLimit characters" $installed
-    Confirm-Status "an install that would pass $environmentLimit characters" $installed "$statusRefused"
+    Confirm-Status "an install that would pass $environmentLimit characters" $installed $statusNoRoom
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath

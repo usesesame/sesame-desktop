@@ -8,9 +8,14 @@ pub const EXIT_UNCHANGED: i32 = 10;
 pub const EXIT_REFUSED: i32 = 11;
 pub const EXIT_FAILED: i32 = 12;
 pub const EXIT_LEFT_FOR_PERSON: i32 = 13;
+pub const EXIT_NO_ROOM: i32 = 14;
 
 pub const MAX_VALUE_UNITS: usize = 32_767;
 pub const COMMAND_SHELL_LIMIT: usize = 8_191;
+pub const LONGEST_USER_NAME: usize = 20;
+pub const DEFAULT_USER_PATH_ALLOWANCE: usize =
+    r"C:\Users\".len() + LONGEST_USER_NAME + r"\AppData\Local\Microsoft\WindowsApps".len() + 2;
+pub const MACHINE_PATH_LIMIT: usize = COMMAND_SHELL_LIMIT - DEFAULT_USER_PATH_ALLOWANCE;
 pub const ACCESS_DENIED: u32 = 5;
 
 pub fn registry_failure_code(status: u32) -> i32 {
@@ -23,6 +28,7 @@ pub fn registry_failure_code(status: u32) -> i32 {
 
 const SEPARATOR: u16 = b';' as u16;
 const QUOTE: u16 = b'"' as u16;
+const PERCENT: u16 = b'%' as u16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -65,7 +71,7 @@ pub fn left_alone_code(plan: &Plan) -> i32 {
         Plan::Write(_) => EXIT_CHANGED,
         Plan::AlreadyPresent | Plan::Absent => EXIT_UNCHANGED,
         Plan::NotSesameForm | Plan::Duplicated => EXIT_LEFT_FOR_PERSON,
-        Plan::TooLong | Plan::PastCommandShellLimit => EXIT_REFUSED,
+        Plan::TooLong | Plan::PastCommandShellLimit => EXIT_NO_ROOM,
     }
 }
 
@@ -225,17 +231,31 @@ fn reaches_folder(entry: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option
 }
 
 fn expanded_length(value: &[u16], lookup: &dyn Fn(&str) -> Option<String>) -> usize {
-    let all = entries(value);
-    let separators = all.len().saturating_sub(1);
-    separators
-        + all
+    let mut length = 0;
+    let mut rest = value;
+    while let Some(start) = rest.iter().position(|unit| *unit == PERCENT) {
+        length += start;
+        let after = &rest[start + 1..];
+        let resolved = after
             .iter()
-            .map(|entry| {
-                String::from_utf16(entry).map_or(entry.len(), |text| {
-                    expand_references(&text, lookup).encode_utf16().count()
-                })
-            })
-            .sum::<usize>()
+            .position(|unit| *unit == PERCENT)
+            .filter(|end| *end > 0)
+            .and_then(|end| {
+                let name = String::from_utf16(&after[..end]).ok()?;
+                Some((end, lookup(&name)?))
+            });
+        match resolved {
+            Some((end, expansion)) => {
+                length += expansion.encode_utf16().count();
+                rest = &after[end + 1..];
+            }
+            None => {
+                length += 1;
+                rest = after;
+            }
+        }
+    }
+    length + rest.len()
 }
 
 pub fn plan_add(value: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option<String>) -> Plan {
@@ -258,8 +278,8 @@ pub fn plan_add(value: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option<S
     if written.len() > MAX_VALUE_UNITS {
         return Plan::TooLong;
     }
-    if expanded_length(value, lookup) <= COMMAND_SHELL_LIMIT
-        && expanded_length(&written, lookup) > COMMAND_SHELL_LIMIT
+    if expanded_length(value, lookup) <= MACHINE_PATH_LIMIT
+        && expanded_length(&written, lookup) > MACHINE_PATH_LIMIT
     {
         return Plan::PastCommandShellLimit;
     }
@@ -271,7 +291,7 @@ pub fn plan_remove(value: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Optio
     let matching: Vec<usize> = all
         .iter()
         .enumerate()
-        .filter(|(_, entry)| names_folder(entry, folder, lookup))
+        .filter(|(_, entry)| reaches_folder(entry, folder, lookup))
         .map(|(index, _)| index)
         .collect();
     match matching.as_slice() {
@@ -386,6 +406,7 @@ mod tests {
             EXIT_REFUSED,
             EXIT_FAILED,
             EXIT_LEFT_FOR_PERSON,
+            EXIT_NO_ROOM,
         ];
         for (index, code) in others.iter().enumerate() {
             assert!(*code > crate::terminal_client::EXIT_OUTDATED, "{code}");
@@ -526,7 +547,7 @@ mod tests {
 
     #[test]
     fn long_paths_get_the_folder_unless_it_crosses_a_limit() {
-        let room = COMMAND_SHELL_LIMIT - FOLDER.len() - 1;
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
         let longest = MAX_VALUE_UNITS - FOLDER.len() - 1;
         for length in [
             994_usize,
@@ -536,7 +557,7 @@ mod tests {
             1024,
             4096,
             room,
-            COMMAND_SHELL_LIMIT + 1,
+            MACHINE_PATH_LIMIT + 1,
             8300,
             16_384,
             longest,
@@ -556,7 +577,7 @@ mod tests {
             let value = long_value(length);
             let plan = add(&value);
             assert_eq!(plan, Plan::TooLong, "{length}");
-            assert_eq!(left_alone_code(&plan), EXIT_REFUSED);
+            assert_eq!(left_alone_code(&plan), EXIT_NO_ROOM);
             let holding = format!("{value};{FOLDER}");
             assert_eq!(written(remove(&holding)), value, "{length}");
             assert_eq!(add(&holding), Plan::AlreadyPresent, "{length}");
@@ -569,28 +590,28 @@ mod tests {
 
     #[test]
     fn an_add_that_takes_the_path_past_what_cmd_can_search_is_refused() {
-        let room = COMMAND_SHELL_LIMIT - FOLDER.len() - 1;
-        assert_eq!(written(add(&long_value(room))).len(), COMMAND_SHELL_LIMIT);
-        for length in [room + 1, COMMAND_SHELL_LIMIT - 1, COMMAND_SHELL_LIMIT] {
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
+        assert_eq!(written(add(&long_value(room))).len(), MACHINE_PATH_LIMIT);
+        for length in [room + 1, MACHINE_PATH_LIMIT - 1, MACHINE_PATH_LIMIT] {
             let value = long_value(length);
             let plan = add(&value);
             assert_eq!(plan, Plan::PastCommandShellLimit, "{length}");
-            assert_eq!(left_alone_code(&plan), EXIT_REFUSED);
+            assert_eq!(left_alone_code(&plan), EXIT_NO_ROOM);
             let holding = format!("{value};{FOLDER}");
             assert_eq!(add(&holding), Plan::AlreadyPresent, "{length}");
             assert_eq!(written(remove(&holding)), value, "{length}");
         }
-        let over = long_value(COMMAND_SHELL_LIMIT + 1);
+        let over = long_value(MACHINE_PATH_LIMIT + 1);
         assert_eq!(written(add(&over)), format!("{over};{FOLDER}"));
         let ending = format!("{};", long_value(room - 1));
-        assert_eq!(written(add(&ending)).len(), COMMAND_SHELL_LIMIT);
+        assert_eq!(written(add(&ending)).len(), MACHINE_PATH_LIMIT);
         let ending = format!("{};", long_value(room));
         assert_eq!(add(&ending), Plan::PastCommandShellLimit);
     }
 
     #[test]
     fn the_command_shell_limit_counts_the_path_as_a_new_session_expands_it() {
-        let room = COMMAND_SHELL_LIMIT - FOLDER.len() - 1;
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
         let prefix = r"%SystemRoot%\Fictional;";
         let value = format!("{prefix}{}", &long_value(room)[..room - prefix.len() + 2]);
         assert_eq!(value.len(), room + 2);
@@ -605,12 +626,12 @@ mod tests {
         assert_eq!(add(&lengthening), Plan::PastCommandShellLimit);
         assert_eq!(
             written(plan_add(&wide(&lengthening), &wide(FOLDER), &unexpanded)).len(),
-            COMMAND_SHELL_LIMIT
+            MACHINE_PATH_LIMIT
         );
     }
 
     #[test]
-    fn a_reference_that_expands_to_several_folders_counts_for_adding_but_never_for_removal() {
+    fn a_reference_that_expands_to_several_folders_counts_as_present_but_is_never_removed() {
         let machine = |name: &str| {
             name.eq_ignore_ascii_case("FictionalBins")
                 .then(|| MachineValue {
@@ -627,7 +648,7 @@ mod tests {
         );
         assert_eq!(
             plan_remove(&wide(&value), &wide(FOLDER), &lookup),
-            Plan::Absent
+            Plan::NotSesameForm
         );
         let other = |name: &str| {
             name.eq_ignore_ascii_case("FictionalBins")
@@ -646,7 +667,7 @@ mod tests {
 
     #[test]
     fn invalid_text_in_one_entry_does_not_stop_references_in_others_from_counting() {
-        let room = COMMAND_SHELL_LIMIT - FOLDER.len() - 1;
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
         let mut value = wide(r"%ProgramFiles%\a;%ProgramFiles%\b;C:\Fictional\");
         value.push(0xd800);
         value.push(SEPARATOR);
@@ -667,13 +688,75 @@ mod tests {
     }
 
     #[test]
+    fn a_multi_folder_reference_beside_the_exact_entry_counts_twice() {
+        let machine = |name: &str| {
+            name.eq_ignore_ascii_case("FictionalBins")
+                .then(|| MachineValue {
+                    text: format!(r"C:\Fictional\One;{FOLDER}"),
+                    expands: false,
+                })
+        };
+        let lookup = |name: &str| machine_reference(name, PROGRAM_FILES, &machine, &process);
+        let value = format!("{BASE};{FOLDER};%FictionalBins%");
+        assert_eq!(
+            plan_remove(&wide(&value), &wide(FOLDER), &lookup),
+            Plan::Duplicated
+        );
+        let quiet = |_: &str| None;
+        assert_eq!(
+            written(plan_remove(&wide(&value), &wide(FOLDER), &quiet)),
+            format!("{BASE};%FictionalBins%")
+        );
+    }
+
+    #[test]
+    fn references_beside_invalid_text_in_the_same_entry_still_count() {
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
+        let mut value = wide(r"C:\Fictional\%ProgramFiles%\a%ProgramFiles%");
+        value.push(0xdc00);
+        value.extend(wide(r"\b;C:\Fictional\"));
+        let filler = room - 4 - value.len();
+        value.extend(wide(&"x".repeat(filler)));
+        assert_eq!(expanded_length(&value, &lookup), room);
+        assert!(matches!(
+            plan_add(&value, &wide(FOLDER), &lookup),
+            Plan::Write(_)
+        ));
+        value.push(b'x' as u16);
+        assert_eq!(
+            plan_add(&value, &wide(FOLDER), &lookup),
+            Plan::PastCommandShellLimit
+        );
+        let mut name = wide("%Program");
+        name.push(0xd800);
+        name.extend(wide("Files%"));
+        assert_eq!(expanded_length(&name, &lookup), name.len());
+    }
+
+    #[test]
+    fn the_machine_limit_leaves_room_for_a_default_user_path() {
+        let longest = format!(
+            r"C:\Users\{}\AppData\Local\Microsoft\WindowsApps",
+            "u".repeat(LONGEST_USER_NAME)
+        );
+        assert_eq!(
+            MACHINE_PATH_LIMIT + 1 + longest.len() + 1,
+            COMMAND_SHELL_LIMIT
+        );
+        let room = MACHINE_PATH_LIMIT - FOLDER.len() - 1;
+        let after = written(add(&long_value(room)));
+        assert_eq!(format!("{after};{longest};").len(), COMMAND_SHELL_LIMIT);
+        assert_eq!(add(&long_value(room + 1)), Plan::PastCommandShellLimit);
+    }
+
+    #[test]
     fn every_outcome_that_leaves_the_path_has_its_own_code() {
         assert_eq!(left_alone_code(&Plan::AlreadyPresent), EXIT_UNCHANGED);
         assert_eq!(left_alone_code(&Plan::Absent), EXIT_UNCHANGED);
         assert_eq!(left_alone_code(&Plan::NotSesameForm), EXIT_LEFT_FOR_PERSON);
         assert_eq!(left_alone_code(&Plan::Duplicated), EXIT_LEFT_FOR_PERSON);
-        assert_eq!(left_alone_code(&Plan::TooLong), EXIT_REFUSED);
-        assert_eq!(left_alone_code(&Plan::PastCommandShellLimit), EXIT_REFUSED);
+        assert_eq!(left_alone_code(&Plan::TooLong), EXIT_NO_ROOM);
+        assert_eq!(left_alone_code(&Plan::PastCommandShellLimit), EXIT_NO_ROOM);
         assert_eq!(remove(BASE), Plan::Absent);
         assert_eq!(left_alone_code(&remove(BASE)), EXIT_UNCHANGED);
         let other_form = format!("{BASE};%ProgramFiles%\\Sesame\\cli");
