@@ -82,6 +82,8 @@ $statusChanged = '0'
 $statusUnchanged = '10'
 $statusRefused = 11
 $statusFailed = '12'
+$environmentLimit = 32767
+$commandShellLineLimit = 8191
 $uninstallKeys = @(
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$productName",
   "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$productName"
@@ -624,10 +626,25 @@ function Invoke-Scenario {
   }
 }
 
-function Invoke-LongPathScenario {
+function Get-LongPath {
   param([int]$Length)
   $prefix = "$basePath;C:\Fictional\Long\"
-  $value = $prefix + ('x' * ($Length - $prefix.Length))
+  return $prefix + ('x' * ($Length - $prefix.Length))
+}
+
+function Confirm-LookupFromNewCommandShell {
+  param([string]$What)
+  $sessionPath = Get-NewSessionPath
+  $tool = Invoke-SessionCommand 'sesame --version' 30 $sessionPath
+  $toolFound = ($tool.exitCode -eq $exitOk) -and $tool.output.StartsWith('sesame ')
+  Confirm-That "$What lets a new cmd.exe with a Path of $($sessionPath.Length) characters run sesame" $toolFound 'sesame --version exits 0' "exit code $($tool.exitCode), output [$($tool.output)], errors [$($tool.errors)]"
+  $existing = Invoke-SessionCommand 'whoami' 30 $sessionPath
+  Confirm-That "$What lets a new cmd.exe with a Path of $($sessionPath.Length) characters run a command from an existing entry" ($existing.exitCode -eq 0) 'whoami exits 0' "exit code $($existing.exitCode), errors [$($existing.errors)]"
+}
+
+function Invoke-LongPathScenario {
+  param([int]$Length)
+  $value = Get-LongPath $Length
   Invoke-Scenario "Path of $Length characters" $value 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
@@ -636,6 +653,7 @@ function Invoke-LongPathScenario {
     Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
     Confirm-RecordAdded 'the install' $installed
     Confirm-Status 'the install' $installed $statusChanged
+    Confirm-LookupFromNewCommandShell 'the install'
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
@@ -659,6 +677,58 @@ function Invoke-ExistingEntryScenario {
   }
 }
 
+function Invoke-CommandShellProbe {
+  param([int]$Length, [string]$Early, [string]$Late, [string]$Session)
+  $head = "$Early;$env:SystemRoot\system32;C:\Fictional\Pad\"
+  $tail = ";$Late"
+  $value = $head + ('x' * ($Length - $head.Length - $tail.Length)) + $tail
+  try {
+    $run = Invoke-Captured $commandShell "/d /c `"$Session`"" 60 $value
+  } catch {
+    $run = [pscustomobject][ordered]@{ command = "$commandShell $Session"; finished = $false; exitCode = $null; seconds = 0; output = ''; errors = "could not start: $($_.Exception.Message)" }
+  }
+  $child = [regex]::Match($run.output, 'child Path length (\d+)')
+  $probe = [pscustomobject][ordered]@{
+    length = $value.Length
+    earlyFound = $run.output.Contains('fictional early probe ran')
+    lateFound = $run.output.Contains('fictional late probe ran')
+    pathDefined = $run.output.Contains('cmd sees PATH')
+    childPathLength = if ($child.Success) { [int]$child.Groups[1].Value } else { -1 }
+    errors = $run.errors.Trim()
+  }
+  Write-Host ("cmd probe: Path of {0} characters, first entry found {1}, last entry found {2}, PATH defined in cmd {3}, Path length in a child of cmd {4}, errors [{5}]" -f $probe.length, $probe.earlyFound, $probe.lateFound, $probe.pathDefined, $probe.childPathLength, $probe.errors)
+  Save-Evidence "cmd probe $Length" ([ordered]@{ probe = $probe; run = $run })
+  return $probe
+}
+
+function Invoke-CommandShellLimitScenario {
+  Invoke-Scenario "A new cmd.exe given a Path around $commandShellLineLimit characters" $basePath 'ExpandString' {
+    $probeRoot = Join-Path $EvidenceRoot 'cmd-path-probe'
+    $early = Join-Path $probeRoot 'first'
+    $late = Join-Path $probeRoot 'last'
+    New-Item -ItemType Directory -Force -Path $early, $late | Out-Null
+    Set-Content -LiteralPath (Join-Path $early 'fictional-early-probe.cmd') -Encoding ASCII -Value '@echo fictional early probe ran'
+    Set-Content -LiteralPath (Join-Path $late 'fictional-late-probe.cmd') -Encoding ASCII -Value '@echo fictional late probe ran'
+    $session = Join-Path $probeRoot 'session.cmd'
+    Set-Content -LiteralPath $session -Encoding ASCII -Value @(
+      '@echo off',
+      'call fictional-early-probe',
+      'call fictional-late-probe',
+      'if defined PATH (echo cmd sees PATH) else (echo cmd sees no PATH)',
+      '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "$p = [Environment]::GetEnvironmentVariable(''Path''); if ($null -eq $p) { ''child Path missing'' } else { ''child Path length '' + $p.Length }"'
+    )
+    $probes = @(foreach ($length in @(8000, 8190, $commandShellLineLimit, ($commandShellLineLimit + 1), ($commandShellLineLimit + 2), 8300, 16384, $environmentLimit, ($environmentLimit + 1), 40000)) {
+        Invoke-CommandShellProbe $length $early $late $session
+      })
+    Save-Evidence 'cmd probes' $probes
+    foreach ($probe in $probes) {
+      if ($probe.length -gt $commandShellLineLimit) { continue }
+      $works = $probe.earlyFound -and $probe.lateFound -and $probe.pathDefined -and ($probe.childPathLength -eq $probe.length)
+      Confirm-That "a new cmd.exe with a Path of $($probe.length) characters finds commands in its first and last entries and passes Path on whole" $works 'both probes found and the full length passed on' ("first {0}, last {1}, defined {2}, child length {3}" -f $probe.earlyFound, $probe.lateFound, $probe.pathDefined, $probe.childPathLength)
+    }
+  }
+}
+
 function Get-NsisStringLimit {
   $toolRoot = Join-Path $env:LOCALAPPDATA 'tauri\NSIS'
   foreach ($candidate in @((Join-Path $toolRoot 'makensis.exe'), (Join-Path $toolRoot 'Bin\makensis.exe'))) {
@@ -672,10 +742,13 @@ function Get-NsisStringLimit {
   return $null
 }
 
+Write-Host "runner machine Path at the start: $(Format-PathValue $originalPath)"
+Write-Host "runner user Path at the start: $(Format-PathValue $originalUserPath)"
+if (Get-UninstallKey) { throw 'Sesame is already installed, so this test cannot start from a clean machine.' }
+if (Get-PathRecord) { throw 'A record of a Sesame Path entry already exists, so this test cannot start from a clean machine.' }
+if (Test-Path -LiteralPath $installDirectory) { throw "$installDirectory already exists, so this test cannot start from a clean machine." }
+
 try {
-  Write-Host "runner machine Path at the start: $(Format-PathValue $originalPath)"
-  Write-Host "runner user Path at the start: $(Format-PathValue $originalUserPath)"
-  if (Get-UninstallKey) { throw 'Sesame is already installed, so this test cannot start from a clean machine.' }
   $originalHolds = @((Get-PathEntries $originalPath.Value) | Where-Object { Test-TerminalEntry $_ }).Count
   Confirm-That 'the runner Path holds no Sesame entry before the test' ($originalHolds -eq 0) '0 entries' "$originalHolds entries"
 
@@ -762,6 +835,39 @@ try {
     Confirm-TerminalRemoved 'the uninstall after a failed Path edit' $after
   }
 
+  Invoke-Scenario 'An uninstall whose Path edit fails keeps Sesame installed so it can run again' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-RecordAdded 'the install' $installed
+    Set-MachinePath ($installed.machinePath.Value.Replace(';', "`n")) 'MultiString'
+    $broken = Get-State 'after the Path is changed to REG_MULTI_SZ'
+    $code = Invoke-Installer $uninstaller @('/S', "_?=$installDirectory")
+    $stopped = Get-State 'after a silent uninstall that could not edit Path'
+    Confirm-That 'a silent uninstall whose Path edit fails exits with an error' ($code -ne 0) 'a nonzero exit code' "$code"
+    Confirm-PathUnchanged 'a silent uninstall whose Path edit fails' $broken.machinePath $stopped.machinePath
+    Confirm-That 'a silent uninstall whose Path edit fails keeps cli\sesame.exe' $stopped.terminalProgramExists $terminalProgram 'no file'
+    Confirm-That 'a silent uninstall whose Path edit fails keeps the uninstall key' ($null -ne $stopped.uninstallKey) 'the uninstall key' 'no key'
+    Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $stopped
+    Set-MachinePath $installed.machinePath.Value $installed.machinePath.Kind
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after the uninstall runs again'
+    Confirm-PathUnchanged 'the uninstall that runs again' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall that runs again' $after
+  }
+
+  Invoke-Scenario 'An uninstall after someone else removed the entry' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-RecordAdded 'the install' $installed
+    Set-MachinePath $before.machinePath.Value $before.machinePath.Kind
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'an uninstall that finds the entry gone' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'an uninstall that finds the entry gone' $after
+  }
+
   Invoke-Scenario 'Path holds the entry twice at uninstall' $basePath 'ExpandString' {
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
@@ -818,6 +924,37 @@ try {
   foreach ($length in @(994, 995, 1022, 1023, 1024, 4096, ($limit * 8))) {
     Invoke-LongPathScenario $length
   }
+
+  $longest = $environmentLimit - $terminalFolder.Length - 1
+  Invoke-Scenario "Path of $longest characters, the longest that leaves room for the entry" (Get-LongPath $longest) 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+    Confirm-That "the install leaves Path at $environmentLimit characters" ($installed.machinePath.Length -eq $environmentLimit) "$environmentLimit" "$($installed.machinePath.Length)"
+    Confirm-RecordAdded 'the install' $installed
+    Confirm-Status 'the install' $installed $statusChanged
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall' $after
+  }
+
+  Invoke-Scenario "Path of $($longest + 1) characters, too long to add the entry" (Get-LongPath ($longest + 1)) 'ExpandString' {
+    $before = Get-State 'before install'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
+    Confirm-PathUnchanged "an install that would pass $environmentLimit characters" $before.machinePath $installed.machinePath
+    Confirm-NoRecord "an install that would pass $environmentLimit characters" $installed
+    Confirm-Status "an install that would pass $environmentLimit characters" $installed "$statusRefused"
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall' $after
+  }
+
+  Invoke-CommandShellLimitScenario
 
   Write-Host "The runner Path has $($originalPath.Length) characters and the installer must add the entry to it"
   Invoke-Scenario "The runner's own Path of $($originalPath.Length) characters" $originalPath.Value $originalPath.Kind {

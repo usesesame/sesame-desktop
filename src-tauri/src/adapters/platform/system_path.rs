@@ -2,6 +2,8 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, HANDLE, LPARAM, WIN32_ERROR,
@@ -20,15 +22,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::machine_path::{
-    plan_add, plan_remove, registry_bytes, string_data, Mode, Plan, Request, EXIT_CHANGED,
-    EXIT_FAILED, EXIT_REFUSED, EXIT_UNCHANGED,
+    left_alone_code, machine_reference, plan_add, plan_remove, registry_bytes, string_data,
+    MachineValue, Mode, Plan, Request, EXIT_CHANGED, EXIT_FAILED, EXIT_REFUSED, MAX_VALUE_UNITS,
 };
 
 const ENVIRONMENT_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
 const CURRENT_VERSION_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion";
 const PRODUCT_FOLDER: &str = "Sesame";
 const ATTEMPTS: usize = 3;
-const BROADCAST_TIMEOUT_MILLISECONDS: u32 = 5_000;
+const BROADCAST_TIMEOUT_MILLISECONDS: u32 = 1_000;
+const BROADCAST_DEADLINE: Duration = Duration::from_secs(5);
 
 fn wide(text: &str) -> Vec<u16> {
     OsStr::new(text).encode_wide().chain(Some(0)).collect()
@@ -182,19 +185,38 @@ fn read_value(key: &Key, name: &[u16]) -> Result<(REG_VALUE_TYPE, Vec<u8>), WIN3
     Err(ERROR_MORE_DATA)
 }
 
+fn machine_value(key: &Key, name: &str) -> Option<MachineValue> {
+    let (kind, bytes) = read_value(key, &wide(name)).ok()?;
+    if kind != REG_SZ && kind != REG_EXPAND_SZ {
+        return None;
+    }
+    let text = String::from_utf16(&string_data(&bytes)?).ok()?;
+    Some(MachineValue {
+        text,
+        expands: kind == REG_EXPAND_SZ,
+    })
+}
+
 fn broadcast() {
-    let environment = wide("Environment");
-    let mut result = 0_usize;
-    unsafe {
-        SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            environment.as_ptr() as LPARAM,
-            SMTO_ABORTIFHUNG,
-            BROADCAST_TIMEOUT_MILLISECONDS,
-            &mut result,
-        );
+    let (finished, done) = mpsc::channel();
+    let sent = std::thread::Builder::new().spawn(move || {
+        let environment = wide("Environment");
+        let mut result = 0_usize;
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                environment.as_ptr() as LPARAM,
+                SMTO_ABORTIFHUNG,
+                BROADCAST_TIMEOUT_MILLISECONDS,
+                &mut result,
+            );
+        }
+        let _ = finished.send(());
+    });
+    if sent.is_ok() {
+        let _ = done.recv_timeout(BROADCAST_DEADLINE);
     }
 }
 
@@ -211,6 +233,9 @@ fn left_alone(plan: &Plan, folder: &str) -> String {
         ),
         Plan::Duplicated => format!(
             "The system Path holds {folder} more than once, so Sesame left it. Remove the entries you no longer need by hand."
+        ),
+        Plan::TooLong => format!(
+            "Adding {folder} would make the system Path longer than {MAX_VALUE_UNITS} characters, so Sesame left it as it was. Shorten the system Path and add the folder by hand to use the sesame command."
         ),
         Plan::Write(_) => String::new(),
     }
@@ -257,15 +282,13 @@ fn change(mode: Mode, install: &Install) -> i32 {
             return EXIT_FAILED;
         };
         let expands = kind == REG_EXPAND_SZ;
+        let machine = |name: &str| machine_value(&key, name);
+        let system = |name: &str| std::env::var(name).ok();
         let lookup = |name: &str| {
-            if !expands {
-                None
-            } else if name.eq_ignore_ascii_case("ProgramFiles")
-                || name.eq_ignore_ascii_case("ProgramW6432")
-            {
-                Some(install.program_files.clone())
+            if expands {
+                machine_reference(name, &install.program_files, &machine, &system)
             } else {
-                std::env::var(name).ok()
+                None
             }
         };
         let plan = match mode {
@@ -276,7 +299,7 @@ fn change(mode: Mode, install: &Install) -> i32 {
             Plan::Write(written) => written,
             other => {
                 eprintln!("{}", left_alone(&other, folder));
-                return EXIT_UNCHANGED;
+                return left_alone_code(&other);
             }
         };
         match read_value(&key, &value_name) {

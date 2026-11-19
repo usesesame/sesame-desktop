@@ -7,6 +7,9 @@ pub const EXIT_CHANGED: i32 = 0;
 pub const EXIT_UNCHANGED: i32 = 10;
 pub const EXIT_REFUSED: i32 = 11;
 pub const EXIT_FAILED: i32 = 12;
+pub const EXIT_LEFT_FOR_PERSON: i32 = 13;
+
+pub const MAX_VALUE_UNITS: usize = 32_767;
 
 const SEPARATOR: u16 = b';' as u16;
 const QUOTE: u16 = b'"' as u16;
@@ -43,6 +46,59 @@ pub enum Plan {
     Absent,
     NotSesameForm,
     Duplicated,
+    TooLong,
+}
+
+pub fn left_alone_code(plan: &Plan) -> i32 {
+    match plan {
+        Plan::Write(_) => EXIT_CHANGED,
+        Plan::AlreadyPresent | Plan::Absent => EXIT_UNCHANGED,
+        Plan::NotSesameForm | Plan::Duplicated => EXIT_LEFT_FOR_PERSON,
+        Plan::TooLong => EXIT_REFUSED,
+    }
+}
+
+pub struct MachineValue {
+    pub text: String,
+    pub expands: bool,
+}
+
+const SYSTEM_SUPPLIED: [&str; 2] = ["SystemRoot", "SystemDrive"];
+
+fn supplied(
+    name: &str,
+    program_files: &str,
+    system: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if name.eq_ignore_ascii_case("ProgramFiles") || name.eq_ignore_ascii_case("ProgramW6432") {
+        Some(program_files.to_string())
+    } else if SYSTEM_SUPPLIED
+        .iter()
+        .any(|known| name.eq_ignore_ascii_case(known))
+    {
+        system(name)
+    } else {
+        None
+    }
+}
+
+pub fn machine_reference(
+    name: &str,
+    program_files: &str,
+    machine: &dyn Fn(&str) -> Option<MachineValue>,
+    system: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if let Some(value) = supplied(name, program_files, system) {
+        return Some(value);
+    }
+    let value = machine(name)?;
+    if value.expands {
+        Some(expand_references(&value.text, &|inner| {
+            supplied(inner, program_files, system)
+        }))
+    } else {
+        Some(value.text)
+    }
 }
 
 pub fn string_data(bytes: &[u8]) -> Option<Vec<u16>> {
@@ -99,10 +155,31 @@ fn expand_references(text: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Str
     expanded
 }
 
+fn drive_rooted(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\' {
+        Some((&text[..2], &text[3..]))
+    } else {
+        None
+    }
+}
+
 fn comparable(text: &str) -> String {
-    text.replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
+    let text = text.replace('/', "\\").to_lowercase();
+    let Some((drive, rest)) = drive_rooted(&text) else {
+        return text.trim_end_matches('\\').to_string();
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in rest.split('\\') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("{drive}\\{}", parts.join("\\"))
 }
 
 pub fn names_folder(
@@ -137,6 +214,9 @@ pub fn plan_add(value: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option<S
     } else {
         written.push(SEPARATOR);
         written.extend_from_slice(folder);
+    }
+    if written.len() > MAX_VALUE_UNITS {
+        return Plan::TooLong;
     }
     Plan::Write(written)
 }
@@ -181,13 +261,35 @@ mod tests {
         String::from_utf16(units).unwrap()
     }
 
-    fn lookup(name: &str) -> Option<String> {
+    const PROGRAM_FILES: &str = r"C:\Program Files";
+
+    fn process(name: &str) -> Option<String> {
         match name.to_ascii_lowercase().as_str() {
-            "programfiles" | "programw6432" => Some(r"C:\Program Files".to_string()),
             "systemroot" => Some(r"C:\Windows".to_string()),
+            "systemdrive" => Some("C:".to_string()),
             "sesamehome" => Some(r"C:\Program Files\Sesame".to_string()),
+            "fictionalonlyhere" => Some(r"C:\Program Files\Sesame".to_string()),
             _ => None,
         }
+    }
+
+    fn machine_with(home: &str, expands: bool) -> impl Fn(&str) -> Option<MachineValue> + '_ {
+        move |name: &str| {
+            name.eq_ignore_ascii_case("SesameHome")
+                .then(|| MachineValue {
+                    text: home.to_string(),
+                    expands,
+                })
+        }
+    }
+
+    fn lookup(name: &str) -> Option<String> {
+        machine_reference(
+            name,
+            PROGRAM_FILES,
+            &machine_with(r"C:\Program Files\Sesame", false),
+            &process,
+        )
     }
 
     fn add(value: &str) -> Plan {
@@ -234,7 +336,12 @@ mod tests {
     #[test]
     fn the_installer_outcomes_are_distinct_and_apart_from_the_terminal_codes() {
         assert_eq!(EXIT_CHANGED, 0);
-        let others = [EXIT_UNCHANGED, EXIT_REFUSED, EXIT_FAILED];
+        let others = [
+            EXIT_UNCHANGED,
+            EXIT_REFUSED,
+            EXIT_FAILED,
+            EXIT_LEFT_FOR_PERSON,
+        ];
         for (index, code) in others.iter().enumerate() {
             assert!(*code > crate::terminal_client::EXIT_OUTDATED, "{code}");
             assert!(!others[index + 1..].contains(code), "{code}");
@@ -357,16 +464,144 @@ mod tests {
         assert_eq!(written(remove(&after)), BASE);
     }
 
+    fn long_value(length: usize) -> String {
+        let prefix = format!("{BASE};C:\\Fictional\\Long\\");
+        let value = format!("{prefix}{}", "x".repeat(length - prefix.len()));
+        assert_eq!(value.len(), length);
+        value
+    }
+
     #[test]
-    fn long_paths_have_no_length_limit() {
-        for length in [994_usize, 995, 1022, 1023, 1024, 4096, 40_000] {
-            let prefix = format!("{BASE};C:\\Fictional\\Long\\");
-            let value = format!("{prefix}{}", "x".repeat(length - prefix.len()));
-            assert_eq!(value.len(), length);
+    fn long_paths_get_the_folder_up_to_the_environment_limit() {
+        let longest = MAX_VALUE_UNITS - FOLDER.len() - 1;
+        for length in [994_usize, 995, 1022, 1023, 1024, 4096, 8191, 8192, longest] {
+            let value = long_value(length);
             let after = written(add(&value));
             assert_eq!(after, format!("{value};{FOLDER}"));
+            assert!(after.len() <= MAX_VALUE_UNITS);
             assert_eq!(written(remove(&after)), value);
         }
+    }
+
+    #[test]
+    fn an_add_past_the_environment_limit_is_refused_and_removal_still_works() {
+        let longest = MAX_VALUE_UNITS - FOLDER.len() - 1;
+        for length in [longest + 1, MAX_VALUE_UNITS, 40_000] {
+            let value = long_value(length);
+            let plan = add(&value);
+            assert_eq!(plan, Plan::TooLong, "{length}");
+            assert_eq!(left_alone_code(&plan), EXIT_REFUSED);
+            let holding = format!("{value};{FOLDER}");
+            assert_eq!(written(remove(&holding)), value, "{length}");
+            assert_eq!(add(&holding), Plan::AlreadyPresent, "{length}");
+        }
+        let ending = format!("{};", long_value(longest - 1));
+        assert_eq!(written(add(&ending)).len(), MAX_VALUE_UNITS);
+        let ending = format!("{};", long_value(longest));
+        assert_eq!(add(&ending), Plan::TooLong);
+    }
+
+    #[test]
+    fn every_outcome_that_leaves_the_path_has_its_own_code() {
+        assert_eq!(left_alone_code(&Plan::AlreadyPresent), EXIT_UNCHANGED);
+        assert_eq!(left_alone_code(&Plan::Absent), EXIT_UNCHANGED);
+        assert_eq!(left_alone_code(&Plan::NotSesameForm), EXIT_LEFT_FOR_PERSON);
+        assert_eq!(left_alone_code(&Plan::Duplicated), EXIT_LEFT_FOR_PERSON);
+        assert_eq!(left_alone_code(&Plan::TooLong), EXIT_REFUSED);
+        assert_eq!(remove(BASE), Plan::Absent);
+        assert_eq!(left_alone_code(&remove(BASE)), EXIT_UNCHANGED);
+        let other_form = format!("{BASE};%ProgramFiles%\\Sesame\\cli");
+        assert_eq!(left_alone_code(&remove(&other_form)), EXIT_LEFT_FOR_PERSON);
+        let twice = format!("{BASE};{FOLDER};{FOLDER}");
+        assert_eq!(left_alone_code(&remove(&twice)), EXIT_LEFT_FOR_PERSON);
+    }
+
+    #[test]
+    fn dot_components_name_the_folder_but_only_the_exact_entry_is_removed() {
+        for entry in [
+            r"C:\Program Files\Sesame\.\cli",
+            r"C:\Program Files\.\Sesame\cli\.",
+            r"C:\Program Files\Sesame\cli\..\cli",
+            r"C:\Program Files\Fictional\..\Sesame\cli",
+            r"C:\..\Program Files\Sesame\cli",
+            r"C:\Program Files\\Sesame\cli",
+            r"C:/Program Files/Sesame/./cli/",
+            r"%ProgramFiles%\Sesame\.\cli",
+            r"%SystemRoot%\..\Program Files\Sesame\cli",
+            r"%SystemDrive%\Program Files\Sesame\cli",
+            "\"C:\\Program Files\\Sesame\\.\\cli\"",
+        ] {
+            let value = format!("{BASE};{entry}");
+            assert_eq!(add(&value), Plan::AlreadyPresent, "{entry}");
+            assert_eq!(remove(&value), Plan::NotSesameForm, "{entry}");
+            assert_eq!(
+                remove(&format!("{value};{FOLDER}")),
+                Plan::Duplicated,
+                "{entry}"
+            );
+        }
+        for entry in [
+            r"C:\Program Files\Sesame\cli\..",
+            r"C:\Program Files\Sesame\..\cli",
+            r"C:\Program Files\Sesame\cli\..\cli2",
+            r".\cli",
+            r"..\Sesame\cli",
+            r"\\Fictional\Share\..\Program Files\Sesame\cli",
+        ] {
+            let value = format!("{BASE};{entry}");
+            assert_eq!(written(add(&value)), format!("{value};{FOLDER}"), "{entry}");
+            assert_eq!(remove(&value), Plan::Absent, "{entry}");
+        }
+    }
+
+    #[test]
+    fn references_resolve_with_the_machine_value_and_not_the_installer_process() {
+        let entry = r"%SesameHome%\cli";
+        let value = format!("{BASE};{entry}");
+        let plan_with = |home: &str, expands: bool, mode: Mode| {
+            let machine = machine_with(home, expands);
+            let lookup = |name: &str| machine_reference(name, PROGRAM_FILES, &machine, &process);
+            match mode {
+                Mode::Add => plan_add(&wide(&value), &wide(FOLDER), &lookup),
+                Mode::Remove => plan_remove(&wide(&value), &wide(FOLDER), &lookup),
+            }
+        };
+        assert_eq!(
+            written(plan_with(r"D:\Fictional\Elsewhere", false, Mode::Add)),
+            format!("{value};{FOLDER}")
+        );
+        assert_eq!(
+            plan_with(r"D:\Fictional\Elsewhere", false, Mode::Remove),
+            Plan::Absent
+        );
+        assert_eq!(
+            plan_with(r"C:\Program Files\Sesame", false, Mode::Add),
+            Plan::AlreadyPresent
+        );
+        assert_eq!(
+            plan_with(r"%ProgramFiles%\Sesame", true, Mode::Add),
+            Plan::AlreadyPresent
+        );
+        assert_eq!(
+            written(plan_with(r"%ProgramFiles%\Sesame", false, Mode::Add)),
+            format!("{value};{FOLDER}")
+        );
+        assert_eq!(
+            written(plan_with(r"%FictionalOnlyHere%", true, Mode::Add)),
+            format!("{value};{FOLDER}")
+        );
+
+        let nowhere = |_: &str| None;
+        let only_process = |name: &str| machine_reference(name, PROGRAM_FILES, &nowhere, &process);
+        assert_eq!(
+            plan_add(&wide(&value), &wide(FOLDER), &only_process),
+            Plan::Write(wide(&format!("{value};{FOLDER}")))
+        );
+        let elsewhere = format!("{BASE};%FictionalOnlyHere%\\cli");
+        assert_eq!(
+            plan_remove(&wide(&elsewhere), &wide(FOLDER), &only_process),
+            Plan::Absent
+        );
     }
 
     #[test]

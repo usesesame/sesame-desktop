@@ -294,7 +294,7 @@ test('Windows CI builds the installer and runs its install lifecycle', () => {
   assert.ok(commandLine > steps, 'CI no longer checks the command line tool on the machine Path after the install lifecycle')
   assert.match(windows.slice(commandLine), /-EvidenceRoot \(Join-Path \$env:RUNNER_TEMP 'command-line-install-evidence'\)/)
   assert.match(windows, /name: Check the command line tool on the machine Path\s+shell: powershell\s+timeout-minutes: \d+/)
-  assert.match(windows, /uses: actions\/upload-artifact@[0-9a-f]{40} # v[\d.]+\s+with:\s+name: windows-command-line-install-evidence\s+path: \$\{\{ runner\.temp \}\}\/command-line-install-evidence/)
+  assert.match(windows, /uses: actions\/upload-artifact@[0-9a-f]{40} # v[\d.]+\s+if: always\(\)\s+with:\s+name: windows-command-line-install-evidence\s+path: \$\{\{ runner\.temp \}\}\/command-line-install-evidence/, 'the evidence must be uploaded when the check fails too')
 })
 
 test('the command line install test guards the machine Path and checks what the hook claims', () => {
@@ -310,6 +310,16 @@ test('the command line install test guards the machine Path and checks what the 
   assert.ok(refusal > 0, 'the test must refuse to run outside CI without a flag')
   assert.ok(saved > refusal, 'the original Path is not saved right after the CI check')
   assert.ok(firstWrite > saved, 'the test writes the machine Path before it saves the original')
+  const outerTry = script.search(/^try \{$/m)
+  assert.ok(outerTry > saved, 'the test has no outer try after it saves the original Path')
+  for (const prerequisite of [
+    "if (Get-UninstallKey) { throw 'Sesame is already installed",
+    'if (Get-PathRecord) { throw',
+    'if (Test-Path -LiteralPath $installDirectory) { throw',
+  ]) {
+    const at = script.indexOf(prerequisite)
+    assert.ok(at > 0 && at < outerTry, `${prerequisite} must stop the test before the cleanup in its finally block can remove an installation it did not create`)
+  }
   assert.match(script, /\} finally \{\s+\$script:scenario = 'final restore'[\s\S]*Set-MachinePath \$originalPath\.Value \$originalPath\.Kind/, 'a failed run does not restore the runner Path')
   assert.match(script, /function Invoke-Scenario[\s\S]*?\} finally \{[\s\S]*?Set-MachinePath \$originalPath\.Value \$originalPath\.Kind/, 'a failed scenario does not restore the runner Path')
   assert.match(script, /OpenSubKey\(\$environmentKeyPath, \$true\)/)
@@ -365,6 +375,19 @@ test('the command line install test guards the machine Path and checks what the 
     'Confirm-PathModeRefusals $installed.machinePath',
     "/trustlevel:0x20000",
     "sesame --help does not list the installer arguments",
+    'An uninstall whose Path edit fails keeps Sesame installed so it can run again',
+    "Confirm-That 'a silent uninstall whose Path edit fails exits with an error' ($code -ne 0)",
+    "Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $stopped",
+    'An uninstall after someone else removed the entry',
+    "Confirm-LookupFromNewCommandShell 'the install'",
+    "Invoke-SessionCommand 'whoami'",
+    'the longest that leaves room for the entry',
+    'too long to add the entry',
+    "Confirm-Status \"an install that would pass $environmentLimit characters\" $installed \"$statusRefused\"",
+    'Invoke-CommandShellLimitScenario',
+    "'call fictional-early-probe'",
+    "'call fictional-late-probe'",
+    'if defined PATH (echo cmd sees PATH) else (echo cmd sees no PATH)',
   ]) {
     assert.ok(script.includes(scenario), `the test no longer covers ${scenario}`)
   }
@@ -375,6 +398,8 @@ test('the command line install test guards the machine Path and checks what the 
   assert.ok(script.includes(`$statusUnchanged = '${status('EXIT_UNCHANGED')}'`))
   assert.ok(script.includes(`$statusRefused = ${status('EXIT_REFUSED')}`))
   assert.ok(script.includes(`$statusFailed = '${status('EXIT_FAILED')}'`))
+  assert.ok(script.includes(`$environmentLimit = ${pure.match(/pub const MAX_VALUE_UNITS: usize = ([\d_]+);/)[1].replaceAll('_', '')}`), 'the test no longer places its longest Path at the limit the cli program enforces')
+  assert.match(script, /\$commandShellLineLimit = 8191\b/)
   assert.match(script, /\$basePath = '%SystemRoot%\\system32;%SystemRoot%;/)
 })
 
@@ -407,6 +432,12 @@ test('the Windows installer hands the system Path to the cli program and records
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
   assert.match(remove, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"/, 'uninstall removes a Path entry Sesame did not add, or removes it during an update')
+  assert.match(remove, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_UNCHANGED')}"\\s+DetailPrint "The system Path no longer holds [^"]*left it as it was\\."`), 'an entry that is already gone must not ask the person to remove it')
+  assert.match(remove, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_LEFT_FOR_PERSON')}"\\s+DetailPrint "[^"]*Remove the entries you no longer need by hand\\."`), 'an entry Sesame left in place must tell the person to remove it')
+  const failure = remove.slice(remove.indexOf(`$0 == "${constant('EXIT_LEFT_FOR_PERSON')}"`))
+  assert.match(failure, /\$\{Else\}\s+DetailPrint[^\n]+\s+\$\{If\} \$\{Silent\}\s+\$\{OrIf\} \$PassiveMode = 1\s+Pop \$0\s+Abort "[^"]+"\s+\$\{EndIf\}\s+MessageBox MB_ICONEXCLAMATION\|MB_ABORTRETRYIGNORE "[^"]+" IDRETRY sesame_remove_terminal_path IDIGNORE sesame_remove_terminal_path_done\s+Pop \$0\s+Abort "[^"]+"\s+\$\{EndIf\}\s+sesame_remove_terminal_path_done:\s+Pop \$0/, 'a removal that fails must stop the uninstall before the files go, offer a retry in the window, and never wait on a dialog when silent or passive')
+  assert.match(remove, /Push \$0\s+sesame_remove_terminal_path:\s+ClearErrors\s+ExecWait/, 'a retry must run the cli program again')
+  assert.doesNotMatch(remove.slice(0, remove.indexOf('${Else}')), /Abort|MessageBox/, 'an outcome that changed or left the Path must not stop the uninstall')
   assert.ok(remove.includes(`ExecWait '"$INSTDIR\\cli\\sesame.exe" ${constant('REMOVE_ARGUMENT')}' $0`))
   assert.doesNotMatch(remove, /WriteReg|DeleteReg/)
   assert.match(macro('NSIS_HOOK_POSTINSTALL'), /!insertmacro SESAME_ADD_TERMINAL_PATH/)
@@ -426,6 +457,10 @@ test('the Windows installer hands the system Path to the cli program and records
   assert.match(native, /Ok\(\(again_kind, again\)\) if again_kind == kind && again == bytes => \{\}\s+Ok\(_\) => continue/, 'the Path is not compared again just before it is written')
   assert.match(native, /RegSetValueExW\(\s*key\.0,\s*value_name\.as_ptr\(\),\s*0,\s*kind,/, 'the Path type is not kept')
   assert.match(native, /WM_SETTINGCHANGE/)
+  assert.match(native, /fn broadcast\(\) \{[\s\S]*?std::thread::Builder::new\(\)\.spawn\(move \|\| \{[\s\S]*?SendMessageTimeoutW\([\s\S]*?\}\);\s+if sent\.is_ok\(\) \{\s+let _ = done\.recv_timeout\(BROADCAST_DEADLINE\);/, 'the wait for the environment broadcast must have one overall deadline')
+  assert.match(native, /broadcast\(\);\s+return EXIT_CHANGED;/, 'a committed write must still report that it changed the Path')
+  assert.match(native, /machine_reference\(name, &install\.program_files, &machine, &system\)/, 'references in the Path must resolve with the machine environment')
+  assert.match(native, /return left_alone_code\(&other\);/)
   assert.match(read('.github', 'SECURITY.md'), /--add-to-machine-path/, 'SECURITY.md does not describe the installer Path mode')
 })
 

@@ -235,6 +235,7 @@ jobs:
           ./tools/test-windows-command-line-install.ps1 -InstallerPath $installers[0].FullName -EvidenceRoot (Join-Path $env:RUNNER_TEMP 'command-line-install-evidence')
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
           name: windows-command-line-install-evidence
           path: ${{ runner.temp }}/command-line-install-evidence

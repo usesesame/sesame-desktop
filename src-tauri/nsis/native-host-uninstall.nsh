@@ -32,6 +32,7 @@ Var SesameOwnsTerminalPath
   ${If} $UpdateMode <> 1
   ${AndIf} $SesameOwnsTerminalPath S== "${SESAME_TERMINAL_FOLDER}"
     Push $0
+    sesame_remove_terminal_path:
     ClearErrors
     ExecWait '"$INSTDIR\cli\sesame.exe" --remove-from-machine-path' $0
     ${If} ${Errors}
@@ -40,10 +41,21 @@ Var SesameOwnsTerminalPath
     ${If} $0 == "0"
       DetailPrint "Sesame removed ${SESAME_TERMINAL_FOLDER} from the system Path."
     ${ElseIf} $0 == "10"
+      DetailPrint "The system Path no longer holds ${SESAME_TERMINAL_FOLDER}, so Sesame left it as it was."
+    ${ElseIf} $0 == "13"
       DetailPrint "The system Path holds ${SESAME_TERMINAL_FOLDER} in a form Sesame did not add, or more than once, so Sesame left it. Remove the entries you no longer need by hand."
     ${Else}
-      DetailPrint "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path. Remove it by hand."
+      DetailPrint "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path, outcome $0."
+      ${If} ${Silent}
+      ${OrIf} $PassiveMode = 1
+        Pop $0
+        Abort "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path, so it stopped and kept Sesame installed. Run the uninstaller again to retry."
+      ${EndIf}
+      MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path.$\r$\n$\r$\nChoose Retry to try again, Ignore to finish the uninstall and remove the entry by hand, or Abort to stop and keep Sesame installed." IDRETRY sesame_remove_terminal_path IDIGNORE sesame_remove_terminal_path_done
+      Pop $0
+      Abort "Sesame could not remove ${SESAME_TERMINAL_FOLDER} from the system Path, so it stopped and kept Sesame installed. Run the uninstaller again to retry."
     ${EndIf}
+    sesame_remove_terminal_path_done:
     Pop $0
   ${EndIf}
 !macroend
