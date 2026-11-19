@@ -14,13 +14,15 @@ interface CardFillControllerOptions {
   feedback: FeedbackController
   onVaultLocked: () => void
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createCardFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: CardFillControllerOptions) {
+export function createCardFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive = () => false, held = () => false }: CardFillControllerOptions) {
   const { browserCardFill } = stores
   const loop = approvalLoop<BrowserCardFillRequest>({
     store: browserCardFill,
+    held,
     mayShow: () => modal.cardFillMayShow(),
     offersNothing: (request) => !request.candidates.length,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),
@@ -47,5 +49,5 @@ export function createCardFillController({ stores, feedback, onVaultLocked: hand
     }
   }
 
-  return { resolve, clearSecrets: loop.clearSecrets, start: loop.start }
+  return { resolve, clearSecrets: loop.clearSecrets, start: loop.start, syncPending: loop.syncPending }
 }

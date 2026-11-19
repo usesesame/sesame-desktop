@@ -15,13 +15,15 @@ interface BrowserFillControllerOptions {
   feedback: FeedbackController
   onVaultLocked: () => void
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createBrowserFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: BrowserFillControllerOptions) {
+export function createBrowserFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive = () => false, held = () => false }: BrowserFillControllerOptions) {
   const { browserFill } = stores
   const loop = approvalLoop<BrowserFillRequest>({
     store: browserFill,
+    held,
     mayShow: () => modal.browserFillMayShow(),
     offersNothing: (request) => !request.candidates.length,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),

@@ -658,6 +658,7 @@ button.no-totp, .credential-button, .more-button {
 .credential-label svg { color: var(--chip-icon); }
 .credential-row code { overflow: hidden; color: var(--text); font-size: var(--type-3); text-overflow: ellipsis; white-space: nowrap; }
 .credential-row code.concealed { letter-spacing: 1.6px; }
+.credential-row code.revealed, .merge-field code.revealed { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: pre-wrap; word-break: break-all; }
 .credential-button { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--chip-icon); background: transparent; line-height: 0; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease, color var(--t-fast) ease; }
 .credential-button:hover { border-color: var(--border); color: var(--accent-link); background: var(--tint); }
 .login-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: var(--space-3); }
@@ -836,7 +837,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .change-master-password-modal form input:focus-visible { box-shadow: var(--field-ring); outline: none; }
 .change-master-password-modal .change-password-forgot { justify-self: start; }
 
-.browser-fill-backdrop, .terminal-approval-backdrop { z-index: 120; }
+.browser-fill-backdrop, .terminal-approval-backdrop { z-index: 140; }
 .browser-fill-modal { width: min(100%, 540px); }
 .browser-fill-modal h2 { margin: 0; color: var(--text-heading); font-size: var(--type-5); letter-spacing: -.005em; }
 .browser-fill-modal > p:not(.eyebrow) { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: var(--type-3); line-height: 1.55; }
@@ -1298,6 +1299,9 @@ button.no-totp:hover { filter: brightness(.97); }
   .view-header { align-items: flex-start; flex-direction: column; }
   .view-header-aside { justify-self: start; text-align: left; }
   .credential-row { grid-template-columns: 105px minmax(0, 1fr) auto auto auto; }
+  .credential-row:not(.login-field-detail) { display: flex; flex-wrap: wrap; row-gap: var(--space-1); }
+  .credential-row:not(.login-field-detail) > .credential-label { flex: 1 1 0; min-width: 0; }
+  .credential-row:not(.login-field-detail) > code { flex: 1 1 100%; order: 1; min-width: 0; }
   .backup-card { align-items: flex-start; flex-direction: column; }
   .settings-view article, .activity-settings article { flex-wrap: wrap; }
   .settings-service-connect, .settings-service-actions { width: calc(100% - 52px); margin-left: 52px; }

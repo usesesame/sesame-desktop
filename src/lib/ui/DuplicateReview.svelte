@@ -80,7 +80,7 @@
               type="button"
               class="entry-select"
               aria-pressed={isSelected}
-              aria-label={`${isSelected ? 'Deselect' : 'Select'} ${entry.title}`}
+              aria-label={`${isSelected ? 'Deselect' : 'Select'} ${vaultText(entry.title)}`}
               on:click={() => onSelectEntry(entry.id, !isSelected)}
             >
               <span class="selection-box" aria-hidden="true">

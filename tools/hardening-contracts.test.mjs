@@ -1905,8 +1905,94 @@ function textInterpolations(source) {
   return found
 }
 
-const VAULT_WORDS = /\b(title|username|email|site|subtitle|folder|folderName|initials|notes|filename|brand|label|value|name|tag|url|urls|recoveryEmail|recoveryPhone|detail|savedOrigin|revealedPassword|revealed|groupTitle|titleFor|shown|shownValue|displayInitials|listHeading|collectionHeading|bulkFolderLabel|fullName|ssid|cardholderName|selectedLabel)\b/
-const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/
+const TEXT_ATTRIBUTES = /^(title|aria-label|aria-description|aria-roledescription|aria-valuetext|aria-placeholder|alt|placeholder)$/
+
+function expressionPieces(expression) {
+  const pieces = []
+  let outside = ''
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index]
+    if (character === '`') {
+      let end = index + 1
+      while (end < expression.length && expression[end] !== '`') {
+        if (expression[end] === '\\') end += 1
+        else if (expression[end] === '$' && expression[end + 1] === '{') {
+          const close = closingBrace(expression, end + 1)
+          pieces.push(...expressionPieces(expression.slice(end + 2, close)))
+          end = close
+        }
+        end += 1
+      }
+      index = end
+    } else if (character === "'" || character === '"') {
+      let end = index + 1
+      while (end < expression.length && expression[end] !== character) end += expression[end] === '\\' ? 2 : 1
+      index = end
+    } else outside += character
+  }
+  if (outside.trim()) pieces.push(outside.trim())
+  return pieces
+}
+
+function attributeInterpolations(source) {
+  const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '')
+  const found = []
+  const tags = /<[a-z][a-z0-9-]*\b/g
+  while (tags.exec(markup)) {
+    let index = tags.lastIndex
+    while (index < markup.length && markup[index] !== '>') {
+      const attribute = /^\s+([A-Za-z][\w:-]*)=/.exec(markup.slice(index))
+      if (attribute) {
+        const name = attribute[1]
+        index += attribute[0].length
+        const opener = markup[index]
+        let expressions = []
+        if (opener === '{') {
+          const end = closingBrace(markup, index)
+          expressions = [markup.slice(index + 1, end)]
+          index = end + 1
+        } else if (opener === '"' || opener === "'") {
+          const end = markup.indexOf(opener, index + 1)
+          const value = markup.slice(index + 1, end)
+          for (let at = value.indexOf('{'); at >= 0; at = value.indexOf('{', at + 1)) {
+            const close = closingBrace(value, at)
+            expressions.push(value.slice(at + 1, close))
+            at = close
+          }
+          index = end + 1
+        }
+        if (TEXT_ATTRIBUTES.test(name)) for (const expression of expressions) found.push(...expressionPieces(expression.trim()).map((piece) => `${name}: ${piece}`))
+      } else if (markup[index] === '{') index = closingBrace(markup, index) + 1
+      else if (markup[index] === '"' || markup[index] === "'") index = markup.indexOf(markup[index], index + 1) + 1
+      else index += 1
+    }
+    tags.lastIndex = index
+  }
+  return found
+}
+
+const VAULT_WORDS = /\b(title|username|email|site|subtitle|folder|folderName|initials|notes|filename|brand|label|value|name|tag|url|urls|recoveryEmail|recoveryPhone|detail|savedOrigin|deviceLabel|deviceName|origin|revealedPassword|revealed|groupTitle|titleFor|shown|shownValue|displayInitials|listHeading|collectionHeading|bulkFolderLabel|fullName|ssid|cardholderName|selectedLabel)\b/
+const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/g
+
+function withoutHelperCalls(expression) {
+  let rest = expression
+  for (let match = VAULT_HELPERS.exec(rest); match; match = VAULT_HELPERS.exec(rest)) {
+    let depth = 0
+    let end = match.index + match[0].length - 1
+    for (; end < rest.length; end += 1) {
+      if (rest[end] === '(') depth += 1
+      else if (rest[end] === ')' && --depth === 0) break
+    }
+    rest = `${rest.slice(0, match.index)}${rest.slice(end + 1)}`
+    VAULT_HELPERS.lastIndex = 0
+  }
+  VAULT_HELPERS.lastIndex = 0
+  return rest
+}
+
+function unprotectedVaultValue(expression) {
+  return expressionPieces(expression).some((piece) => VAULT_WORDS.test(withoutHelperCalls(piece)))
+}
 const NOT_FROM_THE_VAULT = {
   'src/lib/ui/BackupDrillModal.svelte': ['formatCopy?.label', 'formatCopy?.detail', 'verifiedCopy?.label'],
   'src/lib/ui/CardEditor.svelte': ['network.name', 'network?.name'],
@@ -1921,7 +2007,7 @@ const NOT_FROM_THE_VAULT = {
   'src/lib/ui/ImportModal.svelte': ['importSources.find((source) => source.value === $imports.source)?.label', 'source.label'],
   'src/lib/ui/ItemDetail.svelte': ["detail.favourite ? '★' : '☆'", "detail.locked ? 'Opening this note asks for your master password.' : 'This note shows whenever Sesame is unlocked.'", "detail.locked ? 'Remove the lock' : 'Lock with master password'"],
   'src/lib/ui/ItemFilterMenu.svelte': ['folderCount(folder.id)', 'tagCount(tag)'],
-  'src/lib/ui/NeverSaveSitesSetting.svelte': ["$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'"],
+  'src/lib/ui/NeverSaveSitesSetting.svelte': ["$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'", "working === origin ? 'Removing…' : 'Remove'"],
   'src/lib/ui/PassphraseGeneratorView.svelte': ['item.label'],
   'src/lib/ui/PasswordStrengthView.svelte': ['label'],
   'src/lib/ui/QuickAccessView.svelte': ["primaryAction(item)?.label ?? 'No action'", "action.label.replace(/^Copy /, '')"],
@@ -1931,7 +2017,6 @@ const NOT_FROM_THE_VAULT = {
   'src/lib/ui/SecretText.svelte': ['value'],
   'src/lib/ui/SettingsView.svelte': ['item.label'],
   'src/lib/ui/Sidebar.svelte': ['group.label', 'item.label'],
-  'src/lib/ui/SyncPanel.svelte': ["device.label || 'Unnamed device'"],
   'src/lib/ui/TerminalAccessSetting.svelte': ['allowedRequestWords(request.command, request.field, titleFor(request.itemId), request.itemKind)'],
   'src/lib/ui/TerminalApprovalModal.svelte': ["request.candidates.length > 1 ? 'None of the items with this name has a' : 'The item below has no'", "candidate.fieldHidden ? ', a hidden value' : ''"],
   'src/lib/ui/Toast.svelte': ['notice.title', 'notice.action.label'],
@@ -1941,15 +2026,43 @@ const NOT_FROM_THE_VAULT = {
   'src/lib/ui/WorkspaceShell.svelte': ['title'],
 }
 
+const NOT_FROM_THE_VAULT_IN_ATTRIBUTES = {
+  'src/lib/Icon.svelte': ['aria-label: label'],
+  'src/lib/ui/CheckupView.svelte': ['aria-label: finding.title'],
+  'src/lib/ui/ConfirmMergeModal.svelte': ['aria-label: revealed?.entryId === option.entryId ?  :'],
+  'src/lib/ui/ItemDetail.svelte': ['aria-label: detail.favourite ?  :'],
+  'src/lib/ui/LoginFieldsPanel.svelte': ['aria-label: shown ?  :', 'title: shown ?  :'],
+  'src/lib/ui/PanelResizer.svelte': ['aria-label: label'],
+  'src/lib/ui/PasswordStrengthView.svelte': ['aria-label: revealed ?  :', 'title: revealed ?  :'],
+  'src/lib/ui/PendingChangesNotice.svelte': ['aria-label: label'],
+  'src/lib/ui/QuickAccessView.svelte': ['aria-label: action.label', 'title: action.label'],
+  'src/lib/ui/SelectMenu.svelte': ['aria-label: label', 'aria-label: selectedLabel ?  : label'],
+  'src/lib/ui/Sidebar.svelte': ['aria-label: item.label', 'title: item.label'],
+}
+
 test('every value from the vault that a component draws goes through the direction helper', () => {
   const unprotected = []
   for (const file of svelteFiles('src')) {
     const allowed = NOT_FROM_THE_VAULT[file.split('\\').join('/')] ?? []
     for (const expression of textInterpolations(read(file))) {
-      if (VAULT_WORDS.test(expression) && !VAULT_HELPERS.test(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
+      if (unprotectedVaultValue(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
     }
   }
   assert.deepEqual(unprotected, [], 'a component draws a vault value without vaultText, noteText or SecretText')
+  const unprotectedAttributes = []
+  for (const file of svelteFiles('src')) {
+    const allowed = NOT_FROM_THE_VAULT_IN_ATTRIBUTES[file.split('\\').join('/')] ?? []
+    for (const piece of attributeInterpolations(read(file))) {
+      const expression = piece.slice(piece.indexOf(': ') + 2)
+      if (unprotectedVaultValue(expression) && !allowed.includes(piece)) unprotectedAttributes.push(`${file}: ${piece}`)
+    }
+  }
+  assert.deepEqual(unprotectedAttributes, [], 'a tooltip, label or placeholder carries a vault value without vaultText')
+  const planted = attributeInterpolations('<button title={`Copy ${field.label}`} aria-label="Remove {folder.name}" placeholder={vaultText(entry.title)}></button>')
+  assert.deepEqual(planted, ['title: field.label', 'aria-label: folder.name', 'placeholder: vaultText(entry.title)'], 'the attribute check no longer reads every attribute form')
+  const mixed = attributeInterpolations('<span title={vaultText(entry.title) + folder.name} aria-label={`${vaultText(entry.title)} in ${vaultText(folder.name)}`} placeholder={vaultText(isolatedVaultText(entry.title))}></span>')
+  assert.deepEqual(mixed.filter((piece) => unprotectedVaultValue(piece.slice(piece.indexOf(': ') + 2))), ['title: vaultText(entry.title) + folder.name'], 'one protected operand hides an unprotected one in the same attribute')
+  assert.equal(unprotectedVaultValue('vaultText(entry.title) || folder.name'), true, 'one protected operand hides an unprotected one in the same text')
   const secret = read('src', 'lib', 'ui', 'SecretText.svelte')
   assert.match(secret, /<bdi>\{value\}<\/bdi>/, 'a revealed secret is not isolated or is altered')
   assert.match(secret, /hasHiddenCharacters\(value\)/, 'a revealed secret with a hidden character is not called out')

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { onMount } from 'svelte'
   import SyncEnableModal from './SyncEnableModal.svelte'
   import SyncPairingModal from './SyncPairingModal.svelte'
@@ -239,7 +240,7 @@
       {#each members as device (device.deviceId)}
         <article>
           <div class="setting-copy">
-            <strong>{device.label || 'Unnamed device'}</strong>
+            <strong><bdi>{vaultText(device.label) || 'Unnamed device'}</bdi></strong>
             <p>{deviceNote(device)}</p>
           </div>
           {#if !device.isThisDevice}
