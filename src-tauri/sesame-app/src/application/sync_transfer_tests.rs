@@ -2199,6 +2199,90 @@ mod adoption_and_publish_tests {
     }
 
     #[test]
+    fn a_master_password_change_during_a_vault_key_change_keeps_the_new_password() {
+        const NEW_PASSWORD: &str = "fictional replacement passphrase 9031";
+        let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
+        {
+            let mut session = acting_vault.state.session.lock().expect("session lock");
+            let session = session.as_mut().expect("session");
+            session.recovery_wrap = None;
+            session.recovery_kdf = None;
+            crate::vault::storage::persist_session(session).expect("saved");
+        }
+        let vault_id = vault_id_of_test_vault(&acting_vault);
+        let scratch = Scratch::new();
+        let acting_store = scratch.store();
+        let acting = DeviceIdentity::generate().expect("acting identity");
+        let other = DeviceIdentity::generate().expect("other identity");
+        acting
+            .save(&acting_store.identity_path())
+            .expect("saved identity");
+        let entries = labels(&vault_id, &[&acting, &other]);
+        let mut acting_state = SyncState::new(&vault_id, &acting.device_id);
+        acting_state.entries = entries.clone();
+        acting_state.activated_epoch = 1;
+        state_digest(&acting_vault, &mut acting_state);
+        acting_store
+            .save_state(&acting_state)
+            .expect("saved acting state");
+        let world = Arc::new(Mutex::new(FakeSyncWorld::new(&vault_id, entries, 1)));
+        {
+            let mut world = world.lock().expect("world");
+            world
+                .tokens
+                .insert(ACTING_TOKEN.into(), acting.device_id.clone());
+            world.activated.insert(acting.device_id.clone(), 1);
+        }
+        let server = TestServer::start(handler(world.clone()));
+        let instance = world.lock().expect("world").instance_key();
+        let acting_client = SyncClient::for_tests(&server.base(), ACTING_TOKEN, &instance);
+        let new_key = [6u8; 32];
+        let prepared = crate::sync::key_change::PreparedKeyChange::default();
+        let (_, recovery) = prepare_recovery(&new_key).expect("prepared");
+        prepared.stage(&new_key, recovery, std::time::Instant::now());
+        let path = acting_vault.path().to_path_buf();
+        let changed_path = path.clone();
+        *acting_vault.state.test_pause.lock().expect("pause") =
+            Some(std::sync::Arc::new(move |state, point| {
+                if point == "adoptionSealed" {
+                    crate::application::unlock::change_master_password_in_state(
+                        state,
+                        &FakeEffects::new(changed_path.clone()),
+                        crate::vault::ChangeMasterPasswordRequest {
+                            current_password: Some(PASSWORD.to_string()),
+                            recovery_kit: None,
+                            new_password: NEW_PASSWORD.to_string(),
+                        },
+                    )
+                    .expect("changed the master password");
+                }
+            }));
+
+        let removed = block_on(crate::application::sync_transfer::rekey_without_in_state(
+            &acting_vault.state,
+            &acting_store,
+            &FakeEffects::new(PathBuf::new()),
+            &acting_client,
+            crate::application::sync_transfer::RekeyRequest {
+                prepared: &prepared,
+                subject: None,
+                master_password: PASSWORD,
+                adopt_locally: true,
+            },
+        ));
+        *acting_vault.state.test_pause.lock().expect("pause") = None;
+
+        assert_eq!(
+            removed.err().as_deref(),
+            Some(crate::vault::key_proof::VAULT_CHANGED_DURING_CHECK)
+        );
+        assert_ne!(vault_key(&acting_vault), new_key);
+        let file = sesame_core::loader::VaultLoader::read(&path).expect("vault file");
+        assert!(sesame_core::api::open_vault_with_password(&file, NEW_PASSWORD).is_ok());
+        assert!(sesame_core::api::open_vault_with_password(&file, PASSWORD).is_err());
+    }
+
+    #[test]
     fn a_clean_rekey_publishes_a_snapshot_a_second_device_can_read() {
         let acting_vault = TestVault::with_login("fictional-login", "https://northwind.example");
         acting_vault.seed(|payload| {

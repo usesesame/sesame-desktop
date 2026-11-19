@@ -1,11 +1,3 @@
 {
-  "entries": [
-    {
-      "id": "GHSA-fc5q-39xc-vjpf",
-      "package": "picomatch",
-      "reason": "No fixed version exists. picomatch is a development dependency that matches file patterns in the build and lint settings. It is not part of anything shipped, and no pattern from outside reaches it.",
-      "reviewed": "2026-11-17",
-      "expires": "2026-12-17"
-    }
-  ]
+  "entries": []
 }

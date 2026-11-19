@@ -18,6 +18,7 @@
     "desktop:dependency:admission": "node ./tools/dependency-admission.mjs",
     "desktop:host:stage": "node tools/stage-browser-host.mjs",
     "desktop:sites:refresh": "node tools/refresh-two-factor-sites.mjs",
+    "desktop:terminal-text:tables": "node tools/generate-terminal-text-tables.mjs",
     "desktop:lint:rust": "npm run desktop:host:stage && cargo fmt --manifest-path src-tauri/Cargo.toml --all --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked",
     "desktop:check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run desktop:test:unit",
     "desktop:test:unit": "vitest run",

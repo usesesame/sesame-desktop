@@ -141,6 +141,72 @@ const neverCompiled = (component) =>
     (property) => property.name === 'sesame:cargo-build' && property.value === 'never-compiled',
   )
 const audited = (component) => hasPurl(component) && !neverCompiled(component)
+const propertyValues = (component, name) =>
+  (component.properties ?? []).filter((property) => property.name === name).map((property) => property.value)
+
+export const arrivesTransitively = (component) => {
+  if (typeof component.purl !== 'string' || !component.purl.startsWith('pkg:cargo/')) return false
+  const roles = propertyValues(component, 'sesame:cargo-dependency')
+  return roles.length > 0 && roles.every((role) => role === 'transitive')
+}
+
+export const resourceExhaustionWeaknesses = new Set(['CWE-1333', 'CWE-400', 'CWE-405', 'CWE-407', 'CWE-770', 'CWE-834'])
+
+export const neverShips = (component) =>
+  typeof component.purl === 'string' && component.purl.startsWith('pkg:npm/') && component.scope === 'excluded'
+
+const cvssVector = /^CVSS:(3\.[01]|4\.0)((?:\/[A-Za-z]+:[A-Za-z])+)$/
+const confidentialityAndIntegrity = { 3: ['C', 'I'], 4: ['VC', 'VI', 'SC', 'SI'] }
+
+export const availabilityOnlyVector = (vector) => {
+  const match = typeof vector === 'string' ? vector.match(cvssVector) : null
+  if (!match) return false
+  const metrics = new Map()
+  for (const metric of match[2].slice(1).split('/')) {
+    const [key, value] = metric.split(':')
+    if (metrics.has(key)) return false
+    metrics.set(key, value)
+  }
+  return confidentialityAndIntegrity[match[1][0]].every((key) => metrics.get(key) === 'N')
+}
+
+export const onlyResourceExhaustion = (weaknesses, vectors) =>
+  Array.isArray(weaknesses) &&
+  weaknesses.length > 0 &&
+  weaknesses.every((weakness) => resourceExhaustionWeaknesses.has(weakness)) &&
+  Array.isArray(vectors) &&
+  vectors.length > 0 &&
+  vectors.every(availabilityOnlyVector)
+
+const osvVectors = (vulnerability) =>
+  Array.isArray(vulnerability.severity)
+    ? vulnerability.severity.filter((entry) => /^CVSS_/.test(entry?.type ?? '')).map((entry) => entry.score)
+    : []
+
+const rustsecId = /^RUSTSEC-\d{4}-\d{4,}$/
+const isEmptyList = (value) => value === undefined || value === null || (Array.isArray(value) && value.length === 0)
+
+export const onlyUnmaintained = (vulnerability, component) => {
+  if (!rustsecId.test(vulnerability.id ?? '')) return false
+  if (!isEmptyList(vulnerability.aliases) || !isEmptyList(vulnerability.severity)) return false
+  if (!isEmptyList(vulnerability.database_specific?.cwe_ids)) return false
+  const affected = vulnerability.affected
+  if (!Array.isArray(affected) || affected.length === 0) return false
+  return affected.every((entry) => {
+    const facts = entry?.database_specific ?? {}
+    const effects = entry?.ecosystem_specific ?? {}
+    return (
+      entry.package?.ecosystem === 'crates.io' &&
+      entry.package?.name === component.name &&
+      facts.informational === 'unmaintained' &&
+      (facts.cvss === undefined || facts.cvss === null) &&
+      isEmptyList(facts.categories) &&
+      (effects.affected_functions === undefined || effects.affected_functions === null) &&
+      isEmptyList(effects.affects?.functions) &&
+      isEmptyList(entry.severity)
+    )
+  })
+}
 
 const ecosystemCounts = (components) => {
   const counts = {}
@@ -151,7 +217,18 @@ const ecosystemCounts = (components) => {
   return counts
 }
 
-const queryComponents = async (entries, { query, concurrency }) => {
+const osvTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/
+
+export const isWithdrawn = (vulnerability, now = Date.now()) => {
+  const value = vulnerability?.withdrawn
+  if (typeof value !== 'string' || !osvTime.test(value)) return false
+  const time = Date.parse(value)
+  if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 19) !== value.slice(0, 19)) return false
+  const laterInTheMillisecond = /[1-9]/.test(value.match(/\.\d{3}(\d*)Z$/)?.[1] ?? '')
+  return time < now || (time === now && !laterInTheMillisecond)
+}
+
+const queryComponents = async (entries, { query, concurrency, now = Date.now() }) => {
   const results = new Array(entries.length)
   let cursor = 0
   const worker = async () => {
@@ -159,7 +236,12 @@ const queryComponents = async (entries, { query, concurrency }) => {
       const index = cursor
       cursor += 1
       const entry = entries[index]
-      results[index] = { ...entry, vulnerabilities: await query(entry.component.purl) }
+      const found = await query(entry.component.purl)
+      results[index] = {
+        ...entry,
+        vulnerabilities: found.filter((vulnerability) => !isWithdrawn(vulnerability, now)),
+        withdrawn: found.filter((vulnerability) => isWithdrawn(vulnerability, now)),
+      }
     }
   }
   const workers = Math.max(1, Math.min(concurrency, entries.length))
@@ -177,6 +259,17 @@ const advisoryList = (results) =>
       ids: entry.vulnerabilities.map((vulnerability) => vulnerability.id).filter(Boolean),
     }))
 
+const withdrawnList = (results) =>
+  results
+    .filter((entry) => entry.withdrawn.length > 0)
+    .map((entry) => ({
+      label: entry.label ?? null,
+      name: entry.component.name,
+      version: entry.component.version,
+      purl: entry.component.purl,
+      ids: entry.withdrawn.map((vulnerability) => vulnerability.id ?? 'an advisory without an id'),
+    }))
+
 const publicAdvisory = (entry) => ({
   label: entry.label,
   name: entry.name,
@@ -185,10 +278,10 @@ const publicAdvisory = (entry) => ({
   ids: entry.ids,
 })
 
-export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8 } = {}) => {
+export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8, now } = {}) => {
   const components = Array.isArray(bom.components) ? bom.components : []
   const queried = components.filter(audited)
-  const results = await queryComponents(queried.map((component) => ({ component })), { query, concurrency })
+  const results = await queryComponents(queried.map((component) => ({ component })), { query, concurrency, now })
   return {
     total: components.length,
     queried: queried.length,
@@ -196,6 +289,7 @@ export const collectAdvisories = async (bom, { query = queryOsv, concurrency = 8
     neverCompiled: components.filter(neverCompiled).length,
     byEcosystem: ecosystemCounts(queried),
     vulnerable: advisoryList(results),
+    withdrawn: withdrawnList(results),
   }
 }
 
@@ -207,6 +301,7 @@ export const collectSbomAdvisories = async (
     allowlist: configured = [],
     unfixed = { release: null, libraries: [] },
     today = new Date().toISOString().slice(0, 10),
+    now,
   } = {},
 ) => {
   const lapsed = (rule) => typeof rule.expires === 'string' && rule.expires < today
@@ -227,9 +322,9 @@ export const collectSbomAdvisories = async (
       neverCompiled: components.filter(neverCompiled).length,
       byEcosystem: ecosystemCounts(queried),
     })
-    for (const component of queried) entries.push({ sourceIndex: index, component })
+    for (const component of queried) entries.push({ sourceIndex: index, label: source.label ?? null, component })
   }
-  const results = await queryComponents(entries, { query, concurrency })
+  const results = await queryComponents(entries, { query, concurrency, now })
   const usedRules = new Set()
   const usedLibraries = new Set()
   const coverage = (component, vulnerability) => {
@@ -243,6 +338,8 @@ export const collectSbomAdvisories = async (
       usedLibraries.add(library)
       return 'waiting'
     }
+    if (arrivesTransitively(component) && onlyUnmaintained(vulnerability, component)) return 'unmaintained'
+    if (neverShips(component) && onlyResourceExhaustion(vulnerability.database_specific?.cwe_ids, osvVectors(vulnerability))) return 'build-tool'
     return null
   }
   const vulnerable = results
@@ -257,7 +354,9 @@ export const collectSbomAdvisories = async (
         version: entry.component.version,
         purl: entry.component.purl,
         ids: identified.map((vulnerability) => vulnerability.id),
-        waitingIds: identified.filter((_, index) => covered[index] === 'waiting').map((vulnerability) => vulnerability.id),
+        pulledInBy: propertyValues(entry.component, 'sesame:cargo-pulled-in-by').join(', '),
+        weaknesses: Object.fromEntries(identified.map((vulnerability) => [vulnerability.id, vulnerability.database_specific?.cwe_ids])),
+        idsCoveredBy: (kind) => identified.filter((_, index) => covered[index] === kind).map((vulnerability) => vulnerability.id),
         cleared: covered.length > 0 && covered.every(Boolean),
       }
     })
@@ -273,8 +372,17 @@ export const collectSbomAdvisories = async (
   const unusedLibraries = libraries.filter((rule) => !usedLibraries.has(rule))
   const withIds = (entries, pick) =>
     entries.map((entry) => ({ ...publicAdvisory(entry), ids: pick(entry) })).filter((entry) => entry.ids.length > 0)
-  const waiting = withIds(vulnerable, (entry) => entry.waitingIds)
-  const reviewed = withIds(allowed, (entry) => entry.ids.filter((id) => !entry.waitingIds.includes(id)))
+  const waiting = withIds(vulnerable, (entry) => entry.idsCoveredBy('waiting'))
+  const reviewed = withIds(allowed, (entry) => entry.idsCoveredBy('reviewed'))
+  const unmaintained = vulnerable
+    .map((entry) => ({ ...publicAdvisory(entry), ids: entry.idsCoveredBy('unmaintained'), pulledInBy: entry.pulledInBy }))
+    .filter((entry) => entry.ids.length > 0)
+  const buildTools = vulnerable
+    .map((entry) => {
+      const ids = entry.idsCoveredBy('build-tool')
+      return { ...publicAdvisory(entry), ids, weaknesses: [...new Set(ids.flatMap((id) => entry.weaknesses[id]))].sort() }
+    })
+    .filter((entry) => entry.ids.length > 0)
   return {
     sources: summaries.map((summary, index) => ({
       ...summary,
@@ -288,9 +396,12 @@ export const collectSbomAdvisories = async (
     neverCompiled: summaries.reduce((sum, summary) => sum + summary.neverCompiled, 0),
     byEcosystem,
     vulnerable: fatal.map(publicAdvisory),
+    withdrawn: withdrawnList(results),
     allowed: allowed.map(publicAdvisory),
     reviewed,
     waiting,
+    unmaintained,
+    buildTools,
     unused,
     unusedLibraries,
     expired,
@@ -342,6 +453,9 @@ const formatEcosystems = (byEcosystem) =>
     .map(([type, count]) => `${type} ${count}`)
     .join(', ')
 
+export const describeComponent = (component, labelled = false) =>
+  `${labelled && component.label ? `${component.label}: ` : ''}${component.name}@${component.version}: ${component.ids.join(', ')}`
+
 const main = async () => {
   const sources = []
   for (const sbomPath of sbomPaths()) {
@@ -368,14 +482,30 @@ const main = async () => {
       `Combined: queried ${report.queried} of ${report.total} components against OSV (${report.skipped} without a purl; ${formatEcosystems(report.byEcosystem)}).\n`,
     )
   }
+  const describe = (component) => describeComponent(component, report.sources.length > 1)
+  const withdrawnCount = report.withdrawn.reduce((sum, component) => sum + component.ids.length, 0)
+  process.stdout.write(`Left out ${withdrawnCount} advisories that their publisher withdrew.\n`)
+  for (const component of report.withdrawn) {
+    process.stdout.write(`Withdrawn: ${describe(component)}\n`)
+  }
   for (const component of report.reviewed) {
     process.stdout.write(
-      `Allowed by review: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+      `Allowed by review: ${describe(component)}\n`,
     )
   }
   for (const component of report.waiting) {
     process.stdout.write(
-      `Waiting on an Ubuntu fix: ${component.name}@${component.version}: ${component.ids.join(', ')}\n`,
+      `Waiting on an Ubuntu fix: ${describe(component)}\n`,
+    )
+  }
+  for (const component of report.unmaintained) {
+    process.stdout.write(
+      `Unmaintained crate that only arrives through ${component.pulledInBy}: ${describe(component)}\n`,
+    )
+  }
+  for (const component of report.buildTools) {
+    process.stdout.write(
+      `Resource exhaustion in a build tool that never ships: ${describe(component)} with ${component.weaknesses.join(', ')}\n`,
     )
   }
   for (const rule of report.expiredLibraries) {
@@ -398,7 +528,7 @@ const main = async () => {
   }
   if (report.vulnerable.length > 0) {
     for (const component of report.vulnerable) {
-      process.stdout.write(`${component.name}@${component.version}: ${component.ids.join(', ')}\n`)
+      process.stdout.write(`${describe(component)}\n`)
     }
     process.exitCode = 1
     return

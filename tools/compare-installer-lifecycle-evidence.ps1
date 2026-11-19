@@ -44,6 +44,8 @@ $changes = @(foreach ($path in $paths) {
     [pscustomobject][ordered]@{ relativePath = $path; status = 'Added'; beforeSha256 = ''; afterSha256 = $new.sha256 }
   } elseif (-not $new) {
     [pscustomobject][ordered]@{ relativePath = $path; status = 'Removed'; beforeSha256 = $old.sha256; afterSha256 = '' }
+  } elseif ($old.status -eq 'locked' -or $new.status -eq 'locked') {
+    [pscustomobject][ordered]@{ relativePath = $path; status = 'Unverified'; beforeSha256 = $old.sha256; afterSha256 = $new.sha256 }
   } elseif ($old.sha256 -ne $new.sha256 -or $old.length -ne $new.length) {
     [pscustomobject][ordered]@{ relativePath = $path; status = 'Changed'; beforeSha256 = $old.sha256; afterSha256 = $new.sha256 }
   }

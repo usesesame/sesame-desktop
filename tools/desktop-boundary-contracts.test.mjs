@@ -283,6 +283,10 @@ test('test acceleration preserves application checks and release profiles', () =
   }
 })
 
+function withoutEvidenceUploadAlways(job) {
+  return job.replace(/(\n\s+- uses: actions\/upload-artifact@[0-9a-f]{40} # v[\d.]+\n)\s+if: always\(\)\n/g, '$1')
+}
+
 function workflowJob(workflow, name) {
   const start = workflow.indexOf(`\n  ${name}:\n`)
   assert.notEqual(start, -1, `ci.yml has no ${name} job`)
@@ -298,7 +302,19 @@ test('native CI waits for quick checks and runs every Rust test in one Windows j
   for (const name of [...windowsJobs, ...linuxJobs]) {
     const job = workflowJob(workflow, name)
     assert.match(job, /needs: \[lint, typecheck\]/, name)
-    assert.doesNotMatch(job, /continue-on-error:|^\s+if:/m, name)
+    const gated = withoutEvidenceUploadAlways(job)
+    assert.doesNotMatch(gated, /continue-on-error:|^\s+if:/m, name)
+  }
+  const fictional = '    steps:\n      - run: npm test\n\n      - uses: actions/upload-artifact@' + '0'.repeat(40) + ' # v7.0.2\n        if: always()\n        with:\n          name: x\n'
+  const allowed = withoutEvidenceUploadAlways(fictional)
+  assert.doesNotMatch(allowed, /^\s+if:/m, 'an evidence upload that runs after a failure is allowed')
+  for (const skipped of [
+    fictional.replace('if: always()', 'if: success()'),
+    fictional.replace('- run: npm test\n', '- run: npm test\n        if: always()\n'),
+    fictional.replace('upload-artifact', 'fictional-action'),
+  ]) {
+    const stripped = withoutEvidenceUploadAlways(skipped)
+    assert.match(stripped, /^\s+if:/m, 'only an always() condition on an evidence upload may be allowed')
   }
   const windows = windowsJobs.map((name) => workflowJob(workflow, name)).join('\n')
   for (const script of ['desktop:version:check', 'desktop:lint:js', 'desktop:dependency:admission', 'desktop:contracts', 'desktop:check', 'desktop:lint:rust', 'desktop:test:rust']) {

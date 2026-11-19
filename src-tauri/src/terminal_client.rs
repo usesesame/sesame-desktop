@@ -201,71 +201,92 @@ impl Streams<'_> {
 
 const STAND_IN: char = '?';
 
-fn hides_or_reorders(character: char) -> bool {
-    if character.is_control() {
-        return true;
-    }
+const MAX_MARKS_PER_CHARACTER: usize = 2;
+
+fn in_table(table: &[(u32, u32)], character: char) -> bool {
     let point = u32::from(character);
-    point & 0xfffe == 0xfffe
-        || matches!(
-            point,
-            0x00ad
-                | 0x034f
-                | 0x0600..=0x0605
-                | 0x061c
-                | 0x06dd
-                | 0x070f
-                | 0x0890..=0x0891
-                | 0x08e2
-                | 0x115f..=0x1160
-                | 0x17b4..=0x17b5
-                | 0x180b..=0x180f
-                | 0x200b..=0x200f
-                | 0x2028..=0x202e
-                | 0x2060..=0x206f
-                | 0x2800
-                | 0x3164
-                | 0xe000..=0xf8ff
-                | 0xfdd0..=0xfdef
-                | 0xfe00..=0xfe0f
-                | 0xfeff
-                | 0xffa0
-                | 0xfff0..=0xfffb
-                | 0x110bd
-                | 0x110cd
-                | 0x13430..=0x1343f
-                | 0x1bca0..=0x1bca3
-                | 0x1d159
-                | 0x1d173..=0x1d17a
-                | 0xe0000..=0xe0fff
-                | 0xf0000..=0x10ffff
-        )
+    table
+        .binary_search_by(|&(start, end)| {
+            if end < point {
+                std::cmp::Ordering::Less
+            } else if start > point {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
-fn shown_character(character: char) -> char {
-    if hides_or_reorders(character) {
-        STAND_IN
-    } else if character.is_whitespace() {
-        ' '
-    } else {
-        character
+fn hides_or_reorders(character: char) -> bool {
+    in_table(crate::terminal_text_tables::HIDDEN, character)
+}
+
+fn is_mark(character: char) -> bool {
+    in_table(crate::terminal_text_tables::MARKS, character)
+}
+
+fn printable(value: &str, keep_layout: bool) -> Zeroizing<String> {
+    let normalized = sesame_core::util::nfc(value);
+    let mut out = Zeroizing::new(String::with_capacity(normalized.len()));
+    let mut last: Option<char> = None;
+    let mut marks = 0;
+    let mut excess = false;
+    for character in normalized.chars() {
+        if keep_layout && matches!(character, '\n' | '\t') {
+            out.push(character);
+            last = Some(' ');
+        } else if hides_or_reorders(character) {
+            out.push(STAND_IN);
+            last = Some(STAND_IN);
+        } else if is_mark(character) {
+            let has_base = !matches!(last, None | Some(' ') | Some(STAND_IN));
+            if has_base && !excess && marks < MAX_MARKS_PER_CHARACTER {
+                out.push(character);
+                marks += 1;
+            } else {
+                if !excess {
+                    out.push(STAND_IN);
+                    last = Some(STAND_IN);
+                }
+                excess = true;
+            }
+            continue;
+        } else {
+            let shown = if character.is_whitespace() {
+                ' '
+            } else {
+                character
+            };
+            out.push(shown);
+            last = Some(shown);
+        }
+        marks = 0;
+        excess = false;
     }
+    out
 }
 
 fn printable_line(value: &str) -> String {
-    value.chars().map(shown_character).collect()
+    printable(value, false).to_string()
 }
 
 fn printable_block(value: &str) -> Zeroizing<String> {
-    Zeroizing::new(
-        value
-            .chars()
-            .map(|character| match character {
-                '\n' | '\t' => character,
-                _ => shown_character(character),
-            })
-            .collect(),
-    )
+    printable(value, true)
+}
+
+fn line_safe(value: &str) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(value.len()));
+    for character in value.chars() {
+        out.push(if hides_or_reorders(character) {
+            STAND_IN
+        } else if character.is_whitespace() {
+            ' '
+        } else {
+            character
+        });
+    }
+    out
 }
 
 fn unsafe_for_terminal(value: &str) -> bool {
@@ -391,9 +412,9 @@ fn print_list(
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&item.id),
-                printable_line(&item.kind),
-                printable_line(&item.title),
+                line_safe(&item.id).as_str(),
+                line_safe(&item.kind).as_str(),
+                line_safe(&item.title).as_str(),
             )?;
         }
     }
@@ -428,13 +449,13 @@ fn print_item(reply: &CliReply, streams: &mut Streams<'_>) -> io::Result<()> {
     } else {
         for field in fields {
             let value = match (&field.value, field.hidden) {
-                (Some(value), false) => Zeroizing::new(printable_line(value)),
+                (Some(value), false) => line_safe(value),
                 _ => Zeroizing::new(String::new()),
             };
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&field.name),
+                line_safe(&field.name).as_str(),
                 if field.hidden { "hidden" } else { "visible" },
                 value.as_str()
             )?;
@@ -963,6 +984,138 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn stacked_marks_are_capped_the_way_the_window_caps_them() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/cli/v1/vectors.json"))
+                .expect("vectors");
+        let cases = vectors["shownTextCases"]["marks"]
+            .as_array()
+            .expect("mark cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = case[0].as_str().expect("input");
+            let shown = case[1].as_str().expect("shown");
+            assert_eq!(printable_line(input), shown, "{input:?}");
+            assert_eq!(printable_block(input).as_str(), shown, "{input:?}");
+        }
+        assert_eq!(
+            printable_block("x\u{301}\u{301}\u{301}\n\u{301}y").as_str(),
+            "x\u{301}\u{301}?\n?y"
+        );
+    }
+
+    #[test]
+    fn the_tables_are_sorted_ranges_for_the_stated_unicode_version() {
+        assert_eq!(crate::terminal_text_tables::UNICODE_VERSION, "17.0");
+        for table in [
+            crate::terminal_text_tables::HIDDEN,
+            crate::terminal_text_tables::MARKS,
+        ] {
+            assert!(table
+                .iter()
+                .all(|(start, end)| start <= end && *end <= 0x10ffff));
+            assert!(table.windows(2).all(|pair| pair[0].1 + 1 < pair[1].0));
+        }
+        assert!(is_mark('\u{301}') && is_mark('\u{20dd}') && is_mark('\u{903}'));
+        assert!(!is_mark('a') && !hides_or_reorders('a'));
+        assert!(hides_or_reorders('\u{378}') && hides_or_reorders('\u{e0067}'));
+    }
+
+    #[test]
+    fn titles_kinds_ids_and_field_names_reach_a_pipe_unnormalized_and_uncapped() {
+        let marked = "x\u{301}\u{301}\u{301}\u{301}";
+        let items = vec![CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: format!("Cafe\u{301} {marked}"),
+        }];
+        let list = [CliReply::items(ID, items), CliReply::done(ID)];
+        let (code, piped, _) = talk(&CliCommand::List, &list, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(
+            piped,
+            format!("fictional-login\tlogin\tCafe\u{301} {marked}\n")
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let mut streams = Streams {
+            out: &mut out,
+            err: &mut err,
+            out_terminal: false,
+            err_terminal: false,
+        };
+        let unchecked = [CliItemSummary {
+            id: format!("fictional-{marked}"),
+            kind: format!("login{marked}"),
+            title: "Northwind".to_string(),
+        }];
+        print_list(&unchecked, &mut streams).expect("printed");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            format!("fictional-{marked}\tlogin{marked}\tNorthwind\n")
+        );
+
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: format!("Member {marked}"),
+                hidden: false,
+                value: Some("4471".to_string()),
+            }],
+        );
+        let (_, piped, _) = talk(&get(None, false), std::slice::from_ref(&item), false);
+        assert!(
+            piped.contains(&format!("Member {marked}\tvisible\t4471\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Member x\u{301}\u{301}?"), "{shown:?}");
+    }
+
+    #[test]
+    fn a_visible_value_in_a_whole_item_reaches_a_pipe_unnormalized_and_uncapped() {
+        let value = "Cafe\u{301}\u{301}\u{301}\u{301} name";
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: "username".to_string(),
+                hidden: false,
+                value: Some(value.to_string()),
+            }],
+        );
+        let (code, piped, _) = talk(&get(None, false), &[item.clone()], false);
+        assert_eq!(code, EXIT_OK);
+        assert!(
+            piped.contains(&format!("username\tvisible\t{value}\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Caf\u{e9}\u{301}\u{301}? name"), "{shown:?}");
+    }
+
+    #[test]
+    fn a_requested_secret_with_stacked_marks_reaches_a_pipe_exactly() {
+        let secret = format!("{}\u{301}\u{301}\u{301}\u{301}e\u{301}", "fictional");
+        let reply = CliReply::value(ID, &secret, true);
+        let (code, out, _) = talk(&get(Some("password"), false), &[reply.clone()], false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, secret);
+        let (code, out, _) = talk(&get(Some("password"), false), &[reply], true);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, format!("{secret}\n"));
     }
 
     #[test]
