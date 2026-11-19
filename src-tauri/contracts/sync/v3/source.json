@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceRepository": "usesesame/sesame-server",
-  "sourceCommit": "d075444b601ca6fdcb00d5c6251a4207ebbff82c",
+  "sourceCommit": "57a45b129e4e80d18fe8b7e93f47ac97cbb2fb29",
   "sourcePaths": {
     "v3-fixture.json": "internal/syncproto/testdata/v3-fixture.json",
     "wire-fixture.json": "internal/syncv3http/testdata/wire-fixture.json"
