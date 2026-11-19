@@ -82,19 +82,43 @@ export const awaitsUbuntuFix = (vulnerability, component, release) => {
   return affected.length > 0 && !affected.some(hasFix)
 }
 
-export const queryOsv = async (purl) => {
+export const osvRetryDelaysMs = [2000, 5000, 15000]
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const postOsv = async (purl, request, { fetchImpl, delaysMs, wait }) => {
+  let failure
+  for (let attempt = 0; attempt <= delaysMs.length; attempt += 1) {
+    if (attempt > 0) await wait(delaysMs[attempt - 1])
+    let response
+    try {
+      response = await fetchImpl(osvEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      })
+    } catch (error) {
+      failure = new Error(`OSV query for ${purl} failed: ${error.message ?? error}`)
+      continue
+    }
+    if (response.ok) return response
+    failure = new Error(`OSV query for ${purl} failed with HTTP ${response.status}`)
+    if (response.status < 500) throw failure
+  }
+  throw failure
+}
+
+export const queryOsv = async (
+  purl,
+  { fetchImpl = fetch, delaysMs = osvRetryDelaysMs, wait = sleep } = {},
+) => {
   const vulnerabilities = []
   const seenTokens = new Set()
   let pageToken
   do {
     const request = { package: { purl } }
     if (pageToken) request.page_token = pageToken
-    const response = await fetch(osvEndpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
-    })
-    if (!response.ok) throw new Error(`OSV query for ${purl} failed with HTTP ${response.status}`)
+    const response = await postOsv(purl, request, { fetchImpl, delaysMs, wait })
     const body = await response.json()
     vulnerabilities.push(...(body.vulns ?? []))
     pageToken = body.next_page_token

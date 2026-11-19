@@ -4,10 +4,14 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
+  auditRetryDelaysMs,
   cargoFindings,
   evaluateFindings,
   loadExceptions,
   npmFindings,
+  registryUnavailable,
+  reportFrom,
+  retryTransient,
   validateExceptions,
 } from './audit-dependencies.mjs'
 
@@ -92,4 +96,69 @@ test('an npm advisory without a GHSA identifier can never be accepted', () => {
   const findings = npmFindings(npmReport([advisory({ url: 'https://example.invalid/advisory' })]))
   assert.equal(findings[0].id, 'npm advisory 1100001')
   assert.equal(evaluateFindings(findings, [exception()]).blocking.length, 1)
+})
+
+test('an unreachable registry is told apart from a failed request and from a real report', () => {
+  assert.equal(registryUnavailable({ message: 'Service Unavailable', statusCode: 503 }), true)
+  assert.equal(registryUnavailable({ message: 'Bad Gateway', statusCode: 502 }), true)
+  assert.equal(registryUnavailable({ error: { code: 'E504', summary: 'Gateway Timeout' } }), true)
+  assert.equal(registryUnavailable({ error: { code: 'ECONNRESET', summary: 'socket hang up' } }), true)
+  assert.equal(registryUnavailable({ message: 'request to https://registry.example.test failed, reason: getaddrinfo ENOTFOUND' }), true)
+  assert.equal(registryUnavailable({ message: 'Forbidden', statusCode: 403 }), false)
+  assert.equal(registryUnavailable({ message: 'Too Many Requests', statusCode: 429 }), false)
+  assert.equal(registryUnavailable({ error: { code: 'ENOAUDIT', summary: 'the registry has no audit endpoint' } }), false)
+  assert.equal(registryUnavailable({ error: { code: 'E404', summary: 'not found' } }), false)
+  assert.equal(registryUnavailable(npmReport([advisory()])), false)
+  assert.equal(registryUnavailable({ auditReportVersion: 2, vulnerabilities: {} }), false)
+  assert.equal(registryUnavailable(null), false)
+})
+
+test('a failed audit step is retried with a growing wait and then gives up', async () => {
+  const unavailable = () => Object.assign(new Error('registry unavailable'), { transient: true })
+  const waits = []
+  let calls = 0
+  const report = await retryTransient(
+    async () => {
+      calls += 1
+      if (calls < 4) throw unavailable()
+      return { vulnerabilities: {} }
+    },
+    { wait: async (ms) => waits.push(ms) },
+  )
+  assert.deepEqual(report, { vulnerabilities: {} })
+  assert.equal(calls, 4)
+  assert.deepEqual(waits, auditRetryDelaysMs)
+
+  calls = 0
+  await assert.rejects(
+    retryTransient(async () => {
+      calls += 1
+      throw unavailable()
+    }, { wait: async () => {} }),
+    /registry unavailable/,
+  )
+  assert.equal(calls, auditRetryDelaysMs.length + 1)
+})
+
+test('a failure that is not transient is never retried', async () => {
+  let calls = 0
+  await assert.rejects(
+    retryTransient(async () => {
+      calls += 1
+      throw new Error('npm audit did not return a report')
+    }, { wait: async () => assert.fail('waited before a retry') }),
+    /did not return a report/,
+  )
+  assert.equal(calls, 1)
+})
+
+test('a tool that prints a report and fails is read, and one that prints nothing is transient', async () => {
+  const findings = await reportFrom(process.execPath, ['-e', "console.log(JSON.stringify({ vulnerabilities: { list: [] } })); process.exit(1)"], root)
+  assert.deepEqual(findings, { vulnerabilities: { list: [] } })
+  await assert.rejects(
+    reportFrom(process.execPath, ['-e', "console.error('could not fetch the advisory database'); process.exit(2)"], root),
+    (error) => error.transient === true && /could not fetch the advisory database/.test(error.message),
+  )
+  await assert.rejects(reportFrom(process.execPath, ['-e', 'console.log("not json")'], root), (error) => error instanceof SyntaxError && !error.transient)
+  await assert.rejects(reportFrom('fictional-audit-tool-that-does-not-exist', [], root), (error) => error.code === 'ENOENT' && !error.transient)
 })

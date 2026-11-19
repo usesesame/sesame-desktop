@@ -13,6 +13,7 @@ import {
   awaitsUbuntuFix,
   loadAllowlist,
   loadUnfixedLibraryRules,
+  osvRetryDelaysMs,
   queryOsv,
 } from './audit-sbom.mjs'
 
@@ -322,10 +323,83 @@ test('a failed OSV continuation refuses the audit', async (t) => {
     calls += 1
     return calls === 1
       ? { ok: true, json: async () => ({ next_page_token: 'fictional-page-two' }) }
-      : { ok: false, status: 503 }
+      : { ok: false, status: 403 }
   })
-  await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0'), /HTTP 503/)
+  await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0'), /HTTP 403/)
   assert.equal(calls, 2)
+})
+
+const scriptedOsv = (outcomes) => {
+  const calls = []
+  const fetchImpl = async (_url, options) => {
+    calls.push(JSON.parse(options.body))
+    const outcome = outcomes.shift()
+    if (outcome instanceof Error) throw outcome
+    if (typeof outcome === 'number') return { ok: false, status: outcome }
+    return { ok: true, json: async () => outcome }
+  }
+  return { fetchImpl, calls }
+}
+
+test('an OSV query retries gateway errors and dropped connections with a growing wait', async () => {
+  const waits = []
+  const { fetchImpl, calls } = scriptedOsv([502, new Error('socket hang up'), 503, { vulns: [{ id: 'GHSA-fictional-late' }] }])
+  const vulnerabilities = await queryOsv('pkg:npm/fictional-package@1.0.0', { fetchImpl, wait: async (ms) => waits.push(ms) })
+  assert.deepEqual(vulnerabilities.map((vulnerability) => vulnerability.id), ['GHSA-fictional-late'])
+  assert.equal(calls.length, 4)
+  assert.deepEqual(waits, osvRetryDelaysMs)
+})
+
+test('an OSV query stops after the last retry and reports the final status', async () => {
+  const waits = []
+  const { fetchImpl, calls } = scriptedOsv([503, 503, 503, 503, { vulns: [] }])
+  await assert.rejects(
+    queryOsv('pkg:npm/fictional-package@1.0.0', { fetchImpl, wait: async (ms) => waits.push(ms) }),
+    /fictional-package@1\.0\.0 failed with HTTP 503/,
+  )
+  assert.equal(calls.length, 4)
+  assert.equal(waits.length, 3)
+})
+
+test('an OSV query that keeps dropping the connection reports the network error', async () => {
+  const { fetchImpl, calls } = scriptedOsv(Array.from({ length: 4 }, () => new Error('socket hang up')))
+  await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0', { fetchImpl, wait: async () => {} }), /failed: socket hang up/)
+  assert.equal(calls.length, 4)
+})
+
+test('an OSV query does not retry a client error', async () => {
+  for (const status of [400, 403, 404, 429]) {
+    const { fetchImpl, calls } = scriptedOsv([status, { vulns: [] }])
+    await assert.rejects(queryOsv('pkg:npm/fictional-package@1.0.0', { fetchImpl, wait: async () => {} }), new RegExp(`HTTP ${status}`))
+    assert.equal(calls.length, 1)
+  }
+})
+
+test('an OSV page that fails once is retried without losing the pages already read', async () => {
+  const purl = 'pkg:npm/fictional-package@1.0.0'
+  const { fetchImpl, calls } = scriptedOsv([
+    { vulns: [{ id: 'GHSA-fictional-first' }], next_page_token: 'fictional-page-two' },
+    504,
+    { vulns: [{ id: 'GHSA-fictional-last' }] },
+  ])
+  const vulnerabilities = await queryOsv(purl, { fetchImpl, wait: async () => {} })
+  assert.deepEqual(vulnerabilities.map((vulnerability) => vulnerability.id), ['GHSA-fictional-first', 'GHSA-fictional-last'])
+  assert.deepEqual(calls, [
+    { package: { purl } },
+    { package: { purl }, page_token: 'fictional-page-two' },
+    { package: { purl }, page_token: 'fictional-page-two' },
+  ])
+})
+
+test('an advisory found after a retried OSV failure still fails the audit', async () => {
+  const { fetchImpl } = scriptedOsv([503, { vulns: [{ id: 'GHSA-fictional-after-retry' }] }])
+  await assert.rejects(
+    auditSbom(
+      { components: [component('fictional-package', '1.0.0', 'pkg:npm/fictional-package@1.0.0')] },
+      { query: (purl) => queryOsv(purl, { fetchImpl, wait: async () => {} }) },
+    ),
+    /GHSA-fictional-after-retry/,
+  )
 })
 
 test('a repeated OSV continuation token refuses the audit', async (t) => {

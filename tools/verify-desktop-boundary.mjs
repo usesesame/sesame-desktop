@@ -6,13 +6,19 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const boundary = JSON.parse(await readFile(path.join(root, 'desktop-boundary.json'), 'utf8'))
-const destination = await mkdtemp(path.join(tmpdir(), 'sesame-desktop-boundary-'))
-const runGate = process.argv.includes('--run')
-const scriptFlag = process.argv.indexOf('--script')
-const ownedScripts = (scriptFlag === -1 ? 'desktop:ci' : process.argv[scriptFlag + 1] ?? '').split(/\s+/).filter(Boolean)
+const args = process.argv.slice(2)
+const runGate = args.includes('--run')
+const scriptFlag = args.indexOf('--script')
+const consumed = scriptFlag === -1 ? [] : [scriptFlag, scriptFlag + 1]
+const leftover = args.filter((arg, index) => arg !== '--run' && !consumed.includes(index))
+if (leftover.length > 0) {
+  throw new Error(`Unexpected arguments: ${leftover.join(' ')}. Pass every script name in one quoted --script value.`)
+}
+const ownedScripts = (scriptFlag === -1 ? 'desktop:ci' : args[scriptFlag + 1] ?? '').split(/\s+/).filter(Boolean)
 if (ownedScripts.length === 0 || !ownedScripts.every((name) => /^desktop:[a-z:-]+$/.test(name))) {
   throw new Error('--script needs desktop npm script names separated by spaces.')
 }
+const destination = await mkdtemp(path.join(tmpdir(), 'sesame-desktop-boundary-'))
 
 function gitFiles(paths) {
   const output = execFileSync(
