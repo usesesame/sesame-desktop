@@ -393,6 +393,10 @@ jobs:
             a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-older.out"
           grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-older.out"
 
+      - name: Prove Sync against the real self-host server
+        timeout-minutes: 20
+        run: node tools/run-real-sync-station.mjs --server sesame-server
+
   linux-bundles:
     needs: [lint, typecheck]
     runs-on: ubuntu-24.04
