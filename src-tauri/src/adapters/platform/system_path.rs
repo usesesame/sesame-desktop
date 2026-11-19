@@ -6,10 +6,12 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, HANDLE, LPARAM, WIN32_ERROR,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, HANDLE,
+    LPARAM, WIN32_ERROR,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, TokenElevation,
+    WinBuiltinAdministratorsSid, SECURITY_MAX_SID_SIZE, TOKEN_ELEVATION, TOKEN_QUERY,
 };
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
@@ -22,8 +24,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::machine_path::{
-    left_alone_code, machine_reference, plan_add, plan_remove, registry_bytes, string_data,
-    MachineValue, Mode, Plan, Request, EXIT_CHANGED, EXIT_FAILED, EXIT_REFUSED, MAX_VALUE_UNITS,
+    left_alone_code, machine_reference, plan_add, plan_remove, registry_bytes,
+    registry_failure_code, string_data, MachineValue, Mode, Plan, Request, ACCESS_DENIED,
+    COMMAND_SHELL_LIMIT, EXIT_CHANGED, EXIT_FAILED, EXIT_REFUSED, MAX_VALUE_UNITS,
 };
 
 const ENVIRONMENT_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
@@ -32,6 +35,9 @@ const PRODUCT_FOLDER: &str = "Sesame";
 const ATTEMPTS: usize = 3;
 const BROADCAST_TIMEOUT_MILLISECONDS: u32 = 1_000;
 const BROADCAST_DEADLINE: Duration = Duration::from_secs(5);
+const NEEDS_ADMINISTRATOR: &str =
+    "Only the Sesame installer, running as an administrator, can change the system Path.";
+const _: () = assert!(ERROR_ACCESS_DENIED == ACCESS_DENIED);
 
 fn wide(text: &str) -> Vec<u16> {
     OsStr::new(text).encode_wide().chain(Some(0)).collect()
@@ -66,7 +72,27 @@ fn is_elevated() -> bool {
     unsafe {
         CloseHandle(token);
     }
-    read != 0 && elevation.TokenIsElevated != 0
+    read != 0 && elevation.TokenIsElevated != 0 && is_administrator()
+}
+
+fn is_administrator() -> bool {
+    let mut sid = [0_u32; SECURITY_MAX_SID_SIZE as usize / 4];
+    let mut size = SECURITY_MAX_SID_SIZE;
+    let created = unsafe {
+        CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if created == 0 {
+        return false;
+    }
+    let mut member = 0;
+    let checked =
+        unsafe { CheckTokenMembership(ptr::null_mut(), sid.as_mut_ptr().cast(), &mut member) };
+    checked != 0 && member != 0
 }
 
 fn program_files() -> Option<String> {
@@ -237,8 +263,21 @@ fn left_alone(plan: &Plan, folder: &str) -> String {
         Plan::TooLong => format!(
             "Adding {folder} would make the system Path longer than {MAX_VALUE_UNITS} characters, so Sesame left it as it was. Shorten the system Path and add the folder by hand to use the sesame command."
         ),
+        Plan::PastCommandShellLimit => format!(
+            "Adding {folder} would make the system Path longer than {COMMAND_SHELL_LIMIT} characters, and a new Command Prompt finds no command on a Path that long, so Sesame left it as it was. Add the folder yourself to use the sesame command, after you make room on the Path."
+        ),
         Plan::Write(_) => String::new(),
     }
+}
+
+fn registry_failure(status: WIN32_ERROR, action: &str) -> i32 {
+    let code = registry_failure_code(status);
+    if code == EXIT_REFUSED {
+        eprintln!("{NEEDS_ADMINISTRATOR}");
+    } else {
+        eprintln!("Sesame could not {action}, error {status}.");
+    }
+    code
 }
 
 fn change(mode: Mode, install: &Install) -> i32 {
@@ -256,8 +295,7 @@ fn change(mode: Mode, install: &Install) -> i32 {
         )
     };
     if status != ERROR_SUCCESS {
-        eprintln!("Sesame could not open the system environment, error {status}.");
-        return EXIT_FAILED;
+        return registry_failure(status, "open the system environment");
     }
     let key = Key(raw);
     let value_name = wide("Path");
@@ -318,8 +356,7 @@ fn change(mode: Mode, install: &Install) -> i32 {
         let status =
             unsafe { RegSetValueExW(key.0, value_name.as_ptr(), 0, kind, data.as_ptr(), length) };
         if status != ERROR_SUCCESS {
-            eprintln!("Sesame could not write the system Path, error {status}.");
-            return EXIT_FAILED;
+            return registry_failure(status, "write the system Path");
         }
         broadcast();
         return EXIT_CHANGED;
@@ -337,9 +374,7 @@ pub fn run(request: Request) -> i32 {
         }
     };
     if !is_elevated() {
-        eprintln!(
-            "Only the Sesame installer, running as an administrator, can change the system Path."
-        );
+        eprintln!("{NEEDS_ADMINISTRATOR}");
         return EXIT_REFUSED;
     }
     match own_install() {

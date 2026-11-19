@@ -365,7 +365,14 @@ test('the command line install test guards the machine Path and checks what the 
     "Uninstall-Sesame @('/S', '/UPDATE')",
     "Install-Sesame @('/S', '/UPDATE')",
     "Install-Sesame @('/P')",
-    "foreach ($length in @(994, 995, 1022, 1023, 1024, 4096, ($limit * 8))) {",
+    "foreach ($length in @(994, 995, 1022, 1023, 1024, 4096)) {",
+    'Path that reaches $commandShellLineLimit characters with the entry',
+    "Confirm-LookupFromNewCommandShell 'the install' $session",
+    'Path one character too long to add the entry without passing $commandShellLineLimit characters',
+    "Confirm-Status \"an install that would pass $commandShellLineLimit characters\" $installed \"$statusRefused\"",
+    "Confirm-LookupFromNewCommandShell 'a refused install' (Get-MachineSessionPath $installed) -WithoutTool",
+    'Path already past $commandShellLineLimit characters',
+    'keeps PATH but finds no command through it, not even in the first entry',
     "The runner's own Path",
     "Invoke-ExistingEntryScenario 'in quotes'",
     "Invoke-ExistingEntryScenario 'written with %ProgramFiles%' '%ProgramFiles%\\Sesame\\cli'",
@@ -399,7 +406,7 @@ test('the command line install test guards the machine Path and checks what the 
   assert.ok(script.includes(`$statusRefused = ${status('EXIT_REFUSED')}`))
   assert.ok(script.includes(`$statusFailed = '${status('EXIT_FAILED')}'`))
   assert.ok(script.includes(`$environmentLimit = ${pure.match(/pub const MAX_VALUE_UNITS: usize = ([\d_]+);/)[1].replaceAll('_', '')}`), 'the test no longer places its longest Path at the limit the cli program enforces')
-  assert.match(script, /\$commandShellLineLimit = 8191\b/)
+  assert.ok(script.includes(`$commandShellLineLimit = ${pure.match(/pub const COMMAND_SHELL_LIMIT: usize = ([\d_]+);/)[1].replaceAll('_', '')}`), 'the test no longer checks the cmd.exe limit the cli program enforces')
   assert.match(script, /\$basePath = '%SystemRoot%\\system32;%SystemRoot%;/)
 })
 
@@ -428,6 +435,7 @@ test('the Windows installer hands the system Path to the cli program and records
   assert.match(add, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_UNCHANGED')}"`))
   assert.match(add, /WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_STATUS_VALUE\}" "\$0"/, 'the outcome of the Path edit is not recorded where a test can read it')
   assert.doesNotMatch(add, /Abort|Quit|SetErrorLevel/, 'a failed Path edit must not fail the install')
+  assert.match(add, /\$\{Else\}\s+DetailPrint "Sesame could not add \$\{SESAME_TERMINAL_FOLDER\} to the system Path\. Add it by hand to use the sesame command\."/, 'a refused or failed add must tell the person to add the folder themselves')
   assert.equal((hook.match(/WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/g) ?? []).length, 1)
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
@@ -450,6 +458,8 @@ test('the Windows installer hands the system Path to the cli program and records
   assert.doesNotMatch(client, /machine-path/, 'the terminal help must not list the installer arguments')
   const run = native.slice(native.indexOf('pub fn run(request: Request)'))
   assert.ok(run.indexOf('is_elevated()') > 0 && run.indexOf('is_elevated()') < run.indexOf('own_install()'), 'the Path mode does not refuse a process that is not elevated first')
+  assert.match(native, /read != 0 && elevation\.TokenIsElevated != 0 && is_administrator\(\)/, 'an elevated token whose Administrators group is deny only must be refused')
+  assert.match(native, /CreateWellKnownSid\(\s*WinBuiltinAdministratorsSid,[\s\S]*?CheckTokenMembership\(ptr::null_mut\(\), sid\.as_mut_ptr\(\)\.cast\(\), &mut member\)/)
   assert.match(native, /fn own_install\(\) -> Result<Install, String> \{[\s\S]*?program_files\(\)[\s\S]*?current_exe\(\)\.and_then\(std::fs::canonicalize\)[\s\S]*?std::fs::canonicalize\(&expected\)/, 'the Path mode must add only the folder of its own installed copy')
   assert.match(native, /"ProgramFilesDir"/)
   assert.match(native, new RegExp(`const PRODUCT_FOLDER: &str = "${config.productName}";`))
@@ -461,6 +471,8 @@ test('the Windows installer hands the system Path to the cli program and records
   assert.match(native, /broadcast\(\);\s+return EXIT_CHANGED;/, 'a committed write must still report that it changed the Path')
   assert.match(native, /machine_reference\(name, &install\.program_files, &machine, &system\)/, 'references in the Path must resolve with the machine environment')
   assert.match(native, /return left_alone_code\(&other\);/)
+  assert.match(native, /const _: \(\) = assert!\(ERROR_ACCESS_DENIED == ACCESS_DENIED\);/)
+  assert.equal((native.match(/return registry_failure\(status, "(?:open the system environment|write the system Path)"\);/g) ?? []).length, 2, 'access denied on the open or the write must read as a refusal')
   assert.match(read('.github', 'SECURITY.md'), /--add-to-machine-path/, 'SECURITY.md does not describe the installer Path mode')
 })
 
