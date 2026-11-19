@@ -1,14 +1,20 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::application::lifecycle::install_unlocked_session;
+use crate::application::lifecycle::{
+    begin_unlock, confirm_unlock_survived, finish_unlock, install_unlocked_session,
+    key_settings_in_state, unlock_with_derived_key, LOCKED_DURING_UNLOCK,
+};
 use crate::application::DesktopEffects;
 use crate::vault::crypto::decrypt_bytes;
+use crate::vault::key_proof::{
+    KeySettings, NewKeyWraps, NewPinWrap, NewRecoveryKit, SecretProof, VAULT_CHANGED_DURING_CHECK,
+};
 use crate::vault::storage::{
-    complete_recovery_setup_for_session, derive_pin_wrapping_key, remove_hello_for_session,
-    remove_pin_for_session, resume_recovery_setup_for_session, rotate_master_password_for_session,
-    set_hello_for_session, set_pin_for_session, validate_new_unlock_pin, validate_unlock_pin,
-    write_vault_file, RotationCredentials,
+    commit_master_password_rotation, complete_recovery_setup_with, derive_pin_wrapping_key,
+    prove_rotation_credentials, remove_hello_for_session, remove_pin_for_session,
+    resume_recovery_setup_with, set_hello_for_session, set_pin_with, validate_new_unlock_pin,
+    validate_unlock_pin, write_vault_file, RotationCredentials,
 };
 use crate::vault::throttle::PinAttemptGuard;
 use crate::vault::util::{random_id, read_file_with_limit};
@@ -135,14 +141,19 @@ pub fn create_vault_in_state(
     effects: &dyn DesktopEffects,
     master_password: Zeroizing<String>,
 ) -> VaultResult<VaultSetup> {
+    let lock_generation = state.lock_generation();
     let (opened, recovery_kit_for_display) =
         sesame_core::api::create_vault(&master_password, "My Sesame vault")?;
     drop(master_password);
+    state.pause_for_test("vaultDerived");
     // Session guard first: a concurrent restore must not race the file creation.
     let mut session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
+    if state.lock_generation() != lock_generation {
+        return Err(LOCKED_DURING_UNLOCK.into());
+    }
     let path = effects.vault_path()?;
     if path.exists() {
         return Err("A local Sesame vault already exists on this device.".into());
@@ -156,7 +167,7 @@ pub fn create_vault_in_state(
     let unlocked = UnlockedVault::from_opened(path, &opened)?;
     effects.report_key_page_fallback(&unlocked);
     let snapshot = unlocked.snapshot();
-    *session = Some(unlocked);
+    state.install_session(&mut session, unlocked);
     state.advance_session_epoch();
     Ok(VaultSetup {
         snapshot,
@@ -166,14 +177,16 @@ pub fn create_vault_in_state(
 
 /// Replacement kit for an interrupted setup; only the still-empty pending vault can use this path.
 pub fn resume_recovery_setup_in_state(state: &VaultState) -> VaultResult<String> {
+    const LOCKED: &str = "Unlock your vault before resuming recovery setup.";
+    let checked = key_settings_in_state(state, LOCKED)?;
+    let recovery = NewRecoveryKit::generate()?;
+    state.pause_for_test("recoverySetupPrepared");
     let mut session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before resuming recovery setup.")?;
-    resume_recovery_setup_for_session(session)
+    let session = same_session(session.as_mut().ok_or(LOCKED)?, &checked)?;
+    resume_recovery_setup_with(session, &recovery)
 }
 
 /// Host-owned recovery gate: a renderer preference cannot satisfy it.
@@ -181,14 +194,16 @@ pub fn complete_recovery_setup_in_state(
     state: &VaultState,
     recovery_kit: Zeroizing<String>,
 ) -> VaultResult<()> {
+    const LOCKED: &str = "Unlock your vault before completing recovery setup.";
+    let settings = key_settings_in_state(state, LOCKED)?;
+    let proof = SecretProof::recovery_kit(&settings, &recovery_kit)?;
+    drop(recovery_kit);
     let mut session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the vault session.".to_string())?;
-    let session = session
-        .as_mut()
-        .ok_or("Unlock your vault before completing recovery setup.")?;
-    complete_recovery_setup_for_session(session, &recovery_kit)
+    let session = session.as_mut().ok_or(LOCKED)?;
+    complete_recovery_setup_with(session, &proof)
 }
 
 pub fn unlock_recovery_vault_in_state(
@@ -196,20 +211,16 @@ pub fn unlock_recovery_vault_in_state(
     effects: &dyn DesktopEffects,
     recovery_kit: Zeroizing<String>,
 ) -> VaultResult<VaultSnapshot> {
-    // Guard held from file read to install: restore or deletion must never race it.
-    let mut session = state
-        .session
-        .lock()
-        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
-    let path = effects.vault_path()?;
-    let file = sesame_core::loader::VaultLoader::read(&path)?;
-    let key_array = sesame_core::api::unwrap_key_with_recovery_kit(&file, &recovery_kit)?;
-    let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
-    drop(session);
-    if result.is_ok() {
+    let turn = begin_unlock(state)?;
+    let (snapshot, _) = unlock_with_derived_key(state, effects, &turn, |file| {
+        sesame_core::api::unwrap_key_with_recovery_kit(file, &recovery_kit)
+    })?;
+    drop(recovery_kit);
+    finish_unlock(state, &turn, || {
         let _ = establish_pin_throttle_state(state, effects);
-    }
-    result.map(|(snapshot, _)| snapshot)
+    })?;
+    drop(turn);
+    Ok(snapshot)
 }
 
 pub fn set_unlock_pin_in_state(
@@ -217,24 +228,46 @@ pub fn set_unlock_pin_in_state(
     effects: &dyn DesktopEffects,
     pin: String,
 ) -> VaultResult<()> {
-    let mut pin = pin;
-    let result = (|| {
-        validate_new_unlock_pin(&pin)?;
+    let pin = Zeroizing::new(pin);
+    validate_new_unlock_pin(&pin)?;
+    let checked = key_settings_in_state(state, SET_PIN_LOCKED)?;
+    let wrap = NewPinWrap::prepare(&pin)?;
+    drop(pin);
+    apply_unlock_pin_in_state(state, effects, &checked, &wrap)
+}
+
+const SET_PIN_LOCKED: &str = "Unlock your vault before setting a PIN.";
+
+fn same_session<'a>(
+    session: &'a mut UnlockedVault,
+    checked: &KeySettings,
+) -> VaultResult<&'a mut UnlockedVault> {
+    if checked.same_session(session) {
+        Ok(session)
+    } else {
+        Err(VAULT_CHANGED_DURING_CHECK.into())
+    }
+}
+
+pub fn apply_unlock_pin_in_state(
+    state: &VaultState,
+    effects: &dyn DesktopEffects,
+    checked: &KeySettings,
+    wrap: &NewPinWrap,
+) -> VaultResult<()> {
+    {
         let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault session.".to_string())?;
-        let session = session
-            .as_mut()
-            .ok_or("Unlock your vault before setting a PIN.")?;
-        set_pin_for_session(session, &pin)
-    })();
-    pin.zeroize();
-    if result.is_ok() {
-        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
+        let session = same_session(session.as_mut().ok_or(SET_PIN_LOCKED)?, checked)?;
+        set_pin_with(session, wrap)?;
+        state.pause_for_test("pinSaved");
         state.cache_pin_unlock(true);
     }
-    result
+    state.pause_for_test("pinSessionReleased");
+    let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
+    Ok(())
 }
 
 pub fn remove_unlock_pin_in_state(
@@ -250,8 +283,8 @@ pub fn remove_unlock_pin_in_state(
             .as_mut()
             .ok_or("Unlock your vault before removing the PIN.")?;
         remove_pin_for_session(session)?;
+        state.cache_pin_unlock(false);
     }
-    state.cache_pin_unlock(false);
     crate::application::unlock::discard_pin_throttle_state(state, effects);
     Ok(())
 }
@@ -340,50 +373,43 @@ fn unlock_pin_vault_inner(
     // A malformed PIN is rejected before the attempt budget is touched.
     validate_unlock_pin(pin)?;
     ensure_pin_throttle_loaded(state, effects)?;
-    // The attempt is spent and persisted before any slow work, under the budget lock.
-    {
-        let mut guard = state
-            .pin_guard
-            .lock()
-            .map_err(|_| "Sesame could not read the PIN protection state.".to_string())?;
-        guard.check().map_err(|seconds| {
-            format!("Too many incorrect PIN attempts. Wait {seconds} seconds, then try again.")
-        })?;
-        guard.record_failure();
-        effects.write_pin_throttle_state(&guard).map_err(|_| {
-            "Sesame could not record this PIN attempt. Use your master password instead."
-                .to_string()
-        })?;
+    let turn = begin_unlock(state)?;
+    charge_pin_attempt(state, effects)?;
+    let (snapshot, _) = unlock_with_derived_key(state, effects, &turn, |file| {
+        let pin_wrap = file
+            .pin_wrap
+            .as_ref()
+            .ok_or("This vault does not have a PIN set up.")?;
+        let wrapping_key = Zeroizing::new(derive_pin_wrapping_key(pin, pin_wrap)?);
+        let vault_key = decrypt_bytes(&wrapping_key, &pin_wrap.key_wrap, PIN_WRAP_AAD)
+            .map_err(|_| "That PIN is not correct.".to_string())?;
+        let key_array: [u8; 32] = vault_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| "The local vault key is invalid.".to_string())?;
+        Ok(key_array)
+    })?;
+    if let Ok(mut guard) = state.pin_guard.lock() {
+        guard.record_success();
+        let _ = effects.write_pin_throttle_state(&guard);
     }
-    // Throttle first; the decrypt/install path stays serialized with restore and deletion.
-    let mut session = state
-        .session
+    confirm_unlock_survived(state, &turn)?;
+    drop(turn);
+    Ok(snapshot)
+}
+
+fn charge_pin_attempt(state: &VaultState, effects: &dyn DesktopEffects) -> VaultResult<()> {
+    let mut guard = state
+        .pin_guard
         .lock()
-        .map_err(|_| "Sesame could not open the vault session.".to_string())?;
-    let path = effects.vault_path()?;
-    let file = sesame_core::loader::VaultLoader::read(&path)?;
-    let pin_wrap = file
-        .pin_wrap
-        .as_ref()
-        .ok_or("This vault does not have a PIN set up.")?;
-    let wrapping_key = Zeroizing::new(derive_pin_wrapping_key(pin, pin_wrap)?);
-    // The attempt was already spent and persisted above; nothing left to record here.
-    let mut vault_key = decrypt_bytes(&wrapping_key, &pin_wrap.key_wrap, PIN_WRAP_AAD)
-        .map_err(|_| "That PIN is not correct.".to_string())?;
-    let key_array: [u8; 32] = vault_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| "The local vault key is invalid.".to_string())?;
-    vault_key.zeroize();
-    let result = install_unlocked_session(state, &mut session, path, key_array, file, effects);
-    drop(session);
-    if result.is_ok() {
-        if let Ok(mut guard) = state.pin_guard.lock() {
-            guard.record_success();
-            let _ = effects.write_pin_throttle_state(&guard);
-        }
-    }
-    result.map(|(snapshot, _)| snapshot)
+        .map_err(|_| "Sesame could not read the PIN protection state.".to_string())?;
+    guard.check().map_err(|seconds| {
+        format!("Too many incorrect PIN attempts. Wait {seconds} seconds, then try again.")
+    })?;
+    guard.record_failure();
+    effects.write_pin_throttle_state(&guard).map_err(|_| {
+        "Sesame could not record this PIN attempt. Use your master password instead.".to_string()
+    })
 }
 
 fn ensure_pin_throttle_loaded(state: &VaultState, effects: &dyn DesktopEffects) -> VaultResult<()> {
@@ -416,35 +442,44 @@ pub fn change_master_password_in_state(
     effects: &dyn DesktopEffects,
     request: ChangeMasterPasswordRequest,
 ) -> VaultResult<ChangeMasterPasswordResult> {
+    const LOCKED: &str = "Unlock your vault before changing its master password.";
     let current_password = request.current_password.map(Zeroizing::new);
     let recovery_kit = request.recovery_kit.map(Zeroizing::new);
-    let mut new_password = request.new_password;
-    let result = (|| {
-        let mut session = state
+    let new_password = Zeroizing::new(request.new_password);
+    let settings = key_settings_in_state(state, LOCKED)?;
+    let proofs = prove_rotation_credentials(
+        &settings,
+        RotationCredentials {
+            current_password: current_password.as_deref().map(String::as_str),
+            recovery_kit: recovery_kit.as_deref().map(String::as_str),
+        },
+        &new_password,
+    )?;
+    drop(current_password);
+    drop(recovery_kit);
+    {
+        let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault session.".to_string())?;
-        let session = session
-            .as_mut()
-            .ok_or("Unlock your vault before changing its master password.")?;
-        let rotation = rotate_master_password_for_session(
-            session,
-            RotationCredentials {
-                current_password: current_password.as_deref().map(String::as_str),
-                recovery_kit: recovery_kit.as_deref().map(String::as_str),
-            },
-            &new_password,
-        )?;
-        retire_unlock_methods_after_key_rotation(state, effects);
-        crate::application::release_record::open_release_record(state, session);
-        effects.report_key_page_fallback(session);
-        Ok(ChangeMasterPasswordResult {
-            recovery_kit: rotation.recovery_kit,
-            backups_remaining: rotation.backups_remaining,
-        })
-    })();
-    new_password.zeroize();
-    result
+        proofs.confirm(session.as_ref().ok_or(LOCKED)?)?;
+    }
+    let wraps = NewKeyWraps::derive(&new_password)?;
+    drop(new_password);
+    state.pause_for_test("passwordChangeDerived");
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Sesame could not read the unlocked vault session.".to_string())?;
+    let session = session.as_mut().ok_or(LOCKED)?;
+    let rotation = commit_master_password_rotation(session, &proofs, &wraps)?;
+    retire_unlock_methods_after_key_rotation(state, effects);
+    crate::application::release_record::open_release_record(state, session);
+    effects.report_key_page_fallback(session);
+    Ok(ChangeMasterPasswordResult {
+        recovery_kit: rotation.recovery_kit,
+        backups_remaining: rotation.backups_remaining,
+    })
 }
 
 pub fn record_activity() {

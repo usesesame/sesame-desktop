@@ -182,6 +182,10 @@ good-faith report that turns out to be out of scope is not held against you.
   vault changed first, 7 when nothing has that name, 8 when Sesame is busy or
   making terminals wait and 9 when Sesame needs an update. `sesame --help`
   lists the same codes.
+- The Activity list records every terminal request and how it ended,
+  including the ones Sesame turned down without showing them. Repeats within a
+  minute share one entry, and a request for a name the vault does not have is
+  recorded without the name, because a program chose that text.
 - Windows offers no terminal allowance, because Sesame cannot tell one
   terminal from another there, so every request from the `sesame` command
   asks in the window.

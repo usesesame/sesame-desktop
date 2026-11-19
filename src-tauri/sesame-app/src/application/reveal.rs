@@ -10,6 +10,7 @@ use crate::vault::{TaggedItem, UnlockedVault, VaultResult, VaultState};
 
 const BACKUP_CODES: &str = "backupCodes";
 pub const TERMINAL_SOURCE: &str = "terminal";
+pub const TERMINAL_ALLOWANCE_SOURCE: &str = "terminal-allowance";
 pub const VAULT_CHANGED: &str = "vaultChanged";
 
 fn item_in(session: &UnlockedVault, id: &str, kind: &str) -> VaultResult<TaggedItem> {
@@ -63,22 +64,37 @@ fn record_field(state: &VaultState, entry: EntryKind, id: &str, kind: &str, fiel
     );
 }
 
-fn terminal_draft(entry: EntryKind, id: &str, kind: &str, field: &str) -> ReleaseDraft {
-    ReleaseDraft::new(entry, Outcome::Released)
-        .item(id.trim(), kind)
-        .field(field)
-        .host(TERMINAL_SOURCE)
+pub struct TerminalRelease<'a> {
+    pub entry: EntryKind,
+    pub id: &'a str,
+    pub kind: &'a str,
+    pub field: Option<&'a str>,
+    pub source: &'a str,
+}
+
+pub fn terminal_draft(release: &TerminalRelease<'_>, outcome: Outcome) -> ReleaseDraft {
+    let draft = ReleaseDraft::new(release.entry, outcome).host(release.source);
+    let draft = match release.field {
+        Some(field) => draft.field(field),
+        None => draft,
+    };
+    if release.id.trim().is_empty() {
+        draft
+    } else {
+        draft.item(release.id.trim(), release.kind)
+    }
 }
 
 pub fn record_terminal_release_in(
     state: &VaultState,
     session: &UnlockedVault,
-    entry: EntryKind,
-    id: &str,
-    kind: &str,
-    field: &str,
+    release: TerminalRelease<'_>,
 ) {
-    record_in(state, Some(session), terminal_draft(entry, id, kind, field));
+    record_in(
+        state,
+        Some(session),
+        terminal_draft(&release, Outcome::Released),
+    );
 }
 
 pub fn with_session_at<T>(
@@ -139,6 +155,7 @@ pub fn copy_item_field_in_state(
 
 pub struct TerminalField<'a> {
     pub epoch: u64,
+    pub source: &'a str,
     pub id: &'a str,
     pub kind: &'a str,
     pub field: &'a str,
@@ -165,10 +182,13 @@ pub fn terminal_item_field_in_state(
         record_terminal_release_in(
             state,
             session,
-            EntryKind::Reveal,
-            wanted.id,
-            wanted.kind,
-            wanted.field,
+            TerminalRelease {
+                entry: EntryKind::TerminalRead,
+                id: wanted.id,
+                kind: wanted.kind,
+                field: Some(wanted.field),
+                source: wanted.source,
+            },
         );
         Ok(Some(value))
     })
@@ -194,10 +214,13 @@ pub fn terminal_copy_item_field_in_state(
         record_terminal_release_in(
             state,
             session,
-            EntryKind::Copy,
-            wanted.id,
-            wanted.kind,
-            wanted.field,
+            TerminalRelease {
+                entry: EntryKind::TerminalCopy,
+                id: wanted.id,
+                kind: wanted.kind,
+                field: Some(wanted.field),
+                source: wanted.source,
+            },
         );
         Ok(copied)
     })
