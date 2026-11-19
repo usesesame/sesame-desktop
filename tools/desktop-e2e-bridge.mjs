@@ -196,31 +196,76 @@ export function appProcessAlive(child) {
   return Boolean(child) && child.exitCode === null && child.signalCode === null
 }
 
-export async function stopApp(child) {
-  if (!appProcessAlive(child)) return
+export const APP_STOP_TIMEOUT_MS = 10_000
+const APP_KILL_TIMEOUT_MS = 5_000
+const crashSignals = ['SIGABRT', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGSEGV']
+
+async function signalProcessGroup(child, signal) {
   if (process.platform === 'win32') {
     try {
       await run('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
     } catch {
       child.kill()
     }
-  } else {
-    try {
-      process.kill(-child.pid, 'SIGTERM')
-    } catch {
-      child.kill('SIGTERM')
-    }
+    return
   }
-  await new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      if (appProcessAlive(child)) child.kill('SIGKILL')
-      resolve()
-    }, 10_000)
-    child.once('exit', () => {
+  try {
+    process.kill(-child.pid, signal)
+  } catch {
+    child.kill(signal)
+  }
+}
+
+function waitForExit(child, timeoutMs) {
+  if (!appProcessAlive(child)) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const onExit = () => {
       clearTimeout(timer)
-      resolve()
-    })
+      resolve(true)
+    }
+    const timer = setTimeout(() => {
+      child.off('exit', onExit)
+      resolve(false)
+    }, timeoutMs)
+    child.once('exit', onExit)
   })
+}
+
+export async function stopApp(child, { timeoutMs = APP_STOP_TIMEOUT_MS, killTimeoutMs = APP_KILL_TIMEOUT_MS, signalGroup = signalProcessGroup } = {}) {
+  const startedAt = Date.now()
+  const outcome = (fields) => ({
+    signalled: false,
+    ended: false,
+    killed: false,
+    exitCode: child?.exitCode ?? null,
+    signalCode: child?.signalCode ?? null,
+    milliseconds: Date.now() - startedAt,
+    timeoutMs,
+    ...fields,
+  })
+  if (!appProcessAlive(child)) return outcome({ ended: Boolean(child) })
+  await signalGroup(child, 'SIGTERM')
+  const ended = await waitForExit(child, timeoutMs)
+  if (ended) return outcome({ signalled: true, ended: true })
+  await signalGroup(child, 'SIGKILL')
+  await waitForExit(child, killTimeoutMs)
+  return outcome({ signalled: true, killed: true })
+}
+
+export function judgeAppStop(stop) {
+  const value = stop && {
+    signalled: stop.signalled === true,
+    ended: stop.ended === true,
+    killed: stop.killed === true,
+    exitCode: stop.exitCode ?? null,
+    signalCode: stop.signalCode ?? null,
+    milliseconds: stop.milliseconds ?? null,
+    timeoutMs: stop.timeoutMs ?? null,
+  }
+  if (!value || !value.signalled) return { ok: false, value, error: 'The app had already exited before it was asked to stop, so its shutdown was not observed.' }
+  if (value.killed || !value.ended) return { ok: false, value, error: `The app did not end within ${value.timeoutMs} ms of the stop signal and had to be killed.` }
+  if (crashSignals.includes(value.signalCode)) return { ok: false, value, error: `The app crashed with ${value.signalCode} while stopping.` }
+  return { ok: true, value }
 }
 
 export function recordStep(steps, name, result, extra) {
@@ -232,10 +277,14 @@ export function recordStep(steps, name, result, extra) {
   return step
 }
 
+export function evidenceStep({ name, ok, error, value, evidence }) {
+  return { name, ok, ...(error ? { error } : {}), ...(evidence === true && value !== undefined ? { value } : {}) }
+}
+
 export async function summarize(steps) {
   return {
     passed: steps.filter((step) => step.ok).length,
     failed: steps.filter((step) => !step.ok).length,
-    steps: steps.map(({ name, ok, error }) => ({ name, ok, ...(error ? { error } : {}) })),
+    steps: steps.map(evidenceStep),
   }
 }

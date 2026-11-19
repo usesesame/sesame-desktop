@@ -156,6 +156,19 @@ jobs:
             --package "$(ls release-packages/*.deb)" \
             --out linux-shipped-evidence
 
+      - name: Prove the shipped deb upgrades from the newest published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir previous-release
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern '*_amd64.deb' --pattern 'SHA256SUMS-linux' --dir previous-release
+          xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format deb \
+            --package "$(ls release-packages/*.deb)" \
+            --previous "$(ls previous-release/*_amd64.deb)" \
+            --previous-sums previous-release/SHA256SUMS-linux \
+            --out linux-deb-upgrade-evidence
+
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
           xvfb-run -a node tools/linux-shipped-package-gate.mjs \

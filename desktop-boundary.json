@@ -62,6 +62,7 @@
     "tools/test-glib-patches.mjs",
     "tools/linux-installed-package-gate.mjs",
     "tools/linux-package-gate-contracts.test.mjs",
+    "tools/linux-package-journey-contracts.test.mjs",
     "tools/linux-shipped-package-gate.mjs",
     "tools/prepare-linux-bundle-tools.mjs",
     "tools/linux-release-evidence.mjs",
