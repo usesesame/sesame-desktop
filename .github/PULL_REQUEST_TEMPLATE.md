@@ -19,18 +19,6 @@
 
 Explain any checked security-boundary change:
 
-## Validation
-
-<!-- List exact commands and manual checks. Do not write only "tested". -->
-
-```text
-
-```
-
-## Evidence
-
-<!-- Link CI, screenshots, release inspection, or fresh-clone output when the issue requires evidence. Use fictional test data. -->
-
 ## Review notes
 
 - [ ] Generated output and local state are not included.

@@ -15,6 +15,7 @@ import {
   interpretCandidateSubmission,
   latestReceiptBindsInstaller,
   linuxLaneAssetPatterns,
+  mergeReleaseNotes,
   parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
@@ -543,5 +544,116 @@ test('both publish tools look releases up through the list that includes drafts'
     const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8')
     assert.match(source, /selectReleaseForTag\(parseReleaseList\(stdout\), tag\)/, `${file} must select from the full list`)
     assert.doesNotMatch(source, /releases\/tags\//, `${file} must not use the lookup that hides drafts`)
+  }
+})
+
+const changelog = '### Everyday use\n\n- A fictional change that the changelog describes.'
+const windowsSection = [
+  'Early access build for Windows 10 and 11, x64.',
+  '',
+  'This installer is not Authenticode signed, so SmartScreen will warn you.',
+  '',
+  '    .\\verify-sesame-release.ps1 -Installer .\\Sesame_1.2.3_x64-setup.exe -EvidenceDirectory .',
+].join('\n')
+const linuxSection = [
+  'Early access build for Linux x86_64: deb, rpm, and AppImage packages.',
+  '',
+  'SHA-256 digests are in SHA256SUMS-linux.',
+].join('\n')
+const windowsDigest = 'a'.repeat(64)
+const linuxDigest = 'b'.repeat(64)
+const digestLine = (value) => `${RELEASE_SET_DIGEST_LABEL}: ${value}`
+const createdBody = (section, digest) => `${changelog}\n\n${section}\n\n${digestLine(digest)}\n`
+const occurrences = (text, needle) => text.split(needle).length - 1
+const windowsMerge = (body) => mergeReleaseNotes(body, { section: windowsSection, setDigest: windowsDigest })
+const linuxMerge = (body) => mergeReleaseNotes(body, { section: linuxSection, setDigest: linuxDigest })
+
+function assertWholeBody(body) {
+  assert.equal(occurrences(body, changelog), 1)
+  assert.equal(occurrences(body, windowsSection), 1)
+  assert.equal(occurrences(body, linuxSection), 1)
+  assert.equal(occurrences(body, digestLine(windowsDigest)), 1)
+  assert.equal(occurrences(body, digestLine(linuxDigest)), 1)
+  assert.ok(body.indexOf(changelog) < body.indexOf(windowsSection))
+  assert.ok(body.indexOf(changelog) < body.indexOf(linuxSection))
+  const firstDigest = Math.min(body.indexOf(digestLine(windowsDigest)), body.indexOf(digestLine(linuxDigest)))
+  assert.ok(body.indexOf(windowsSection) < firstDigest, 'the Windows section follows a digest line')
+  assert.ok(body.indexOf(linuxSection) < firstDigest, 'the Linux section follows a digest line')
+}
+
+test('the Linux lane keeps the Windows steps when it runs after the Windows lane', () => {
+  const merged = linuxMerge(createdBody(windowsSection, windowsDigest))
+  assertWholeBody(merged)
+})
+
+test('the Windows lane keeps the Linux steps when it runs after the Linux lane', () => {
+  const merged = windowsMerge(createdBody(linuxSection, linuxDigest))
+  assertWholeBody(merged)
+})
+
+test('rerunning either lane leaves a finished release body exactly as it is', () => {
+  const afterWindowsFirst = linuxMerge(createdBody(windowsSection, windowsDigest))
+  assert.equal(linuxMerge(afterWindowsFirst), afterWindowsFirst)
+  assert.equal(windowsMerge(afterWindowsFirst), afterWindowsFirst)
+  const afterLinuxFirst = windowsMerge(createdBody(linuxSection, linuxDigest))
+  assert.equal(windowsMerge(afterLinuxFirst), afterLinuxFirst)
+  assert.equal(linuxMerge(afterLinuxFirst), afterLinuxFirst)
+  assertWholeBody(afterWindowsFirst)
+  assertWholeBody(afterLinuxFirst)
+})
+
+test('a lane that reruns before the other lane has run adds nothing twice', () => {
+  const body = createdBody(windowsSection, windowsDigest)
+  assert.equal(windowsMerge(body), body)
+  const once = linuxMerge(body)
+  assert.equal(linuxMerge(once), once)
+  assertWholeBody(once)
+})
+
+test('a body that a person edited between the two lanes keeps the edit and gains the missing section', () => {
+  const edited = createdBody(windowsSection, windowsDigest)
+    .replace('A fictional change that the changelog describes.', 'A fictional change that the changelog describes, reworded by hand.')
+    .replace('SmartScreen will warn you.', 'SmartScreen will warn you, and the owner added this sentence.')
+  const merged = linuxMerge(edited)
+  assert.ok(merged.includes('reworded by hand.'))
+  assert.ok(merged.includes('and the owner added this sentence.'))
+  assert.equal(occurrences(merged, 'Early access build for Windows 10 and 11, x64.'), 1)
+  assert.equal(occurrences(merged, linuxSection), 1)
+  assert.equal(occurrences(merged, digestLine(windowsDigest)), 1)
+  assert.equal(occurrences(merged, digestLine(linuxDigest)), 1)
+  assert.equal(linuxMerge(merged), merged)
+  assert.equal(windowsMerge(merged), merged)
+})
+
+test('a published body that lost the Windows steps gets them back before the digest lines and keeps them on a rerun', () => {
+  const lost = `${changelog}\n\n${linuxSection}\n\n${digestLine(windowsDigest)}\n\n${digestLine(linuxDigest)}\n`
+  const restored = windowsMerge(lost)
+  assert.equal(restored, `${changelog}\n\n${linuxSection}\n\n${windowsSection}\n\n${digestLine(windowsDigest)}\n\n${digestLine(linuxDigest)}\n`)
+  assert.equal(windowsMerge(restored), restored)
+  assert.equal(linuxMerge(restored), restored)
+})
+
+test('a body that GitHub returned with Windows line endings is recognised and not duplicated', () => {
+  const crlf = createdBody(windowsSection, windowsDigest).replace(/\n/g, '\r\n')
+  assert.equal(windowsMerge(crlf), crlf)
+  const merged = linuxMerge(crlf)
+  assert.equal(occurrences(merged, 'Early access build for Windows 10 and 11, x64.'), 1)
+  assert.equal(occurrences(merged, linuxSection), 1)
+  assert.equal(occurrences(merged, digestLine(windowsDigest)), 1)
+  assert.equal(occurrences(merged, digestLine(linuxDigest)), 1)
+})
+
+test('the release notes merge refuses an empty section, a section with a digest line, and a malformed digest', () => {
+  assert.throws(() => mergeReleaseNotes('notes', { section: '\n\n', setDigest: linuxDigest }), /section is empty/)
+  assert.throws(() => mergeReleaseNotes('notes', { section: `${linuxSection}\n${digestLine(linuxDigest)}`, setDigest: linuxDigest }), /must not carry a release set digest/)
+  assert.throws(() => mergeReleaseNotes('notes', { section: linuxSection, setDigest: 'not-a-digest' }), /valid release set digest/)
+})
+
+test('both publish tools write the release body through the one merge', async () => {
+  for (const file of ['reconcile-github-release.mjs', 'publish-linux-release.mjs']) {
+    const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8')
+    assert.match(source, /mergeReleaseNotes\(release\.body \?\? '', \{ section: await readFile\(sectionFilename, 'utf8'\), setDigest: candidate\.setDigest \}\)/, `${file} must merge its section into the existing body`)
+    assert.doesNotMatch(source, /appendSetDigest/, `${file} must not append only the digest`)
+    assert.match(source, /!sectionFilename/, `${file} must require the section file`)
   }
 })
