@@ -83,30 +83,35 @@ export const npmFindings = (report) => {
         title: source.title ?? '',
         url: source.url ?? '',
         cwe: source.cwe,
+        cvss: typeof source.cvss?.vectorString === 'string' ? [source.cvss.vectorString] : [],
       })
     }
   }
   return [...findings.values()]
 }
 
+const installedPackageName = (location) => location.slice(location.lastIndexOf('node_modules/') + 'node_modules/'.length)
 const lockPackageName = (location, entry) =>
-  typeof entry?.name === 'string' && entry.name
-    ? entry.name
-    : location.slice(location.lastIndexOf('node_modules/') + 'node_modules/'.length)
+  typeof entry?.name === 'string' && entry.name ? entry.name : installedPackageName(location)
 
 export const npmShippedState = (lock, shippedPackages) => {
   if (!(shippedPackages instanceof Set)) return () => true
   const copies = new Map()
   for (const [location, entry] of Object.entries(lock?.packages ?? {})) {
     if (!location.includes('node_modules/')) continue
-    for (const name of new Set([lockPackageName(location, entry), location.slice(location.lastIndexOf('node_modules/') + 'node_modules/'.length)])) {
+    const installedName = installedPackageName(location)
+    for (const name of new Set([lockPackageName(location, entry), installedName])) {
       if (!copies.has(name)) copies.set(name, [])
-      copies.get(name).push(entry)
+      copies.get(name).push({ entry, installedName })
     }
   }
   return (name) => {
     const installed = copies.get(name) ?? []
-    return shippedPackages.has(name) || installed.length === 0 || installed.some((entry) => entry?.dev !== true)
+    return (
+      shippedPackages.has(name) ||
+      installed.length === 0 ||
+      installed.some(({ entry, installedName }) => entry?.dev !== true || shippedPackages.has(installedName))
+    )
   }
 }
 
@@ -131,7 +136,7 @@ export const evaluateFindings = (findings, exceptions, { ships = () => true } = 
   for (const finding of findings) {
     const entry = exceptions.find((candidate) => matches(finding, candidate))
     if (entry) accepted.push({ ...finding, expires: entry.expires })
-    else if (finding.ecosystem === 'npm' && !ships(finding.package) && onlyResourceExhaustion(finding.cwe)) buildTools.push(finding)
+    else if (finding.ecosystem === 'npm' && !ships(finding.package) && onlyResourceExhaustion(finding.cwe, finding.cvss)) buildTools.push(finding)
     else blocking.push(finding)
   }
   const unused = exceptions.filter((entry) => !findings.some((finding) => matches(finding, entry)))
@@ -142,8 +147,8 @@ const loadShippedState = async () => {
   let shippedPackages = null
   try {
     shippedPackages = await readShippedPackages(shippedPackagesPath)
-  } catch {
-    console.log(`${path.relative(root, shippedPackagesPath)} is missing or unreadable, so every npm package counts as shipped.`)
+  } catch (error) {
+    console.log(`Every npm package counts as shipped because ${path.relative(root, shippedPackagesPath)} cannot be used. ${error.message}`)
   }
   return npmShippedState(JSON.parse(readFileSync(npmLockPath, 'utf8')), shippedPackages)
 }

@@ -13,11 +13,13 @@ import {
   dependencyRoleProperty,
   markDependencyRoles,
   markNeverCompiled,
+  markVendoredGlib,
+  npmComponents,
   neverCompiledProperty,
   pulledInByProperty,
   vendorTreeDigest,
 } from './create-sbom.mjs'
-import { packageNameFromModuleId } from './shipped-packages.mjs'
+import { packageNameFromModuleId, readShippedPackages, shippedInventory } from './shipped-packages.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
@@ -35,7 +37,8 @@ function generate(shipped = shippedFixture) {
   const output = mkdtempSync(join(tmpdir(), 'sesame-sbom-'))
   try {
     const shippedFile = join(output, 'shipped-npm-packages.json')
-    writeFileSync(shippedFile, `${JSON.stringify([...shipped].sort(), null, 2)}\n`)
+    const moduleIds = shipped.map((name) => join(root, 'node_modules', name, 'index.js'))
+    writeFileSync(shippedFile, `${JSON.stringify(shippedInventory(moduleIds, root), null, 2)}\n`)
     execFileSync(process.execPath, [join(root, 'tools', 'create-sbom.mjs')], {
       cwd: root,
       env: {
@@ -321,4 +324,92 @@ test('every cargo crate in the bill of materials says whether a Sesame crate nam
   const zvariant = cargo.find((component) => component.name === 'zvariant')
   assert.deepEqual(role(zvariant), ['transitive'])
   assert.match(zvariant.properties.find((property) => property.name === pulledInByProperty).value, /\bzbus\b/)
+})
+
+test('an aliased npm package that the bundle lists under its folder name is required', () => {
+  const lock = {
+    packages: {
+      '': { name: 'example-app' },
+      'node_modules/example-alias': { name: 'example-real', version: '3.0.0', dev: true, integrity: 'sha512-AAAA' },
+      'node_modules/@example/scoped-alias': { name: '@example/scoped-real', version: '1.0.0', dev: true },
+      'node_modules/example-tool': { version: '2.0.0', dev: true },
+    },
+  }
+  const scopes = (shipped) =>
+    Object.fromEntries(npmComponents(lock, new Set(shipped)).map((component) => [component.purl, component.scope]))
+  assert.deepEqual(scopes(['example-alias', '@example/scoped-alias']), {
+    'pkg:npm/example-real@3.0.0': 'required',
+    'pkg:npm/@example/scoped-real@1.0.0': 'required',
+    'pkg:npm/example-tool@2.0.0': 'excluded',
+  })
+  assert.deepEqual(scopes(['example-real']), {
+    'pkg:npm/example-real@3.0.0': 'required',
+    'pkg:npm/@example/scoped-real@1.0.0': 'excluded',
+    'pkg:npm/example-tool@2.0.0': 'excluded',
+  })
+  assert.deepEqual(Object.values(scopes([])), ['excluded', 'excluded', 'excluded'])
+})
+
+test('only the vendored glib crate carries the vendor tree digest', () => {
+  const vendored = { name: 'glib', version: '0.18.5', purl: 'pkg:cargo/glib@0.18.5', properties: [{ name: 'sesame:source', value: 'path' }] }
+  const registry = { name: 'glib', version: '0.20.0', purl: 'pkg:cargo/glib@0.20.0', properties: [{ name: dependencyRoleProperty, value: 'direct' }] }
+  const bare = { name: 'glib', version: '0.19.0', purl: 'pkg:cargo/glib@0.19.0' }
+  const other = { name: 'example-crate', version: '1.0.0', purl: 'pkg:cargo/example-crate@1.0.0', properties: [{ name: 'sesame:source', value: 'path' }] }
+  markVendoredGlib([vendored, registry, bare, other], 'a'.repeat(64))
+  const digestOf = (component) => component.properties?.find((property) => property.name === 'sesame:vendor-tree-sha256')?.value
+  assert.equal(digestOf(vendored), 'a'.repeat(64))
+  assert.equal(digestOf(registry), undefined)
+  assert.equal(digestOf(bare), undefined)
+  assert.equal(digestOf(other), undefined)
+})
+
+test('the shipped package list is accepted only for the inputs it was built from', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'sesame-shipped-inputs-'))
+  try {
+    mkdirSync(join(base, 'src'), { recursive: true })
+    writeFileSync(join(base, 'package-lock.json'), '{"name":"example-app"}\n')
+    writeFileSync(join(base, 'vite.config.ts'), 'export default {}\n')
+    writeFileSync(join(base, 'index.html'), '<script type="module" src="/src/main.ts"></script>\n')
+    writeFileSync(join(base, 'src', 'main.ts'), "import 'example-ui'\n")
+    const moduleIds = [
+      join(base, 'index.html'),
+      `${join(base, 'src', 'main.ts')}?used`,
+      join(base, 'node_modules', 'example-ui', 'index.js'),
+      join(base, 'node_modules', '@example', 'widgets', 'index.js'),
+      '\0vite/modulepreload-polyfill.js',
+    ]
+    const inventory = shippedInventory(moduleIds, base)
+    assert.deepEqual(inventory.packages, ['@example/widgets', 'example-ui'])
+    assert.deepEqual(inventory.inputs.map((input) => input.path), ['index.html', 'package-lock.json', 'src/main.ts', 'vite.config.ts'])
+    const file = join(base, 'shipped-npm-packages.json')
+    const write = (value) => writeFileSync(file, `${JSON.stringify(value)}\n`)
+    write(inventory)
+    assert.deepEqual([...(await readShippedPackages(file, base))], ['@example/widgets', 'example-ui'])
+
+    writeFileSync(join(base, 'src', 'main.ts'), "import 'example-ui'\nimport 'example-dev-tool'\n")
+    await assert.rejects(readShippedPackages(file, base), /src\/main\.ts has changed/)
+    writeFileSync(join(base, 'src', 'main.ts'), "import 'example-ui'\n")
+    await readShippedPackages(file, base)
+    writeFileSync(join(base, 'package-lock.json'), '{"name":"example-app","lockfileVersion":3}\n')
+    await assert.rejects(readShippedPackages(file, base), /package-lock\.json has changed/)
+    writeFileSync(join(base, 'package-lock.json'), '{"name":"example-app"}\n')
+
+    const rejected = {
+      'an older plain list': inventory.packages,
+      'no inputs': { packages: inventory.packages },
+      'empty inputs': { packages: inventory.packages, inputs: [] },
+      'no lock file': { packages: inventory.packages, inputs: inventory.inputs.filter((input) => input.path !== 'package-lock.json') },
+      'a path outside the tree': { ...inventory, inputs: [...inventory.inputs, { path: '../outside.ts', sha256: 'a'.repeat(64) }] },
+      'an absolute path': { ...inventory, inputs: [...inventory.inputs, { path: join(base, 'index.html'), sha256: inventory.inputs[0].sha256 }] },
+      'a missing input': { ...inventory, inputs: [...inventory.inputs, { path: 'src/gone.ts', sha256: 'a'.repeat(64) }] },
+      'a malformed digest': { ...inventory, inputs: inventory.inputs.map((input) => ({ ...input, sha256: input.sha256.toUpperCase() })) },
+      'a package that is not a name': { ...inventory, packages: [1] },
+    }
+    for (const [label, value] of Object.entries(rejected)) {
+      write(value)
+      await assert.rejects(readShippedPackages(file, base), /npm run desktop:build|must list/, label)
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true })
+  }
 })

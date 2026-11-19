@@ -11,6 +11,7 @@ import {
   collectSbomAdvisories,
   defaultSbomPath,
   awaitsUbuntuFix,
+  describeComponent,
   isWithdrawn,
   onlyUnmaintained,
   loadAllowlist,
@@ -613,10 +614,15 @@ test('a notice that carries anything beyond unmaintained still fails for a trans
 })
 
 const npmPackage = (scope, name = 'fictional-glob') => ({ ...component(name, '4.0.0', `pkg:npm/${name}@4.0.0`), ...(scope === undefined ? {} : { scope }) })
-const githubAdvisory = (cweIds, id = 'GHSA-fictional-glob') => ({
+const availabilityOnly = [
+  { type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H' },
+  { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N' },
+]
+const githubAdvisory = (cweIds, id = 'GHSA-fictional-glob', severity = availabilityOnly) => ({
   id,
   affected: [{ package: { ecosystem: 'npm', name: 'fictional-glob' } }],
   database_specific: cweIds === undefined ? { severity: 'HIGH' } : { severity: 'HIGH', cwe_ids: cweIds },
+  ...(severity === null ? {} : { severity }),
 })
 const auditPackage = (target, advisories) =>
   collectSbomAdvisories([{ bom: { components: [target] } }], { query: async () => advisories, today: '2026-11-17' })
@@ -653,4 +659,45 @@ test('resource exhaustion fails in a package that ships or whose shipped state i
   assert.equal((await auditPackage(cargo, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
   const bundled = { ...component('fictional-glob', '4.0.0', 'pkg:deb/ubuntu/fictional-glob@4.0.0'), scope: 'excluded' }
   assert.equal((await auditPackage(bundled, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
+})
+
+test('a broad resource exhaustion weakness with confidentiality or integrity impact still fails', async () => {
+  const cases = {
+    'high confidentiality and integrity': [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
+    'one vector of two has integrity impact': [availabilityOnly[0], { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N' }],
+    'subsequent system integrity': [{ type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:L/SA:N' }],
+    'only an ecosystem priority': [{ type: 'Ubuntu', score: 'low' }],
+    'an older vector it cannot read': [{ type: 'CVSS_V2', score: 'AV:N/AC:L/Au:N/C:N/I:N/A:C' }, availabilityOnly[0]],
+    'a malformed vector': [{ type: 'CVSS_V3', score: 'CVSS:3.1/C:N/I:N/A' }],
+    'an empty list': [],
+    'no severity field': null,
+  }
+  for (const [label, severity] of Object.entries(cases)) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(['CWE-400'], 'GHSA-fictional-glob', severity)])
+    assert.equal(report.vulnerable.length, 1, label)
+    assert.deepEqual(report.buildTools, [], label)
+  }
+  const malformed = await auditPackage(npmPackage('excluded'), [{ ...githubAdvisory(['CWE-400']), severity: 'HIGH' }])
+  assert.equal(malformed.vulnerable.length, 1)
+})
+
+test('a withdrawal later in the same millisecond has not taken effect yet', () => {
+  const now = Date.parse('2026-11-17T12:00:00.123Z')
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123456789Z' }, now), false)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123000001Z' }, now), false)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123000000Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.122999999Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.124Z' }, now), false)
+})
+
+test('a line names its SBOM only when more than one SBOM was audited', async () => {
+  const sources = [
+    { label: 'first.cdx.json', bom: { components: [npmPackage('excluded')] } },
+    { label: 'second.cdx.json', bom: { components: [npmPackage('required')] } },
+  ]
+  const report = await collectSbomAdvisories(sources, { query: async () => [githubAdvisory(['CWE-1333'])], today: '2026-11-17' })
+  assert.deepEqual(report.buildTools.map((entry) => describeComponent(entry, true)), ['first.cdx.json: fictional-glob@4.0.0: GHSA-fictional-glob'])
+  assert.deepEqual(report.vulnerable.map((entry) => describeComponent(entry, true)), ['second.cdx.json: fictional-glob@4.0.0: GHSA-fictional-glob'])
+  assert.equal(describeComponent(report.vulnerable[0], false), 'fictional-glob@4.0.0: GHSA-fictional-glob')
 })

@@ -95,8 +95,16 @@ test('an npm advisory without a GHSA identifier can never be accepted', () => {
   assert.equal(evaluateFindings(findings, [exception()]).blocking.length, 1)
 })
 
-const globReport = (cwe, name = 'example-glob') =>
-  npmReport([advisory({ name, url: 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf', ...(cwe === undefined ? {} : { cwe }) })])
+const availabilityVector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H'
+const globReport = (cwe, name = 'example-glob', cvss = { score: 7.5, vectorString: availabilityVector }) =>
+  npmReport([
+    advisory({
+      name,
+      url: 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf',
+      ...(cwe === undefined ? {} : { cwe }),
+      ...(cvss === null ? {} : { cvss }),
+    }),
+  ])
 const devLock = {
   packages: {
     '': { name: 'example-app' },
@@ -137,4 +145,33 @@ test('resource exhaustion fails in a package that ships or whose shipped state i
   assert.equal(blocked('example-glob', undefined), 1, 'no shipped state was given')
   const cargo = cargoFindings({ vulnerabilities: { list: [{ advisory: { id: 'RUSTSEC-2026-0001' }, package: { name: 'example-glob' } }] } })
   assert.equal(evaluateFindings(cargo.map((finding) => ({ ...finding, cwe: ['CWE-1333'] })), [], { ships: buildOnly }).blocking.length, 1)
+})
+
+test('a bundled alias counts as shipped under its published name', () => {
+  const bundled = npmShippedState(devLock, new Set(['example-alias']))
+  assert.equal(bundled('example-real'), true)
+  assert.equal(bundled('example-alias'), true)
+  assert.equal(evaluateFindings(npmFindings(globReport(['CWE-1333'], 'example-real')), [], { ships: bundled }).blocking.length, 1)
+  assert.equal(evaluateFindings(npmFindings(globReport(['CWE-1333'], 'example-real')), [], { ships: buildOnly }).buildTools.length, 1)
+})
+
+test('resource exhaustion with confidentiality or integrity impact, or without a readable vector, still fails', () => {
+  const cases = {
+    'high confidentiality and integrity': { score: 9.1, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N' },
+    'low integrity': { score: 8.2, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:H' },
+    'no vector': { score: 0, vectorString: null },
+    'unparseable vector': { score: 7.5, vectorString: 'AV:N/AC:L/C:N/I:N/A:H' },
+    'repeated metric': { score: 7.5, vectorString: 'CVSS:3.1/AV:N/C:N/I:N/I:H/A:H' },
+    'missing integrity metric': { score: 7.5, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/A:H' },
+    'no cvss field': null,
+  }
+  for (const [label, cvss] of Object.entries(cases)) {
+    const result = evaluateFindings(npmFindings(globReport(['CWE-400'], 'example-glob', cvss)), [], { ships: buildOnly })
+    assert.equal(result.blocking.length, 1, label)
+    assert.deepEqual(result.buildTools, [], label)
+  }
+  const v4 = { score: 8.7, vectorString: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N' }
+  assert.equal(evaluateFindings(npmFindings(globReport(['CWE-1333'], 'example-glob', v4)), [], { ships: buildOnly }).buildTools.length, 1)
+  const v4Subsequent = { score: 8.7, vectorString: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:H/SA:N' }
+  assert.equal(evaluateFindings(npmFindings(globReport(['CWE-1333'], 'example-glob', v4Subsequent)), [], { ships: buildOnly }).blocking.length, 1)
 })

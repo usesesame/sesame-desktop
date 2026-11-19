@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readShippedPackages } from './shipped-packages.mjs'
+import { packageNameFromModuleId, readShippedPackages } from './shipped-packages.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const destination = process.env.SESAME_SBOM_OUTPUT_DIR
@@ -29,18 +29,19 @@ const shippedPackagesFile = process.env.SESAME_SHIPPED_PACKAGES
   ? path.resolve(process.env.SESAME_SHIPPED_PACKAGES)
   : path.join(root, 'dist', 'shipped-npm-packages.json')
 
-const npmComponents = (shippedPackages) =>
-  Object.entries(JSON.parse(npmLock).packages ?? {})
+export const npmComponents = (lock, shippedPackages) =>
+  Object.entries(lock.packages ?? {})
     .filter(([name]) => name.includes('node_modules/'))
     .map(([name, entry]) => {
-      const packageName =
-        entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
+      const installedName = packageNameFromModuleId(name)
+      const packageName = entry.name ?? installedName
+      const shipped = shippedPackages.has(packageName) || shippedPackages.has(installedName)
       const component = {
         type: 'library',
         name: packageName,
         version: entry.version,
         purl: `pkg:npm/${packageName}@${entry.version}`,
-        scope: entry.dev && !shippedPackages.has(packageName) ? 'excluded' : 'required',
+        scope: entry.dev && !shipped ? 'excluded' : 'required',
       }
       const hash = npmHash(entry.integrity)
       if (hash) component.hashes = [hash]
@@ -213,20 +214,27 @@ export const vendorTreeDigest = async (directory, base = root) => {
   return hash.digest('hex')
 }
 
+const vendoredSource = (component) =>
+  (component.properties ?? []).some((property) => property.name === 'sesame:source' && property.value === 'path')
+
+export const markVendoredGlib = (components, vendorTree) => {
+  for (const component of components) {
+    if (component.name === 'glib' && vendoredSource(component)) {
+      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
+    }
+  }
+}
+
 const main = async () => {
   const shippedPackages = await readShippedPackages(shippedPackagesFile)
   const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
   markNeverCompiled(cargoComponents, compiledCrates(cargoTree()))
   markDependencyRoles(cargoComponents, cargoDependencyRoles(cargoMetadata()))
-  for (const component of cargoComponents) {
-    if (component.name === 'glib' && component.properties) {
-      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
-    }
-  }
+  markVendoredGlib(cargoComponents, vendorTree)
 
   await mkdir(destination, { recursive: true })
   const components = [
-    ...npmComponents(shippedPackages),
+    ...npmComponents(JSON.parse(npmLock), shippedPackages),
     ...cargoComponents,
     ...(goSum
       ? [
