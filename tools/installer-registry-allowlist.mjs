@@ -1,9 +1,7 @@
 export const ALLOWED_REGISTRY_OPERATIONS = [
-  /^ReadRegStr \$R[04] HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"$/,
-  /^(?:WriteRegStr|WriteRegExpandStr) HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"$/,
-  /^System::Call 'advapi32::RegGetValueW\(p 0x80000002, w "\$\{SESAME_ENVIRONMENT_KEY\}", w "Path", i 0x1000ffff, \*i \.R4, p 0, p 0\) i \.R5'$/,
   /^ReadRegStr \$SesameOwnsTerminalPath SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"$/,
   /^WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"$/,
+  /^WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_STATUS_VALUE\}" "\$0"$/,
 ]
 
 export function unexpectedRegistryOperations(hook) {
