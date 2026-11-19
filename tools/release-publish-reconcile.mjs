@@ -212,6 +212,34 @@ export function planReleasePublication({ release, expectedAssets, setDigest, for
   }
 }
 
+export function mergeReleaseNotes(body, { section, setDigest }) {
+  const sectionLines = section.split(/\r?\n/)
+  while (sectionLines.length > 0 && sectionLines[sectionLines.length - 1].trim() === '') sectionLines.pop()
+  const lead = sectionLines[0]?.trim() ?? ''
+  if (lead === '') throw new Error('The release notes section is empty.')
+  const digestPrefix = `${RELEASE_SET_DIGEST_LABEL}: `
+  if (!sha256Pattern.test(setDigest ?? '')) throw new Error('The release notes need a valid release set digest.')
+  if (sectionLines.some((line) => line.startsWith(digestPrefix))) throw new Error('The release notes section must not carry a release set digest line.')
+
+  const original = body ?? ''
+  const lines = original.split(/\r?\n/)
+  const join = (blocks) => blocks.map((block) => block.replace(/\s+$/, '')).filter((block) => block !== '').join('\n\n')
+  let notes = original
+  let changed = false
+  if (!lines.some((line) => line.trim() === lead)) {
+    const firstDigest = lines.findIndex((line) => line.startsWith(digestPrefix))
+    const head = lines.slice(0, firstDigest === -1 ? lines.length : firstDigest).join('\n')
+    const tail = firstDigest === -1 ? '' : lines.slice(firstDigest).join('\n')
+    notes = `${join([head, sectionLines.join('\n'), tail])}${/\n$/.test(original) ? '\n' : ''}`
+    changed = true
+  }
+  if (!notes.split(/\r?\n/).some((line) => line.trim() === `${digestPrefix}${setDigest}`)) {
+    notes = `${join([notes])}\n\n${digestPrefix}${setDigest}\n`
+    changed = true
+  }
+  return changed ? notes : original
+}
+
 // The server accepts an exact replay with 201, so the same POST is both the
 // state query and the mutation; a timeout after acceptance converges on the
 // next attempt without a second candidate.

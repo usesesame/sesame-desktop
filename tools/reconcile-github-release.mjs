@@ -7,20 +7,20 @@ import { promisify } from 'node:util'
 import { fileSha256 } from './release-evidence-lib.mjs'
 import {
   RELEASE_LIST_JQ,
-  RELEASE_SET_DIGEST_LABEL,
   RELEASE_VISIBILITY_DRAFT,
   assertCandidateMatchesAssets,
   collectPublishAssets,
   linuxLaneAssetPatterns,
+  mergeReleaseNotes,
   parseReleaseList,
   parseReleaseVisibility,
   planReleasePublication,
   selectReleaseForTag,
 } from './release-publish-reconcile.mjs'
 
-const [handoffDirectory, publicDirectory, manifestFilename, candidateFilename, notesFilename] = process.argv.slice(2)
-if (!handoffDirectory || !publicDirectory || !manifestFilename || !candidateFilename) {
-  throw new Error('Usage: node tools/reconcile-github-release.mjs <handoff-dir> <public-evidence-dir> <manifest-filename> <candidate-filename> [notes-file]')
+const [handoffDirectory, publicDirectory, manifestFilename, candidateFilename, notesFilename, sectionFilename] = process.argv.slice(2)
+if (!handoffDirectory || !publicDirectory || !manifestFilename || !candidateFilename || !sectionFilename) {
+  throw new Error('Usage: node tools/reconcile-github-release.mjs <handoff-dir> <public-evidence-dir> <manifest-filename> <candidate-filename> <notes-file> <section-file>')
 }
 
 const repository = process.env.GITHUB_REPOSITORY
@@ -61,8 +61,7 @@ const downloadAssets = async (remoteAssets) => {
 
 const assetPaths = (names) => names.map((name) => assets.find((asset) => asset.name === name).path)
 
-const appendSetDigest = async (body, directory) => {
-  const notes = `${body.replace(/\n*$/, '')}\n\n${RELEASE_SET_DIGEST_LABEL}: ${candidate.setDigest}\n`
+const updateNotes = async (notes, directory) => {
   const notesPath = path.join(directory, 'release-notes.md')
   await writeFile(notesPath, notes)
   await gh(['release', 'edit', tag, '--repo', repository, '--notes-file', notesPath])
@@ -84,10 +83,11 @@ const reconcile = async (release) => {
     ].join('\n'))
   }
   if (plan.upload.length > 0) await gh(['release', 'upload', tag, '--repo', repository, ...assetPaths(plan.upload)])
-  if (plan.anchor === 'append') {
+  const notes = mergeReleaseNotes(release.body ?? '', { section: await readFile(sectionFilename, 'utf8'), setDigest: candidate.setDigest })
+  if (notes !== (release.body ?? '')) {
     const directory = await mkdtemp(path.join(tmpdir(), 'sesame-release-notes-'))
     try {
-      await appendSetDigest(release.body ?? '', directory)
+      await updateNotes(notes, directory)
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
