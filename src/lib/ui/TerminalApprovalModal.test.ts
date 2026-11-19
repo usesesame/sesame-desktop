@@ -39,6 +39,7 @@ function request(partial: Partial<CliApprovalRequestEvent> = {}): CliApprovalReq
     remote: false,
     canAllowTerminal: true,
     needsPresence: false,
+    missingField: false,
     allowed: false,
     expiresInMs: 60_000,
     ...partial,
@@ -156,11 +157,31 @@ test('Enter in the master password field does not allow', async () => {
 })
 
 test('Escape and the Deny button both refuse', async () => {
+  vi.useFakeTimers()
   const { props } = show()
+  await armed()
   await fireEvent.keyDown(window, { key: 'Escape' })
   await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
   expect(props.onDeny).toHaveBeenCalledTimes(2)
   expect(props.onAllow).not.toHaveBeenCalled()
+})
+
+test('a key or click meant for what was on screen before does nothing to a dialog that just appeared', async () => {
+  vi.useFakeTimers()
+  terminalApi.getTerminalApprovalWait.mockResolvedValue(0)
+  const { props } = show()
+  await vi.advanceTimersByTimeAsync(300)
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
+  await fireEvent.click(screen.getByRole('checkbox', { name: /Allow this terminal for five minutes/ }))
+  await fireEvent.click(document.querySelector('[data-modal-shell]') as HTMLElement)
+  expect(props.onDeny).not.toHaveBeenCalled()
+  expect(props.onAllowTerminal).not.toHaveBeenCalled()
+  expect(allowButton().disabled).toBe(true)
+  await vi.advanceTimersByTimeAsync(500)
+  expect(allowButton().disabled).toBe(false)
+  await fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
+  expect(props.onDeny).toHaveBeenCalledTimes(1)
 })
 
 test('the allow-terminal box is unticked and explains what it allows', () => {
@@ -195,7 +216,9 @@ test('the chooser needs a pick before allow and offers only the items Sesame sen
 })
 
 test('a request for a missing item shows only an OK button', async () => {
+  vi.useFakeTimers()
   const { props } = show({ candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false, fieldHidden: false })
+  await armed()
   expect(screen.getByRole('heading', { name: 'A terminal asked for an item you do not have' })).toBeTruthy()
   expect(screen.getByText('Northwnd mail')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
@@ -203,6 +226,65 @@ test('a request for a missing item shows only an OK button', async () => {
   await fireEvent.keyDown(window, { key: 'Escape' })
   expect(props.onDismiss).toHaveBeenCalledTimes(2)
   expect(props.onDeny).not.toHaveBeenCalled()
+})
+
+test('a field the item does not have shows only an OK button and names the field asked for', async () => {
+  vi.useFakeTimers()
+  const { props } = show({ field: 'Recovery PIN', fieldHidden: false, missingField: true, canAllowTerminal: false, candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldHidden: false }] })
+  await armed()
+  expect(screen.getByRole('heading', { name: 'A terminal asked for a field this item does not have' })).toBeTruthy()
+  expect(screen.getByText('Northwind mail')).toBeTruthy()
+  const row = screen.getByText('Field').closest('div') as HTMLElement
+  expect(row.textContent).toContain('Recovery PIN')
+  expect(row.textContent).toContain('No field by that name')
+  expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Deny' })).toBeNull()
+  expect(screen.queryByRole('checkbox')).toBeNull()
+  await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+  await fireEvent.keyDown(window, { key: 'Escape' })
+  expect(props.onDismiss).toHaveBeenCalledTimes(2)
+  expect(props.onDeny).not.toHaveBeenCalled()
+  expect(props.onAllow).not.toHaveBeenCalled()
+})
+
+test('the chooser keeps Allow off for an item that has no field by that name', async () => {
+  vi.useFakeTimers()
+  const { stores } = show({
+    field: 'Recovery PIN',
+    fieldHidden: false,
+    candidates: [
+      { id: 'northwind-a', kind: 'login', title: 'Northwind mail', fieldHidden: false },
+      { id: 'northwind-b', kind: 'login', title: 'Northwind mail', fieldName: 'Recovery PIN', fieldHidden: false },
+    ],
+  })
+  await armed()
+  stores.terminalApproval.patch({ selectedId: 'northwind-a' })
+  await tick()
+  expect(allowButton().disabled).toBe(true)
+  stores.terminalApproval.patch({ selectedId: 'northwind-b' })
+  await tick()
+  expect(allowButton().disabled).toBe(true)
+  await armed()
+  expect(allowButton().disabled).toBe(false)
+})
+
+test('the error line holds its place before an error so the buttons stay put', async () => {
+  const { stores } = show()
+  const line = () => document.getElementById('terminal-approval-error') as HTMLElement
+  const footer = document.querySelector('.terminal-footer') as HTMLElement
+  expect(line()).not.toBeNull()
+  expect(line().textContent).toBe('')
+  expect(line().nextElementSibling).toBe(footer)
+  stores.terminalApproval.patch({ error: 'That master password does not open this vault.' })
+  await tick()
+  expect(line().textContent).toBe('That master password does not open this vault.')
+  expect(line().nextElementSibling).toBe(footer)
+})
+
+test('a notice puts OK straight under the details with no empty line between', () => {
+  show({ candidates: [], notFound: 'Northwnd mail', canAllowTerminal: false, fieldHidden: false })
+  expect(document.getElementById('terminal-approval-error')).toBeNull()
+  expect(document.querySelector('.terminal-request')?.nextElementSibling?.classList.contains('terminal-footer')).toBe(true)
 })
 
 test('expiry closes the dialog through the controller', async () => {

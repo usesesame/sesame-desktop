@@ -1,5 +1,5 @@
 import type { CliApprovalRequestEvent } from './generated/CliApprovalRequestEvent'
-import type { CliCommandKind } from './generated/CliCommandKind'
+import type { CliUnlockRequestEvent } from './generated/CliUnlockRequestEvent'
 import { itemNoun } from './release-record'
 
 export const MAX_SHOWN_CHARS = 80
@@ -15,16 +15,24 @@ const BLANK_LOOKING_POINTS = new Set([0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x
 const BLANK_LOOKING = { test: (character: string) => BLANK_LOOKING_POINTS.has(character.codePointAt(0) ?? 0) }
 const READABLE = /[^?\s]/u
 
+export function hidesCharacter(character: string): boolean {
+  return BLANK_LOOKING.test(character) || HIDDEN_FORMATTING.test(character)
+}
+
+export function isMark(character: string): boolean {
+  return MARK.test(character)
+}
+
 function cleaned(value: string): string[] {
   const out: string[] = []
   let marks = 0
   let excess = false
   for (const character of value.normalize('NFC')) {
-    if (BLANK_LOOKING.test(character) || HIDDEN_FORMATTING.test(character)) {
+    if (hidesCharacter(character)) {
       out.push(STAND_IN)
       marks = 0
       excess = false
-    } else if (MARK.test(character)) {
+    } else if (isMark(character)) {
       if (out.length === 0 || out[out.length - 1] === ' ' || out[out.length - 1] === STAND_IN) {
         if (!excess) out.push(STAND_IN)
         excess = true
@@ -116,17 +124,14 @@ export function approvalSummary(request: HeadingRequest): string {
   return request.fieldHidden ? 'Sesame prints this hidden value in the terminal.' : 'Sesame prints this value in the terminal.'
 }
 
+export function noticeOnly(request: Pick<CliApprovalRequestEvent, 'notFound' | 'missingField'>): boolean {
+  return request.notFound !== undefined || request.missingField
+}
+
 export function secretNeeded(request: CliApprovalRequestEvent, selectedId: string, presenceGranted: boolean): boolean {
   if (!request.needsPresence || presenceGranted) return false
   if (request.candidates.length <= 1) return true
   return request.candidates.some((candidate) => candidate.id === selectedId && candidate.fieldHidden)
-}
-
-export function commandWords(command: CliCommandKind | string): string {
-  if (command === 'list') return 'list every item title'
-  if (command === 'totp') return 'read a one-time code'
-  if (command === 'get') return 'read an item'
-  return 'make a request'
 }
 
 export function outputWords(copy: boolean, clearAfterSeconds: number): string {
@@ -149,16 +154,19 @@ export function cancelledLine(reason: string): string {
   return cancelledLines[reason] ?? 'Sesame closed the terminal request.'
 }
 
-export function unlockLine(command: CliCommandKind): string {
-  return `A terminal is waiting to ${commandWords(command)}. Sesame asks you about it after you unlock.`
+type UnlockRequest = Pick<CliUnlockRequestEvent, 'command' | 'field' | 'copy'>
+
+export function unlockLine(request: UnlockRequest): string {
+  const wanted = approvalHeading({ command: request.command, field: request.field, copy: request.copy, fieldHidden: false })
+  return `${wanted}. Sesame asks you about it after you unlock.`
 }
 
 export function remainingWords(ms: number): string {
-  const seconds = Math.max(0, Math.ceil(ms / 1_000))
-  if (seconds >= 60) {
-    const minutes = Math.ceil(seconds / 60)
+  if (ms >= 60_000) {
+    const minutes = Math.floor(ms / 60_000)
     return `${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}`
   }
+  const seconds = Math.min(59, Math.max(0, Math.ceil(ms / 1_000)))
   return `${seconds} more ${seconds === 1 ? 'second' : 'seconds'}`
 }
 

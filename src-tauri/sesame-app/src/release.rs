@@ -4,16 +4,21 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
 use crate::vault::crypto::unwrap_with_password;
-use crate::vault::{bytes_match, UnlockedVault, VaultResult, WRAP_AAD};
+use crate::vault::key_proof::SecretProof;
+use crate::vault::{bytes_match, UnlockedVault, VaultResult, VaultState, WRAP_AAD};
 
 pub const PRESENCE_TTL: Duration = Duration::from_secs(120);
 pub const PRESENCE_REQUIRED: &str = "presenceRequired";
+pub const VAULT_CHANGED_DURING_CHECK: &str =
+    "The vault locked or changed while Sesame checked the master password. Try again.";
+const WRONG_PASSWORD: &str = "That master password does not open this vault.";
 const MAX_ATTEMPTS_BEFORE_COOLDOWN: u32 = 3;
 const COOLDOWN_BASE: Duration = Duration::from_secs(5);
 const COOLDOWN_MAX: Duration = Duration::from_secs(300);
 
 #[derive(Default)]
 pub struct ReleasePresence {
+    checking: Mutex<()>,
     grant: Mutex<Option<Grant>>,
     failures: Mutex<u32>,
     cooldown_until: Mutex<Option<Instant>>,
@@ -50,6 +55,33 @@ impl ReleasePresence {
         }
     }
 
+    pub fn ready_for_password(&self) -> VaultResult<()> {
+        self.await_cooldown()
+    }
+
+    pub fn grant_with_proof(
+        &self,
+        session: &UnlockedVault,
+        epoch: u64,
+        proof: &SecretProof,
+    ) -> VaultResult<()> {
+        self.await_cooldown()?;
+        if !proof.opens(session)? {
+            self.record_failure()?;
+            return Err(WRONG_PASSWORD.into());
+        }
+        let mut grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        let now = Instant::now();
+        *grant = Some(Grant {
+            epoch,
+            expires_at: now + PRESENCE_TTL,
+            password_checked_at: Some(now),
+        });
+        let mut failures = self.failures.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        *failures = 0;
+        Ok(())
+    }
+
     pub fn grant_with_password(
         &self,
         session: &UnlockedVault,
@@ -72,6 +104,61 @@ impl ReleasePresence {
             self.record_failure()?;
         }
         verified
+    }
+
+    pub fn grant_with_password_in(&self, state: &VaultState, secret: &str) -> VaultResult<()> {
+        self.grant_checked(state, secret, || {})
+    }
+
+    fn grant_checked(
+        &self,
+        state: &VaultState,
+        secret: &str,
+        during_check: impl FnOnce(),
+    ) -> VaultResult<()> {
+        let _checking = self.checking.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        self.await_cooldown()?;
+        let (epoch, kdf, key_wrap) = {
+            let session = state.session.lock().map_err(|_| LOCK_ERROR.to_string())?;
+            let session = session.as_ref().ok_or("Unlock your vault first.")?;
+            (
+                state.session_epoch(),
+                session.kdf.clone(),
+                session.key_wrap.clone(),
+            )
+        };
+        let unwrapped = unwrap_with_password(secret, &kdf, &key_wrap, WRAP_AAD);
+        during_check();
+        let mut candidate = unwrapped?;
+        let session = state.session.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        let unchanged = session.as_ref().is_some_and(|session| {
+            state.session_epoch() == epoch
+                && same_json(&session.kdf, &kdf)
+                && same_json(&session.key_wrap, &key_wrap)
+        });
+        let Some(session) = session.as_ref().filter(|_| unchanged) else {
+            candidate.zeroize();
+            return Err(VAULT_CHANGED_DURING_CHECK.into());
+        };
+        let matched = match candidate.as_ref() {
+            Some(candidate) => session.expose_vault_key(|key| Ok(bytes_match(candidate, key)))?,
+            None => false,
+        };
+        candidate.zeroize();
+        if !matched {
+            self.record_failure()?;
+            return Err(WRONG_PASSWORD.into());
+        }
+        let mut grant = self.grant.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        let now = Instant::now();
+        *grant = Some(Grant {
+            epoch,
+            expires_at: now + PRESENCE_TTL,
+            password_checked_at: Some(now),
+        });
+        let mut failures = self.failures.lock().map_err(|_| LOCK_ERROR.to_string())?;
+        *failures = 0;
+        Ok(())
     }
 
     pub fn grant_after_unlock(&self, epoch: u64) {
@@ -143,6 +230,13 @@ fn verify_master_password(session: &UnlockedVault, secret: &str) -> VaultResult<
     }
 }
 
+fn same_json<T: serde::Serialize>(left: &T, right: &T) -> bool {
+    match (serde_json::to_vec(left), serde_json::to_vec(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
 const LOCK_ERROR: &str = "Sesame could not read the vault session.";
 
 #[cfg(test)]
@@ -201,6 +295,77 @@ mod tests {
         presence.grant_after_unlock(7);
         assert_eq!(
             presence.require_password_since(7, since),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+    }
+
+    fn vault() -> crate::test_support::TestVault {
+        crate::test_support::TestVault::with_login("fictional-login", "https://northwind.example")
+    }
+
+    #[test]
+    fn the_master_password_check_leaves_the_session_free_and_grants_the_epoch_it_checked() {
+        let vault = vault();
+        let presence = ReleasePresence::default();
+        let epoch = vault.state.session_epoch();
+        let mut session_was_free = false;
+        presence
+            .grant_checked(&vault.state, "fictional master password", || {
+                session_was_free = vault.state.session.try_lock().is_ok();
+            })
+            .expect("password accepted");
+        assert!(session_was_free);
+        assert!(presence.require(epoch).is_ok());
+        assert_eq!(
+            presence.require(epoch + 1),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+    }
+
+    #[test]
+    fn a_lock_or_a_new_session_during_the_check_gets_no_grant() {
+        let vault = vault();
+        let presence = ReleasePresence::default();
+        let first = vault.state.session_epoch();
+        assert_eq!(
+            presence.grant_checked(&vault.state, "fictional master password", || {
+                vault.state.lock_for_lifecycle().expect("locked");
+            }),
+            Err(VAULT_CHANGED_DURING_CHECK.to_string())
+        );
+        assert_eq!(presence.require(first), Err(PRESENCE_REQUIRED.to_string()));
+
+        vault.reopen();
+        let reopened = vault.state.session_epoch();
+        assert_eq!(
+            presence.grant_checked(&vault.state, "fictional master password", || {
+                vault.reopen();
+            }),
+            Err(VAULT_CHANGED_DURING_CHECK.to_string())
+        );
+        for epoch in [reopened, vault.state.session_epoch()] {
+            assert_eq!(presence.require(epoch), Err(PRESENCE_REQUIRED.to_string()));
+        }
+    }
+
+    #[test]
+    fn checks_run_one_at_a_time_so_wrong_passwords_still_reach_the_cooldown() {
+        let vault = vault();
+        let presence = ReleasePresence::default();
+        let mut overlapped = false;
+        let _ = presence.grant_checked(&vault.state, "fictional wrong password", || {
+            overlapped = presence.checking.try_lock().is_ok();
+        });
+        assert!(!overlapped);
+        for _ in 1..MAX_ATTEMPTS_BEFORE_COOLDOWN {
+            let _ = presence.grant_with_password_in(&vault.state, "fictional wrong password");
+        }
+        assert_eq!(
+            presence.grant_with_password_in(&vault.state, "fictional master password"),
+            Err("Too many attempts. Wait a moment and try again.".to_string())
+        );
+        assert_eq!(
+            presence.require(vault.state.session_epoch()),
             Err(PRESENCE_REQUIRED.to_string())
         );
     }

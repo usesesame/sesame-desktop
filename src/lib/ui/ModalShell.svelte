@@ -4,7 +4,9 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, onMount, tick } from 'svelte'
+  import { onDestroy, tick } from 'svelte'
+  import { get } from 'svelte/store'
+  import { APPROVAL_SETTLE_MS, approvalOnScreen, claimApprovalSurface, claimPromptSurface } from '../controllers/approval-gate'
 
   export let open = true
   export let onClose: () => void
@@ -14,6 +16,8 @@
   export let modalClass = ''
   export let initialFocus: ((dialog: HTMLElement) => void) | null = null
   export let ariaBusy: boolean | undefined = undefined
+  export let approval = false
+  export let settleKey = ''
 
   const steady = typeof document !== 'undefined' && (document.querySelector('[data-modal-shell]') !== null || performance.now() - lastClosedAt < HANDOVER_MS)
 
@@ -22,6 +26,21 @@
   let portaledShell: HTMLDivElement | null = null
   let placed = false
   let returnFocus: HTMLElement | null = null
+  let focused = false
+  let waiting = !approval && get(approvalOnScreen)
+  let settled = !approval
+  let settleTimer: ReturnType<typeof setTimeout> | undefined
+  let stopWatching: () => void = () => {}
+  const releaseSurface = approval ? claimApprovalSurface() : claimPromptSurface()
+
+  let shownKey = settleKey
+
+  $: if (waiting && !$approvalOnScreen) waiting = false
+  $: if (approval && settleKey !== shownKey) {
+    shownKey = settleKey
+    unsettle()
+  }
+  $: shown = open && !waiting
 
   const focusableSelector = [
     'button:not([disabled])',
@@ -48,7 +67,7 @@
 
   async function focusModal() {
     await tick()
-    if (!open || !dialog) return
+    if (!shown || !dialog) return
     if (initialFocus) {
       initialFocus(dialog)
       if (dialog.contains(document.activeElement)) return
@@ -64,16 +83,44 @@
     queueMicrotask(() => target.focus({ preventScroll: true }))
   }
 
+  function unsettle() {
+    settled = false
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => (settled = true), APPROVAL_SETTLE_MS)
+  }
+
+  function ignoreUntilSettled(event: Event) {
+    if (settled) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  function watchPlacement(node: HTMLElement, box: HTMLElement) {
+    const events = ['click', 'dblclick', 'auxclick', 'mousedown', 'pointerdown']
+    for (const name of events) node.addEventListener(name, ignoreUntilSettled, true)
+    node.addEventListener('scroll', unsettle, true)
+    window.addEventListener('resize', unsettle)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(unsettle)
+    observer?.observe(box)
+    unsettle()
+    return () => {
+      for (const name of events) node.removeEventListener(name, ignoreUntilSettled, true)
+      node.removeEventListener('scroll', unsettle, true)
+      window.removeEventListener('resize', unsettle)
+      observer?.disconnect()
+    }
+  }
+
   function closeOnBackdrop(event: MouseEvent) {
     if (event.target === event.currentTarget && isTopmostModal()) onClose()
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (!open || !dialog || !isTopmostModal()) return
+    if (!shown || !dialog || !isTopmostModal()) return
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
-      onClose()
+      if (settled) onClose()
       return
     }
     if (event.key !== 'Tab') return
@@ -114,12 +161,21 @@
     placed = false
   }
 
-  onMount(() => {
+  $: if (shown && !focused) {
+    focused = true
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     void focusModal()
-  })
+  }
+
+  $: if (approval && placed && shell && dialog) {
+    stopWatching()
+    stopWatching = watchPlacement(shell, dialog)
+  }
 
   onDestroy(() => {
+    stopWatching()
+    if (settleTimer) clearTimeout(settleTimer)
+    releaseSurface()
     lastClosedAt = performance.now()
     portaledShell?.remove()
     portaledShell = null
@@ -129,10 +185,10 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-{#if open}
+{#if shown}
   <div bind:this={shell} class="modal-backdrop{tone ? ` ${tone}-backdrop` : ''}{steady ? ' modal-backdrop-steady' : ''}{placed ? '' : ' modal-backdrop-pending'}" data-modal-shell role="presentation" on:click={closeOnBackdrop}>
     <div bind:this={dialog} class="modal{modalClass ? ` ${modalClass}` : ''}" role="dialog" aria-modal="true" aria-labelledby={labelledby} aria-describedby={describedby || undefined} aria-busy={ariaBusy} tabindex="-1">
-      <slot />
+      <slot {settled} />
     </div>
   </div>
 {/if}

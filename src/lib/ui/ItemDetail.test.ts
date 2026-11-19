@@ -105,3 +105,44 @@ test('other kinds show no protection section', () => {
 
   expect(screen.queryByText('Protection')).toBeNull()
 })
+
+test('notes and field values keep right-to-left text, isolate it and show only an override as a stand-in', () => {
+  renderDetail({
+    detail: {
+      ...detail,
+      notes: 'שלום עולם\u200F\nInvoice \u202Efdp.exe',
+      tags: ['Work\u202E'],
+      fields: [{ label: 'Branch\u202E', value: 'مرحبا \u202Eelpmaxe', secret: false, multiline: false, icon: 'user' }],
+    },
+  })
+  const container = document.body
+  const notes = container.querySelector('.item-notes') as HTMLElement
+  expect(notes.textContent).toBe('שלום עולם\u200F\nInvoice ?fdp.exe')
+  expect(notes.getAttribute('dir')).toBe('auto')
+  expect(container.querySelector('.tag-chip bdi')?.textContent).toBe('Work?')
+  expect(container.textContent).not.toMatch(/[\u202D\u202E]/)
+})
+
+test('a revealed secret field is shown exactly with a note when it hides a character', () => {
+  renderDetail({ revealed: { number: "4111\u200B1111" } })
+  const container = document.body
+  expect(container.querySelector('.secret-text bdi')?.textContent).toBe('4111\u200B1111')
+  expect(container.querySelector('.secret-text-note')).not.toBeNull()
+})
+
+test('a tooltip and a screen reader label show a direction override in a title or field name as a stand-in', () => {
+  renderDetail({
+    detail: {
+      ...detail,
+      title: 'Mallory ‮gnp.exe‬ Item',
+      fields: [{ label: 'PIN ‮edoc‬', value: '0000', secret: false, multiline: false, icon: 'key' }],
+    },
+  })
+  const edit = screen.getByRole('button', { name: 'Edit Mallory ?gnp.exe? Item' })
+  expect(edit.getAttribute('title')).toBe('Edit Mallory ?gnp.exe? Item')
+  const copy = screen.getByRole('button', { name: 'Copy PIN ?edoc?' })
+  expect(copy.getAttribute('title')).toBe('Copy PIN ?edoc?')
+  for (const element of document.querySelectorAll('[title], [aria-label]')) {
+    expect(`${element.getAttribute('title') ?? ''}${element.getAttribute('aria-label') ?? ''}`).not.toMatch(/[‪-‮⁦-⁩]/)
+  }
+})

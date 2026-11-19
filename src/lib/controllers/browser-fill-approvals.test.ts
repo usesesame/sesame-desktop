@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { writable } from 'svelte/store'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { createAppStores } from '../stores/app-stores'
+import { claimPromptSurface, createApprovalGate } from './approval-gate'
 import { createBrowserFillController } from './browser-fill-controller'
 import { createCardFillController } from './card-fill-controller'
 import { createFeedbackController } from './feedback-controller'
@@ -392,5 +394,127 @@ describe.each(flows)('$name approvals', (flow) => {
     await flush()
     expect(stopSubscription).toHaveBeenCalledTimes(1)
     expect(stopLocked).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe.each(flows)('$name approvals behind something the person is answering', (flow) => {
+  let stores: Stores
+  let feedback: ReturnType<typeof createFeedbackController>
+  let handlers: { request: (payload: unknown) => void; cancelled: (payload: unknown) => void }
+  let answering: ReturnType<typeof writable<boolean>>
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    for (const mock of Object.values(vaultApi)) mock.mockReset()
+    stores = createAppStores()
+    stores.vault.patch({ status: { ...stores.vault.value().status, unlocked: true } })
+    feedback = createFeedbackController()
+    answering = writable(false)
+    flow.subscribe.mockImplementation(async (next) => {
+      handlers = next
+      return () => {}
+    })
+    vaultApi.onVaultLocked.mockImplementation(async () => () => {})
+    flow.pending.mockResolvedValue(null)
+    flow.answer.mockResolvedValue(undefined)
+    vaultApi.recordDiagnostic.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function state() {
+    return stores[flow.store].value()
+  }
+
+  async function started() {
+    const modal = createModalController({ stores, feedback })
+    const gate = createApprovalGate(stores, answering)
+    const controller = flow.create({ stores, feedback, onVaultLocked: vi.fn(), modal, held: () => gate.held(flow.store) }) as Controller & { syncPending: () => Promise<void> }
+    const stopWake = gate.whenClear(() => void controller.syncPending())
+    const stopLoop = controller.start()
+    await flush()
+    return { controller, modal, stop: () => { stopWake(); stopLoop() } }
+  }
+
+  it('waits unanswered while the person answers something else and shows as soon as the way is clear', async () => {
+    const { stop } = await started()
+    answering.set(true)
+    flow.pending.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    await vi.advanceTimersByTimeAsync(9_000)
+    expect(state().request).toBeNull()
+    expect(flow.answer).not.toHaveBeenCalled()
+    answering.set(false)
+    await flush()
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(flow.answer).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('waits behind an open dialog or menu instead of turning the request down', async () => {
+    const { modal, stop } = await started()
+    expect(modal.open({ kind: 'login-editor' })).toBe(true)
+    answering.set(true)
+    const releaseMenu = claimPromptSurface()
+    flow.pending.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    modal.close()
+    answering.set(false)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(state().request).toBeNull()
+    releaseMenu()
+    await flush()
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(flow.answer).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('waits behind a terminal approval or another browser approval and never declines either', async () => {
+    const { stop } = await started()
+    const other = flow.store === 'browserFill' ? 'browserTotpFill' : 'browserFill'
+    stores[other].patch({ request: request('other-approval') })
+    flow.pending.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    expect(state().request).toBeNull()
+    stores[other].patch({ request: null })
+    await flush()
+    expect(state().request?.approvalId).toBe('approval-1')
+    expect(flow.answer).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('lets a waiting request expire by its own deadline without an answer from the window', async () => {
+    const { stop } = await started()
+    answering.set(true)
+    flow.pending.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    await vi.advanceTimersByTimeAsync(27_000)
+    flow.pending.mockResolvedValue(null)
+    handlers.cancelled({ approvalId: 'approval-1', reason: 'expired' })
+    await vi.advanceTimersByTimeAsync(6_000)
+    answering.set(false)
+    await flush()
+    expect(state().request).toBeNull()
+    expect(flow.answer).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('still ignores a replay and still closes on a cancellation once a waiting request is shown', async () => {
+    const { stop } = await started()
+    answering.set(true)
+    flow.pending.mockResolvedValue(request('approval-1'))
+    handlers.request(request('approval-1'))
+    answering.set(false)
+    await flush()
+    handlers.request(request('approval-1'))
+    expect(state().request?.approvalId).toBe('approval-1')
+    handlers.cancelled({ approvalId: 'stale-approval', reason: 'expired' })
+    expect(state().request?.approvalId).toBe('approval-1')
+    handlers.cancelled({ approvalId: 'approval-1', reason: 'connectionClosed' })
+    expect(state().request).toBeNull()
+    expect(flow.answer).not.toHaveBeenCalled()
+    stop()
   })
 })

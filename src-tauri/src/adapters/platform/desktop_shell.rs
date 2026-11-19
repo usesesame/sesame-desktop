@@ -640,16 +640,12 @@ pub fn lock_vault(app: &AppHandle) {
 
 /// No spurious lock events when the vault is already locked.
 pub fn lock_vault_if_unlocked(app: &AppHandle) -> bool {
-    let has_session = app
-        .state::<VaultState>()
-        .session
-        .lock()
-        .map(|session| session.is_some())
-        .unwrap_or(false);
-    if has_session {
-        lock_vault(app);
-    }
-    has_session
+    let state = app.state::<VaultState>();
+    crate::application::lifecycle::lock_if_unlocked(
+        &state,
+        &crate::adapters::desktop_effects::DesktopHostEffects::new(app),
+    )
+    .unwrap_or(false)
 }
 
 #[cfg(test)]

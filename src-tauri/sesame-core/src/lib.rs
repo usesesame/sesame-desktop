@@ -11,6 +11,7 @@ pub mod ffi;
 pub mod generator;
 pub mod history;
 pub mod imports;
+pub mod key_proof;
 pub mod loader;
 pub mod migration;
 pub mod password_analysis;
@@ -132,6 +133,7 @@ pub fn payload_aad_for_file(
 
 pub struct VaultState {
     pub session: Mutex<Option<UnlockedVault>>,
+    pub unlock_gate: Mutex<()>,
     /// Parsed import entries; never reach the interface, dropped on lock.
     pub pending_import: Mutex<Option<pending_import::PendingImport>>,
     pub pin_guard: Mutex<throttle::PinAttemptGuard>,
@@ -142,13 +144,20 @@ pub struct VaultState {
     hello_unlock_available: AtomicBool,
     auto_lock_minutes: AtomicU64,
     session_epoch: AtomicU64,
+    lock_generation: AtomicU64,
     pub release_record: release_record::RecordState,
+    #[cfg(any(test, feature = "test-util"))]
+    pub test_pause: Mutex<Option<TestPause>>,
 }
+
+#[cfg(any(test, feature = "test-util"))]
+pub type TestPause = std::sync::Arc<dyn Fn(&VaultState, &str) + Send + Sync>;
 
 impl Default for VaultState {
     fn default() -> Self {
         Self {
             session: Mutex::new(None),
+            unlock_gate: Mutex::new(()),
             pending_import: Mutex::new(None),
             pin_guard: Mutex::new(throttle::PinAttemptGuard::default()),
             pin_status_loaded: AtomicBool::new(false),
@@ -158,7 +167,10 @@ impl Default for VaultState {
             hello_unlock_available: AtomicBool::new(false),
             auto_lock_minutes: AtomicU64::new(5),
             session_epoch: AtomicU64::new(1),
+            lock_generation: AtomicU64::new(0),
             release_record: release_record::RecordState::default(),
+            #[cfg(any(test, feature = "test-util"))]
+            test_pause: Mutex::new(None),
         }
     }
 }
@@ -171,6 +183,47 @@ impl VaultState {
 
     pub fn advance_session_epoch(&self) -> u64 {
         self.session_epoch.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn lock_generation(&self) -> u64 {
+        self.lock_generation.load(Ordering::Acquire)
+    }
+
+    pub fn pause_for_test(&self, _point: &str) {
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            let pause = self
+                .test_pause
+                .lock()
+                .ok()
+                .and_then(|pause| pause.as_ref().map(std::sync::Arc::clone));
+            if let Some(pause) = pause {
+                pause(self, _point);
+            }
+        }
+    }
+
+    fn mark_locked(&self) {
+        self.pause_for_test("lock");
+        self.lock_generation.fetch_add(1, Ordering::AcqRel);
+        self.advance_session_epoch();
+    }
+
+    pub fn install_session(&self, slot: &mut Option<UnlockedVault>, mut unlocked: UnlockedVault) {
+        unlocked.opened_in_lock_generation = self.lock_generation();
+        *slot = Some(unlocked);
+    }
+
+    pub fn lock_if_unlocked(&self) -> VaultResult<bool> {
+        let session = self
+            .session
+            .lock()
+            .map_err(|_| "Sesame could not lock the vault session.".to_string())?;
+        if session.is_some() {
+            return Ok(true);
+        }
+        self.mark_locked();
+        Ok(false)
     }
 
     pub fn cached_pin_unlock(&self) -> Option<bool> {
@@ -222,12 +275,14 @@ impl VaultState {
     /// Held across file replacement, serializes against every other mutation command.
     pub fn begin_destructive_lifecycle_change(
         &self,
+        confirm: impl FnOnce(Option<&UnlockedVault>) -> VaultResult<()>,
     ) -> VaultResult<std::sync::MutexGuard<'_, Option<UnlockedVault>>> {
         let mut session = self.begin_lifecycle_change()?;
+        confirm(session.as_ref())?;
         self.release_record.close(None);
         *session = None;
         self.discard_pending_import();
-        self.advance_session_epoch();
+        self.mark_locked();
         Ok(session)
     }
 
@@ -241,15 +296,15 @@ impl VaultState {
 
     pub fn apply_lifecycle_replacement<T>(
         &self,
-        replace: impl FnOnce() -> VaultResult<T>,
+        replace: impl FnOnce(Option<&UnlockedVault>) -> VaultResult<T>,
     ) -> VaultResult<T> {
         let mut session = self.begin_lifecycle_change()?;
-        let result = replace();
+        let result = replace(session.as_ref());
         if result.is_ok() {
             self.release_record.close(None);
             *session = None;
             self.discard_pending_import();
-            self.advance_session_epoch();
+            self.mark_locked();
         }
         result
     }
@@ -261,10 +316,10 @@ impl VaultState {
             .map_err(|_| "Sesame could not lock the vault session.".to_string())?;
         self.release_record.close(session.as_ref());
         *session = None;
-        drop(session);
         // Parsed import entries are secrets; they never outlive an unlocked vault.
         self.discard_pending_import();
-        self.advance_session_epoch();
+        self.mark_locked();
+        drop(session);
         Ok(())
     }
 }
@@ -281,6 +336,7 @@ pub struct UnlockedVault {
     pub hello_wrap: Option<HelloWrap>,
     pub setup_complete: bool,
     format_upgrade_pending: bool,
+    opened_in_lock_generation: u64,
     records: record_store::VaultRecordStore,
 }
 
@@ -300,12 +356,17 @@ impl UnlockedVault {
             hello_wrap: opened.file.hello_wrap.clone(),
             setup_complete: opened.file.setup_complete,
             format_upgrade_pending: opened.migration.source_format < VAULT_FORMAT_VERSION,
+            opened_in_lock_generation: 0,
             records: record_store::VaultRecordStore::from_payload(&opened.payload)?,
         })
     }
 
     pub fn format_upgrade_pending(&self) -> bool {
         self.format_upgrade_pending
+    }
+
+    pub fn opened_in_lock_generation(&self) -> u64 {
+        self.opened_in_lock_generation
     }
 
     pub fn open_payload(&self) -> VaultResult<record_store::OpenedPayload> {

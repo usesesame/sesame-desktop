@@ -9,7 +9,8 @@ use serde::Serialize;
 use zeroize::Zeroize;
 
 use crate::application::sync::{
-    present, present_proof, refresh, vault_id_of, verify_master_password, SyncStore,
+    confirm_master_password, master_password_proof, present, present_proof, refresh, vault_id_of,
+    SyncStore,
 };
 use crate::sync::client::{PairingRecord, SyncClient, SyncError};
 use crate::sync::devicelist::DeviceListEntry;
@@ -164,14 +165,14 @@ pub fn verify_master_password_now_in_state(
     state: &VaultState,
     master_password: &str,
 ) -> Result<(), String> {
+    const LOCKED: &str = "Unlock Sesame before joining a synced vault.";
+    let proof = master_password_proof(state, master_password, LOCKED)?;
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-    let unlocked = session
-        .as_ref()
-        .ok_or("Unlock Sesame before joining a synced vault.")?;
-    verify_master_password(unlocked, master_password)
+    let unlocked = session.as_ref().ok_or(LOCKED)?;
+    confirm_master_password(unlocked, &proof)
 }
 
 #[derive(Serialize)]

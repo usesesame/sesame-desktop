@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
@@ -33,6 +35,9 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
+  settleKey={settleKeyFor(request, $browserChange.selectedId)}
   open={true}
   onClose={cancel}
   labelledby="browser-change-heading"
@@ -48,7 +53,7 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   {#if selectedWaiting}
@@ -59,7 +64,7 @@
   {:else if selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
-      <p><strong>Matched by site</strong><span>This login is saved for <code>{selectedCandidate.savedOrigin}</code> and set to fill on the whole site.</span></p>
+      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site.</span></p>
     </div>
   {/if}
 
@@ -67,8 +72,8 @@
     {#each request.candidates as candidate (candidate.id)}
       <label class:selected={$browserChange.selectedId === candidate.id}>
         <input type="radio" name="browser-change-login" value={candidate.id} checked={$browserChange.selectedId === candidate.id} on:change={() => browserChange.patch({ selectedId: candidate.id })} disabled={working} />
-        <span class="entry-avatar">{candidate.title.slice(0, 1).toUpperCase() || '?'}</span>
-        <span><strong>{candidate.title}</strong><small>{candidate.username || candidate.email || 'No username saved'}</small><small class="candidate-origin">{candidate.savedOrigin}</small></span>
+        <span class="entry-avatar">{vaultText(candidate.title).slice(0, 1).toUpperCase() || '?'}</span>
+        <span><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small><small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small></span>
         {#if candidate.matchKind === 'wwwAlias'}<span class="candidate-match">www match</span>{:else if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
       </label>
     {/each}
@@ -78,7 +83,7 @@
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
-      <button type="button" class="primary-button" disabled={!$browserChange.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>
+      <button type="button" class="primary-button" disabled={!$browserChange.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>
         {working ? 'Changing…' : 'Change password'}
       </button>
     </div>

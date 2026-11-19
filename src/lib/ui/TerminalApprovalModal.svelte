@@ -1,14 +1,11 @@
-<script module lang="ts">
-  const SHOWN_BEFORE_ARMED_MS = 750
-</script>
-
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { approvalFooterText, createApprovalWait } from '../approval-wait'
   import { useAppStores } from '../stores/app-stores'
   import { getTerminalApprovalWait, type CliApprovalRequestEvent } from '../terminal-api'
   import { presenceCopy } from '../presence-copy'
-  import { approvalHeading, approvalSummary, kindWords, outputWords, secretNeeded, shownText } from '../terminal-text'
+  import { approvalHeading, approvalSummary, kindWords, noticeOnly, outputWords, secretNeeded, shownText } from '../terminal-text'
   import { vaultItems } from '../vault-items'
   import MasterPasswordField from './MasterPasswordField.svelte'
   import ModalShell from './ModalShell.svelte'
@@ -26,10 +23,10 @@
   const wait = createApprovalWait(getTerminalApprovalWait)
   const approvalId = request.approvalId
   const notFound = request.notFound !== undefined
-  const choosing = request.candidates.length > 1
+  const missingField = !notFound && request.missingField
+  const notice = noticeOnly(request)
+  const choosing = !notice && request.candidates.length > 1
 
-  let heldLongEnough = false
-  const armTimer = window.setTimeout(() => (heldLongEnough = true), SHOWN_BEFORE_ARMED_MS)
   const remainingSeconds = () => Math.max(0, Math.ceil(($terminalApproval.expiresAt - Date.now()) / 1_000))
   let remaining = remainingSeconds()
   const timer = window.setInterval(() => {
@@ -37,18 +34,16 @@
     if (remaining === 0) onExpire(approvalId)
   }, 1_000)
 
-  onDestroy(() => {
-    window.clearTimeout(armTimer)
-    window.clearInterval(timer)
-  })
+  onDestroy(() => window.clearInterval(timer))
 
   $: state = $terminalApproval
   $: working = state.working
   $: askSecret = secretNeeded(request, state.selectedId, state.presenceGranted)
   $: secret = state.secret
   $: chosenValid = !choosing || request.candidates.some((candidate) => candidate.id === state.selectedId)
-  $: armed = heldLongEnough && $wait.ms === 0
-  $: allowDisabled = working || remaining === 0 || !armed || !chosenValid || (askSecret && !secret)
+  $: armed = $wait.ms === 0
+  $: lacksField = Boolean(request.field && resolved && !resolved.fieldName)
+  $: allowDisabled = working || remaining === 0 || !armed || !chosenValid || lacksField || (askSecret && !secret)
   $: items = vaultItems($vault.snapshot)
   $: single = request.candidates.length === 1 ? request.candidates[0] : null
   $: resolved = single ?? request.candidates.find((candidate) => candidate.id === state.selectedId) ?? null
@@ -64,7 +59,7 @@
 
   function close() {
     if (working) return
-    if (notFound) onDismiss()
+    if (notice) onDismiss()
     else onDeny()
   }
 
@@ -82,6 +77,9 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
+  settleKey={settleKeyFor(request, state.selectedId, request.needsPresence)}
   open={true}
   onClose={close}
   labelledby="terminal-approval-heading"
@@ -94,6 +92,9 @@
   {#if notFound}
     <h2 id="terminal-approval-heading">A terminal asked for an item you do not have</h2>
     <p id="terminal-approval-description" class="terminal-summary">No item has the name below, so Sesame sends nothing back.</p>
+  {:else if missingField}
+    <h2 id="terminal-approval-heading">A terminal asked for a field this item does not have</h2>
+    <p id="terminal-approval-description" class="terminal-summary">{request.candidates.length > 1 ? 'None of the items with this name has a' : 'The item below has no'} field by the name a terminal asked for, so Sesame sends nothing back.</p>
   {:else}
     <h2 id="terminal-approval-heading">{approvalHeading(request)}</h2>
     <p id="terminal-approval-description" class="terminal-summary">{approvalSummary(request)}</p>
@@ -104,13 +105,15 @@
       <div><dt>Name asked for</dt><dd><code class="terminal-value"><bdi>{shownText(request.notFound)}</bdi></code></dd></div>
     {:else if single}
       <div><dt>Item</dt><dd><span class="terminal-value"><bdi>{shownText(single.title)}</bdi></span><small>{kindWords(single.kind)}</small></dd></div>
+    {:else if missingField}
+      <div><dt>Items</dt><dd><span class="terminal-value"><bdi>{shownText(request.candidates[0].title)}</bdi></span><small>{request.candidates.length} items have this name</small></dd></div>
     {/if}
     {#if request.field}
       <div>
         <dt>Field</dt>
         <dd>
-          {#if notFound}
-            <code class="terminal-value"><bdi>{shownText(request.field, 48)}</bdi></code>
+          {#if notice}
+            <code class="terminal-value"><bdi>{shownText(request.field, 48)}</bdi></code>{#if missingField}<small>No field by that name</small>{/if}
           {:else if !resolved}
             <span>Choose an item to see which field it sends</span>
           {:else if resolved.fieldName}
@@ -123,7 +126,7 @@
         </dd>
       </div>
     {/if}
-    {#if !notFound && request.command !== 'list' && request.copy}
+    {#if !notice && request.command !== 'list' && request.copy}
       <div><dt>Sent to</dt><dd><span>{outputWords(true, $settings.clipboardClearSeconds)}</span></dd></div>
     {/if}
     <div><dt>Terminal</dt><dd>{#if request.terminal}<code class="terminal-value"><bdi>{shownText(request.terminal, 24)}</bdi></code>{:else}<span>No terminal</span>{/if}{#if request.remote}<span class="status-pill warning">Remote session</span>{/if}</dd></div>
@@ -154,24 +157,24 @@
     <p class="terminal-note">This terminal is allowed right now, but Sesame still asks you to choose.</p>
   {/if}
 
-  {#if askSecret && !notFound}
+  {#if askSecret && !notice}
     <div class="terminal-presence">
       <p>{presenceText}</p>
       <MasterPasswordField id="terminal-presence-password" value={secret} disabled={working} invalid={Boolean(state.error)} describedby={state.error ? 'terminal-approval-error' : undefined} onInput={onSecret} />
     </div>
   {/if}
 
-  {#if request.canAllowTerminal && !notFound}
+  {#if request.canAllowTerminal && !notice}
     <label class="terminal-allow">
-      <input type="checkbox" checked={state.allowTerminal} disabled={working || !armed} on:change={allowTerminalChanged} />
+      <input type="checkbox" checked={state.allowTerminal} disabled={working || !armed || !settled} on:change={allowTerminalChanged} />
       <span><strong>Allow this terminal for five minutes</strong><small>Sesame answers it and any program started from it without asking, but hidden values still ask for your master password.</small></span>
     </label>
   {/if}
 
-  {#if state.error}<p id="terminal-approval-error" class="form-error" role="alert">{state.error}</p>{/if}
+  {#if !notice || state.error}<p id="terminal-approval-error" class="form-error terminal-error" role="alert">{state.error}</p>{/if}
 
   <div class="terminal-footer modal-actions">
-    {#if notFound}
+    {#if notice}
       <span></span>
       <div class="confirm-actions">
         <button type="button" class="primary-button" disabled={working} on:click={onDismiss}>OK</button>
@@ -180,7 +183,7 @@
       <span>{approvalFooterText(remaining, $wait)}</span>
       <div class="confirm-actions">
         <button type="button" class="secondary-button" disabled={working} on:click={close}>Deny</button>
-        <button type="button" class="primary-button" disabled={allowDisabled} on:click={onAllow}>{working ? 'Allowing…' : 'Allow'}</button>
+        <button type="button" class="primary-button" disabled={allowDisabled || !settled} on:click={onAllow}>{working ? 'Allowing…' : 'Allow'}</button>
       </div>
     {/if}
   </div>
@@ -225,9 +228,12 @@
   .terminal-allow strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-medium); }
   .terminal-allow small { color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
   :global(.modal) .terminal-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); margin-top: var(--space-5); border-top: 1px solid var(--border-soft); padding-top: var(--space-4); }
+  :global(.modal) .terminal-request + .terminal-footer, :global(.modal) .terminal-request + .terminal-error + .terminal-footer { margin-top: var(--space-4); border-top: 0; padding-top: 0; }
+  .terminal-error { min-height: calc(var(--type-2) * 1.45); margin: var(--space-3) 0 0; line-height: 1.45; }
   .terminal-footer > span { color: var(--text-muted); font-size: var(--type-2); }
   .terminal-footer .confirm-actions { margin: 0 0 0 auto; }
   @media (max-width: 520px) {
     .terminal-request > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+    .terminal-error { min-height: calc(var(--type-2) * 1.45 * 2); }
   }
 </style>

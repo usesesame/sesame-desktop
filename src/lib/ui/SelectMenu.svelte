@@ -3,6 +3,8 @@
 </script>
 
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
+  import { vaultText } from '../vault-text'
   export let value: string
   export let options: Array<{ value: string; label: string }>
   export let onChange: (value: string) => void
@@ -86,16 +88,16 @@
     aria-haspopup="listbox"
     aria-expanded={open}
     aria-controls={open ? listId : undefined}
-    aria-label={selectedLabel ? `${label}: ${selectedLabel}` : label}
+    aria-label={selectedLabel ? `${label}: ${vaultText(selectedLabel)}` : label}
     {disabled}
     on:click={() => (open = !open)}
     on:keydown={handleTriggerKeydown}
   >
-    <span>{selectedLabel}</span>
+    <span><bdi>{vaultText(selectedLabel)}</bdi></span>
     <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
   </button>
   {#if open}
-    <div class="sort-menu" id={listId} role="listbox" aria-label={label}>
+    <div use:holdsApprovals class="sort-menu" id={listId} role="listbox" aria-label={label}>
       {#each options as option (option.value)}
         <button
           type="button"
@@ -105,7 +107,7 @@
           tabindex="-1"
           on:click={() => choose(option.value)}
           on:keydown={handleOptionKeydown}
-        >{option.label}</button>
+        ><bdi>{vaultText(option.label)}</bdi></button>
       {/each}
     </div>
   {/if}

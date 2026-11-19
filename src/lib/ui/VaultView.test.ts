@@ -330,3 +330,26 @@ test('the show control asks the vault again after the password is hidden', async
   await rendered.rerender({ passwordVisible: true, revealedPassword: controller.state.value().revealedPassword })
   expect(screen.getByText('fictional-alpha-rotated')).toBeTruthy()
 })
+
+test('a direction override in a title, site or folder cannot turn the row around', async () => {
+  const items = [item('login-a', 'Mallory \u202Egnp.exe\u202C Item', { subtitle: 'north\u202Eelpmaxe.wind', folder: 'Work\u2067 Notes' })]
+  const { rendered } = renderVault({ allItems: items, visibleItems: items })
+  await Promise.resolve()
+
+  const row = rendered.container.querySelector('.entry-row-main') as HTMLElement
+  expect(row.textContent).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/)
+  const parts = [...row.querySelectorAll('.entry-title bdi')].map((part) => part.textContent)
+  expect(parts).toEqual(['Mallory ?gnp.exe? Item', 'north?elpmaxe.wind', 'Work? Notes'])
+})
+
+test('a revealed password is shown exactly, isolated, and called out when it hides a character', async () => {
+  const { rendered } = renderReveal()
+  await rendered.rerender({ passwordVisible: true, revealedPassword: 'fictional\u202Eterces' })
+  const code = rendered.container.querySelector('.credential-row code:not(.concealed) .secret-text bdi') as HTMLElement
+  expect(code.textContent).toBe('fictional\u202Eterces')
+  expect(rendered.container.querySelector('.secret-text-note')?.textContent).toBe('Has a character you cannot see')
+
+  await rendered.rerender({ passwordVisible: true, revealedPassword: 'fictional-plain-secret' })
+  expect(rendered.container.querySelector('.secret-text bdi')?.textContent).toBe('fictional-plain-secret')
+  expect(rendered.container.querySelector('.secret-text-note')).toBeNull()
+})

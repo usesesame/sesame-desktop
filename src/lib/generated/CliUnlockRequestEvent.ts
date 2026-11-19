@@ -2,4 +2,4 @@
 import type { CliCommandKind } from "./CliCommandKind";
 import type { UnverifiedProgram } from "./UnverifiedProgram";
 
-export type CliUnlockRequestEvent = { command: CliCommandKind, terminal?: string, program?: UnverifiedProgram, remote: boolean, };
+export type CliUnlockRequestEvent = { command: CliCommandKind, field?: string, copy: boolean, terminal?: string, program?: UnverifiedProgram, remote: boolean, };

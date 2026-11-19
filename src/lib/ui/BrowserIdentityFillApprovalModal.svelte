@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
+  import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
   import Icon from '../Icon.svelte'
@@ -44,6 +46,9 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
+  settleKey={settleKeyFor(request, $browserIdentityFill.selectedId)}
   open={true}
   onClose={cancel}
   labelledby="browser-identity-heading"
@@ -59,7 +64,7 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserIdentityFill.selectedId} noun="identity" />
@@ -74,8 +79,8 @@
     {#each request.candidates as candidate (candidate.id)}
       <label class:selected={$browserIdentityFill.selectedId === candidate.id}>
         <input type="radio" name="browser-identity-choice" value={candidate.id} checked={$browserIdentityFill.selectedId === candidate.id} on:change={() => browserIdentityFill.patch({ selectedId: candidate.id })} disabled={working} />
-        <span class="entry-avatar">{candidate.label.slice(0, 1).toUpperCase() || '?'}</span>
-        <span><strong>{candidate.label}</strong></span>
+        <span class="entry-avatar">{vaultText(candidate.label).slice(0, 1).toUpperCase() || '?'}</span>
+        <span><strong><bdi>{vaultText(candidate.label)}</bdi></strong></span>
       </label>
     {/each}
   </div>
@@ -84,7 +89,7 @@
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Not now</button>
-      <button type="button" class="primary-button" disabled={!$browserIdentityFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>
+      <button type="button" class="primary-button" disabled={!$browserIdentityFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>
         {working ? 'Approving…' : 'Fill identity'}
       </button>
     </div>

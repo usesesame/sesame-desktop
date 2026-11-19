@@ -1210,7 +1210,7 @@ mod restore_fault_tests {
         let epoch = state.session_epoch();
 
         let failed: VaultResult<()> =
-            state.apply_lifecycle_replacement(|| Err("replacement failed".into()));
+            state.apply_lifecycle_replacement(|_| Err("replacement failed".into()));
         assert!(failed.is_err());
         assert!(state
             .session
@@ -1222,7 +1222,7 @@ mod restore_fault_tests {
         let prepared =
             prepare_backup_for_restore(&source, &destination, PASSWORD).expect("prepared restore");
         state
-            .apply_lifecycle_replacement(|| {
+            .apply_lifecycle_replacement(|_| {
                 apply_restored_vault_file(&destination, &prepared).map(|_| ())
             })
             .expect("replacement success");

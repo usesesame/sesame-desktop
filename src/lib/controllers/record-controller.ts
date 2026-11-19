@@ -5,6 +5,7 @@ import { controllerStore } from './controller-store'
 import type { FeedbackController } from './feedback-controller'
 import type { ActiveModal, ModalController, ModalKind } from './modal-controller'
 import { undoDeleteAction } from './undo-delete'
+import { isolatedVaultText } from '../vault-text'
 
 export interface RecordControllerOptions {
   stores: AppStores
@@ -101,7 +102,7 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
         const result = await config.api.save(draft)
         vault.patch({ snapshot: result.snapshot })
         closeEditor()
-        const notice = config.copy.savedNotice(!draft.id, config.draftTitle(draft))
+        const notice = config.copy.savedNotice(!draft.id, isolatedVaultText(config.draftTitle(draft)))
         feedback.showNotice(notice.title, notice.body)
       } catch (error) {
         feedback.setError(error)
@@ -127,7 +128,7 @@ export function createRecordController<TItem extends RecordLike, TInput extends 
         vault.patch({ snapshot: result.snapshot })
         modal.close(config.deleteModalKind)
         state.patch({ deleteCandidate: null })
-        const notice = config.copy.deletedNotice(candidate.title)
+        const notice = config.copy.deletedNotice(isolatedVaultText(candidate.title))
         feedback.showNotice(notice.title, notice.body, undoDeleteAction([candidate.id], { stores, feedback }))
       } catch (error) {
         void recordDiagnostic('vault_save', 'failed')

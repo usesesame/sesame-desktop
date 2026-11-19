@@ -640,9 +640,60 @@ test('only a master password unlock counts as the presence check', () => {
   const lifecycle = read('src-tauri', 'sesame-app', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
   const body = braceBody(lifecycle, lifecycle.indexOf('pub fn unlock_vault_in_state('))
-  assert.match(body, /if let Ok\(\(_, epoch\)\) = &result \{[\s\S]*presence\.grant_after_unlock\(\*epoch\);/, 'a master password unlock no longer grants the presence check for the epoch it installed')
+  assert.match(body, /let \(snapshot, epoch\) = unlock_with_derived_key\([\s\S]*\)\?;[\s\S]*presence\.grant_after_unlock\(epoch\);/, 'a master password unlock no longer grants the presence check for the epoch it installed')
+  assert.match(body, /finish_unlock\(state, &turn, \|\| \{[\s\S]*presence\.grant_after_unlock\(epoch\);\s*\}\)\?;/, 'a master password unlock grants the presence check outside its last lock check')
   const command = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
-  assert.match(braceBody(command, command.indexOf('pub fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
+  assert.match(braceBody(command, command.indexOf('pub async fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
+})
+
+test('every way of locking goes through a lock that cancels an unlock in progress', () => {
+  const shell = read('src-tauri', 'src', 'adapters', 'platform', 'desktop_shell.rs')
+  const guard = read('src-tauri', 'src', 'adapters', 'platform', 'session_guard.rs')
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const updater = read('src-tauri', 'src', 'commands', 'updater.rs')
+  const backups = read('src-tauri', 'src', 'commands', 'backups.rs')
+  assert.match(braceBody(shell, shell.indexOf('pub fn lock_vault_if_unlocked(')), /lifecycle::lock_if_unlocked\(/, 'a conditional lock skips an unlock in progress')
+  assert.match(braceBody(shell, shell.indexOf('pub fn lock_vault(')), /lock_and_notify\(/)
+  assert.match(shell, /"sesame\.lock" => lock_vault\(app\)/, 'the tray no longer locks')
+  assert.match(braceBody(shell, shell.indexOf('fn web_process_terminated(')), /lock_vault_if_unlocked\(app\)/, 'a webview crash no longer locks')
+  assert.equal((guard.match(/lock_vault_if_unlocked\(&app\)/g) ?? []).length, 2, 'the screen lock, sleep or idle check no longer locks')
+  assert.match(lib, /ExitRequested[\s\S]{0,120}lock_vault_if_unlocked\(app\)/, 'exit no longer locks')
+  assert.match(updater, /lock_vault_if_unlocked\(&app\)/, 'installing an update no longer locks')
+  assert.match(braceBody(backups, backups.indexOf('pub fn lock_vault(')), /lock_and_notify\(/, 'the lock command no longer locks')
+  const core = read('src-tauri', 'sesame-core', 'src', 'lib.rs')
+  for (const name of ['lock_for_lifecycle', 'begin_destructive_lifecycle_change', 'apply_lifecycle_replacement', 'lock_if_unlocked']) {
+    assert.match(braceBody(core, core.indexOf(`pub fn ${name}`)), /self\.mark_locked\(\)/, `${name} no longer cancels an unlock in progress`)
+  }
+  const lock = braceBody(core, core.indexOf('pub fn lock_for_lifecycle('))
+  assert.ok(lock.indexOf('self.mark_locked()') < lock.indexOf('drop(session)'), 'a lock advances the epoch after it lets go of the session')
+})
+
+test('every command that derives a key from a secret runs off the window thread', () => {
+  const sources = {
+    lifecycle: read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0],
+    backups: read('src-tauri', 'src', 'commands', 'backups.rs').split('#[cfg(test)]')[0],
+  }
+  const commands = {
+    lifecycle: ['create_vault', 'resume_recovery_setup', 'complete_recovery_setup', 'unlock_recovery_vault', 'set_unlock_pin', 'unlock_pin_vault', 'unlock_vault', 'change_master_password'],
+    backups: ['delete_local_vault', 'verify_backup', 'restore_backup'],
+  }
+  for (const [file, names] of Object.entries(commands)) {
+    for (const name of names) {
+      const start = sources[file].indexOf(`pub async fn ${name}(`)
+      assert.notEqual(start, -1, `${name} is no longer an async command`)
+      assert.match(braceBody(sources[file], start), /off_window_thread\(app, /, `${name} derives its key on the window thread`)
+    }
+  }
+  assert.match(sources.lifecycle, /tauri::async_runtime::spawn_blocking\(move \|\| work\(&app\)\)/)
+  const unlock = read('src-tauri', 'sesame-app', 'src', 'application', 'lifecycle.rs').split('#[cfg(test)]')[0]
+  const derived = braceBody(unlock, unlock.indexOf('pub fn unlock_with_derived_key('))
+  assert.ok(derived.indexOf('derive(&read)') < derived.indexOf('state\n        .session\n        .lock()'), 'the unlock derives its key while it holds the vault session')
+  assert.match(derived, /if state\.session_epoch\(\) != epoch \|\| state\.lock_generation\(\) != turn\.lock_generation \{\s*return Err\(LOCKED_DURING_UNLOCK\.into\(\)\);/, 'a lock during the derivation no longer wins over the unlock')
+  assert.match(braceBody(unlock, unlock.indexOf('pub fn confirm_unlock_survived(')), /finish_unlock\(state, turn, /, 'an unlock that lost to a lock can still be reported as a success')
+  const finish = braceBody(unlock, unlock.indexOf('pub fn finish_unlock<'))
+  assert.match(finish, /if session\.is_some\(\) && state\.lock_generation\(\) == turn\.lock_generation \{\s*let committed = commit\(\);\s*drop\(session\);/, 'an unlock that lost to a lock can still be reported as a success')
+  const begin = braceBody(unlock, unlock.indexOf('pub fn begin_unlock('))
+  assert.ok(begin.indexOf('state.lock_generation()') < begin.indexOf('.unlock_gate'), 'an unlock reads the lock generation only after it waited for its turn')
 })
 
 test('the window never keeps a secret value in a record view', () => {
@@ -777,7 +828,8 @@ test('every file command resolves its path through a Rust-issued choice', () => 
   ]
   for (const [file, applicationFile, command] of commands) {
     const source = read('src-tauri', 'src', 'commands', file)
-    const start = source.indexOf(`pub fn ${command}(`)
+    const sync = source.indexOf(`pub fn ${command}(`)
+    const start = sync >= 0 ? sync : source.indexOf(`pub async fn ${command}(`)
     assert.ok(start >= 0, `${command} does not exist in ${file}`)
     const next = source.indexOf('\n#[tauri::command]', start)
     const body = source.slice(start, next === -1 ? source.length : next)
@@ -1584,9 +1636,9 @@ test('vault key material is drawn from the system random source', () => {
 
   const secretSites = [
     ['src-tauri/sesame-core/src/api.rs', 'create_vault'],
-    ['src-tauri/sesame-core/src/storage.rs', 'resume_recovery_setup_for_session'],
-    ['src-tauri/sesame-core/src/storage.rs', 'rotate_vault_key'],
-    ['src-tauri/sesame-core/src/storage.rs', 'set_pin_for_session'],
+    ['src-tauri/sesame-core/src/key_proof.rs', 'generate'],
+    ['src-tauri/sesame-core/src/storage.rs', 'rotate_vault_key_with'],
+    ['src-tauri/sesame-core/src/key_proof.rs', 'prepare'],
     ['src-tauri/sesame-core/src/platform/linux.rs', 'create_linux_device_key'],
     ['src-tauri/sesame-core/src/record_store.rs', 'from_payload'],
     ['src-tauri/sesame-core/src/util.rs', 'generate_recovery_kit'],
@@ -1862,4 +1914,208 @@ test('no native messaging message type can reach the Activity record', () => {
   for (const source of [pipe, replies]) {
     assert.doesNotMatch(source, /release_record_page_in_state|\.entries\(&|\.clear\(&|set_retention_days/, 'a browser request reads or changes the record')
   }
+})
+
+function svelteFiles(directory) {
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return svelteFiles(path)
+    return entry.name.endsWith('.svelte') ? [path] : []
+  })
+}
+
+function closingBrace(source, start) {
+  let depth = 0
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1
+    else if (source[index] === '}' && --depth === 0) return index
+  }
+  return source.length
+}
+
+function textInterpolations(source) {
+  const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '')
+  const found = []
+  let inTag = false
+  let quote = null
+  for (let index = 0; index < markup.length; index += 1) {
+    const character = markup[index]
+    if (!inTag) {
+      if (character === '<' && /[A-Za-z/!]/.test(markup[index + 1] ?? '')) inTag = true
+      else if (character === '{') {
+        const end = closingBrace(markup, index)
+        const expression = markup.slice(index + 1, end).trim()
+        if (!/^[#/:@]/.test(expression)) found.push(expression)
+        index = end
+      }
+    } else if (quote) {
+      if (character === quote) quote = null
+    } else if (character === '"' || character === "'") quote = character
+    else if (character === '{') index = closingBrace(markup, index)
+    else if (character === '>') inTag = false
+  }
+  return found
+}
+
+const TEXT_ATTRIBUTES = /^(title|aria-label|aria-description|aria-roledescription|aria-valuetext|aria-placeholder|alt|placeholder)$/
+
+function expressionPieces(expression) {
+  const pieces = []
+  let outside = ''
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index]
+    if (character === '`') {
+      let end = index + 1
+      while (end < expression.length && expression[end] !== '`') {
+        if (expression[end] === '\\') end += 1
+        else if (expression[end] === '$' && expression[end + 1] === '{') {
+          const close = closingBrace(expression, end + 1)
+          pieces.push(...expressionPieces(expression.slice(end + 2, close)))
+          end = close
+        }
+        end += 1
+      }
+      index = end
+    } else if (character === "'" || character === '"') {
+      let end = index + 1
+      while (end < expression.length && expression[end] !== character) end += expression[end] === '\\' ? 2 : 1
+      index = end
+    } else outside += character
+  }
+  if (outside.trim()) pieces.push(outside.trim())
+  return pieces
+}
+
+function attributeInterpolations(source) {
+  const markup = source.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '')
+  const found = []
+  const tags = /<[a-z][a-z0-9-]*\b/g
+  while (tags.exec(markup)) {
+    let index = tags.lastIndex
+    while (index < markup.length && markup[index] !== '>') {
+      const attribute = /^\s+([A-Za-z][\w:-]*)=/.exec(markup.slice(index))
+      if (attribute) {
+        const name = attribute[1]
+        index += attribute[0].length
+        const opener = markup[index]
+        let expressions = []
+        if (opener === '{') {
+          const end = closingBrace(markup, index)
+          expressions = [markup.slice(index + 1, end)]
+          index = end + 1
+        } else if (opener === '"' || opener === "'") {
+          const end = markup.indexOf(opener, index + 1)
+          const value = markup.slice(index + 1, end)
+          for (let at = value.indexOf('{'); at >= 0; at = value.indexOf('{', at + 1)) {
+            const close = closingBrace(value, at)
+            expressions.push(value.slice(at + 1, close))
+            at = close
+          }
+          index = end + 1
+        }
+        if (TEXT_ATTRIBUTES.test(name)) for (const expression of expressions) found.push(...expressionPieces(expression.trim()).map((piece) => `${name}: ${piece}`))
+      } else if (markup[index] === '{') index = closingBrace(markup, index) + 1
+      else if (markup[index] === '"' || markup[index] === "'") index = markup.indexOf(markup[index], index + 1) + 1
+      else index += 1
+    }
+    tags.lastIndex = index
+  }
+  return found
+}
+
+const VAULT_WORDS = /\b(title|username|email|site|subtitle|folder|folderName|initials|notes|filename|brand|label|value|name|tag|url|urls|recoveryEmail|recoveryPhone|detail|savedOrigin|deviceLabel|deviceName|origin|revealedPassword|revealed|groupTitle|titleFor|shown|shownValue|displayInitials|listHeading|collectionHeading|bulkFolderLabel|fullName|ssid|cardholderName|selectedLabel)\b/
+const VAULT_HELPERS = /\b(vaultText|isolatedVaultText|noteText|shownText)\(/g
+
+function withoutHelperCalls(expression) {
+  let rest = expression
+  for (let match = VAULT_HELPERS.exec(rest); match; match = VAULT_HELPERS.exec(rest)) {
+    let depth = 0
+    let end = match.index + match[0].length - 1
+    for (; end < rest.length; end += 1) {
+      if (rest[end] === '(') depth += 1
+      else if (rest[end] === ')' && --depth === 0) break
+    }
+    rest = `${rest.slice(0, match.index)}${rest.slice(end + 1)}`
+    VAULT_HELPERS.lastIndex = 0
+  }
+  VAULT_HELPERS.lastIndex = 0
+  return rest
+}
+
+function unprotectedVaultValue(expression) {
+  return expressionPieces(expression).some((piece) => VAULT_WORDS.test(withoutHelperCalls(piece)))
+}
+const NOT_FROM_THE_VAULT = {
+  'src/lib/ui/BackupDrillModal.svelte': ['formatCopy?.label', 'formatCopy?.detail', 'verifiedCopy?.label'],
+  'src/lib/ui/CardEditor.svelte': ['network.name', 'network?.name'],
+  'src/lib/ui/CheckupView.svelte': ['finding.title'],
+  'src/lib/ui/ConfirmMergeModal.svelte': ["revealed?.entryId === option.entryId ? 'Hide' : 'Show'"],
+  'src/lib/ui/CustomServerSetting.svelte': ['inspection.name'],
+  'src/lib/ui/DuplicateReview.svelte': ['groupTitle(group)', 'groupTitle(activeGroup)', 'displayInitials(entry)'],
+  'src/lib/ui/FolderManagerModal.svelte': ['count(folder)', "count(folder) === 1 ? 'login' : 'logins'"],
+  'src/lib/ui/FolderNameModal.svelte': ['title', "working ? 'Saving…' : 'Save folder'"],
+  'src/lib/ui/GeneralSettings.svelte': ['shortcut.label'],
+  'src/lib/ui/ImportAccountingList.svelte': ['group.label', 'reason.label'],
+  'src/lib/ui/ImportModal.svelte': ['importSources.find((source) => source.value === $imports.source)?.label', 'source.label'],
+  'src/lib/ui/ItemDetail.svelte': ["detail.favourite ? '★' : '☆'", "detail.locked ? 'Opening this note asks for your master password.' : 'This note shows whenever Sesame is unlocked.'", "detail.locked ? 'Remove the lock' : 'Lock with master password'"],
+  'src/lib/ui/ItemFilterMenu.svelte': ['folderCount(folder.id)', 'tagCount(tag)'],
+  'src/lib/ui/NeverSaveSitesSetting.svelte': ["$neverSaveSites?.length ? `${$neverSaveSites.length} ${$neverSaveSites.length === 1 ? 'site' : 'sites'}` : 'No sites'", "working === origin ? 'Removing…' : 'Remove'"],
+  'src/lib/ui/PassphraseGeneratorView.svelte': ['item.label'],
+  'src/lib/ui/PasswordStrengthView.svelte': ['label'],
+  'src/lib/ui/QuickAccessView.svelte': ["primaryAction(item)?.label ?? 'No action'", "action.label.replace(/^Copy /, '')"],
+  'src/lib/ui/ReleaseRecordRows.svelte': ['entrySentence(entry, titleFor)'],
+  'src/lib/ui/ReleaseRecordView.svelte': ['itemTitle($activityItemFilter, titleFor)', 'day.label'],
+  'src/lib/ui/RestoreModal.svelte': ['formatCopy.label', 'formatCopy.detail'],
+  'src/lib/ui/SecretText.svelte': ['value'],
+  'src/lib/ui/SettingsView.svelte': ['item.label'],
+  'src/lib/ui/Sidebar.svelte': ['group.label', 'item.label'],
+  'src/lib/ui/TerminalAccessSetting.svelte': ['allowedRequestWords(request.command, request.field, titleFor(request.itemId), request.itemKind)'],
+  'src/lib/ui/TerminalApprovalModal.svelte': ["request.candidates.length > 1 ? 'None of the items with this name has a' : 'The item below has no'", "candidate.fieldHidden ? ', a hidden value' : ''"],
+  'src/lib/ui/Toast.svelte': ['notice.title', 'notice.action.label'],
+  'src/lib/ui/ToolsView.svelte': ['item.value', 'item.label'],
+  'src/lib/ui/VaultView.svelte': ['issueKindLabels[activeIssue].title', "loginCard.matchRule === 'site' ? 'Whole site. Sesame also offers this login on other addresses under the same site, and says so before it fills.' : 'Never fill. Sesame does not offer this login in the browser.'"],
+  'src/lib/ui/ViewHeader.svelte': ['title'],
+  'src/lib/ui/WorkspaceShell.svelte': ['title'],
+}
+
+const NOT_FROM_THE_VAULT_IN_ATTRIBUTES = {
+  'src/lib/Icon.svelte': ['aria-label: label'],
+  'src/lib/ui/CheckupView.svelte': ['aria-label: finding.title'],
+  'src/lib/ui/ConfirmMergeModal.svelte': ['aria-label: revealed?.entryId === option.entryId ?  :'],
+  'src/lib/ui/ItemDetail.svelte': ['aria-label: detail.favourite ?  :'],
+  'src/lib/ui/LoginFieldsPanel.svelte': ['aria-label: shown ?  :', 'title: shown ?  :'],
+  'src/lib/ui/PanelResizer.svelte': ['aria-label: label'],
+  'src/lib/ui/PasswordStrengthView.svelte': ['aria-label: revealed ?  :', 'title: revealed ?  :'],
+  'src/lib/ui/PendingChangesNotice.svelte': ['aria-label: label'],
+  'src/lib/ui/QuickAccessView.svelte': ['aria-label: action.label', 'title: action.label'],
+  'src/lib/ui/SelectMenu.svelte': ['aria-label: label', 'aria-label: selectedLabel ?  : label'],
+  'src/lib/ui/Sidebar.svelte': ['aria-label: item.label', 'title: item.label'],
+}
+
+test('every value from the vault that a component draws goes through the direction helper', () => {
+  const unprotected = []
+  for (const file of svelteFiles('src')) {
+    const allowed = NOT_FROM_THE_VAULT[file.split('\\').join('/')] ?? []
+    for (const expression of textInterpolations(read(file))) {
+      if (unprotectedVaultValue(expression) && !allowed.includes(expression)) unprotected.push(`${file}: {${expression}}`)
+    }
+  }
+  assert.deepEqual(unprotected, [], 'a component draws a vault value without vaultText, noteText or SecretText')
+  const unprotectedAttributes = []
+  for (const file of svelteFiles('src')) {
+    const allowed = NOT_FROM_THE_VAULT_IN_ATTRIBUTES[file.split('\\').join('/')] ?? []
+    for (const piece of attributeInterpolations(read(file))) {
+      const expression = piece.slice(piece.indexOf(': ') + 2)
+      if (unprotectedVaultValue(expression) && !allowed.includes(piece)) unprotectedAttributes.push(`${file}: ${piece}`)
+    }
+  }
+  assert.deepEqual(unprotectedAttributes, [], 'a tooltip, label or placeholder carries a vault value without vaultText')
+  const planted = attributeInterpolations('<button title={`Copy ${field.label}`} aria-label="Remove {folder.name}" placeholder={vaultText(entry.title)}></button>')
+  assert.deepEqual(planted, ['title: field.label', 'aria-label: folder.name', 'placeholder: vaultText(entry.title)'], 'the attribute check no longer reads every attribute form')
+  const mixed = attributeInterpolations('<span title={vaultText(entry.title) + folder.name} aria-label={`${vaultText(entry.title)} in ${vaultText(folder.name)}`} placeholder={vaultText(isolatedVaultText(entry.title))}></span>')
+  assert.deepEqual(mixed.filter((piece) => unprotectedVaultValue(piece.slice(piece.indexOf(': ') + 2))), ['title: vaultText(entry.title) + folder.name'], 'one protected operand hides an unprotected one in the same attribute')
+  assert.equal(unprotectedVaultValue('vaultText(entry.title) || folder.name'), true, 'one protected operand hides an unprotected one in the same text')
+  const secret = read('src', 'lib', 'ui', 'SecretText.svelte')
+  assert.match(secret, /<bdi>\{value\}<\/bdi>/, 'a revealed secret is not isolated or is altered')
+  assert.match(secret, /hasHiddenCharacters\(value\)/, 'a revealed secret with a hidden character is not called out')
 })

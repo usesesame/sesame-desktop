@@ -14,13 +14,15 @@ interface TotpFillControllerOptions {
   feedback: FeedbackController
   onVaultLocked: () => void
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createTotpFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: TotpFillControllerOptions) {
+export function createTotpFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive = () => false, held = () => false }: TotpFillControllerOptions) {
   const { browserTotpFill } = stores
   const loop = approvalLoop<BrowserTotpFillRequest>({
     store: browserTotpFill,
+    held,
     mayShow: () => modal.totpFillMayShow(),
     offersNothing: (request) => !request.candidates.length,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),

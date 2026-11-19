@@ -49,7 +49,8 @@ test('a password copy that needs the master password points to the main window a
 
   await fireEvent.click(await screen.findByRole('button', { name: /Copy password/ }))
 
-  expect(await screen.findByText(/Confirm your master password in Sesame to copy from Northwind/)).toBeTruthy()
+  const notice = await screen.findByText((_, element) => element?.tagName === 'SPAN' && element.textContent === 'Confirm your master password in Sesame to copy from Northwind.')
+  expect(notice.querySelector('bdi')?.textContent).toBe('Northwind')
 
   await fireEvent.click(screen.getByRole('button', { name: 'Open Sesame' }))
   expect(vaultApi.openQuickAccessItem).toHaveBeenCalledWith('fictional-login')

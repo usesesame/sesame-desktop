@@ -34,6 +34,7 @@ const VERBS: [&str; 8] = [
 const NOT_RUNNING: &str = "Sesame is not running. Open Sesame and try again.";
 const NOT_SESAME: &str = "This is not the Sesame app this command belongs to.";
 const UNREADABLE_REPLY: &str = "Sesame sent a reply this command does not understand.";
+const STOPPED_WAITING: &str = "Sesame closed before it answered this request.";
 const OUTPUT_FAILED: &str = "The output could not be written completely, so this command failed.";
 
 const USAGE_COMMON: &str = "Usage:
@@ -45,6 +46,22 @@ Each request waits for your approval in the Sesame window. A hidden value also n
 With --copy Sesame puts the value on the clipboard instead of printing it, and clears it again after a while.
 Sesame never takes a secret as an argument, but the item and field names you type stay in your shell history.
 Anything printed in a terminal can be read by other programs that run as you.
+Sesame turns terminal requests away for a while after one is denied or not answered, or after a second one since your last Allow asks for something the vault does not have.
+The wait starts at 15 seconds, doubles each time up to 5 minutes, and ends when you allow a request.
+";
+
+const USAGE_EXIT_CODES: &str = "
+Exit codes:
+  0  The request was answered.
+  1  Something else went wrong.
+  2  The command was not typed correctly.
+  3  Sesame is not running, or it closed before it answered.
+  4  Nobody answered in Sesame in time.
+  5  The request was denied in Sesame.
+  6  Sesame locked or the vault changed before you answered.
+  7  No item, field or one-time code has that name.
+  8  Sesame is busy, or it is making terminals wait.
+  9  Sesame needs an update to answer this command.
 ";
 
 #[cfg(not(windows))]
@@ -57,7 +74,7 @@ const USAGE_PLATFORM: &str = "On Windows every request asks in the Sesame window
 ";
 
 fn usage() -> String {
-    format!("{USAGE_COMMON}{USAGE_PLATFORM}")
+    format!("{USAGE_COMMON}{USAGE_PLATFORM}{USAGE_EXIT_CODES}")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -182,38 +199,100 @@ impl Streams<'_> {
     }
 }
 
-fn printable_line(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                '?'
+const STAND_IN: char = '?';
+
+const MAX_MARKS_PER_CHARACTER: usize = 2;
+
+fn in_table(table: &[(u32, u32)], character: char) -> bool {
+    let point = u32::from(character);
+    table
+        .binary_search_by(|&(start, end)| {
+            if end < point {
+                std::cmp::Ordering::Less
+            } else if start > point {
+                std::cmp::Ordering::Greater
             } else {
-                character
+                std::cmp::Ordering::Equal
             }
         })
-        .collect()
+        .is_ok()
+}
+
+fn hides_or_reorders(character: char) -> bool {
+    in_table(crate::terminal_text_tables::HIDDEN, character)
+}
+
+fn is_mark(character: char) -> bool {
+    in_table(crate::terminal_text_tables::MARKS, character)
+}
+
+fn printable(value: &str, keep_layout: bool) -> Zeroizing<String> {
+    let normalized = sesame_core::util::nfc(value);
+    let mut out = Zeroizing::new(String::with_capacity(normalized.len()));
+    let mut last: Option<char> = None;
+    let mut marks = 0;
+    let mut excess = false;
+    for character in normalized.chars() {
+        if keep_layout && matches!(character, '\n' | '\t') {
+            out.push(character);
+            last = Some(' ');
+        } else if hides_or_reorders(character) {
+            out.push(STAND_IN);
+            last = Some(STAND_IN);
+        } else if is_mark(character) {
+            let has_base = !matches!(last, None | Some(' ') | Some(STAND_IN));
+            if has_base && !excess && marks < MAX_MARKS_PER_CHARACTER {
+                out.push(character);
+                marks += 1;
+            } else {
+                if !excess {
+                    out.push(STAND_IN);
+                    last = Some(STAND_IN);
+                }
+                excess = true;
+            }
+            continue;
+        } else {
+            let shown = if character.is_whitespace() {
+                ' '
+            } else {
+                character
+            };
+            out.push(shown);
+            last = Some(shown);
+        }
+        marks = 0;
+        excess = false;
+    }
+    out
+}
+
+fn printable_line(value: &str) -> String {
+    printable(value, false).to_string()
 }
 
 fn printable_block(value: &str) -> Zeroizing<String> {
-    Zeroizing::new(
-        value
-            .chars()
-            .map(|character| {
-                if character.is_control() && character != '\n' && character != '\t' {
-                    '?'
-                } else {
-                    character
-                }
-            })
-            .collect(),
-    )
+    printable(value, true)
+}
+
+fn line_safe(value: &str) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(value.len()));
+    for character in value.chars() {
+        out.push(if hides_or_reorders(character) {
+            STAND_IN
+        } else if character.is_whitespace() {
+            ' '
+        } else {
+            character
+        });
+    }
+    out
 }
 
 fn unsafe_for_terminal(value: &str) -> bool {
     value
         .chars()
-        .any(|character| character.is_control() && character != '\n' && character != '\t')
+        .any(|character| character != '\n' && character != '\t' && hides_or_reorders(character))
 }
 
 pub fn request_id() -> String {
@@ -222,14 +301,25 @@ pub fn request_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn read_failure(error: &io::Error, answered: bool, streams: &mut Streams<'_>) -> i32 {
-    match error.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Progress {
+    Nothing,
+    Waiting,
+    Answering,
+}
+
+fn read_failure(error: &io::Error, progress: Progress, streams: &mut Streams<'_>) -> i32 {
+    match (error.kind(), progress) {
+        (ErrorKind::TimedOut | ErrorKind::WouldBlock, _) => {
             streams.say(CliErrorCode::Timeout.message());
             EXIT_TIMEOUT
         }
-        ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe if !answered => {
+        (ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe, Progress::Nothing) => {
             streams.say(NOT_SESAME);
+            EXIT_UNREACHABLE
+        }
+        (ErrorKind::UnexpectedEof | ErrorKind::BrokenPipe, Progress::Waiting) => {
+            streams.say(STOPPED_WAITING);
             EXIT_UNREACHABLE
         }
         _ => {
@@ -246,15 +336,14 @@ pub fn converse(
     streams: &mut Streams<'_>,
 ) -> i32 {
     let mut waiting = 0;
-    let mut answered = false;
+    let mut progress = Progress::Nothing;
     let mut total = 0_usize;
     let mut items = Vec::new();
     loop {
         let frame = match source.next_frame() {
             Ok(frame) => frame,
-            Err(error) => return read_failure(&error, answered, streams),
+            Err(error) => return read_failure(&error, progress, streams),
         };
-        answered = true;
         total = total.saturating_add(frame.len());
         if total > MAX_CLI_LIST_BYTES {
             streams.say(UNREADABLE_REPLY);
@@ -267,6 +356,9 @@ pub fn converse(
         };
         match reply.reply_type {
             CliReplyType::Waiting => {
+                if progress == Progress::Nothing {
+                    progress = Progress::Waiting;
+                }
                 waiting += 1;
                 if waiting > MAX_WAITING_FRAMES {
                     streams.say(UNREADABLE_REPLY);
@@ -274,10 +366,13 @@ pub fn converse(
                 }
                 streams.say(match reply.reason {
                     Some(WaitReason::Unlock) => "Unlock Sesame to continue.",
-                    _ => "Approve this request in Sesame.",
+                    _ => "Answer this request in the Sesame window.",
                 });
             }
-            CliReplyType::Items => items.extend(reply.items.clone().unwrap_or_default()),
+            CliReplyType::Items => {
+                progress = Progress::Answering;
+                items.extend(reply.items.clone().unwrap_or_default());
+            }
             CliReplyType::Done => {
                 let written = print_list(&items, streams);
                 return streams.delivered(written);
@@ -300,7 +395,7 @@ fn print_list(
             .min(60);
         let kind_width = items
             .iter()
-            .map(|item| item.kind.chars().count())
+            .map(|item| printable_line(&item.kind).chars().count())
             .max()
             .unwrap_or(0);
         for item in items {
@@ -308,7 +403,7 @@ fn print_list(
                 streams.out,
                 "{:title_width$}  {:kind_width$}  {}",
                 printable_line(&item.title),
-                item.kind,
+                printable_line(&item.kind),
                 printable_line(&item.id),
             )?;
         }
@@ -317,9 +412,9 @@ fn print_list(
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&item.id),
-                item.kind,
-                printable_line(&item.title),
+                line_safe(&item.id).as_str(),
+                line_safe(&item.kind).as_str(),
+                line_safe(&item.title).as_str(),
             )?;
         }
     }
@@ -354,13 +449,13 @@ fn print_item(reply: &CliReply, streams: &mut Streams<'_>) -> io::Result<()> {
     } else {
         for field in fields {
             let value = match (&field.value, field.hidden) {
-                (Some(value), false) => Zeroizing::new(printable_line(value)),
+                (Some(value), false) => line_safe(value),
                 _ => Zeroizing::new(String::new()),
             };
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&field.name),
+                line_safe(&field.name).as_str(),
                 if field.hidden { "hidden" } else { "visible" },
                 value.as_str()
             )?;
@@ -380,10 +475,14 @@ fn finish(reply: &CliReply, streams: &mut Streams<'_>) -> i32 {
             let hidden = reply.hidden.unwrap_or(true);
             let written = if streams.out_terminal {
                 if hidden && unsafe_for_terminal(value) {
-                    streams.say("This value contains control characters, so Sesame will not print it to a terminal. Use --copy or send the output to another program.");
+                    streams.say("This value contains control or invisible characters, so Sesame will not print it to a terminal. Use --copy or send the output to another program.");
                     return EXIT_FAILED;
                 }
-                let shown = printable_block(value);
+                let shown = if hidden {
+                    Zeroizing::new(value.to_string())
+                } else {
+                    printable_block(value)
+                };
                 writeln!(streams.out, "{}", shown.as_str())
             } else {
                 streams.out.write_all(value.as_bytes())
@@ -710,6 +809,29 @@ mod tests {
             assert!(help.contains("./Sesame.AppImage list"));
         }
         assert!(!help.contains('\u{2014}') && !help.contains('(') && !help.contains(')'));
+        assert!(help.contains("doubles each time up to 5 minutes"));
+        assert!(help
+            .trim_end()
+            .ends_with("Sesame needs an update to answer this command."));
+        assert!(help.contains("\n\nExit codes:\n"));
+        for (exit, words) in [
+            (EXIT_OK, "answered."),
+            (EXIT_FAILED, "went wrong."),
+            (EXIT_USAGE, "not typed correctly."),
+            (EXIT_UNREACHABLE, "not running"),
+            (EXIT_TIMEOUT, "in time."),
+            (EXIT_DENIED, "denied in Sesame."),
+            (EXIT_STALE, "locked"),
+            (EXIT_MISSING, "has that name."),
+            (EXIT_BUSY, "making terminals wait."),
+            (EXIT_OUTDATED, "needs an update"),
+        ] {
+            let line = help
+                .lines()
+                .find(|line| line.trim_start().starts_with(&format!("{exit}  ")))
+                .unwrap_or_else(|| panic!("exit code {exit} is not listed"));
+            assert!(line.contains(words), "{line}");
+        }
     }
 
     #[test]
@@ -764,7 +886,7 @@ mod tests {
         assert_eq!(code, EXIT_OK);
         assert_eq!(out, "fictional-password-canary");
         assert!(err.contains("Unlock Sesame to continue."));
-        assert!(err.contains("Approve this request in Sesame."));
+        assert!(err.contains("Answer this request in the Sesame window."));
         assert!(!err.contains("canary"));
 
         let (_, out, _) = talk(&get(Some("password"), false), &replies, true);
@@ -827,6 +949,267 @@ mod tests {
         assert!(!out.contains('\u{1b}'));
         assert!(out.contains("casey?[2J"));
         assert!(out.contains("password  hidden"));
+    }
+
+    fn code_point(hex: &serde_json::Value) -> char {
+        let hex = hex.as_str().expect("a code point");
+        char::from_u32(u32::from_str_radix(hex, 16).expect("hex")).expect("a character")
+    }
+
+    #[test]
+    fn the_terminal_and_the_window_replace_the_same_characters() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/cli/v1/vectors.json"))
+                .expect("vectors");
+        let cases = &vectors["shownTextCases"];
+        for (group, expected) in [
+            ("standIns", Some('?')),
+            ("spaces", Some(' ')),
+            ("kept", None),
+        ] {
+            let points = cases[group].as_array().expect("a group");
+            assert!(!points.is_empty(), "{group}");
+            for point in points {
+                let character = code_point(point);
+                let shown = expected.unwrap_or(character);
+                assert_eq!(
+                    printable_line(&format!("a{character}b")),
+                    format!("a{shown}b"),
+                    "{group} {point}"
+                );
+                assert_eq!(
+                    printable_block(&format!("a{character}b")).as_str(),
+                    format!("a{shown}b"),
+                    "{group} {point}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stacked_marks_are_capped_the_way_the_window_caps_them() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/cli/v1/vectors.json"))
+                .expect("vectors");
+        let cases = vectors["shownTextCases"]["marks"]
+            .as_array()
+            .expect("mark cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let input = case[0].as_str().expect("input");
+            let shown = case[1].as_str().expect("shown");
+            assert_eq!(printable_line(input), shown, "{input:?}");
+            assert_eq!(printable_block(input).as_str(), shown, "{input:?}");
+        }
+        assert_eq!(
+            printable_block("x\u{301}\u{301}\u{301}\n\u{301}y").as_str(),
+            "x\u{301}\u{301}?\n?y"
+        );
+    }
+
+    #[test]
+    fn the_tables_are_sorted_ranges_for_the_stated_unicode_version() {
+        assert_eq!(crate::terminal_text_tables::UNICODE_VERSION, "17.0");
+        for table in [
+            crate::terminal_text_tables::HIDDEN,
+            crate::terminal_text_tables::MARKS,
+        ] {
+            assert!(table
+                .iter()
+                .all(|(start, end)| start <= end && *end <= 0x10ffff));
+            assert!(table.windows(2).all(|pair| pair[0].1 + 1 < pair[1].0));
+        }
+        assert!(is_mark('\u{301}') && is_mark('\u{20dd}') && is_mark('\u{903}'));
+        assert!(!is_mark('a') && !hides_or_reorders('a'));
+        assert!(hides_or_reorders('\u{378}') && hides_or_reorders('\u{e0067}'));
+    }
+
+    #[test]
+    fn titles_kinds_ids_and_field_names_reach_a_pipe_unnormalized_and_uncapped() {
+        let marked = "x\u{301}\u{301}\u{301}\u{301}";
+        let items = vec![CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: format!("Cafe\u{301} {marked}"),
+        }];
+        let list = [CliReply::items(ID, items), CliReply::done(ID)];
+        let (code, piped, _) = talk(&CliCommand::List, &list, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(
+            piped,
+            format!("fictional-login\tlogin\tCafe\u{301} {marked}\n")
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let mut streams = Streams {
+            out: &mut out,
+            err: &mut err,
+            out_terminal: false,
+            err_terminal: false,
+        };
+        let unchecked = [CliItemSummary {
+            id: format!("fictional-{marked}"),
+            kind: format!("login{marked}"),
+            title: "Northwind".to_string(),
+        }];
+        print_list(&unchecked, &mut streams).expect("printed");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            format!("fictional-{marked}\tlogin{marked}\tNorthwind\n")
+        );
+
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: format!("Member {marked}"),
+                hidden: false,
+                value: Some("4471".to_string()),
+            }],
+        );
+        let (_, piped, _) = talk(&get(None, false), std::slice::from_ref(&item), false);
+        assert!(
+            piped.contains(&format!("Member {marked}\tvisible\t4471\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Member x\u{301}\u{301}?"), "{shown:?}");
+    }
+
+    #[test]
+    fn a_visible_value_in_a_whole_item_reaches_a_pipe_unnormalized_and_uncapped() {
+        let value = "Cafe\u{301}\u{301}\u{301}\u{301} name";
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: "username".to_string(),
+                hidden: false,
+                value: Some(value.to_string()),
+            }],
+        );
+        let (code, piped, _) = talk(&get(None, false), &[item.clone()], false);
+        assert_eq!(code, EXIT_OK);
+        assert!(
+            piped.contains(&format!("username\tvisible\t{value}\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Caf\u{e9}\u{301}\u{301}? name"), "{shown:?}");
+    }
+
+    #[test]
+    fn a_requested_secret_with_stacked_marks_reaches_a_pipe_exactly() {
+        let secret = format!("{}\u{301}\u{301}\u{301}\u{301}e\u{301}", "fictional");
+        let reply = CliReply::value(ID, &secret, true);
+        let (code, out, _) = talk(&get(Some("password"), false), &[reply.clone()], false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, secret);
+        let (code, out, _) = talk(&get(Some("password"), false), &[reply], true);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, format!("{secret}\n"));
+    }
+
+    #[test]
+    fn a_direction_override_in_a_title_kind_or_message_never_reaches_the_terminal() {
+        let items = vec![CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: "Mallory \u{202e}gnp.exe\u{202c} Item".to_string(),
+        }];
+        let list = [CliReply::items(ID, items), CliReply::done(ID)];
+        for terminal in [true, false] {
+            let (code, out, _) = talk(&CliCommand::List, &list, terminal);
+            assert_eq!(code, EXIT_OK);
+            assert!(out.contains("Mallory ?gnp.exe? Item"), "{out:?}");
+            assert!(!out.contains(['\u{202e}', '\u{202c}']));
+        }
+        for terminal in [true, false] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let mut streams = Streams {
+                out: &mut out,
+                err: &mut err,
+                out_terminal: terminal,
+                err_terminal: terminal,
+            };
+            let unchecked = [CliItemSummary {
+                id: "fictional\u{2066}login".to_string(),
+                kind: "log\u{2067}in".to_string(),
+                title: "Northwind".to_string(),
+            }];
+            print_list(&unchecked, &mut streams).expect("printed");
+            let out = String::from_utf8(out).expect("utf8");
+            assert!(
+                out.contains("log?in") && out.contains("fictional?login"),
+                "{out:?}"
+            );
+        }
+
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "North\u{200b}wind \u{2066}mail\u{2069}".to_string(),
+            },
+            vec![CliField {
+                name: "web\u{202e}site".to_string(),
+                hidden: false,
+                value: Some("https://\u{202e}elpmaxe.dniwhtron".to_string()),
+            }],
+        );
+        for terminal in [true, false] {
+            let (code, out, _) = talk(&get(None, false), std::slice::from_ref(&item), terminal);
+            assert_eq!(code, EXIT_OK);
+            assert!(!out.contains(['\u{202e}', '\u{200b}', '\u{2066}', '\u{2069}']));
+            assert!(out.contains("web?site"));
+            assert!(out.contains("https://?elpmaxe.dniwhtron"));
+        }
+
+        let refusal = CliReply::error_with(Some(ID), CliErrorCode::Busy, "Try \u{202e}later");
+        let (code, _, err) = talk(&CliCommand::List, &[refusal], true);
+        assert_eq!(code, EXIT_BUSY);
+        assert!(err.contains("Try ?later"));
+    }
+
+    #[test]
+    fn a_value_asked_for_is_exact_in_a_pipe_and_a_hidden_one_is_never_altered_on_a_terminal() {
+        let hidden = "fictional\u{202e}canary\u{a0}pass";
+        let replies = [CliReply::value(ID, hidden, true)];
+        let (code, out, err) = talk(&get(Some("password"), false), &replies, true);
+        assert_eq!(code, EXIT_FAILED);
+        assert!(out.is_empty());
+        assert!(err.contains("--copy"));
+        let (code, out, _) = talk(&get(Some("password"), false), &replies, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out.as_bytes(), hidden.as_bytes());
+
+        let spaced = "fictional\u{a0}canary\u{3000}pass";
+        let (code, out, _) = talk(
+            &get(Some("password"), false),
+            &[CliReply::value(ID, spaced, true)],
+            true,
+        );
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, format!("{spaced}\n"));
+
+        let visible = "https://\u{202e}elpmaxe.dniwhtron";
+        let replies = [CliReply::value(ID, visible, false)];
+        let (code, out, _) = talk(&get(Some("url"), false), &replies, true);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, "https://?elpmaxe.dniwhtron\n");
+        let (code, out, _) = talk(&get(Some("url"), false), &replies, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(out, visible);
     }
 
     #[test]
@@ -1027,6 +1410,37 @@ mod tests {
         let (code, _) = deliver_into(&mut roomy, &cases[0].0, &cases[0].1, false);
         assert_eq!(code, EXIT_OK);
         assert_eq!(roomy.written, b"fictional-password-canary");
+    }
+
+    #[test]
+    fn sesame_closing_while_a_request_waits_exits_as_unreachable() {
+        for reason in [WaitReason::Approval, WaitReason::Unlock] {
+            let (code, out, err) = talk(
+                &get(Some("password"), false),
+                &[CliReply::waiting(ID, reason)],
+                false,
+            );
+            assert_eq!(code, EXIT_UNREACHABLE);
+            assert!(out.is_empty());
+            assert!(err.contains(STOPPED_WAITING));
+        }
+
+        let summary = CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: "Northwind mail".to_string(),
+        };
+        let (code, out, err) = talk(
+            &CliCommand::List,
+            &[
+                CliReply::waiting(ID, WaitReason::Approval),
+                CliReply::items(ID, vec![summary]),
+            ],
+            false,
+        );
+        assert_eq!(code, EXIT_FAILED);
+        assert!(out.is_empty());
+        assert!(err.contains("Sesame stopped answering."));
     }
 
     #[test]

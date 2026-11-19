@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
+  import { vaultText } from '../vault-text'
   import { tick } from 'svelte'
   import Icon from '../Icon.svelte'
   import { handleMenuItemKeydown, handleMenuTriggerKeydown, menuItemsIn } from '../menu-keys'
@@ -90,7 +92,7 @@
   </button>
 
   {#if open}
-    <div id="item-filter-options" class="filter-options" role="menu" aria-label="Filter items">
+    <div use:holdsApprovals id="item-filter-options" class="filter-options" role="menu" aria-label="Filter items">
       <div class="filter-options-scroll" role="none">
       <p class="filter-group-label">Types</p>
       <button type="button" role="menuitemradio" aria-checked={categoryFilter === null} tabindex="-1" on:click={() => choose(() => onSetCategory(null))} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
@@ -114,7 +116,7 @@
       </button>
       {#each folders as folder (folder.id)}
         <button type="button" role="menuitemradio" aria-checked={collectionFilter === folder.id} tabindex="-1" on:click={() => choose(() => onShowCollection(folder.id))} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
-          <Icon name="folder" size={14} /><span>{folder.name}</span><small>{folderCount(folder.id)}</small>
+          <Icon name="folder" size={14} /><span><bdi>{vaultText(folder.name)}</bdi></span><small>{folderCount(folder.id)}</small>
         </button>
       {/each}
       <button type="button" role="menuitemradio" aria-checked={collectionFilter === UNFILED_FILTER} tabindex="-1" on:click={() => choose(() => onShowCollection(UNFILED_FILTER))} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
@@ -125,7 +127,7 @@
         <p class="filter-group-label">Tags</p>
         {#each tags as tag (tag)}
           <button type="button" role="menuitemradio" aria-checked={activeTag === tag} tabindex="-1" on:click={() => choose(() => onShowCollection(tagFilter(tag)))} on:keydown={(event) => handleMenuItemKeydown(event, container, close)}>
-            <Icon name="custom" size={14} /><span>{tag}</span><small>{tagCount(tag)}</small>
+            <Icon name="custom" size={14} /><span><bdi>{vaultText(tag)}</bdi></span><small>{tagCount(tag)}</small>
           </button>
         {/each}
       {/if}

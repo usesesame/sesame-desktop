@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import KeptSecret from './KeptSecret.svelte'
   import { parseTags } from '../vault-items'
   import ModalShell from './ModalShell.svelte'
@@ -121,17 +122,17 @@
                   aria-busy={savingAttachmentId === attachment.id}
                   disabled={savingAttachmentId !== null}
                   on:click={() => onSaveAttachment(attachment.id)}
-                  title={`Save ${attachment.filename}`}
+                  title={`Save ${vaultText(attachment.filename)}`}
                 >
                   <Icon name="file-key" size={15} />
-                  <span class="document-attachment-name">{attachment.filename}</span>
+                  <span class="document-attachment-name"><bdi>{vaultText(attachment.filename)}</bdi></span>
                   <span class="document-attachment-size">{savingAttachmentId === attachment.id ? 'Saving…' : formatBytes(attachment.size)}</span>
                 </button>
                 <button
                   type="button"
                   class="icon-button"
                   class:confirm-armed={armedRemovalId === attachment.id}
-                  aria-label={armedRemovalId === attachment.id ? `Select again to remove ${attachment.filename}` : `Remove ${attachment.filename}`}
+                  aria-label={armedRemovalId === attachment.id ? `Select again to remove ${vaultText(attachment.filename)}` : `Remove ${vaultText(attachment.filename)}`}
                   title={armedRemovalId === attachment.id ? 'Select again to remove' : 'Remove attachment'}
                   disabled={removingAttachmentId === attachment.id}
                   on:click={() => removeAttachment(attachment.id)}

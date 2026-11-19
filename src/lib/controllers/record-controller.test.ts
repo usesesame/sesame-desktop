@@ -102,7 +102,7 @@ describe('createRecordController', () => {
     controller.setDraft({ title: 'Mine' })
     await controller.save()
     expect(saved).toEqual([{ id: 'new-id' }])
-    expect(get(feedback.state).notice).toEqual({ title: 'Thing saved', message: 'Mine stored' })
+    expect(get(feedback.state).notice).toEqual({ title: 'Thing saved', message: '\u2068Mine\u2069 stored' })
     expect(get(controller.state).draft).toEqual({ title: '' })
   })
 
@@ -112,7 +112,7 @@ describe('createRecordController', () => {
     expect(get(controller.state).deleteCandidate).toEqual({ id: 'item-1', title: 'Mine' })
     await controller.confirmDelete()
     expect(deleted).toEqual(['item-1'])
-    expect(get(feedback.state).notice).toMatchObject({ title: 'Thing deleted', message: 'Mine removed', action: { label: 'Undo' } })
+    expect(get(feedback.state).notice).toMatchObject({ title: 'Thing deleted', message: '\u2068Mine\u2069 removed', action: { label: 'Undo' } })
     expect(get(controller.state).deleteCandidate).toBeNull()
   })
 

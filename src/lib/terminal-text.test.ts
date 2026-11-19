@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
+import vectors from '../../src-tauri/contracts/cli/v1/vectors.json'
+import source from '../../src-tauri/src/terminal_text_tables.rs?raw'
+import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, hidesCharacter, isMark, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
 
 const plainProse = /[—–()]/
 
@@ -32,6 +34,70 @@ describe('text a terminal sent', () => {
     expect(shownText('\u3164', 15)).toBe(UNREADABLE_NAME)
     expect(shownText('Readable', 0)).toBe('')
     expect(shownText('Readable', 1)).toBe('…')
+  })
+})
+
+describe('the rule the terminal tool shares', () => {
+  const character = (hex: string) => String.fromCodePoint(Number.parseInt(hex, 16))
+
+  test.each([
+    ['standIns', '?'],
+    ['spaces', ' '],
+    ['kept', null],
+  ] as const)('the %s cases read the same in the window as in the terminal', (group, shown) => {
+    const points: string[] = vectors.shownTextCases[group]
+    expect(points.length).toBeGreaterThan(0)
+    for (const point of points) {
+      const value = character(point)
+      expect(shownText(`a${value}b`), point).toBe(`a${shown ?? value}b`)
+    }
+  })
+})
+
+describe('the tables the terminal tool carries', () => {
+  const runtime = (globalThis as { process?: { versions?: { unicode?: string } } }).process?.versions?.unicode
+
+  function table(name: string): Array<[number, number]> {
+    const body = source.match(new RegExp(`const ${name}: &\\[\\(u32, u32\\)\\] = &\\[([^\\]]*)\\];`))
+    expect(body, name).not.toBeNull()
+    return [...(body?.[1] ?? '').matchAll(/\((0x[0-9a-f]+), (0x[0-9a-f]+)\)/g)].map((pair) => [Number(pair[1]), Number(pair[2])])
+  }
+
+  function inside(ranges: Array<[number, number]>, point: number): boolean {
+    let low = 0
+    let high = ranges.length - 1
+    while (low <= high) {
+      const middle = (low + high) >> 1
+      const [start, end] = ranges[middle]
+      if (point < start) high = middle - 1
+      else if (point > end) low = middle + 1
+      else return true
+    }
+    return false
+  }
+
+  test('were made from the Unicode version this runtime uses, so the check below is exact', () => {
+    expect(runtime).toBeDefined()
+    expect(source).toContain(`UNICODE_VERSION: &str = "${runtime}";`)
+  })
+
+  test('agree with the window on every code point about hidden characters and combining marks', () => {
+    const hidden = table('HIDDEN')
+    const marks = table('MARKS')
+    const disagreements: string[] = []
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      const character = String.fromCodePoint(point)
+      if (inside(hidden, point) !== hidesCharacter(character)) disagreements.push(`hidden ${point.toString(16)}`)
+      if (inside(marks, point) !== isMark(character)) disagreements.push(`mark ${point.toString(16)}`)
+      if (disagreements.length > 20) break
+    }
+    expect(disagreements).toEqual([])
+  })
+
+  test('the shared mark cases read the same in the window as in the terminal', () => {
+    const cases: Array<[string, string]> = vectors.shownTextCases.marks as Array<[string, string]>
+    expect(cases.length).toBeGreaterThan(0)
+    for (const [input, shown] of cases) expect(shownText(input), input).toBe(shown)
   })
 })
 
@@ -93,7 +159,22 @@ describe('what the dialog says', () => {
   test('every closing reason has its own sentence', () => {
     const lines = ['expired', 'connectionClosed', 'vaultChanged', 'preempted', 'somethingNew'].map(cancelledLine)
     expect(new Set(lines).size).toBe(5)
-    for (const line of [...lines, unlockLine('get'), unlockLine('list'), unlockLine('totp')]) expect(line).not.toMatch(plainProse)
+    const waiting = [
+      unlockLine({ command: 'get', copy: false }),
+      unlockLine({ command: 'list', copy: false }),
+      unlockLine({ command: 'totp', copy: true }),
+      unlockLine({ command: 'get', field: 'password', copy: false }),
+    ]
+    for (const line of [...lines, ...waiting]) expect(line).not.toMatch(plainProse)
+  })
+
+  test('the lock screen says what a waiting terminal wants without naming the item', () => {
+    expect(unlockLine({ command: 'get', field: 'password', copy: false })).toBe('A terminal wants the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'password', copy: true })).toBe('A terminal wants to copy the password of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', field: 'Recovery PIN', copy: false })).toBe('A terminal wants one field of an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'get', copy: false })).toBe('A terminal wants to read an item. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'list', copy: false })).toBe('A terminal wants the names of all your items. Sesame asks you about it after you unlock.')
+    expect(unlockLine({ command: 'totp', copy: false })).toBe('A terminal wants a one-time code. Sesame asks you about it after you unlock.')
   })
 
   test('allowed requests and remaining time read as sentences', () => {
@@ -101,7 +182,11 @@ describe('what the dialog says', () => {
     expect(allowedRequestWords('get', 'Recovery PIN', 'Northwind mail', 'login')).toBe('Read a field of Northwind mail')
     expect(allowedRequestWords('totp', 'totp', null, 'login')).toBe('Read the one-time code of a removed login')
     expect(allowedRequestWords('list', undefined, null, undefined)).toBe('Listed every item title')
-    expect(remainingWords(212_000)).toBe('4 more minutes')
+    expect(remainingWords(212_000)).toBe('3 more minutes')
+    expect(remainingWords(270_000)).toBe('4 more minutes')
+    expect(remainingWords(300_000)).toBe('5 more minutes')
+    expect(remainingWords(60_000)).toBe('1 more minute')
+    expect(remainingWords(59_400)).toBe('59 more seconds')
     expect(remainingWords(41_000)).toBe('41 more seconds')
     expect(remainingWords(1_000)).toBe('1 more second')
   })

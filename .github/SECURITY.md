@@ -63,6 +63,9 @@ In scope:
   `src-tauri/src/browser_fill*.rs`.
 - The `sesame` command line tool and its approval path: `src-tauri/src/terminal*.rs`,
   `src-tauri/src/bin/sesame-cli.rs` and the terminal approval in the window.
+- The Windows installer's system Path edit: `src-tauri/src/machine_path.rs`,
+  `src-tauri/src/adapters/platform/system_path.rs` and
+  `src-tauri/nsis/native-host-uninstall.nsh`.
 - Sesame Sync in the desktop app: the signed device list, snapshot headers,
   pairing, key packages, request signatures, and the minimum version check.
   Report server findings in [sesame-server](https://github.com/usesesame/sesame-server).
@@ -166,9 +169,38 @@ good-faith report that turns out to be out of scope is not held against you.
   session in the same terminal is asked again. The allowance also ends when the vault locks and when almost
   anything in the vault changes, such as saving, deleting or starring an item,
   so a terminal you allowed may be asked again before five minutes pass.
+- After a terminal request is denied or not answered, Sesame turns terminal
+  requests away for 15 seconds without raising the window, and the wait
+  doubles with each further one up to 5 minutes. Allowing a request ends it.
+  A request for an item or field the vault does not have counts as well once
+  you dismiss its notice, except the first one since your last Allow, so a
+  typo costs nothing but a run of made-up names stops raising the window. A
+  lock while a request waits does not count. The tool exits with 0 when the
+  request was answered, 1 for any other failure, 2 for a mistyped command, 3
+  when Sesame is not running or closed before it answered, 4 when nobody
+  answered in time, 5 when the request was denied, 6 when Sesame locked or the
+  vault changed first, 7 when nothing has that name, 8 when Sesame is busy or
+  making terminals wait and 9 when Sesame needs an update. `sesame --help`
+  lists the same codes.
+- The Activity list records every terminal request and how it ended,
+  including the ones Sesame turned down without showing them. Repeats within a
+  minute share one entry, and a request for a name the vault does not have is
+  recorded without the name, because a program chose that text.
 - Windows offers no terminal allowance, because Sesame cannot tell one
   terminal from another there, so every request from the `sesame` command
   asks in the window.
+- On Windows the installer runs `cli\sesame.exe --add-to-machine-path` after
+  copying it and `cli\sesame.exe --remove-from-machine-path` before deleting
+  it, to put the cli folder on the system Path and take it off again. Neither
+  argument appears in `sesame --help`. In this mode the program changes only
+  the `Path` value in the machine environment and never opens the connection
+  to the desktop app, so it has no way to reach the vault. It refuses unless
+  it runs elevated as the copy installed at Program Files\Sesame\cli, it
+  takes no folder from its arguments and refuses any extra argument, and it
+  only removes the entry when it finds exactly one copy in the form it adds.
+  A person or program without administrator rights that runs it gets a
+  refusal and no change. Anyone with administrator rights can already change
+  the system Path.
 - On Linux the `sesame` command only checks that the program answering on its
   socket runs as you. A program of yours that answers in Sesame's place, for
   example in a shell where it changed `XDG_RUNTIME_DIR`, learns which command,

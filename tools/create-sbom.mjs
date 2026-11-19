@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readShippedPackages } from './shipped-packages.mjs'
+import { packageNameFromModuleId, readShippedPackages } from './shipped-packages.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
 const destination = process.env.SESAME_SBOM_OUTPUT_DIR
@@ -29,18 +29,19 @@ const shippedPackagesFile = process.env.SESAME_SHIPPED_PACKAGES
   ? path.resolve(process.env.SESAME_SHIPPED_PACKAGES)
   : path.join(root, 'dist', 'shipped-npm-packages.json')
 
-const npmComponents = (shippedPackages) =>
-  Object.entries(JSON.parse(npmLock).packages ?? {})
+export const npmComponents = (lock, shippedPackages) =>
+  Object.entries(lock.packages ?? {})
     .filter(([name]) => name.includes('node_modules/'))
     .map(([name, entry]) => {
-      const packageName =
-        entry.name ?? name.slice(name.lastIndexOf('node_modules/') + 'node_modules/'.length)
+      const installedName = packageNameFromModuleId(name)
+      const packageName = entry.name ?? installedName
+      const shipped = shippedPackages.has(packageName) || shippedPackages.has(installedName)
       const component = {
         type: 'library',
         name: packageName,
         version: entry.version,
         purl: `pkg:npm/${packageName}@${entry.version}`,
-        scope: entry.dev && !shippedPackages.has(packageName) ? 'excluded' : 'required',
+        scope: entry.dev && !shipped ? 'excluded' : 'required',
       }
       const hash = npmHash(entry.integrity)
       if (hash) component.hashes = [hash]
@@ -111,6 +112,85 @@ export const markNeverCompiled = (components, compiled) => {
   }
 }
 
+export const dependencyRoleProperty = 'sesame:cargo-dependency'
+export const pulledInByProperty = 'sesame:cargo-pulled-in-by'
+
+export const cargoDependencyRoles = (metadata) => {
+  const packages = new Map((metadata?.packages ?? []).map((pkg) => [pkg.id, pkg]))
+  const nodes = new Map((metadata?.resolve?.nodes ?? []).map((node) => [node.id, node]))
+  const members = (metadata?.workspace_members ?? []).filter((id) => packages.has(id) && nodes.has(id))
+  if (members.length === 0) {
+    throw new Error('cargo metadata did not list the workspace crates, so direct dependencies cannot be told apart.')
+  }
+  const direct = new Set(members)
+  for (const id of members) for (const dependency of nodes.get(id).deps ?? []) direct.add(dependency.pkg)
+  const pulledInBy = new Map()
+  for (const start of direct) {
+    if (members.includes(start) || !packages.has(start)) continue
+    const seen = new Set([start])
+    const queue = [start]
+    while (queue.length > 0) {
+      for (const dependency of nodes.get(queue.shift())?.deps ?? []) {
+        if (seen.has(dependency.pkg)) continue
+        seen.add(dependency.pkg)
+        queue.push(dependency.pkg)
+        if (direct.has(dependency.pkg)) continue
+        if (!pulledInBy.has(dependency.pkg)) pulledInBy.set(dependency.pkg, new Set())
+        pulledInBy.get(dependency.pkg).add(packages.get(start).name)
+      }
+    }
+  }
+  const roles = new Map()
+  for (const [id, pkg] of packages) {
+    if (!nodes.has(id)) continue
+    const key = `${pkg.name}@${pkg.version}`
+    const known = roles.get(key) ?? { direct: false, pulledInBy: new Set() }
+    const parents = pulledInBy.get(id) ?? new Set()
+    roles.set(key, {
+      direct: known.direct || direct.has(id) || parents.size === 0,
+      pulledInBy: new Set([...known.pulledInBy, ...parents]),
+    })
+  }
+  return roles
+}
+
+export const markDependencyRoles = (components, roles) => {
+  const unlisted = components.filter(
+    (component) =>
+      component.properties?.some((property) => property.name === 'sesame:source') &&
+      !roles.has(`${component.name}@${component.version}`),
+  )
+  if (roles.size === 0 || unlisted.length > 0) {
+    throw new Error('cargo metadata did not list the workspace crates, so direct dependencies cannot be told apart.')
+  }
+  for (const component of components) {
+    const role = roles.get(`${component.name}@${component.version}`)
+    const transitive = role !== undefined && !role.direct && role.pulledInBy.size > 0
+    component.properties = [
+      ...(component.properties ?? []),
+      { name: dependencyRoleProperty, value: transitive ? 'transitive' : 'direct' },
+      ...(transitive ? [{ name: pulledInByProperty, value: [...role.pulledInBy].sort().join(', ') }] : []),
+    ]
+  }
+}
+
+const cargoMetadata = () =>
+  JSON.parse(
+    execFileSync(
+      'cargo',
+      [
+        'metadata',
+        '--manifest-path',
+        path.join(root, 'src-tauri', 'Cargo.toml'),
+        '--locked',
+        '--all-features',
+        '--format-version',
+        '1',
+      ],
+      { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'] },
+    ),
+  )
+
 export const vendorTreeDigest = async (directory, base = root) => {
   const files = []
   const walk = async (current) => {
@@ -134,19 +214,27 @@ export const vendorTreeDigest = async (directory, base = root) => {
   return hash.digest('hex')
 }
 
+const vendoredSource = (component) =>
+  (component.properties ?? []).some((property) => property.name === 'sesame:source' && property.value === 'path')
+
+export const markVendoredGlib = (components, vendorTree) => {
+  for (const component of components) {
+    if (component.name === 'glib' && vendoredSource(component)) {
+      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
+    }
+  }
+}
+
 const main = async () => {
   const shippedPackages = await readShippedPackages(shippedPackagesFile)
   const vendorTree = await vendorTreeDigest(path.join(root, 'src-tauri', 'vendor', 'glib'))
   markNeverCompiled(cargoComponents, compiledCrates(cargoTree()))
-  for (const component of cargoComponents) {
-    if (component.name === 'glib' && component.properties) {
-      component.properties.push({ name: 'sesame:vendor-tree-sha256', value: vendorTree })
-    }
-  }
+  markDependencyRoles(cargoComponents, cargoDependencyRoles(cargoMetadata()))
+  markVendoredGlib(cargoComponents, vendorTree)
 
   await mkdir(destination, { recursive: true })
   const components = [
-    ...npmComponents(shippedPackages),
+    ...npmComponents(JSON.parse(npmLock), shippedPackages),
     ...cargoComponents,
     ...(goSum
       ? [
