@@ -62,8 +62,8 @@ the commit does not unpublish it.
 
 ## Before you open a pull request
 
-Run the checks for what you touched, and paste the commands you actually ran
-into the pull request.
+Run the checks for what you touched. CI runs them again on the pull request, so
+the description does not need to list them.
 
 | You changed | Run |
 | --- | --- |
@@ -103,8 +103,6 @@ applicable" only when the change cannot affect unlock, encryption, backup,
 import, browser messaging, authentication, or audit behaviour. If you had to
 stop and think about whether it applies, it applies, so say what changed and
 what still holds.
-
-Under Validation, name the commands. "Tested" tells a reviewer nothing.
 
 ## Code rules
 
