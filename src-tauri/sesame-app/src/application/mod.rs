@@ -87,6 +87,9 @@ pub mod sync_transfer_tests;
 pub mod tests;
 
 #[cfg(test)]
+pub mod unlock_concurrency_tests;
+
+#[cfg(test)]
 pub mod unlock_lifecycle_tests;
 
 #[cfg(test)]

@@ -12,14 +12,15 @@ use crate::vault::backup::{
     json_export_bytes, managed_vault_paths, prepare_backup_for_restore, restore_revision_delta,
     stage_managed_vault_files, verify_backup_file,
 };
+use crate::vault::key_proof::VAULT_CHANGED_DURING_CHECK;
 use crate::vault::platform::{copy_private_file, create_private_dir, securely_delete};
 use crate::vault::recovery_health::RecoveryHealth;
 use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
 use crate::vault::storage::write_export_file;
 use crate::vault::util::{backup_file_name, random_id, unix_timestamp};
 use crate::vault::{
-    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, VaultResult,
-    VaultState,
+    BackupInspection, BackupVerification, RestoreBackupRequest, RestoreBackupResult, UnlockedVault,
+    VaultResult, VaultState,
 };
 
 pub fn create_backup_in_state(state: &VaultState) -> VaultResult<String> {
@@ -316,8 +317,16 @@ pub fn delete_local_vault_in_state(
         .parent()
         .ok_or("Sesame could not find the vault folder.")?;
 
+    state.pause_for_test("deleteAuthenticated");
     // Guard held through staging so a racing save can never recreate the vault.
-    let session = state.begin_destructive_lifecycle_change()?;
+    let session = state.begin_destructive_lifecycle_change(|_| {
+        let current = sesame_core::loader::VaultLoader::read(&vault)?;
+        if crate::application::lifecycle::same_key_settings(&file, &current) {
+            Ok(())
+        } else {
+            Err(VAULT_CHANGED_DURING_CHECK.into())
+        }
+    })?;
     state.cache_pin_unlock(false);
     state.cache_hello_unlock(false);
     let staged = stage_managed_vault_files(&vault, parent);
@@ -442,10 +451,7 @@ pub fn restore_backup_in_state(
             if active && session.is_none() {
                 return Err("Unlock your vault before restoring a backup.".into());
             }
-            session.map(|vault| {
-                let snapshot = vault.snapshot();
-                (snapshot.vault_id, snapshot.revision)
-            })
+            session.map(UnlockedVault::opened_in_lock_generation)
         };
         if current.is_some() {
             require_release_presence(state, presence)?;
@@ -455,20 +461,29 @@ pub fn restore_backup_in_state(
         let prepared = prepare_backup_for_restore(&source, &destination, &secret);
         drop(secret);
         let prepared = prepared?;
+        state.pause_for_test("restorePrepared");
 
-        let (restored_revision, replaced_revision) = match current {
-            Some((vault_id, revision)) => {
-                let (restored, replaced) =
-                    restore_revision_delta(&prepared, vault_id.as_deref(), revision)?;
-                (restored, Some(replaced))
-            }
-            None => (prepared.revision(), None),
-        };
-
-        require_older_confirmation(restored_revision, replaced_revision, confirm_older)?;
-
-        let installed = state
-            .apply_lifecycle_replacement(|| apply_restored_vault_file(&destination, &prepared))?;
+        let (installed, restored_revision, replaced_revision) =
+            state.apply_lifecycle_replacement(|session| {
+                let (restored_revision, replaced_revision) = match (current, session) {
+                    (Some(generation), Some(vault))
+                        if vault.opened_in_lock_generation() == generation =>
+                    {
+                        let snapshot = vault.snapshot();
+                        let (restored, replaced) = restore_revision_delta(
+                            &prepared,
+                            snapshot.vault_id.as_deref(),
+                            snapshot.revision,
+                        )?;
+                        (restored, Some(replaced))
+                    }
+                    (None, None) if !destination.exists() => (prepared.revision(), None),
+                    _ => return Err(VAULT_CHANGED_DURING_CHECK.into()),
+                };
+                require_older_confirmation(restored_revision, replaced_revision, confirm_older)?;
+                let installed = apply_restored_vault_file(&destination, &prepared)?;
+                Ok((installed, restored_revision, replaced_revision))
+            })?;
         effects.reset_rollback_after_restore(prepared.vault_id(), restored_revision);
         let _ = effects.clear_armed_clipboard();
         state.cache_pin_unlock(installed.pin_unlock_available);

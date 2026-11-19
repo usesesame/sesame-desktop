@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use zeroize::Zeroizing;
 
 use crate::adapters::desktop_effects::DesktopHostEffects;
@@ -16,57 +16,86 @@ use crate::vault::{
     VaultStatus,
 };
 
+pub(crate) const STOPPED_BEFORE_FINISHING: &str =
+    "Sesame stopped this task before it finished. Try again.";
+
+pub(crate) async fn off_window_thread<T: Send + 'static>(
+    app: AppHandle,
+    work: impl FnOnce(&AppHandle) -> VaultResult<T> + Send + 'static,
+) -> VaultResult<T> {
+    tauri::async_runtime::spawn_blocking(move || work(&app))
+        .await
+        .map_err(|_| STOPPED_BEFORE_FINISHING.to_string())?
+}
+
 #[tauri::command]
 pub fn get_vault_status(app: AppHandle, state: State<'_, VaultState>) -> VaultResult<VaultStatus> {
     get_vault_status_in_state(&state, &DesktopHostEffects::new(&app))
 }
 
 #[tauri::command]
-pub fn create_vault(
+pub async fn create_vault(
     app: AppHandle,
-    state: State<'_, VaultState>,
     request: MasterPasswordRequest,
 ) -> VaultResult<VaultSetup> {
-    create_vault_in_state(
-        &state,
-        &DesktopHostEffects::new(&app),
-        Zeroizing::new(request.master_password),
-    )
+    let master_password = Zeroizing::new(request.master_password);
+    off_window_thread(app, move |app| {
+        create_vault_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            master_password,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn resume_recovery_setup(state: State<'_, VaultState>) -> VaultResult<String> {
-    resume_recovery_setup_in_state(&state)
+pub async fn resume_recovery_setup(app: AppHandle) -> VaultResult<String> {
+    off_window_thread(app, |app| {
+        resume_recovery_setup_in_state(&app.state::<VaultState>())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn complete_recovery_setup(
-    state: State<'_, VaultState>,
+pub async fn complete_recovery_setup(
+    app: AppHandle,
     request: RecoveryKitRequest,
 ) -> VaultResult<()> {
-    complete_recovery_setup_in_state(&state, Zeroizing::new(request.recovery_kit))
+    let recovery_kit = Zeroizing::new(request.recovery_kit);
+    off_window_thread(app, move |app| {
+        complete_recovery_setup_in_state(&app.state::<VaultState>(), recovery_kit)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn unlock_recovery_vault(
+pub async fn unlock_recovery_vault(
     app: AppHandle,
-    state: State<'_, VaultState>,
     request: RecoveryKitRequest,
 ) -> VaultResult<VaultSnapshot> {
-    unlock_recovery_vault_in_state(
-        &state,
-        &DesktopHostEffects::new(&app),
-        Zeroizing::new(request.recovery_kit),
-    )
+    let recovery_kit = Zeroizing::new(request.recovery_kit);
+    off_window_thread(app, move |app| {
+        unlock_recovery_vault_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            recovery_kit,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn set_unlock_pin(
-    app: AppHandle,
-    state: State<'_, VaultState>,
-    request: UnlockPinRequest,
-) -> VaultResult<()> {
-    set_unlock_pin_in_state(&state, &DesktopHostEffects::new(&app), request.pin)
+pub async fn set_unlock_pin(app: AppHandle, request: UnlockPinRequest) -> VaultResult<()> {
+    let mut pin = Zeroizing::new(request.pin);
+    off_window_thread(app, move |app| {
+        set_unlock_pin_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            std::mem::take(&mut *pin),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -93,36 +122,51 @@ pub fn unlock_with_windows_hello(
 }
 
 #[tauri::command]
-pub fn unlock_pin_vault(
+pub async fn unlock_pin_vault(
     app: AppHandle,
-    state: State<'_, VaultState>,
     request: UnlockPinRequest,
 ) -> VaultResult<VaultSnapshot> {
-    unlock_pin_vault_in_state(&state, &DesktopHostEffects::new(&app), request.pin)
+    let mut pin = Zeroizing::new(request.pin);
+    off_window_thread(app, move |app| {
+        unlock_pin_vault_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            std::mem::take(&mut *pin),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn unlock_vault(
+pub async fn unlock_vault(
     app: AppHandle,
-    state: State<'_, VaultState>,
-    presence: State<'_, ReleasePresence>,
     request: MasterPasswordRequest,
 ) -> VaultResult<VaultSnapshot> {
-    crate::application::lifecycle::unlock_vault_in_state(
-        &state,
-        &presence,
-        &DesktopHostEffects::new(&app),
-        Zeroizing::new(request.master_password),
-    )
+    let master_password = Zeroizing::new(request.master_password);
+    off_window_thread(app, move |app| {
+        crate::application::lifecycle::unlock_vault_in_state(
+            &app.state::<VaultState>(),
+            &app.state::<ReleasePresence>(),
+            &DesktopHostEffects::new(app),
+            master_password,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn change_master_password(
+pub async fn change_master_password(
     app: AppHandle,
-    state: State<'_, VaultState>,
     request: ChangeMasterPasswordRequest,
 ) -> VaultResult<ChangeMasterPasswordResult> {
-    change_master_password_in_state(&state, &DesktopHostEffects::new(&app), request)
+    off_window_thread(app, move |app| {
+        change_master_password_in_state(
+            &app.state::<VaultState>(),
+            &DesktopHostEffects::new(app),
+            request,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

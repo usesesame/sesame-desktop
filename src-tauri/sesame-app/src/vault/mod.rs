@@ -14,6 +14,8 @@ pub use sesame_core::history;
 #[allow(unused_imports)]
 pub use sesame_core::imports;
 #[allow(unused_imports)]
+pub use sesame_core::key_proof;
+#[allow(unused_imports)]
 pub use sesame_core::migration;
 #[allow(unused_imports)]
 pub use sesame_core::password_analysis;

@@ -12,6 +12,7 @@ mod record_writes_tests;
 mod rollback_guard;
 mod terminal;
 mod terminal_client;
+mod terminal_text_tables;
 mod vault;
 
 pub(crate) use sesame_app::{application, browser_protocol, cli_protocol, release, sync};

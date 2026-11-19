@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import vectors from '../../src-tauri/contracts/cli/v1/vectors.json'
-import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
+import source from '../../src-tauri/src/terminal_text_tables.rs?raw'
+import { MAX_MARKS_PER_CHARACTER, UNREADABLE_NAME, hidesCharacter, isMark, allowedRequestWords, approvalHeading, approvalSummary, cancelledLine, remainingWords, shownText, unlockLine } from './terminal-text'
 
 const plainProse = /[—–()]/
 
@@ -50,6 +51,53 @@ describe('the rule the terminal tool shares', () => {
       const value = character(point)
       expect(shownText(`a${value}b`), point).toBe(`a${shown ?? value}b`)
     }
+  })
+})
+
+describe('the tables the terminal tool carries', () => {
+  const runtime = (globalThis as { process?: { versions?: { unicode?: string } } }).process?.versions?.unicode
+
+  function table(name: string): Array<[number, number]> {
+    const body = source.match(new RegExp(`const ${name}: &\\[\\(u32, u32\\)\\] = &\\[([^\\]]*)\\];`))
+    expect(body, name).not.toBeNull()
+    return [...(body?.[1] ?? '').matchAll(/\((0x[0-9a-f]+), (0x[0-9a-f]+)\)/g)].map((pair) => [Number(pair[1]), Number(pair[2])])
+  }
+
+  function inside(ranges: Array<[number, number]>, point: number): boolean {
+    let low = 0
+    let high = ranges.length - 1
+    while (low <= high) {
+      const middle = (low + high) >> 1
+      const [start, end] = ranges[middle]
+      if (point < start) high = middle - 1
+      else if (point > end) low = middle + 1
+      else return true
+    }
+    return false
+  }
+
+  test('were made from the Unicode version this runtime uses, so the check below is exact', () => {
+    expect(runtime).toBeDefined()
+    expect(source).toContain(`UNICODE_VERSION: &str = "${runtime}";`)
+  })
+
+  test('agree with the window on every code point about hidden characters and combining marks', () => {
+    const hidden = table('HIDDEN')
+    const marks = table('MARKS')
+    const disagreements: string[] = []
+    for (let point = 0; point <= 0x10ffff; point += 1) {
+      const character = String.fromCodePoint(point)
+      if (inside(hidden, point) !== hidesCharacter(character)) disagreements.push(`hidden ${point.toString(16)}`)
+      if (inside(marks, point) !== isMark(character)) disagreements.push(`mark ${point.toString(16)}`)
+      if (disagreements.length > 20) break
+    }
+    expect(disagreements).toEqual([])
+  })
+
+  test('the shared mark cases read the same in the window as in the terminal', () => {
+    const cases: Array<[string, string]> = vectors.shownTextCases.marks as Array<[string, string]>
+    expect(cases.length).toBeGreaterThan(0)
+    for (const [input, shown] of cases) expect(shownText(input), input).toBe(shown)
   })
 })
 
