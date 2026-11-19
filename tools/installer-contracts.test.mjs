@@ -392,6 +392,10 @@ test('the command line install test guards the machine Path and checks what the 
     'too long to add the entry',
     "Confirm-Status \"an install that would pass $environmentLimit characters\" $installed \"$statusRefused\"",
     'Invoke-CommandShellLimitScenario',
+    'Register-BrowserHost',
+    'a silent uninstall whose Path edit fails keeps the browser registration',
+    'A deployment that runs uninstall.exe /S and waits when the Path edit fails',
+    'Write-Host ("deployment uninstall: uninstall.exe /S exited {0}',
     "'call fictional-early-probe'",
     "'call fictional-late-probe'",
     'if defined PATH (echo cmd sees PATH) else (echo cmd sees no PATH)',
@@ -494,6 +498,10 @@ test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
   const deletion = body.indexOf('Delete "$INSTDIR\\')
   assert.ok(running >= 0 && cleanup > running, 'the running app check, where a person can cancel, comes after the Path cleanup')
   assert.ok(deletion > cleanup, 'cli\\sesame.exe is deleted before it can remove its Path entry')
+  const unregister = body.indexOf('!insertmacro SESAME_UNREGISTER_NATIVE_HOST')
+  assert.ok(unregister > cleanup && unregister < deletion, 'the browser host is unregistered before the Path cleanup, so an uninstall that stops on the Path would leave the browser integration broken')
+  assert.doesNotMatch(hook.match(/!macro NSIS_HOOK_PREUNINSTALL\b[\s\S]*?!macroend/)[0], /unregister/, 'the browser host is unregistered before the uninstall can stop on the Path')
+  assert.match(hook, /!macro SESAME_UNREGISTER_NATIVE_HOST\s+\$\{If\} \$UpdateMode <> 1\s+ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'\s+\$\{EndIf\}\s+!macroend/)
   assert.match(body.slice(running, cleanup + '!insertmacro SESAME_REMOVE_TERMINAL_PATH'.length), /^\s*!insertmacro CheckIfAppIsRunning[^\n]*\n\s*!insertmacro SESAME_REMOVE_TERMINAL_PATH/, 'something runs between the running app check and the Path cleanup')
   assert.doesNotMatch(body.slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox|SetErrorLevel/, 'something after the Path cleanup can still cancel the uninstall')
 

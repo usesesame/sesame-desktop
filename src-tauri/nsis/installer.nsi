@@ -26,7 +26,9 @@
 ;      Files, instead of placing executable code under the current user's
 ;      writable LocalAppData directory.
 ;   6. The uninstaller removes the cli folder from the system Path right after
-;      the running app check, while cli\sesame.exe still exists to do it.
+;      the running app check, while cli\sesame.exe still exists to do it, and
+;      unregisters the browser native host only after that, so an uninstall
+;      that stops on the Path leaves the browser integration working.
 ;
 ; Everything else in this file is kept intentionally equivalent to upstream
 ; (updater handling, WebView2 install, shortcuts, signing) so a
@@ -870,6 +872,7 @@ Section Uninstall
 
   ; SESAME: change 6.
   !insertmacro SESAME_REMOVE_TERMINAL_PATH
+  !insertmacro SESAME_UNREGISTER_NATIVE_HOST
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

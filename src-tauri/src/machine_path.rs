@@ -209,16 +209,39 @@ pub fn names_folder(
     !target.is_empty() && comparable(&expand_references(&entry, lookup)) == target
 }
 
+fn reaches_folder(entry: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option<String>) -> bool {
+    if names_folder(entry, folder, lookup) {
+        return true;
+    }
+    let Ok(text) = String::from_utf16(entry) else {
+        return false;
+    };
+    let expanded = expand_references(&text, lookup);
+    expanded.contains(';')
+        && expanded.split(';').any(|segment| {
+            let units: Vec<u16> = segment.encode_utf16().collect();
+            names_folder(&units, folder, &|_| None)
+        })
+}
+
 fn expanded_length(value: &[u16], lookup: &dyn Fn(&str) -> Option<String>) -> usize {
-    String::from_utf16(value).map_or(value.len(), |text| {
-        expand_references(&text, lookup).encode_utf16().count()
-    })
+    let all = entries(value);
+    let separators = all.len().saturating_sub(1);
+    separators
+        + all
+            .iter()
+            .map(|entry| {
+                String::from_utf16(entry).map_or(entry.len(), |text| {
+                    expand_references(&text, lookup).encode_utf16().count()
+                })
+            })
+            .sum::<usize>()
 }
 
 pub fn plan_add(value: &[u16], folder: &[u16], lookup: &dyn Fn(&str) -> Option<String>) -> Plan {
     if entries(value)
         .iter()
-        .any(|entry| names_folder(entry, folder, lookup))
+        .any(|entry| reaches_folder(entry, folder, lookup))
     {
         return Plan::AlreadyPresent;
     }
@@ -583,6 +606,63 @@ mod tests {
         assert_eq!(
             written(plan_add(&wide(&lengthening), &wide(FOLDER), &unexpanded)).len(),
             COMMAND_SHELL_LIMIT
+        );
+    }
+
+    #[test]
+    fn a_reference_that_expands_to_several_folders_counts_for_adding_but_never_for_removal() {
+        let machine = |name: &str| {
+            name.eq_ignore_ascii_case("FictionalBins")
+                .then(|| MachineValue {
+                    text: r"C:\Fictional\One;%ProgramFiles%\Sesame\.\cli;C:\Fictional\Two"
+                        .to_string(),
+                    expands: true,
+                })
+        };
+        let lookup = |name: &str| machine_reference(name, PROGRAM_FILES, &machine, &process);
+        let value = format!("{BASE};%FictionalBins%");
+        assert_eq!(
+            plan_add(&wide(&value), &wide(FOLDER), &lookup),
+            Plan::AlreadyPresent
+        );
+        assert_eq!(
+            plan_remove(&wide(&value), &wide(FOLDER), &lookup),
+            Plan::Absent
+        );
+        let other = |name: &str| {
+            name.eq_ignore_ascii_case("FictionalBins")
+                .then(|| MachineValue {
+                    text: r"C:\Fictional\One;C:\Program Files\Sesame\cli2".to_string(),
+                    expands: false,
+                })
+        };
+        let lookup = |name: &str| machine_reference(name, PROGRAM_FILES, &other, &process);
+        assert_eq!(
+            plan_add(&wide(&value), &wide(FOLDER), &lookup),
+            Plan::Write(wide(&format!("{value};{FOLDER}")))
+        );
+        assert_eq!(add(&format!("{BASE};{FOLDER}")), Plan::AlreadyPresent);
+    }
+
+    #[test]
+    fn invalid_text_in_one_entry_does_not_stop_references_in_others_from_counting() {
+        let room = COMMAND_SHELL_LIMIT - FOLDER.len() - 1;
+        let mut value = wide(r"%ProgramFiles%\a;%ProgramFiles%\b;C:\Fictional\");
+        value.push(0xd800);
+        value.push(SEPARATOR);
+        let filler = room - 4 - value.len();
+        value.extend(wide(&"x".repeat(filler)));
+        assert_eq!(value.len(), room - 4);
+        assert_eq!(expanded_length(&value, &lookup), room);
+        let Plan::Write(after) = plan_add(&value, &wide(FOLDER), &lookup) else {
+            panic!("an add that reaches the limit exactly was refused");
+        };
+        assert_eq!(&after[..value.len()], value.as_slice());
+        value.push(b'x' as u16);
+        assert_eq!(expanded_length(&value, &lookup), room + 1);
+        assert_eq!(
+            plan_add(&value, &wide(FOLDER), &lookup),
+            Plan::PastCommandShellLimit
         );
     }
 

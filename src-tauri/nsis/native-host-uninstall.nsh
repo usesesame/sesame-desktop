@@ -66,6 +66,9 @@ Var SesameOwnsTerminalPath
 
 !macro NSIS_HOOK_PREUNINSTALL
   ReadRegStr $SesameOwnsTerminalPath SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_OWNER_VALUE}"
+!macroend
+
+!macro SESAME_UNREGISTER_NATIVE_HOST
   ${If} $UpdateMode <> 1
     ExecWait '"$INSTDIR\sesame-browser-host.exe" unregister'
   ${EndIf}

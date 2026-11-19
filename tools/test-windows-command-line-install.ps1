@@ -75,6 +75,8 @@ $terminalFolder = Join-Path $installDirectory 'cli'
 $terminalProgram = Join-Path $terminalFolder 'sesame.exe'
 $desktopProgram = Join-Path $installDirectory 'sesame.exe'
 $uninstaller = Join-Path $installDirectory 'uninstall.exe'
+$browserHost = Join-Path $installDirectory 'sesame-browser-host.exe'
+$chromeHostKey = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\app.usesesame.browser'
 $commandShell = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $ownerValueName = 'TerminalPathAdded'
 $statusValueName = 'TerminalPathStatus'
@@ -602,6 +604,26 @@ function Reset-Install {
   }
 }
 
+function Wait-UninstallCopy {
+  $temp = [IO.Path]::GetFullPath($env:TEMP)
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  while ($watch.Elapsed.TotalSeconds -lt 120) {
+    $copies = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $path = $null
+        try { $path = $_.Path } catch { $path = $null }
+        $path -and $path.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -and ((Split-Path -Leaf $path) -like 'Un_*.exe')
+      })
+    if ($copies.Count -eq 0) { return [math]::Round($watch.Elapsed.TotalSeconds, 1) }
+    Start-Sleep -Milliseconds 500
+  }
+  throw 'The temporary uninstaller copy was still running after 120 seconds.'
+}
+
+function Register-BrowserHost {
+  $code = Invoke-Installer $browserHost @('register')
+  Confirm-That 'the browser host registers itself' (($code -eq 0) -and (Test-Path -LiteralPath $chromeHostKey)) 'exit 0 and a Chrome registration' "exit $code, registered $(Test-Path -LiteralPath $chromeHostKey)"
+}
+
 function Invoke-Scenario {
   param([string]$ScenarioName, [string]$StartValue, [string]$StartKind, [scriptblock]$Body)
   $script:scenario = $ScenarioName
@@ -865,9 +887,11 @@ try {
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
     Confirm-RecordAdded 'the install' $installed
+    Register-BrowserHost
     Set-MachinePath ($installed.machinePath.Value.Replace(';', "`n")) 'MultiString'
     $broken = Get-State 'after the Path is changed to REG_MULTI_SZ'
     $code = Invoke-Installer $uninstaller @('/S', "_?=$installDirectory")
+    Confirm-That 'a silent uninstall whose Path edit fails keeps the browser registration' (Test-Path -LiteralPath $chromeHostKey) 'a Chrome registration' 'none' 
     $stopped = Get-State 'after a silent uninstall that could not edit Path'
     Confirm-That 'a silent uninstall whose Path edit fails exits with an error' ($code -ne 0) 'a nonzero exit code' "$code"
     Confirm-PathUnchanged 'a silent uninstall whose Path edit fails' $broken.machinePath $stopped.machinePath
@@ -879,6 +903,25 @@ try {
     $after = Get-State 'after the uninstall runs again'
     Confirm-PathUnchanged 'the uninstall that runs again' $before.machinePath $after.machinePath
     Confirm-TerminalRemoved 'the uninstall that runs again' $after
+    Confirm-That 'the uninstall that runs again removes the browser registration' (-not (Test-Path -LiteralPath $chromeHostKey)) 'no Chrome registration' 'a Chrome registration'
+  }
+
+  Invoke-Scenario 'A deployment that runs uninstall.exe /S and waits when the Path edit fails' $basePath 'ExpandString' {
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-RecordAdded 'the install' $installed
+    Set-MachinePath ($installed.machinePath.Value.Replace(';', "`n")) 'MultiString'
+    $broken = Get-State 'after the Path is changed to REG_MULTI_SZ'
+    $command = (Get-ItemProperty -LiteralPath $installed.uninstallKey).UninstallString
+    Confirm-That 'the registered uninstall command is the installed uninstaller' ($command -ieq "`"$uninstaller`"") "`"$uninstaller`"" "$command"
+    $code = Invoke-Installer $uninstaller @('/S')
+    $waited = Wait-UninstallCopy
+    $ended = Get-State 'after a deployment uninstall that could not edit Path'
+    Write-Host ("deployment uninstall: uninstall.exe /S exited {0}, its temporary copy ran {1} more seconds, uninstall key left {2}, cli\sesame.exe left {3}, record left {4}" -f $code, $waited, ($null -ne $ended.uninstallKey), $ended.terminalProgramExists, ($null -ne $ended.terminalPathRecord))
+    Save-Evidence 'deployment uninstall outcome' ([ordered]@{ exitCode = $code; copySeconds = $waited; state = $ended })
+    Confirm-PathUnchanged 'a deployment uninstall whose Path edit fails' $broken.machinePath $ended.machinePath
+    Set-MachinePath $installed.machinePath.Value $installed.machinePath.Kind
+    if ($ended.uninstallKey) { Uninstall-Sesame @('/S') }
   }
 
   Invoke-Scenario 'An uninstall after someone else removed the entry' $basePath 'ExpandString' {
