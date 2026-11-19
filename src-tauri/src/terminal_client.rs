@@ -412,9 +412,9 @@ fn print_list(
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&item.id),
-                printable_line(&item.kind),
-                printable_line(&item.title),
+                line_safe(&item.id).as_str(),
+                line_safe(&item.kind).as_str(),
+                line_safe(&item.title).as_str(),
             )?;
         }
     }
@@ -455,7 +455,7 @@ fn print_item(reply: &CliReply, streams: &mut Streams<'_>) -> io::Result<()> {
             writeln!(
                 streams.out,
                 "{}\t{}\t{}",
-                printable_line(&field.name),
+                line_safe(&field.name).as_str(),
                 if field.hidden { "hidden" } else { "visible" },
                 value.as_str()
             )?;
@@ -1022,6 +1022,62 @@ mod tests {
         assert!(is_mark('\u{301}') && is_mark('\u{20dd}') && is_mark('\u{903}'));
         assert!(!is_mark('a') && !hides_or_reorders('a'));
         assert!(hides_or_reorders('\u{378}') && hides_or_reorders('\u{e0067}'));
+    }
+
+    #[test]
+    fn titles_kinds_ids_and_field_names_reach_a_pipe_unnormalized_and_uncapped() {
+        let marked = "x\u{301}\u{301}\u{301}\u{301}";
+        let items = vec![CliItemSummary {
+            id: "fictional-login".to_string(),
+            kind: "login".to_string(),
+            title: format!("Cafe\u{301} {marked}"),
+        }];
+        let list = [CliReply::items(ID, items), CliReply::done(ID)];
+        let (code, piped, _) = talk(&CliCommand::List, &list, false);
+        assert_eq!(code, EXIT_OK);
+        assert_eq!(
+            piped,
+            format!("fictional-login\tlogin\tCafe\u{301} {marked}\n")
+        );
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let mut streams = Streams {
+            out: &mut out,
+            err: &mut err,
+            out_terminal: false,
+            err_terminal: false,
+        };
+        let unchecked = [CliItemSummary {
+            id: format!("fictional-{marked}"),
+            kind: format!("login{marked}"),
+            title: "Northwind".to_string(),
+        }];
+        print_list(&unchecked, &mut streams).expect("printed");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            format!("fictional-{marked}\tlogin{marked}\tNorthwind\n")
+        );
+
+        let item = CliReply::item(
+            ID,
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind".to_string(),
+            },
+            vec![CliField {
+                name: format!("Member {marked}"),
+                hidden: false,
+                value: Some("4471".to_string()),
+            }],
+        );
+        let (_, piped, _) = talk(&get(None, false), std::slice::from_ref(&item), false);
+        assert!(
+            piped.contains(&format!("Member {marked}\tvisible\t4471\n")),
+            "{piped:?}"
+        );
+        let (_, shown, _) = talk(&get(None, false), &[item], true);
+        assert!(shown.contains("Member x\u{301}\u{301}?"), "{shown:?}");
     }
 
     #[test]
