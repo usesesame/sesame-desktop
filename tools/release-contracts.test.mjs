@@ -153,9 +153,36 @@ test('a blank password on edit keeps the stored secret', () => {
 test('release notes written by the release workflows never describe the release as a draft', () => {
   for (const workflow of ['release-early-access.yml', 'release-linux-early-access.yml']) {
     const text = read('.github', 'workflows', workflow)
-    const end = text.indexOf('} > release-notes.md')
-    assert.ok(end > 0, `${workflow} no longer writes release-notes.md`)
-    const notes = text.slice(text.lastIndexOf('          {\n', end), end)
-    assert.doesNotMatch(notes, /draft/i, `${workflow} writes a draft claim into notes that outlive the draft`)
+    for (const target of ['release-section.md', 'release-notes.md']) {
+      const end = text.indexOf(`} > ${target}`)
+      assert.ok(end > 0, `${workflow} no longer writes ${target}`)
+      const notes = text.slice(text.lastIndexOf('          {\n', end), end)
+      assert.doesNotMatch(notes, /draft/i, `${workflow} writes a draft claim into notes that outlive the draft`)
+    }
+  }
+})
+
+test('each release workflow hands its own platform section to the tool that merges it into the shared body', () => {
+  const windows = read('.github', 'workflows', 'release-early-access.yml')
+  const linux = read('.github', 'workflows', 'release-linux-early-access.yml')
+  assert.match(windows, /reconcile-github-release\.mjs [^\n]* release-notes\.md release-section\.md\n/)
+  assert.match(linux, /publish-linux-release\.mjs [^\n]* release-notes\.md release-section\.md\n/)
+  const sectionOf = (text) => text.slice(text.lastIndexOf('          {\n', text.indexOf('} > release-section.md')), text.indexOf('} > release-section.md'))
+  const windowsSection = sectionOf(windows)
+  assert.match(windowsSection, /echo "Early access build for Windows 10 and 11, x64\."/)
+  assert.match(windowsSection, /not Authenticode signed, so SmartScreen will warn you/)
+  assert.match(windowsSection, /gh release download \$GITHUB_REF_NAME --repo \$GITHUB_REPOSITORY/)
+  assert.match(windowsSection, /verify-sesame-release\.ps1 -Installer/)
+  assert.match(windowsSection, /-HashOnly/)
+  assert.match(windowsSection, /SHA-256 of \$installer/)
+  assert.doesNotMatch(windowsSection, /Release set digest|\$changes/)
+  const linuxSection = sectionOf(linux)
+  assert.match(linuxSection, /echo "Early access build for Linux x86_64: deb, rpm, and AppImage packages\."/)
+  assert.match(linuxSection, /not signed by a distribution key/)
+  assert.match(linuxSection, /SHA-256 digests are in SHA256SUMS-linux\./)
+  assert.doesNotMatch(linuxSection, /Release set digest|\$changes/)
+  for (const [name, text] of [['Windows', windows], ['Linux', linux]]) {
+    const notes = text.slice(text.lastIndexOf('          {\n', text.indexOf('} > release-notes.md')), text.indexOf('} > release-notes.md'))
+    assert.match(notes, /echo "\$changes"[\s\S]*cat release-section\.md[\s\S]*Release set digest: \$setdigest/, `${name} creates the release body from the changelog, its section and its digest`)
   }
 })
