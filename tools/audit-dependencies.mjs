@@ -155,22 +155,60 @@ const loadShippedState = async () => {
 
 const run = promisify(execFile)
 
-const reportFrom = async (command, args, cwd) => {
+export const auditRetryDelaysMs = [2000, 5000, 15000]
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const networkCodes = new Set(['ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN', 'ENETUNREACH', 'ENOTFOUND', 'EPIPE', 'ETIMEDOUT', 'FETCH_ERROR'])
+
+const transient = (message) => Object.assign(new Error(message), { transient: true })
+
+export const registryUnavailable = (report) => {
+  if (!report || typeof report !== 'object' || report.vulnerabilities) return false
+  if (Number.isInteger(report.statusCode)) return report.statusCode >= 500
+  if (report.error) {
+    const code = report.error.code
+    return typeof code === 'string' && (/^E5\d\d$/.test(code) || networkCodes.has(code))
+  }
+  return typeof report.message === 'string'
+}
+
+export const retryTransient = async (attempt, { delaysMs = auditRetryDelaysMs, wait = sleep } = {}) => {
+  for (let index = 0; ; index += 1) {
+    try {
+      return await attempt()
+    } catch (error) {
+      if (!error.transient || index >= delaysMs.length) throw error
+      await wait(delaysMs[index])
+    }
+  }
+}
+
+export const reportFrom = async (command, args, cwd) => {
   try {
     const { stdout } = await run(command, args, { cwd, maxBuffer: 64 * 1024 * 1024 })
     return JSON.parse(stdout)
   } catch (error) {
+    if (error instanceof SyntaxError || error.code === 'ENOENT') throw error
     if (typeof error.stdout === 'string' && error.stdout.trim().length > 0) return JSON.parse(error.stdout)
-    throw error
+    throw transient(`${command} produced no report: ${String(error.stderr ?? error.message).trim().split('\n')[0]}`)
   }
 }
+
+const auditReport = (command, args, cwd, options) =>
+  retryTransient(async () => {
+    const report = await reportFrom(command, args, cwd)
+    if (command === 'npm' && registryUnavailable(report)) {
+      throw transient(`npm audit could not reach the registry: ${report.error?.summary ?? report.message ?? report.statusCode}`)
+    }
+    return report
+  }, options)
 
 const main = async () => {
   const today = new Date().toISOString().slice(0, 10)
   const exceptions = loadExceptions(today)
   const findings = [
-    ...npmFindings(await reportFrom('npm', ['audit', '--json'], root)),
-    ...cargoFindings(await reportFrom('cargo', ['audit', '--json', '--file', 'src-tauri/Cargo.lock'], root)),
+    ...npmFindings(await auditReport('npm', ['audit', '--json'], root)),
+    ...cargoFindings(await auditReport('cargo', ['audit', '--json', '--file', 'src-tauri/Cargo.lock'], root)),
   ]
   const { accepted, blocking, buildTools, unused } = evaluateFindings(findings, exceptions, { ships: await loadShippedState() })
   for (const finding of accepted) {
