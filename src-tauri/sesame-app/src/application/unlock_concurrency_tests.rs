@@ -298,7 +298,10 @@ fn a_lock_right_after_the_unlock_check_never_replaces_a_newer_presence_grant() {
             .recv_timeout(STEP)
             .expect("the unlock passed its check");
         lock_and_notify(&vault_ref.state, effects_ref).expect("locked");
-        presence_ref.grant_after_unlock(vault_ref.state.session_epoch());
+        presence_ref.grant_until(
+            vault_ref.state.session_epoch(),
+            std::time::Instant::now() + crate::release::PRESENCE_TTL,
+        );
         let _ = done_tx.send(());
         let _ = unlock.join().expect("unlock thread");
     });
@@ -908,7 +911,10 @@ fn a_replacement_password_checked_before_a_lock_and_unlock_grants_nothing_and_re
     set_pause(&vault, move |state, point| {
         if point == "replacementProofDerived" {
             lock_and_unlock_again(state);
-            reopened.grant_after_unlock(state.session_epoch());
+            reopened.grant_until(
+                state.session_epoch(),
+                std::time::Instant::now() + crate::release::PRESENCE_TTL,
+            );
         }
     });
     let before = std::fs::read(vault.path()).expect("vault bytes");

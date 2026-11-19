@@ -641,6 +641,7 @@ test('only a master password unlock counts as the presence check', () => {
   assert.equal((lifecycle.match(/grant_after_unlock\(/g) ?? []).length, 1)
   const body = braceBody(lifecycle, lifecycle.indexOf('pub fn unlock_vault_in_state('))
   assert.match(body, /let \(snapshot, epoch\) = unlock_with_derived_key\([\s\S]*\)\?;[\s\S]*presence\.grant_after_unlock\(epoch\);/, 'a master password unlock no longer grants the presence check for the epoch it installed')
+  assert.match(body, /finish_unlock\(state, &turn, \|\| \{[\s\S]*presence\.grant_after_unlock\(epoch\);\s*\}\)\?;/, 'a master password unlock grants the presence check outside its last lock check')
   const command = read('src-tauri', 'src', 'commands', 'lifecycle.rs').split('#[cfg(test)]')[0]
   assert.match(braceBody(command, command.indexOf('pub async fn unlock_vault(')), /unlock_vault_in_state\(/, 'the unlock command no longer runs the master password unlock')
 })
@@ -688,8 +689,11 @@ test('every command that derives a key from a secret runs off the window thread'
   const derived = braceBody(unlock, unlock.indexOf('pub fn unlock_with_derived_key('))
   assert.ok(derived.indexOf('derive(&read)') < derived.indexOf('state\n        .session\n        .lock()'), 'the unlock derives its key while it holds the vault session')
   assert.match(derived, /if state\.session_epoch\(\) != epoch \|\| state\.lock_generation\(\) != turn\.lock_generation \{\s*return Err\(LOCKED_DURING_UNLOCK\.into\(\)\);/, 'a lock during the derivation no longer wins over the unlock')
-  const confirm = braceBody(unlock, unlock.indexOf('pub fn confirm_unlock_survived('))
-  assert.match(confirm, /session\.is_some\(\) && state\.lock_generation\(\) == turn\.lock_generation/, 'an unlock that lost to a lock can still be reported as a success')
+  assert.match(braceBody(unlock, unlock.indexOf('pub fn confirm_unlock_survived(')), /finish_unlock\(state, turn, /, 'an unlock that lost to a lock can still be reported as a success')
+  const finish = braceBody(unlock, unlock.indexOf('pub fn finish_unlock<'))
+  assert.match(finish, /if session\.is_some\(\) && state\.lock_generation\(\) == turn\.lock_generation \{\s*let committed = commit\(\);\s*drop\(session\);/, 'an unlock that lost to a lock can still be reported as a success')
+  const begin = braceBody(unlock, unlock.indexOf('pub fn begin_unlock('))
+  assert.ok(begin.indexOf('state.lock_generation()') < begin.indexOf('.unlock_gate'), 'an unlock reads the lock generation only after it waited for its turn')
 })
 
 test('the window never keeps a secret value in a record view', () => {
