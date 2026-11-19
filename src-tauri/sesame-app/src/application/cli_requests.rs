@@ -143,12 +143,14 @@ pub fn serve_cli_request(context: &CliContext<'_>, payload: &[u8], origin: &Term
         item: None,
         source: TERMINAL_SOURCE,
         outcome: None,
+        lock_generation: None,
     };
     let answered = answer(context, &request_id, &command, origin, &mut noted);
     if let Err(stop) = &answered {
+        context.vault.pause_for_test("terminalRefused");
         if let Some(outcome) = noted
             .outcome
-            .or_else(|| refusal_outcome(context.vault, stop))
+            .or_else(|| refusal_outcome(context.vault, stop, noted.lock_generation))
         {
             record_terminal(
                 context.vault,
@@ -221,6 +223,7 @@ struct Noted {
     item: Option<CliCandidate>,
     source: &'static str,
     outcome: Option<Outcome>,
+    lock_generation: Option<u64>,
 }
 
 fn vault_locked(vault: &VaultState) -> bool {
@@ -231,7 +234,18 @@ fn vault_locked(vault: &VaultState) -> bool {
         .unwrap_or(true)
 }
 
-fn refusal_outcome(vault: &VaultState, stop: &Stop) -> Option<Outcome> {
+fn locked_since(vault: &VaultState, lock_generation: Option<u64>) -> bool {
+    match lock_generation {
+        Some(generation) => vault.lock_generation() != generation,
+        None => vault_locked(vault),
+    }
+}
+
+fn refusal_outcome(
+    vault: &VaultState,
+    stop: &Stop,
+    lock_generation: Option<u64>,
+) -> Option<Outcome> {
     let code = match stop {
         Stop::Gone => return Some(Outcome::ConnectionClosed),
         Stop::ReplyWith(CliErrorCode::Cancelled, PRESENCE_MESSAGE) => {
@@ -241,7 +255,7 @@ fn refusal_outcome(vault: &VaultState, stop: &Stop) -> Option<Outcome> {
     };
     match code {
         CliErrorCode::Timeout => Some(Outcome::TimedOut),
-        CliErrorCode::Stale if vault_locked(vault) => Some(Outcome::Locked),
+        CliErrorCode::Stale if locked_since(vault, lock_generation) => Some(Outcome::Locked),
         CliErrorCode::Stale => Some(Outcome::VaultChanged),
         CliErrorCode::Cancelled => Some(Outcome::Denied),
         CliErrorCode::NotFound
@@ -265,13 +279,18 @@ fn requested_field(command: &CliCommand) -> Option<&str> {
 }
 
 fn unlocked_epoch(vault: &VaultState) -> Option<u64> {
+    unlocked_session(vault).map(|(epoch, _)| epoch)
+}
+
+fn unlocked_session(vault: &VaultState) -> Option<(u64, u64)> {
     let session = vault.session.lock().ok()?;
     session.as_ref()?;
-    Some(vault.session_epoch())
+    Some((vault.session_epoch(), vault.lock_generation()))
 }
 
 struct Unlocked {
     epoch: u64,
+    lock_generation: u64,
     after_wait: Option<Instant>,
 }
 
@@ -281,9 +300,10 @@ fn wait_for_unlock(
     command: &CliCommand,
     origin: &TerminalOrigin,
 ) -> Result<Unlocked, Stop> {
-    if let Some(epoch) = unlocked_epoch(context.vault) {
+    if let Some((epoch, lock_generation)) = unlocked_session(context.vault) {
         return Ok(Unlocked {
             epoch,
+            lock_generation,
             after_wait: None,
         });
     }
@@ -313,11 +333,13 @@ fn wait_for_unlock(
         );
         let observed = Instant::now();
         if observed < deadline {
-            if let Some(epoch) = unlocked_epoch(context.vault).filter(|_| Instant::now() < deadline)
+            if let Some((epoch, lock_generation)) =
+                unlocked_session(context.vault).filter(|_| Instant::now() < deadline)
             {
                 context.host.unlock_ended("unlocked");
                 return Ok(Unlocked {
                     epoch,
+                    lock_generation,
                     after_wait: Some(observed),
                 });
             }
@@ -444,6 +466,7 @@ fn answer(
     noted: &mut Noted,
 ) -> Result<Vec<CliReply>, Stop> {
     let unlocked = wait_for_unlock(context, request_id, command, origin)?;
+    noted.lock_generation = Some(unlocked.lock_generation);
     let epoch = unlocked.epoch;
     let fresh_password_since = unlocked.after_wait;
     let subject = resolve_subject(context.vault, epoch, command)?;

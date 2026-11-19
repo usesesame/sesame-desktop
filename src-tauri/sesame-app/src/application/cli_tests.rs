@@ -2241,6 +2241,42 @@ fn a_lock_during_the_approval_is_recorded_as_locked() {
 }
 
 #[test]
+fn a_lock_during_the_approval_is_recorded_as_locked_even_after_an_unlock() {
+    let harness = Harness::new();
+    let (refused_tx, refused_rx) = std::sync::mpsc::channel::<()>();
+    let (reopened_tx, reopened_rx) = std::sync::mpsc::channel::<()>();
+    let pause_side = std::sync::Mutex::new((refused_tx, reopened_rx));
+    *harness.vault.state.test_pause.lock().expect("pause") =
+        Some(std::sync::Arc::new(move |_, point| {
+            if point == "terminalRefused" {
+                let side = pause_side.lock().expect("pause side");
+                let _ = side.0.send(());
+                let _ = side.1.recv_timeout(Duration::from_secs(60));
+            }
+        }));
+    harness.run_with(
+        &request(
+            46,
+            serde_json::json!({ "type": "totp", "item": "Northwind mail" }),
+        ),
+        &terminal(100),
+        |_, effects| {
+            harness.pending();
+            harness.lock(effects);
+            refused_rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the request was refused");
+            harness.vault.reopen();
+            reopened_tx.send(()).expect("reopened");
+        },
+    );
+    *harness.vault.state.test_pause.lock().expect("pause") = None;
+    let entry = newest(&harness);
+    assert_eq!(entry.kind, EntryKind::TerminalCode);
+    assert_eq!(entry.outcome, Outcome::Locked);
+}
+
+#[test]
 fn a_request_set_aside_for_the_browser_is_recorded_as_turned_away() {
     let harness = Harness::new();
     let browser = BrowserFillState::sharing(harness.slot.clone());
