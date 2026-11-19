@@ -22,6 +22,7 @@ fn same_json<T: serde::Serialize>(left: &T, right: &T) -> bool {
 
 #[derive(Clone)]
 pub struct KeySettings {
+    session: u64,
     kdf: KdfParams,
     key_wrap: CipherBlob,
     recovery: Option<(KdfParams, CipherBlob)>,
@@ -30,6 +31,7 @@ pub struct KeySettings {
 impl KeySettings {
     pub fn of(session: &UnlockedVault) -> Self {
         Self {
+            session: session.opened_in_lock_generation(),
             kdf: session.kdf.clone(),
             key_wrap: session.key_wrap.clone(),
             recovery: session
@@ -41,6 +43,10 @@ impl KeySettings {
 
     pub fn has_recovery(&self) -> bool {
         self.recovery.is_some()
+    }
+
+    pub fn same_session(&self, session: &UnlockedVault) -> bool {
+        self.session == session.opened_in_lock_generation()
     }
 
     pub fn still_match(&self, session: &UnlockedVault) -> bool {
@@ -94,12 +100,16 @@ impl SecretProof {
         if !self.settings.still_match(session) {
             return Err(VAULT_CHANGED_DURING_CHECK.into());
         }
-        match self.candidate.as_ref() {
+        let opens = match self.candidate.as_ref() {
             Some(candidate) => {
-                session.expose_vault_key(|key| Ok(bytes_match(candidate.as_slice(), key)))
+                session.expose_vault_key(|key| Ok(bytes_match(candidate.as_slice(), key)))?
             }
-            None => Ok(false),
+            None => false,
+        };
+        if opens && !self.settings.same_session(session) {
+            return Err(VAULT_CHANGED_DURING_CHECK.into());
         }
+        Ok(opens)
     }
 
     pub fn require(&self, session: &UnlockedVault, wrong: &str) -> VaultResult<()> {

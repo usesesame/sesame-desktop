@@ -209,6 +209,11 @@ impl VaultState {
         self.advance_session_epoch();
     }
 
+    pub fn install_session(&self, slot: &mut Option<UnlockedVault>, mut unlocked: UnlockedVault) {
+        unlocked.opened_in_lock_generation = self.lock_generation();
+        *slot = Some(unlocked);
+    }
+
     pub fn lock_if_unlocked(&self) -> VaultResult<bool> {
         let session = self
             .session
@@ -270,8 +275,10 @@ impl VaultState {
     /// Held across file replacement, serializes against every other mutation command.
     pub fn begin_destructive_lifecycle_change(
         &self,
+        confirm: impl FnOnce(Option<&UnlockedVault>) -> VaultResult<()>,
     ) -> VaultResult<std::sync::MutexGuard<'_, Option<UnlockedVault>>> {
         let mut session = self.begin_lifecycle_change()?;
+        confirm(session.as_ref())?;
         self.release_record.close(None);
         *session = None;
         self.discard_pending_import();
@@ -289,10 +296,10 @@ impl VaultState {
 
     pub fn apply_lifecycle_replacement<T>(
         &self,
-        replace: impl FnOnce() -> VaultResult<T>,
+        replace: impl FnOnce(Option<&UnlockedVault>) -> VaultResult<T>,
     ) -> VaultResult<T> {
         let mut session = self.begin_lifecycle_change()?;
-        let result = replace();
+        let result = replace(session.as_ref());
         if result.is_ok() {
             self.release_record.close(None);
             *session = None;
@@ -329,6 +336,7 @@ pub struct UnlockedVault {
     pub hello_wrap: Option<HelloWrap>,
     pub setup_complete: bool,
     format_upgrade_pending: bool,
+    opened_in_lock_generation: u64,
     records: record_store::VaultRecordStore,
 }
 
@@ -348,12 +356,17 @@ impl UnlockedVault {
             hello_wrap: opened.file.hello_wrap.clone(),
             setup_complete: opened.file.setup_complete,
             format_upgrade_pending: opened.migration.source_format < VAULT_FORMAT_VERSION,
+            opened_in_lock_generation: 0,
             records: record_store::VaultRecordStore::from_payload(&opened.payload)?,
         })
     }
 
     pub fn format_upgrade_pending(&self) -> bool {
         self.format_upgrade_pending
+    }
+
+    pub fn opened_in_lock_generation(&self) -> u64 {
+        self.opened_in_lock_generation
     }
 
     pub fn open_payload(&self) -> VaultResult<record_store::OpenedPayload> {

@@ -37,7 +37,7 @@ pub fn install_unlocked_session(
     }
     let snapshot = unlocked.snapshot();
     effects.observe_unlock(&snapshot);
-    *session = Some(unlocked);
+    state.install_session(session, unlocked);
     if let Some(unlocked) = session.as_ref() {
         crate::application::release_record::open_release_record(state, unlocked);
     }
@@ -51,7 +51,7 @@ pub fn install_unlocked_session(
 pub const LOCKED_DURING_UNLOCK: &str =
     "Sesame locked or replaced the vault before the unlock finished. Try again.";
 
-fn same_key_settings(read: &VaultFile, current: &VaultFile) -> bool {
+pub fn same_key_settings(read: &VaultFile, current: &VaultFile) -> bool {
     fn json<T: serde::Serialize>(value: &T) -> Option<Vec<u8>> {
         serde_json::to_vec(value).ok()
     }
@@ -67,15 +67,20 @@ pub struct UnlockTurn<'a> {
     lock_generation: u64,
 }
 
-pub fn begin_unlock(state: &VaultState) -> UnlockTurn<'_> {
+pub fn begin_unlock(state: &VaultState) -> VaultResult<UnlockTurn<'_>> {
+    let lock_generation = state.lock_generation();
+    state.pause_for_test("unlockQueued");
     let gate = state
         .unlock_gate
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    UnlockTurn {
-        _gate: gate,
-        lock_generation: state.lock_generation(),
+    if state.lock_generation() != lock_generation {
+        return Err(LOCKED_DURING_UNLOCK.into());
     }
+    Ok(UnlockTurn {
+        _gate: gate,
+        lock_generation,
+    })
 }
 
 pub fn unlock_with_derived_key(
@@ -116,12 +121,22 @@ pub fn key_settings_in_state(state: &VaultState, locked: &str) -> VaultResult<Ke
 }
 
 pub fn confirm_unlock_survived(state: &VaultState, turn: &UnlockTurn<'_>) -> VaultResult<()> {
+    finish_unlock(state, turn, || ())
+}
+
+pub fn finish_unlock<T>(
+    state: &VaultState,
+    turn: &UnlockTurn<'_>,
+    commit: impl FnOnce() -> T,
+) -> VaultResult<T> {
     let session = state
         .session
         .lock()
         .map_err(|_| "Sesame could not open the vault session.".to_string())?;
     if session.is_some() && state.lock_generation() == turn.lock_generation {
-        Ok(())
+        let committed = commit();
+        drop(session);
+        Ok(committed)
     } else {
         Err(LOCKED_DURING_UNLOCK.into())
     }
@@ -133,15 +148,17 @@ pub fn unlock_vault_in_state(
     effects: &dyn DesktopEffects,
     master_password: Zeroizing<String>,
 ) -> VaultResult<VaultSnapshot> {
-    let turn = begin_unlock(state);
+    let turn = begin_unlock(state)?;
     let (snapshot, epoch) = unlock_with_derived_key(state, effects, &turn, |file| {
         sesame_core::api::unwrap_key_with_password(file, &master_password)
     })?;
     drop(master_password);
-    confirm_unlock_survived(state, &turn)?;
+    finish_unlock(state, &turn, || {
+        state.pause_for_test("unlockCommitting");
+        let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
+        presence.grant_after_unlock(epoch);
+    })?;
     drop(turn);
-    let _ = crate::application::unlock::establish_pin_throttle_state(state, effects);
-    presence.grant_after_unlock(epoch);
     Ok(snapshot)
 }
 

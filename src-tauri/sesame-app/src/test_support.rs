@@ -73,7 +73,10 @@ impl TestVault {
         let mut session =
             UnlockedVault::from_opened(self.path.clone(), &opened).expect("unlocked vault");
         session.setup_complete = true;
-        *self.state.session.lock().expect("session lock") = Some(session);
+        self.state.install_session(
+            &mut self.state.session.lock().expect("session lock"),
+            session,
+        );
         self.state.advance_session_epoch();
     }
 
@@ -86,7 +89,7 @@ impl TestVault {
             UnlockedVault::from_opened(self.path.clone(), &opened).expect("unlocked vault");
         session.setup_complete = true;
         std::thread::sleep(hold);
-        *guard = Some(session);
+        self.state.install_session(&mut guard, session);
         self.state.advance_session_epoch();
     }
 

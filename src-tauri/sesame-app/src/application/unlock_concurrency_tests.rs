@@ -76,7 +76,7 @@ fn two_unlocks_started_together_derive_one_at_a_time() {
         let workers: Vec<_> = (0..2)
             .map(|_| {
                 scope.spawn(|| {
-                    let turn = begin_unlock(&vault.state);
+                    let turn = begin_unlock(&vault.state).expect("unlock turn");
                     unlock_with_derived_key(&vault.state, &effects, &turn, |file| {
                         let now = deriving.fetch_add(1, Ordering::SeqCst) + 1;
                         most.fetch_max(now, Ordering::SeqCst);
@@ -144,7 +144,7 @@ fn unlock_while(
     let effects = &effects;
     std::thread::scope(|scope| {
         let unlock = scope.spawn(move || {
-            let turn = begin_unlock(&vault.state);
+            let turn = begin_unlock(&vault.state).expect("unlock turn");
             unlock_with_derived_key(&vault.state, effects, &turn, |file| {
                 started.send(()).expect("started");
                 locked.recv_timeout(STEP).expect("lock finished first");
@@ -178,14 +178,14 @@ fn every_way_of_locking_wins_over_an_unlock_in_progress() {
             drop(
                 vault
                     .state
-                    .begin_destructive_lifecycle_change()
+                    .begin_destructive_lifecycle_change(|_| Ok(()))
                     .expect("deleting"),
             );
         }),
         ("restoring a backup", |vault, _| {
             vault
                 .state
-                .apply_lifecycle_replacement(|| Ok(()))
+                .apply_lifecycle_replacement(|_| Ok(()))
                 .expect("restored");
         }),
     ];
@@ -200,14 +200,200 @@ fn every_way_of_locking_wins_over_an_unlock_in_progress() {
 #[test]
 fn a_conditional_lock_does_not_wait_for_the_derivation() {
     let vault = locked_vault();
-    let started = std::time::Instant::now();
+    let locked = AtomicUsize::new(0);
     let unlock = unlock_while(&vault, |vault, effects| {
-        let asked = std::time::Instant::now();
         lock_if_unlocked(&vault.state, effects).expect("asked to lock");
-        assert!(asked.elapsed() < Duration::from_secs(1));
+        locked.fetch_add(1, Ordering::SeqCst);
     });
-    assert!(unlock.is_err());
-    assert!(started.elapsed() < STEP);
+    assert_eq!(locked.load(Ordering::SeqCst), 1);
+    assert_eq!(unlock.err().as_deref(), Some(LOCKED_DURING_UNLOCK));
+}
+
+fn lock_and_unlock_again(state: &crate::vault::VaultState) {
+    let unlocked = state
+        .session
+        .lock()
+        .expect("session lock")
+        .take()
+        .expect("an unlocked session");
+    assert_eq!(state.lock_if_unlocked(), Ok(false));
+    state.install_session(&mut state.session.lock().expect("session lock"), unlocked);
+    state.advance_session_epoch();
+}
+
+fn set_pause(
+    vault: &TestVault,
+    pause: impl Fn(&crate::vault::VaultState, &str) + Send + Sync + 'static,
+) {
+    *vault.state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(pause));
+}
+
+fn clear_pause(vault: &TestVault) {
+    *vault.state.test_pause.lock().expect("pause") = None;
+}
+
+#[test]
+fn a_lock_while_an_unlock_waits_for_its_turn_wins() {
+    let vault = locked_vault();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    let (queued_tx, queued_rx) = mpsc::channel::<()>();
+    let (locked_tx, locked_rx) = mpsc::channel::<()>();
+    let pause_side = Mutex::new((queued_tx, locked_rx));
+    set_pause(&vault, move |_, point| {
+        if point == "unlockQueued" {
+            let side = pause_side.lock().expect("pause side");
+            let _ = side.0.send(());
+            let _ = side.1.recv_timeout(STEP);
+        }
+    });
+    let derived = AtomicUsize::new(0);
+    let (vault_ref, effects_ref, derived_ref) = (&vault, &effects, &derived);
+    let unlock = std::thread::scope(|scope| {
+        let unlock = scope.spawn(move || {
+            let turn = begin_unlock(&vault_ref.state)?;
+            unlock_with_derived_key(&vault_ref.state, effects_ref, &turn, |file| {
+                derived_ref.fetch_add(1, Ordering::SeqCst);
+                password_key(file)
+            })
+            .and_then(|_| confirm_unlock_survived(&vault_ref.state, &turn))
+        });
+        queued_rx.recv_timeout(STEP).expect("the unlock was queued");
+        assert_eq!(lock_if_unlocked(&vault_ref.state, effects_ref), Ok(false));
+        locked_tx.send(()).expect("locked");
+        unlock.join().expect("unlock thread")
+    });
+    clear_pause(&vault);
+
+    assert_eq!(unlock.err().as_deref(), Some(LOCKED_DURING_UNLOCK));
+    assert_eq!(derived.load(Ordering::SeqCst), 0);
+    assert!(!unlocked(&vault));
+}
+
+#[test]
+fn a_lock_right_after_the_unlock_check_never_replaces_a_newer_presence_grant() {
+    let vault = locked_vault();
+    let presence = ReleasePresence::default();
+    let effects = FakeEffects::with_presence(vault.path().to_path_buf(), &presence);
+    let (committing_tx, committing_rx) = mpsc::channel::<()>();
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    let pause_side = Mutex::new((committing_tx, done_rx));
+    set_pause(&vault, move |_, point| {
+        if point == "unlockCommitting" {
+            let side = pause_side.lock().expect("pause side");
+            let _ = side.0.send(());
+            let _ = side.1.recv_timeout(Duration::from_millis(500));
+        }
+    });
+    let (vault_ref, effects_ref, presence_ref) = (&vault, &effects, &presence);
+    std::thread::scope(|scope| {
+        let unlock = scope.spawn(move || {
+            unlock_vault_in_state(
+                &vault_ref.state,
+                presence_ref,
+                effects_ref,
+                Zeroizing::new(MASTER_PASSWORD.to_string()),
+            )
+        });
+        committing_rx
+            .recv_timeout(STEP)
+            .expect("the unlock passed its check");
+        lock_and_notify(&vault_ref.state, effects_ref).expect("locked");
+        presence_ref.grant_after_unlock(vault_ref.state.session_epoch());
+        let _ = done_tx.send(());
+        let _ = unlock.join().expect("unlock thread");
+    });
+    clear_pause(&vault);
+
+    assert!(!unlocked(&vault));
+    assert_eq!(presence.require(vault.state.session_epoch()), Ok(()));
+}
+
+#[test]
+fn a_pin_checked_against_one_session_is_not_saved_into_the_next() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let checked = {
+        let session = vault.state.session.lock().expect("session lock");
+        KeySettings::of(session.as_ref().expect("session"))
+    };
+    lock_and_unlock_again(&vault.state);
+    let before = std::fs::read(vault.path()).expect("vault bytes");
+
+    let saved = super::unlock::apply_unlock_pin_in_state(
+        &vault.state,
+        &FakeEffects::new(vault.path().to_path_buf()),
+        &checked,
+        &crate::vault::key_proof::NewPinWrap::for_tests([4_u8; 32]),
+    );
+
+    assert_eq!(saved, Err(VAULT_CHANGED_DURING_CHECK.to_string()));
+    assert!(vault
+        .state
+        .session
+        .lock()
+        .expect("session lock")
+        .as_ref()
+        .expect("session")
+        .pin_wrap
+        .is_none());
+    assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
+    assert_ne!(vault.state.cached_pin_unlock(), Some(true));
+}
+
+#[test]
+fn a_recovery_kit_prepared_for_one_session_is_not_sealed_into_the_next() {
+    let (opened, _) =
+        sesame_core::api::create_vault(MASTER_PASSWORD, "Fictional vault").expect("vault");
+    let directory =
+        std::env::temp_dir().join(format!("sesame-resume-{}", crate::vault::random_id()));
+    std::fs::create_dir_all(&directory).expect("directory");
+    let path = directory.join("vault.sesame");
+    write_vault_file(&path, &opened.file).expect("written");
+    let state = crate::vault::VaultState::default();
+    state.install_session(
+        &mut state.session.lock().expect("session lock"),
+        crate::vault::UnlockedVault::from_opened(path.clone(), &opened).expect("session"),
+    );
+    *state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(|state, point| {
+        if point == "recoverySetupPrepared" {
+            lock_and_unlock_again(state);
+        }
+    }));
+    let before = std::fs::read(&path).expect("vault bytes");
+
+    let resumed = super::unlock::resume_recovery_setup_in_state(&state);
+    *state.test_pause.lock().expect("pause") = None;
+    let after = std::fs::read(&path).expect("vault bytes");
+    let _ = std::fs::remove_dir_all(&directory);
+
+    assert_eq!(resumed.err().as_deref(), Some(VAULT_CHANGED_DURING_CHECK));
+    assert_eq!(after, before);
+}
+
+#[test]
+fn a_new_vault_derived_while_a_lock_came_is_not_created() {
+    let directory =
+        std::env::temp_dir().join(format!("sesame-create-{}", crate::vault::random_id()));
+    std::fs::create_dir_all(&directory).expect("directory");
+    let path = directory.join("vault.sesame");
+    let state = crate::vault::VaultState::default();
+    *state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(|state, point| {
+        if point == "vaultDerived" {
+            assert_eq!(state.lock_if_unlocked(), Ok(false));
+        }
+    }));
+
+    let created = super::unlock::create_vault_in_state(
+        &state,
+        &FakeEffects::new(path.clone()),
+        Zeroizing::new(MASTER_PASSWORD.to_string()),
+    );
+    *state.test_pause.lock().expect("pause") = None;
+    let exists = path.exists();
+    let _ = std::fs::remove_dir_all(&directory);
+
+    assert_eq!(created.err().as_deref(), Some(LOCKED_DURING_UNLOCK));
+    assert!(!exists);
+    assert!(state.session.lock().expect("session lock").is_none());
 }
 
 #[test]
@@ -230,7 +416,7 @@ fn a_lock_that_cleared_the_session_wins_over_an_unlock_waiting_for_it() {
     let (vault_ref, effects) = (&vault, &effects);
     let unlock = std::thread::scope(|scope| {
         let unlock = scope.spawn(move || {
-            let turn = begin_unlock(&vault_ref.state);
+            let turn = begin_unlock(&vault_ref.state).expect("unlock turn");
             let result = unlock_with_derived_key(&vault_ref.state, effects, &turn, |file| {
                 let key = password_key(file);
                 derived_tx.send(()).expect("derived");
@@ -257,7 +443,7 @@ fn a_lock_that_cleared_the_session_wins_over_an_unlock_waiting_for_it() {
 fn an_unlock_reports_a_lock_that_came_after_the_install() {
     let vault = locked_vault();
     let effects = FakeEffects::new(vault.path().to_path_buf());
-    let turn = begin_unlock(&vault.state);
+    let turn = begin_unlock(&vault.state).expect("unlock turn");
     unlock_with_derived_key(&vault.state, &effects, &turn, password_key).expect("installed");
     assert_eq!(confirm_unlock_survived(&vault.state, &turn), Ok(()));
     assert_eq!(lock_if_unlocked(&vault.state, &effects), Ok(true));
@@ -275,7 +461,7 @@ fn an_unlock_reports_a_lock_that_came_after_the_install() {
 fn an_unlock_reports_a_lock_even_when_a_session_is_back() {
     let vault = locked_vault();
     let effects = FakeEffects::new(vault.path().to_path_buf());
-    let turn = begin_unlock(&vault.state);
+    let turn = begin_unlock(&vault.state).expect("unlock turn");
     unlock_with_derived_key(&vault.state, &effects, &turn, password_key).expect("installed");
     lock_and_notify(&vault.state, &effects).expect("locked");
     vault.reopen();
@@ -302,7 +488,7 @@ fn an_unlock_that_races_a_restore_never_opens_the_replaced_file() {
 
     let unlock = std::thread::scope(|scope| {
         let unlock = scope.spawn(move || {
-            let turn = begin_unlock(&vault.state);
+            let turn = begin_unlock(&vault.state).expect("unlock turn");
             unlock_with_derived_key(&vault.state, effects, &turn, |file| {
                 started.send(()).expect("started");
                 replaced.recv_timeout(STEP).expect("restore finished first");
@@ -312,7 +498,7 @@ fn an_unlock_that_races_a_restore_never_opens_the_replaced_file() {
         deriving.recv_timeout(STEP).expect("derivation started");
         vault
             .state
-            .apply_lifecycle_replacement(|| write_vault_file(vault.path(), &replacement.file))
+            .apply_lifecycle_replacement(|_| write_vault_file(vault.path(), &replacement.file))
             .expect("restored during the derivation");
         release.send(()).expect("released");
         unlock.join().expect("unlock thread")
@@ -330,7 +516,7 @@ fn an_unlock_refuses_a_file_whose_key_changed_behind_it() {
         sesame_core::api::create_vault("fictional other password", "Fictional other vault")
             .expect("replacement vault");
 
-    let turn = begin_unlock(&vault.state);
+    let turn = begin_unlock(&vault.state).expect("unlock turn");
     let unlock = unlock_with_derived_key(&vault.state, &effects, &turn, |file| {
         let key = password_key(file);
         write_vault_file(vault.path(), &replacement.file).expect("replaced outside Sesame");
@@ -349,7 +535,7 @@ fn a_panic_during_the_derivation_does_not_block_the_next_unlock() {
     let panicked = std::thread::scope(|scope| {
         scope
             .spawn(|| {
-                let turn = begin_unlock(&vault.state);
+                let turn = begin_unlock(&vault.state).expect("unlock turn");
                 unlock_with_derived_key(&vault.state, &effects, &turn, |_| {
                     panic!("fictional failure during the derivation")
                 })
@@ -521,11 +707,17 @@ fn change_password(state: &crate::vault::VaultState, path: &std::path::Path, to:
 
 const NEW_PASSWORD: &str = "fictional replacement passphrase 9031";
 
+fn checked_settings(vault: &TestVault) -> KeySettings {
+    let session = vault.state.session.lock().expect("session lock");
+    KeySettings::of(session.as_ref().expect("session"))
+}
+
 #[test]
 fn a_pin_saved_while_the_master_password_changes_never_leaves_a_stale_pin_flag() {
     let vault = TestVault::with_login("fictional-login", "https://northwind.example");
     without_recovery_wrap(&vault);
     let wrap = crate::vault::key_proof::NewPinWrap::for_tests([4_u8; 32]);
+    let checked = checked_settings(&vault);
     let effects = FakeEffects::new(vault.path().to_path_buf());
     let (derived_tx, derived_rx) = mpsc::channel::<()>();
     let (saved_tx, saved_rx) = mpsc::channel::<()>();
@@ -540,9 +732,15 @@ fn a_pin_saved_while_the_master_password_changes_never_leaves_a_stale_pin_flag()
                 let _ = side.1.recv_timeout(STEP);
             }
             "pinSaved" => {
-                let side = pin_side.lock().expect("pin side");
-                let _ = side.0.send(());
-                let _ = side.1.recv_timeout(Duration::from_secs(2));
+                let _ = pin_side.lock().expect("pin side").0.send(());
+            }
+            "pinSessionReleased" => {
+                pin_side
+                    .lock()
+                    .expect("pin side")
+                    .1
+                    .recv_timeout(STEP)
+                    .expect("the key change finished first");
             }
             _ => {}
         }));
@@ -555,7 +753,7 @@ fn a_pin_saved_while_the_master_password_changes_never_leaves_a_stale_pin_flag()
         derived_rx
             .recv_timeout(STEP)
             .expect("the new password was derived");
-        super::unlock::apply_unlock_pin_in_state(&vault_ref.state, &effects, &wrap)
+        super::unlock::apply_unlock_pin_in_state(&vault_ref.state, &effects, &checked, &wrap)
             .expect("PIN saved");
         change.join().expect("change thread");
     });
@@ -580,10 +778,12 @@ fn a_pin_prepared_before_a_key_change_wraps_the_new_key() {
     without_recovery_wrap(&vault);
     let wrapping_key = [4_u8; 32];
     let wrap = crate::vault::key_proof::NewPinWrap::for_tests(wrapping_key);
+    let checked = checked_settings(&vault);
     change_password(&vault.state, vault.path(), NEW_PASSWORD);
     super::unlock::apply_unlock_pin_in_state(
         &vault.state,
         &FakeEffects::new(vault.path().to_path_buf()),
+        &checked,
         &wrap,
     )
     .expect("PIN saved");
@@ -626,16 +826,7 @@ fn a_key_change_after_the_replacement_password_check_stops_the_replacement() {
     let presence = ReleasePresence::default();
     crate::test_support::grant(&vault, &presence);
     let effects = FakeEffects::with_presence(vault.path().to_path_buf(), &presence);
-    let request = effects.recovery_replacement_path().expect("request path");
-    {
-        let session = vault.state.session.lock().expect("session lock");
-        super::recovery_replacement::write_request(
-            &request,
-            session.as_ref().expect("session"),
-            1_800_000_000,
-        )
-        .expect("written request");
-    }
+    let request = written_replacement_request(&vault, &effects);
     *vault.state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(|state, point| {
         if point == "replacementDerived" {
             let mut session = state.session.lock().expect("session lock");
@@ -657,6 +848,125 @@ fn a_key_change_after_the_replacement_password_check_stops_the_replacement() {
     assert_eq!(replaced.err().as_deref(), Some(VAULT_CHANGED_DURING_CHECK));
     assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
     assert!(request.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stale_replacement_password_check_never_takes_the_request_away() {
+    use std::os::unix::fs::MetadataExt;
+
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let presence = ReleasePresence::default();
+    crate::test_support::grant(&vault, &presence);
+    let effects = FakeEffects::with_presence(vault.path().to_path_buf(), &presence);
+    let request = written_replacement_request(&vault, &effects);
+    let request_file = std::fs::metadata(&request).expect("request").ino();
+    set_pause(&vault, |state, point| {
+        if point == "replacementDerived" {
+            let mut session = state.session.lock().expect("session lock");
+            session.as_mut().expect("session").kdf = default_kdf_params();
+        }
+    });
+
+    let replaced = super::recovery_replacement::complete_recovery_replacement_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        Zeroizing::new(MASTER_PASSWORD.to_string()),
+        1_800_000_000 + crate::vault::storage::RECOVERY_REPLACEMENT_DELAY_SECS,
+        false,
+    );
+    clear_pause(&vault);
+
+    assert_eq!(replaced.err().as_deref(), Some(VAULT_CHANGED_DURING_CHECK));
+    assert_eq!(
+        std::fs::metadata(&request).expect("request").ino(),
+        request_file
+    );
+}
+
+fn written_replacement_request(vault: &TestVault, effects: &FakeEffects<'_>) -> PathBuf {
+    let request = effects.recovery_replacement_path().expect("request path");
+    let session = vault.state.session.lock().expect("session lock");
+    super::recovery_replacement::write_request(
+        &request,
+        session.as_ref().expect("session"),
+        1_800_000_000,
+    )
+    .expect("written request");
+    request
+}
+
+#[test]
+fn a_replacement_password_checked_before_a_lock_and_unlock_grants_nothing_and_replaces_nothing() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let presence = std::sync::Arc::new(ReleasePresence::default());
+    crate::test_support::grant(&vault, &presence);
+    let effects = FakeEffects::with_presence(vault.path().to_path_buf(), &presence);
+    let request = written_replacement_request(&vault, &effects);
+    let reopened = std::sync::Arc::clone(&presence);
+    set_pause(&vault, move |state, point| {
+        if point == "replacementProofDerived" {
+            lock_and_unlock_again(state);
+            reopened.grant_after_unlock(state.session_epoch());
+        }
+    });
+    let before = std::fs::read(vault.path()).expect("vault bytes");
+    let stored = std::fs::read(&request).expect("request bytes");
+
+    let replaced = super::recovery_replacement::complete_recovery_replacement_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        Zeroizing::new(MASTER_PASSWORD.to_string()),
+        1_800_000_000 + crate::vault::storage::RECOVERY_REPLACEMENT_DELAY_SECS,
+        false,
+    );
+    clear_pause(&vault);
+
+    assert_eq!(replaced.err().as_deref(), Some(VAULT_CHANGED_DURING_CHECK));
+    assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
+    assert_eq!(std::fs::read(&request).expect("request bytes"), stored);
+    assert_eq!(presence.require(vault.state.session_epoch()), Ok(()));
+}
+
+#[test]
+fn a_join_whose_password_was_checked_before_a_lock_and_unlock_stops_the_adoption() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    without_recovery_wrap(&vault);
+    let store_dir = std::env::temp_dir().join(format!("sesame-join-{}", crate::vault::random_id()));
+    let store = super::sync::SyncStore::new(store_dir.clone());
+    let payload = {
+        let session = vault.state.session.lock().expect("session lock");
+        session
+            .as_ref()
+            .expect("session")
+            .open_payload()
+            .expect("payload")
+            .clone()
+    };
+    let vault_id = payload.vault_id.clone().unwrap_or_default();
+    set_pause(&vault, |state, point| {
+        if point == "adoptionSealed" {
+            lock_and_unlock_again(state);
+        }
+    });
+    let before = std::fs::read(vault.path()).expect("vault bytes");
+
+    let joined = super::sync_adopt::finish_adoption_in_state(
+        &vault.state,
+        &store,
+        &FakeEffects::new(PathBuf::new()),
+        [5_u8; 32],
+        payload,
+        MASTER_PASSWORD,
+        &vault_id,
+    );
+    clear_pause(&vault);
+    let _ = std::fs::remove_dir_all(&store_dir);
+
+    assert_eq!(joined.err().as_deref(), Some(VAULT_CHANGED_DURING_CHECK));
+    assert_eq!(std::fs::read(vault.path()).expect("vault bytes"), before);
 }
 
 #[test]

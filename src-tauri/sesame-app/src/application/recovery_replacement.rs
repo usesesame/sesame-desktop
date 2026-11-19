@@ -142,6 +142,7 @@ pub(super) fn complete_request_with(
     if !session.setup_complete || !recovery_replacement_ready(requested_at, now) {
         return Err("The new recovery kit is not ready yet.".into());
     }
+    proof.require(session, crate::vault::storage::WRONG_CURRENT_PASSWORD)?;
     remove_request(path)?;
     replace_recovery_kit_with(session, proof, wraps, requested_at, now, prune_backups).inspect_err(
         |_| {
@@ -227,17 +228,17 @@ pub fn complete_recovery_replacement_in_state(
     prune_backups: bool,
 ) -> VaultResult<RecoveryReplacementResult> {
     const LOCKED: &str = "Unlock your vault first.";
-    let epoch = state.session_epoch();
     presence.ready_for_password()?;
     let settings = key_settings_in_state(state, LOCKED)?;
     let proof = SecretProof::master_password(&settings, &master_password)?;
+    state.pause_for_test("replacementProofDerived");
     {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the vault session.".to_string())?;
         let session = session.as_ref().ok_or(LOCKED)?;
-        presence.grant_with_proof(session, epoch, &proof)?;
+        presence.grant_with_proof(session, state.session_epoch(), &proof)?;
     }
     let wraps = NewKeyWraps::derive(&master_password)?;
     drop(master_password);
