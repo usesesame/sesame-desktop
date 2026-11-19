@@ -193,7 +193,8 @@ const ordinaryModals = [
   'FolderNameModal',
 ]
 
-const nonHostedModals = ['BrowserFillApprovalModal', 'BrowserIdentityFillApprovalModal', 'BetaOnboarding']
+const nonHostedModals = ['ApprovalHost', 'BetaOnboarding']
+const approvalModals = ['BrowserFillApprovalModal', 'BrowserIdentityFillApprovalModal', 'BrowserCardFillApprovalModal', 'BrowserTotpFillApprovalModal', 'BrowserSaveApprovalModal', 'BrowserChangeApprovalModal', 'BrowserCreateApprovalModal', 'TerminalApprovalModal']
 
 test('all ordinary modals render through a single ModalHost in App.svelte', () => {
   assert.ok(modalHostMatch, 'App.svelte must have one ModalHost')
@@ -204,6 +205,12 @@ test('all ordinary modals render through a single ModalHost in App.svelte', () =
   for (const modal of nonHostedModals) {
     assert.ok(appSource.includes(`<${modal}`), `${modal} must still be rendered in App.svelte`)
     assert.ok(!modalHostSource.includes(`<${modal}`), `${modal} must not be rendered inside ModalHost`)
+  }
+  const approvalHostSource = read(join(projectRoot, 'src', 'lib', 'ui', 'ApprovalHost.svelte'))
+  for (const modal of approvalModals) {
+    assert.ok(approvalHostSource.includes(`<${modal}`), `${modal} must be rendered by ApprovalHost`)
+    assert.ok(!appSource.includes(`<${modal}`), `${modal} must not be rendered outside ApprovalHost`)
+    assert.match(approvalHostSource, new RegExp(`\\{#key \\$\\w+\\.request\\.approvalId\\}\\s*<${modal}\\b`), `${modal} must get a fresh dialog for each request`)
   }
 })
 

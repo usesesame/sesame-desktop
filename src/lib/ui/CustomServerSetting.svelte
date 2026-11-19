@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import { groupedFingerprint, pairingInputHasCode } from '../server-pairing'
   import type { ServerInspection, ServiceConnectionStatus } from '../types'
 
@@ -64,7 +65,7 @@
   {:else if custom}
     <div class="setting-copy">
       <strong>{connection.serverName || 'Paired server'}</strong>
-      <p>Connected to <span class="server-address">{connection.serverAddress}</span> as {connection.deviceName || 'this desktop'}.</p>
+      <p>Connected to <span class="server-address">{connection.serverAddress}</span> as <bdi>{vaultText(connection.deviceName) || 'this desktop'}</bdi>.</p>
       {#if problem}<p class="server-problem">{problem}</p>{/if}
       {#if connection.serverFingerprint}
         <dl class="server-facts">

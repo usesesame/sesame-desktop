@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { vaultText } from '../vault-text'
   import Icon from '../Icon.svelte'
   import { platformCapabilities } from '../platform'
   import type { ServiceConnectionStatus } from '../types'
@@ -19,7 +20,7 @@
   }
 
   $: description = connection.state === 'connected'
-    ? `Connected as ${connection.deviceName || 'this desktop'}.`
+    ? `Connected as ${vaultText(connection.deviceName) || 'this desktop'}.`
     : connection.state === 'suspended'
       ? 'This account is suspended. The local vault still works, and the link will resume when access is restored.'
       : connection.state === 'expired'

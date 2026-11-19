@@ -203,7 +203,7 @@
               <button
                 type="button"
                 class="quick-access-action-button"
-                aria-label={`${action.label} for ${item.title}`}
+                aria-label={`${action.label} for ${vaultText(item.title)}`}
                 title={action.label}
                 disabled={Boolean(workingId) && workingId !== item.id}
                 on:mousemove={() => (selectedIndex = index)}

@@ -129,3 +129,20 @@ test('a revealed secret field is shown exactly with a note when it hides a chara
   expect(container.querySelector('.secret-text bdi')?.textContent).toBe('4111\u200B1111')
   expect(container.querySelector('.secret-text-note')).not.toBeNull()
 })
+
+test('a tooltip and a screen reader label show a direction override in a title or field name as a stand-in', () => {
+  renderDetail({
+    detail: {
+      ...detail,
+      title: 'Mallory ‮gnp.exe‬ Item',
+      fields: [{ label: 'PIN ‮edoc‬', value: '0000', secret: false, multiline: false, icon: 'key' }],
+    },
+  })
+  const edit = screen.getByRole('button', { name: 'Edit Mallory ?gnp.exe? Item' })
+  expect(edit.getAttribute('title')).toBe('Edit Mallory ?gnp.exe? Item')
+  const copy = screen.getByRole('button', { name: 'Copy PIN ?edoc?' })
+  expect(copy.getAttribute('title')).toBe('Copy PIN ?edoc?')
+  for (const element of document.querySelectorAll('[title], [aria-label]')) {
+    expect(`${element.getAttribute('title') ?? ''}${element.getAttribute('aria-label') ?? ''}`).not.toMatch(/[‪-‮⁦-⁩]/)
+  }
+})

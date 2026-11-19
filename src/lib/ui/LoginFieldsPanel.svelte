@@ -26,23 +26,23 @@
       {#each fields as field, index (index)}
         {@const key = slot(index)}
         <div class="credential-row login-field-detail">
-          <span class="credential-label" title={field.label}><span class="login-field-name"><bdi>{vaultText(field.label)}</bdi></span></span>
+          <span class="credential-label" title={vaultText(field.label)}><span class="login-field-name"><bdi>{vaultText(field.label)}</bdi></span></span>
           {#if field.kind === 'secret'}
             {@const stored = secretFields.includes(key)}
             {@const shown = revealed[key] !== undefined}
             {#if !stored}
               <code class="login-field-empty">Empty</code>
             {:else if shown}
-              <code><SecretText value={revealed[key]} /></code>
+              <code class="revealed"><SecretText value={revealed[key]} /></code>
             {:else}
               <code class="concealed">••••••••••••••••</code>
             {/if}
-            <button type="button" class="credential-button" aria-label={shown ? `Hide ${field.label}` : `Show ${field.label}`} title={shown ? `Hide ${field.label}` : `Show ${field.label}`} aria-pressed={shown} disabled={!stored} on:click={() => (shown ? onHide(key) : onReveal(key))}><Icon name={shown ? 'eye-off' : 'eye'} size={16} /></button>
-            <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} disabled={!stored} on:click={() => onCopyField(key, field.label)}><Icon name="copy" size={15} /></button>
+            <button type="button" class="credential-button" aria-label={shown ? `Hide ${vaultText(field.label)}` : `Show ${vaultText(field.label)}`} title={shown ? `Hide ${vaultText(field.label)}` : `Show ${vaultText(field.label)}`} aria-pressed={shown} disabled={!stored} on:click={() => (shown ? onHide(key) : onReveal(key))}><Icon name={shown ? 'eye-off' : 'eye'} size={16} /></button>
+            <button type="button" class="credential-button" aria-label={`Copy ${vaultText(field.label)}`} title={`Copy ${vaultText(field.label)}`} disabled={!stored} on:click={() => onCopyField(key, field.label)}><Icon name="copy" size={15} /></button>
           {:else}
             <code class:login-field-empty={!field.value}><bdi>{vaultText(field.value) || 'Empty'}</bdi></code>
             {#if anyHidden}<span class="login-field-spacer" aria-hidden="true"></span>{/if}
-            <button type="button" class="credential-button" aria-label={`Copy ${field.label}`} title={`Copy ${field.label}`} disabled={!field.value} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
+            <button type="button" class="credential-button" aria-label={`Copy ${vaultText(field.label)}`} title={`Copy ${vaultText(field.label)}`} disabled={!field.value} on:click={() => onCopy(field.value, field.label)}><Icon name="copy" size={15} /></button>
           {/if}
         </div>
       {/each}

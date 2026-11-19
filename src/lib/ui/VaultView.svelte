@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { holdsApprovals } from '../controllers/approval-gate'
   import SecretText from './SecretText.svelte'
   import { noteText, vaultText } from '../vault-text'
   import ItemReleaseSection from './ItemReleaseSection.svelte'
@@ -472,7 +473,7 @@
             <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
           </button>
           {#if sortMenuOpen}
-            <div id="sort-control-options" class="sort-menu" role="listbox" aria-labelledby="sort-control-label">
+            <div use:holdsApprovals id="sort-control-options" class="sort-menu" role="listbox" aria-labelledby="sort-control-label">
               {#each SORT_MODES as mode (mode)}
                 <button type="button" class:selected={mode === $selection.sortMode} role="option" aria-selected={mode === $selection.sortMode} tabindex="-1" on:click={() => chooseSortMode(mode)} on:keydown={handleSortOptionKeydown}>{sortModeLabels[mode]}</button>
               {/each}
@@ -524,7 +525,7 @@
                 <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
               </button>
               {#if folderMenuOpen}
-                <div class="sort-menu" role="listbox" aria-label="Destination collection">
+                <div use:holdsApprovals class="sort-menu" role="listbox" aria-label="Destination collection">
                   <button type="button" class:selected={!bulkFolderId} role="option" aria-selected={!bulkFolderId} tabindex="-1" on:click={() => chooseBulkFolder('')} on:keydown={handleFolderOptionKeydown}>Unfiled</button>
                   {#each folders as folder (folder.id)}
                     <button type="button" class:selected={bulkFolderId === folder.id} role="option" aria-selected={bulkFolderId === folder.id} tabindex="-1" on:click={() => chooseBulkFolder(folder.id)} on:keydown={handleFolderOptionKeydown}><bdi>{vaultText(folder.name)}</bdi></button>
@@ -541,7 +542,7 @@
         <div class="entry-list" class:selecting={multiSelect} bind:this={entryList} role="list" aria-label={multiSelect ? 'Select items' : 'Saved items'}>
           {#each visibleItems as item (item.id)}
             <div class="entry-row" class:selected={$selection.activeItemId === item.id && !multiSelect} class:multi-selected={selectedSet.has(item.id)} role="listitem" on:contextmenu|preventDefault={(event) => !multiSelect && onOpenContextMenu({ x: event.clientX, y: event.clientY }, item.id)}>
-              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${item.title}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
+              <input class="entry-select-box" type="checkbox" checked={selectedSet.has(item.id)} disabled={!multiSelect} aria-label={`Select ${vaultText(item.title)}`} on:change={(event) => onToggleMultiSelect(item.id, event.currentTarget.checked)} />
               <button type="button" class="entry-row-main" aria-current={!multiSelect && $selection.activeItemId === item.id ? 'true' : undefined} aria-pressed={multiSelect ? selectedSet.has(item.id) : undefined} on:click={() => activateRow(item)} on:keydown={(event) => handleRowKeydown(event, item)}>
                 <span class="entry-avatar">
                   {#if item.kind === 'login'}<WebsiteIcon site={item.subtitle} initials={item.initials} enabled={siteIconsEnabled} />{:else}<Icon name={itemKindIcon(item.kind)} size={15} />{/if}
@@ -549,7 +550,7 @@
                 <span class="entry-title"><strong><bdi>{vaultText(item.title)}</bdi></strong><small><span class="entry-subtitle"><bdi>{vaultText(item.subtitle) || itemKindLabel(item.kind)}</bdi></span>{#if item.folder}<span class="entry-folder"><bdi>{vaultText(item.folder)}</bdi></span>{/if}</small></span>
                 {#if item.securityLevel === 'needs-work'}<span class="entry-warning" role="img" aria-label="Needs attention"><span class="entry-warning-label" aria-hidden="true">Needs attention</span></span>{/if}
               </button>
-              <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${item.title} from favourites` : `Add ${item.title} to favourites`} title={item.favourite ? "Remove from favourites" : "Add to favourites"} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
+              <button type="button" class="entry-favourite" class:active={item.favourite} aria-label={item.favourite ? `Remove ${vaultText(item.title)} from favourites` : `Add ${vaultText(item.title)} to favourites`} title={item.favourite ? "Remove from favourites" : "Add to favourites"} aria-pressed={item.favourite} on:click={() => onToggleFavourite(item.id, !item.favourite)}><Icon name={item.favourite ? 'star-filled' : 'star'} size={16} /></button>
             </div>
           {/each}
         </div>
@@ -640,7 +641,7 @@
         <section class="credentials-panel" aria-label="Login details">
           <div class="credential-row"><div class="credential-label"><Icon name="user" size={16} /><span>Username</span></div><code><bdi>{vaultText(loginCard.username) || 'No username saved'}</bdi></code><button type="button" class="credential-button" aria-label="Copy username" title="Copy username" disabled={!loginCard.username} on:click={() => onCopy(loginCard.username, 'Username')}><Icon name="copy" size={15} /></button></div>
           {#if loginCard.email}<div class="credential-row"><div class="credential-label"><Icon name="mail" size={16} /><span>Email</span></div><code><bdi>{vaultText(loginCard.email)}</bdi></code><button type="button" class="credential-button" aria-label="Copy email" title="Copy email" on:click={() => onCopy(loginCard.email, 'Email')}><Icon name="copy" size={15} /></button></div>{/if}
-          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible}>{#if passwordVisible}<SecretText value={revealedPassword} />{:else}••••••••••••••••{/if}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" title="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
+          <div class="credential-row"><div class="credential-label"><Icon name="key" size={16} /><span>Password</span></div><code class:concealed={!passwordVisible} class:revealed={passwordVisible}>{#if passwordVisible}<SecretText value={revealedPassword} />{:else}••••••••••••••••{/if}</code><button type="button" class="credential-button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} title={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} disabled={!loginCard.hasPassword} on:click={revealPassword}><Icon name={passwordVisible ? 'eye-off' : 'eye'} size={16} /></button><button type="button" class="credential-button" aria-label="Copy password" title="Copy password" disabled={!loginCard.hasPassword} on:click={onCopyPassword}><Icon name="copy" size={15} /></button><button type="button" class="credential-button" aria-label="Check this password for known breaches" title="Check for breaches" aria-expanded={breachCheckOpen} disabled={!loginCard.hasPassword} on:click={onToggleBreachCheck}><Icon name="shield-alert" size={15} /></button></div>
         </section>
 
         {#if breachCheckOpen}
