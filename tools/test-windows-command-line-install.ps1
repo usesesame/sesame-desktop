@@ -882,7 +882,7 @@ try {
     Confirm-TerminalRemoved 'the uninstall after a failed Path edit' $after
   }
 
-  Invoke-Scenario 'An uninstall whose Path edit fails keeps Sesame installed so it can run again' $basePath 'ExpandString' {
+  Invoke-Scenario 'A silent uninstall whose Path edit fails finishes and keeps the record' $basePath 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
@@ -890,23 +890,27 @@ try {
     Register-BrowserHost
     Set-MachinePath ($installed.machinePath.Value.Replace(';', "`n")) 'MultiString'
     $broken = Get-State 'after the Path is changed to REG_MULTI_SZ'
-    $code = Invoke-Installer $uninstaller @('/S', "_?=$installDirectory")
-    Confirm-That 'a silent uninstall whose Path edit fails keeps the browser registration' (Test-Path -LiteralPath $chromeHostKey) 'a Chrome registration' 'none' 
-    $stopped = Get-State 'after a silent uninstall that could not edit Path'
-    Confirm-That 'a silent uninstall whose Path edit fails exits with an error' ($code -ne 0) 'a nonzero exit code' "$code"
-    Confirm-PathUnchanged 'a silent uninstall whose Path edit fails' $broken.machinePath $stopped.machinePath
-    Confirm-That 'a silent uninstall whose Path edit fails keeps cli\sesame.exe' $stopped.terminalProgramExists $terminalProgram 'no file'
-    Confirm-That 'a silent uninstall whose Path edit fails keeps the uninstall key' ($null -ne $stopped.uninstallKey) 'the uninstall key' 'no key'
-    Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $stopped
-    Set-MachinePath $installed.machinePath.Value $installed.machinePath.Kind
     Uninstall-Sesame @('/S')
-    $after = Get-State 'after the uninstall runs again'
-    Confirm-PathUnchanged 'the uninstall that runs again' $before.machinePath $after.machinePath
-    Confirm-TerminalRemoved 'the uninstall that runs again' $after
-    Confirm-That 'the uninstall that runs again removes the browser registration' (-not (Test-Path -LiteralPath $chromeHostKey)) 'no Chrome registration' 'a Chrome registration'
+    $finished = Get-State 'after a silent uninstall that could not edit Path'
+    Confirm-PathUnchanged 'a silent uninstall whose Path edit fails' $broken.machinePath $finished.machinePath
+    Confirm-That 'a silent uninstall whose Path edit fails removes cli\sesame.exe' (-not $finished.terminalProgramExists) 'no file' $terminalProgram
+    Confirm-That 'a silent uninstall whose Path edit fails removes the uninstall key' ($null -eq $finished.uninstallKey) 'no key' "$($finished.uninstallKey)"
+    Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $finished
+    Confirm-That 'a silent uninstall whose Path edit fails still removes the browser registration' (-not (Test-Path -LiteralPath $chromeHostKey)) 'no Chrome registration' 'a Chrome registration'
+    Set-MachinePath $installed.machinePath.Value $installed.machinePath.Kind
+    Install-Sesame @('/S')
+    $again = Get-State 'after the next install'
+    Confirm-PathUnchanged 'the next install' $installed.machinePath $again.machinePath
+    Confirm-RecordAdded 'the next install' $again
+    Confirm-Status 'the next install' $again $statusUnchanged
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after the next uninstall'
+    Confirm-PathUnchanged 'the next uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the next uninstall' $after
   }
 
   Invoke-Scenario 'A deployment that runs uninstall.exe /S and waits when the Path edit fails' $basePath 'ExpandString' {
+    $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
     Confirm-RecordAdded 'the install' $installed
@@ -919,9 +923,16 @@ try {
     $ended = Get-State 'after a deployment uninstall that could not edit Path'
     Write-Host ("deployment uninstall: uninstall.exe /S exited {0}, its temporary copy ran {1} more seconds, uninstall key left {2}, cli\sesame.exe left {3}, record left {4}" -f $code, $waited, ($null -ne $ended.uninstallKey), $ended.terminalProgramExists, ($null -ne $ended.terminalPathRecord))
     Save-Evidence 'deployment uninstall outcome' ([ordered]@{ exitCode = $code; copySeconds = $waited; state = $ended })
+    Confirm-That 'a deployment uninstall whose Path edit fails exits 0' ($code -eq 0) '0' "$code"
     Confirm-PathUnchanged 'a deployment uninstall whose Path edit fails' $broken.machinePath $ended.machinePath
+    Confirm-That 'a deployment uninstall whose Path edit fails removes Sesame as it reported' (($null -eq $ended.uninstallKey) -and (-not $ended.terminalProgramExists)) 'no uninstall key and no cli\sesame.exe' "key $($ended.uninstallKey), cli\sesame.exe present $($ended.terminalProgramExists)"
+    Confirm-RecordAdded 'a deployment uninstall whose Path edit fails' $ended
     Set-MachinePath $installed.machinePath.Value $installed.machinePath.Kind
-    if ($ended.uninstallKey) { Uninstall-Sesame @('/S') }
+    Install-Sesame @('/S')
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after the next install and uninstall'
+    Confirm-PathUnchanged 'the next install and uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the next install and uninstall' $after
   }
 
   Invoke-Scenario 'An uninstall after someone else removed the entry' $basePath 'ExpandString' {

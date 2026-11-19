@@ -382,9 +382,11 @@ test('the command line install test guards the machine Path and checks what the 
     'Confirm-PathModeRefusals $installed.machinePath',
     "/trustlevel:0x20000",
     "sesame --help does not list the installer arguments",
-    'An uninstall whose Path edit fails keeps Sesame installed so it can run again',
-    "Confirm-That 'a silent uninstall whose Path edit fails exits with an error' ($code -ne 0)",
-    "Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $stopped",
+    'A silent uninstall whose Path edit fails finishes and keeps the record',
+    "Confirm-Status 'the next install' $again $statusUnchanged",
+    "Confirm-RecordAdded 'a silent uninstall whose Path edit fails' $finished",
+    "Confirm-RecordAdded 'a deployment uninstall whose Path edit fails' $ended",
+    "Confirm-That 'a deployment uninstall whose Path edit fails exits 0' ($code -eq 0)",
     'An uninstall after someone else removed the entry',
     "Confirm-LookupFromNewCommandShell 'the install'",
     "Invoke-SessionCommand 'whoami'",
@@ -393,7 +395,7 @@ test('the command line install test guards the machine Path and checks what the 
     "Confirm-Status \"an install that would pass $environmentLimit characters\" $installed \"$statusRefused\"",
     'Invoke-CommandShellLimitScenario',
     'Register-BrowserHost',
-    'a silent uninstall whose Path edit fails keeps the browser registration',
+    'a silent uninstall whose Path edit fails still removes the browser registration',
     'A deployment that runs uninstall.exe /S and waits when the Path edit fails',
     'Write-Host ("deployment uninstall: uninstall.exe /S exited {0}',
     "'call fictional-early-probe'",
@@ -440,15 +442,16 @@ test('the Windows installer hands the system Path to the cli program and records
   assert.match(add, /WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_STATUS_VALUE\}" "\$0"/, 'the outcome of the Path edit is not recorded where a test can read it')
   assert.doesNotMatch(add, /Abort|Quit|SetErrorLevel/, 'a failed Path edit must not fail the install')
   assert.match(add, /\$\{Else\}\s+DetailPrint "Sesame could not add \$\{SESAME_TERMINAL_FOLDER\} to the system Path\. Add it by hand to use the sesame command\."/, 'a refused or failed add must tell the person to add the folder themselves')
-  assert.equal((hook.match(/WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/g) ?? []).length, 1)
+  assert.equal((hook.match(/WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/g) ?? []).length, 2)
+  assert.match(macro('NSIS_HOOK_POSTUNINSTALL'), /^!macro NSIS_HOOK_POSTUNINSTALL\s+\$\{If\} \$SesameTerminalPathLeft = 1\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"\s+DetailPrint "[^"]+"\s+\$\{EndIf\}\s+!macroend$/, 'the record of the entry may only come back after an uninstall that could not remove it')
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
   assert.match(remove, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"/, 'uninstall removes a Path entry Sesame did not add, or removes it during an update')
   assert.match(remove, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_UNCHANGED')}"\\s+DetailPrint "The system Path no longer holds [^"]*left it as it was\\."`), 'an entry that is already gone must not ask the person to remove it')
   assert.match(remove, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_LEFT_FOR_PERSON')}"\\s+DetailPrint "[^"]*Remove the entries you no longer need by hand\\."`), 'an entry Sesame left in place must tell the person to remove it')
   const failure = remove.slice(remove.indexOf(`$0 == "${constant('EXIT_LEFT_FOR_PERSON')}"`))
-  assert.match(failure, /\$\{Else\}\s+DetailPrint[^\n]+\s+\$\{If\} \$\{Silent\}\s+\$\{OrIf\} \$PassiveMode = 1\s+Pop \$0\s+Abort "[^"]+"\s+\$\{EndIf\}\s+MessageBox MB_ICONEXCLAMATION\|MB_ABORTRETRYIGNORE "[^"]+" IDRETRY sesame_remove_terminal_path IDIGNORE sesame_remove_terminal_path_done\s+Pop \$0\s+Abort "[^"]+"\s+\$\{EndIf\}\s+sesame_remove_terminal_path_done:\s+Pop \$0/, 'a removal that fails must stop the uninstall before the files go, offer a retry in the window, and never wait on a dialog when silent or passive')
-  assert.match(remove, /Push \$0\s+sesame_remove_terminal_path:\s+ClearErrors\s+ExecWait/, 'a retry must run the cli program again')
+  assert.match(failure, /\$\{Else\}\s+DetailPrint[^\n]+\s+StrCpy \$SesameTerminalPathLeft 1\s+\$\{IfNot\} \$\{Silent\}\s+\$\{AndIf\} \$PassiveMode <> 1\s+MessageBox MB_ICONEXCLAMATION\|MB_ABORTRETRYIGNORE "[^"]+" IDRETRY sesame_remove_terminal_path IDIGNORE sesame_remove_terminal_path_done\s+Pop \$0\s+Abort "[^"]+"\s+\$\{EndIf\}\s+\$\{EndIf\}\s+sesame_remove_terminal_path_done:\s+Pop \$0/, 'a removal that fails must offer a retry in the window, and a silent or passive run must finish without a dialog and keep the record')
+  assert.match(remove, /Push \$0\s+sesame_remove_terminal_path:\s+StrCpy \$SesameTerminalPathLeft 0\s+ClearErrors\s+ExecWait/, 'a retry must run the cli program again and forget the earlier failure')
   assert.doesNotMatch(remove.slice(0, remove.indexOf('${Else}')), /Abort|MessageBox/, 'an outcome that changed or left the Path must not stop the uninstall')
   assert.ok(remove.includes(`ExecWait '"$INSTDIR\\cli\\sesame.exe" ${constant('REMOVE_ARGUMENT')}' $0`))
   assert.doesNotMatch(remove, /WriteReg|DeleteReg/)
@@ -488,7 +491,9 @@ test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
     .join('\n')
 
   assert.doesNotMatch(hook, /!insertmacro SESAME_REMOVE_TERMINAL_PATH/, 'the hook runs the Path cleanup itself, outside the place the template chose for it')
-  assert.doesNotMatch(hook, /NSIS_HOOK_POSTUNINSTALL/, 'the Path cleanup would run after cli\\sesame.exe is deleted')
+  const postUninstall = hook.match(/!macro NSIS_HOOK_POSTUNINSTALL\b[\s\S]*?!macroend/)
+  assert.ok(postUninstall, 'the hook no longer restores the record after a cleanup that failed')
+  assert.doesNotMatch(postUninstall[0], /ExecWait|SESAME_REMOVE_TERMINAL_PATH|Abort|MessageBox/, 'the Path cleanup would run after cli\\sesame.exe is deleted')
   assert.equal((code.match(/!insertmacro SESAME_REMOVE_TERMINAL_PATH\b/g) ?? []).length, 1, 'the template runs the Path cleanup more than once')
   const section = code.match(/Section Uninstall\b([\s\S]*?)\nSectionEnd/)
   assert.ok(section, 'the template has no uninstall section')
