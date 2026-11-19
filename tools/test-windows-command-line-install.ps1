@@ -30,7 +30,8 @@ function Read-PathValue {
     if (-not ($key.GetValueNames() -contains 'Path')) {
       return [pscustomobject][ordered]@{ Exists = $false; Kind = ''; Length = 0; Value = '' }
     }
-    $value = [string]$key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $raw = $key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $value = if ($raw -is [string[]]) { $raw -join "`n" } else { [string]$raw }
     return [pscustomobject][ordered]@{ Exists = $true; Kind = $key.GetValueKind('Path').ToString(); Length = $value.Length; Value = $value }
   } finally {
     $key.Close()
@@ -44,7 +45,11 @@ function Set-MachinePath {
   param([string]$Value, [string]$Kind)
   $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($environmentKeyPath, $true)
   try {
-    $key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind)
+    if ($Kind -eq 'MultiString') {
+      $key.SetValue('Path', [string[]]$Value.Split([char]"`n"), [Microsoft.Win32.RegistryValueKind]::MultiString)
+    } else {
+      $key.SetValue('Path', $Value, [Microsoft.Win32.RegistryValueKind]$Kind)
+    }
   } finally {
     $key.Close()
   }
@@ -72,6 +77,11 @@ $desktopProgram = Join-Path $installDirectory 'sesame.exe'
 $uninstaller = Join-Path $installDirectory 'uninstall.exe'
 $commandShell = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $ownerValueName = 'TerminalPathAdded'
+$statusValueName = 'TerminalPathStatus'
+$statusChanged = '0'
+$statusUnchanged = '10'
+$statusRefused = 11
+$statusFailed = '12'
 $uninstallKeys = @(
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$productName",
   "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$productName"
@@ -167,12 +177,13 @@ function Get-UninstallKey {
   return $null
 }
 
-function Get-PathRecord {
+function Get-ProductValue {
+  param([string]$Name)
   foreach ($root in 'HKLM:\SOFTWARE\WOW6432Node', 'HKLM:\SOFTWARE') {
     foreach ($vendor in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {
       $candidate = Join-Path $vendor.PSPath $productName
       if (-not (Test-Path -LiteralPath $candidate)) { continue }
-      $value = (Get-Item -LiteralPath $candidate).GetValue($ownerValueName)
+      $value = (Get-Item -LiteralPath $candidate).GetValue($Name)
       if ($null -ne $value) {
         return [pscustomobject][ordered]@{ Key = $candidate; Value = [string]$value }
       }
@@ -180,6 +191,9 @@ function Get-PathRecord {
   }
   return $null
 }
+
+function Get-PathRecord { Get-ProductValue $ownerValueName }
+function Get-PathStatus { Get-ProductValue $statusValueName }
 
 function Get-InstalledProcesses {
   $prefix = $installDirectory + '\'
@@ -234,6 +248,7 @@ function Get-State {
     machinePath = Get-MachinePath
     userPath = Get-UserPath
     terminalPathRecord = Get-PathRecord
+    terminalPathStatus = Get-PathStatus
     uninstallKey = Get-UninstallKey
     terminalProgramExists = Test-Path -LiteralPath $terminalProgram
     terminalFolderExists = Test-Path -LiteralPath $terminalFolder
@@ -244,6 +259,11 @@ function Get-State {
     Write-Host "  record of the added entry: $($state.terminalPathRecord.Value) under $($state.terminalPathRecord.Key)"
   } else {
     Write-Host '  record of the added entry: none'
+  }
+  if ($state.terminalPathStatus) {
+    Write-Host "  outcome of the Path edit at install: $($state.terminalPathStatus.Value)"
+  } else {
+    Write-Host '  outcome of the Path edit at install: none recorded'
   }
   Write-Host "  cli\sesame.exe present: $($state.terminalProgramExists), cli folder present: $($state.terminalFolderExists)"
   Save-Evidence $Step $state
@@ -285,6 +305,12 @@ function Confirm-RecordAdded {
   param([string]$What, $State)
   $found = if ($State.terminalPathRecord) { $State.terminalPathRecord.Value } else { 'no record' }
   Confirm-That "$What records the entry Sesame added" ($found -ceq $terminalFolder) $terminalFolder $found
+}
+
+function Confirm-Status {
+  param([string]$What, $State, [string]$Expected)
+  $found = if ($State.terminalPathStatus) { $State.terminalPathStatus.Value } else { 'no outcome recorded' }
+  Confirm-That "$What records the outcome of the Path edit" ($found -ceq $Expected) $Expected $found
 }
 
 function Confirm-NoRecord {
@@ -414,6 +440,47 @@ function Invoke-SessionCommand {
   return $result
 }
 
+function Confirm-PathModeRefusals {
+  param($Expected)
+  $copyFolder = Join-Path $EvidenceRoot 'copied-cli\cli'
+  New-Item -ItemType Directory -Force -Path $copyFolder | Out-Null
+  $copy = Join-Path $copyFolder 'sesame.exe'
+  Copy-Item -LiteralPath $terminalProgram -Destination $copy -Force
+  $copied = Invoke-Captured $copy '--add-to-machine-path' 30
+  Remove-Item -LiteralPath (Join-Path $EvidenceRoot 'copied-cli') -Recurse -Force -ErrorAction SilentlyContinue
+  Save-Evidence 'copied cli asked to add itself' $copied
+  Confirm-That 'a copy of the cli program outside the install folder refuses to change Path' ($copied.exitCode -eq $statusRefused) "$statusRefused" "$($copied.exitCode)"
+  Confirm-That 'the refusal names the installed copy' ($copied.errors.Contains('Only the copy of sesame.exe installed at')) 'a message naming the installed copy' "[$($copied.errors)]"
+  Confirm-PathUnchanged 'a refused copy' $Expected (Get-MachinePath)
+
+  $extra = Invoke-Captured $terminalProgram "--add-to-machine-path C:\Fictional\Elsewhere" 30
+  Save-Evidence 'cli asked to add a folder from its arguments' $extra
+  Confirm-That 'the cli program refuses a folder in its arguments' ($extra.exitCode -eq $statusRefused) "$statusRefused" "$($extra.exitCode)"
+  Confirm-PathUnchanged 'a refused extra argument' $Expected (Get-MachinePath)
+
+  $probeFolder = Join-Path $EvidenceRoot 'unelevated-probe'
+  New-Item -ItemType Directory -Force -Path $probeFolder | Out-Null
+  $probe = Join-Path $probeFolder 'probe.cmd'
+  $exitFile = Join-Path $probeFolder 'exit.txt'
+  $errorFile = Join-Path $probeFolder 'errors.txt'
+  Set-Content -LiteralPath $probe -Encoding ASCII -Value @(
+    '@echo off',
+    "`"$terminalProgram`" --remove-from-machine-path 2> `"$errorFile`"",
+    ">`"$exitFile`" echo %ERRORLEVEL%"
+  )
+  $runas = Invoke-Captured (Join-Path $env:SystemRoot 'System32\runas.exe') "/trustlevel:0x20000 `"$env:SystemRoot\System32\cmd.exe /d /c $probe`"" 30
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  while (-not (Test-Path -LiteralPath $exitFile) -and $watch.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 500 }
+  Start-Sleep -Milliseconds 500
+  $exitText = if (Test-Path -LiteralPath $exitFile) { (Get-Content -LiteralPath $exitFile -Raw).Trim() } else { 'no exit code, runas output was ' + $runas.output + $runas.errors }
+  $errorText = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw) } else { '' }
+  Write-Host "a non-elevated run exited [$exitText] and printed [$errorText]"
+  Save-Evidence 'non-elevated cli asked to remove its entry' ([ordered]@{ runas = $runas; exit = $exitText; errors = $errorText })
+  Confirm-That 'a non-elevated run of the cli program refuses to change Path' ($exitText -eq "$statusRefused") "$statusRefused" $exitText
+  Confirm-That 'the non-elevated refusal says an administrator is needed' ($errorText.Contains('running as an administrator')) 'a message about administrator rights' "[$errorText]"
+  Confirm-PathUnchanged 'a refused non-elevated run' $Expected (Get-MachinePath)
+}
+
 function Confirm-ToolFromNewSession {
   param([string]$Version)
   $sessionPath = Get-NewSessionPath
@@ -430,6 +497,7 @@ function Confirm-ToolFromNewSession {
   $help = Invoke-SessionCommand 'sesame --help' 30 $sessionPath
   Confirm-That 'sesame --help exits 0' ($help.exitCode -eq $exitOk) "$exitOk" "$($help.exitCode)"
   $usage = $help.output.Contains('Usage:') -and $help.output.Contains('sesame list') -and $help.output.Contains('Exit codes:') -and $help.output.Contains('On Windows every request asks in the Sesame window')
+  Confirm-That 'sesame --help does not list the installer arguments' (-not $help.output.Contains('machine-path')) 'no machine-path argument' "[$($help.output)]"
   Confirm-That 'sesame --help prints the Windows usage and exit codes' $usage 'Usage:, sesame list, Exit codes: and the Windows line' "[$($help.output)]"
 
   $versionRun = Invoke-SessionCommand 'sesame --version' 30 $sessionPath
@@ -557,21 +625,17 @@ function Invoke-Scenario {
 }
 
 function Invoke-LongPathScenario {
-  param([string]$Description, [int]$Length, [bool]$ExpectAdded)
+  param([int]$Length)
   $prefix = "$basePath;C:\Fictional\Long\"
   $value = $prefix + ('x' * ($Length - $prefix.Length))
-  Invoke-Scenario "Path of $Length characters, $Description" $value 'ExpandString' {
+  Invoke-Scenario "Path of $Length characters" $value 'ExpandString' {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
-    Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
-    if ($ExpectAdded) {
-      Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
-      Confirm-RecordAdded 'the install' $installed
-    } else {
-      Confirm-PathUnchanged 'an install that must not write Path' $before.machinePath $installed.machinePath
-      Confirm-NoRecord 'an install that must not write Path' $installed
-    }
+    Confirm-That 'the install puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
+    Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+    Confirm-RecordAdded 'the install' $installed
+    Confirm-Status 'the install' $installed $statusChanged
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
@@ -587,6 +651,7 @@ function Invoke-ExistingEntryScenario {
     $installed = Get-State 'after install'
     Confirm-PathUnchanged 'an install over an entry Sesame did not add' $before.machinePath $installed.machinePath
     Confirm-NoRecord 'an install over an entry Sesame did not add' $installed
+    Confirm-Status 'an install over an entry Sesame did not add' $installed $statusUnchanged
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'an uninstall that must keep an entry Sesame did not add' $before.machinePath $after.machinePath
@@ -620,10 +685,9 @@ try {
     Write-Host "NSIS_MAX_STRLEN of the makensis that built this installer, $($nsis.makensis): $limit"
   } else {
     $limit = 1024
-    Add-Failure "makensis -HDRINFO could not be read under $env:LOCALAPPDATA\tauri\NSIS, so the long Path cases assume the standard limit of 1024"
+    Write-Host "makensis -HDRINFO could not be read under $env:LOCALAPPDATA\tauri\NSIS, so the long Path cases are only placed around the standard limit of 1024"
   }
   Save-Evidence 'nsis string limit' ([ordered]@{ found = $nsis; limitUsed = $limit })
-  $folderLength = $terminalFolder.Length
 
   Invoke-Scenario 'Silent install, the tool from a new session, the running desktop, reinstall, update and silent uninstall' $basePath 'ExpandString' {
     $before = Get-State 'before install'
@@ -633,6 +697,8 @@ try {
     Confirm-InstalledPrograms
     Confirm-TerminalAdded 'the silent install' $before.machinePath $installed.machinePath
     Confirm-RecordAdded 'the silent install' $installed
+    Confirm-Status 'the silent install' $installed $statusChanged
+    Confirm-PathModeRefusals $installed.machinePath
     Confirm-Unexpanded 'the silent install' $installed
     $version = (Get-ItemProperty -LiteralPath $installed.uninstallKey).DisplayVersion
     $sessionPath = Confirm-ToolFromNewSession $version
@@ -643,6 +709,7 @@ try {
     $state = Get-State 'after silent reinstall'
     Confirm-PathUnchanged 'a silent reinstall' $installed.machinePath $state.machinePath
     Confirm-RecordAdded 'a silent reinstall' $state
+    Confirm-Status 'a silent reinstall' $state $statusUnchanged
 
     Install-Sesame @('/P')
     $state = Get-State 'after passive reinstall'
@@ -677,6 +744,23 @@ try {
   Invoke-ExistingEntryScenario 'in the same form' $terminalFolder
   Invoke-ExistingEntryScenario 'with a trailing backslash' "$terminalFolder\"
   Invoke-ExistingEntryScenario 'in different letter case' $terminalFolder.ToUpperInvariant()
+  Invoke-ExistingEntryScenario 'in quotes' "`"$terminalFolder`""
+  Invoke-ExistingEntryScenario 'written with %ProgramFiles%' '%ProgramFiles%\Sesame\cli'
+
+  Invoke-Scenario 'A Path edit that fails leaves the install working' $basePath 'ExpandString' {
+    Set-MachinePath ($basePath.Replace(';', "`n")) 'MultiString'
+    $before = Get-State 'before install with a Path of type REG_MULTI_SZ'
+    Install-Sesame @('/S')
+    $installed = Get-State 'after install'
+    Confirm-That 'the install still puts cli\sesame.exe in place' $installed.terminalProgramExists $terminalProgram 'no file'
+    Confirm-PathUnchanged 'an install whose Path edit fails' $before.machinePath $installed.machinePath
+    Confirm-NoRecord 'an install whose Path edit fails' $installed
+    Confirm-Status 'an install whose Path edit fails' $installed $statusFailed
+    Uninstall-Sesame @('/S')
+    $after = Get-State 'after uninstall'
+    Confirm-PathUnchanged 'the uninstall after a failed Path edit' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall after a failed Path edit' $after
+  }
 
   Invoke-Scenario 'Path holds the entry twice at uninstall' $basePath 'ExpandString' {
     Install-Sesame @('/S')
@@ -731,37 +815,22 @@ try {
     Confirm-TerminalRemoved 'the final uninstall' $after
   }
 
-  Invoke-LongPathScenario 'the longest that leaves room for the entry' ($limit - $folderLength - 3) $true
-  Invoke-LongPathScenario 'one character too long to add the entry' ($limit - $folderLength - 2) $false
-  Invoke-LongPathScenario 'readable but too long to add the entry' ($limit - 2) $false
-  Invoke-LongPathScenario 'long enough to fill the installer string' ($limit - 1) $false
-  Invoke-LongPathScenario 'far over the installer string' ($limit * 4) $false
-
-  $runnerEntries = Get-PathEntries $originalPath.Value
-  if ($originalPath.Length + 1 -ge $limit) {
-    $runnerExpectation = 'unchanged because the installer cannot read all of it'
-  } elseif (@($runnerEntries | Where-Object { Test-TerminalEntry $_ }).Count -gt 0) {
-    $runnerExpectation = 'unchanged because it already holds the entry'
-  } elseif ($originalPath.Length + $folderLength + 2 -ge $limit) {
-    $runnerExpectation = 'unchanged because adding the entry would cut it short'
-  } else {
-    $runnerExpectation = 'added'
+  foreach ($length in @(994, 995, 1022, 1023, 1024, 4096, ($limit * 8))) {
+    Invoke-LongPathScenario $length
   }
-  Write-Host "The runner Path has $($originalPath.Length) characters, so the expected result on it is: $runnerExpectation"
-  Invoke-Scenario "The runner's own Path, expected $runnerExpectation" $originalPath.Value $originalPath.Kind {
+
+  Write-Host "The runner Path has $($originalPath.Length) characters and the installer must add the entry to it"
+  Invoke-Scenario "The runner's own Path of $($originalPath.Length) characters" $originalPath.Value $originalPath.Kind {
     $before = Get-State 'before install'
     Install-Sesame @('/S')
     $installed = Get-State 'after install'
-    if ($runnerExpectation -eq 'added') {
-      Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
-      Confirm-RecordAdded 'the install' $installed
-    } else {
-      Confirm-PathUnchanged 'the install' $before.machinePath $installed.machinePath
-      Confirm-NoRecord 'the install' $installed
-    }
+    Confirm-TerminalAdded 'the install' $before.machinePath $installed.machinePath
+    Confirm-RecordAdded 'the install' $installed
+    Confirm-Status 'the install' $installed $statusChanged
     Uninstall-Sesame @('/S')
     $after = Get-State 'after uninstall'
     Confirm-PathUnchanged 'the uninstall' $before.machinePath $after.machinePath
+    Confirm-TerminalRemoved 'the uninstall' $after
   }
 } finally {
   $script:scenario = 'final restore'

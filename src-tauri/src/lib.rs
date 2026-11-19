@@ -7,6 +7,8 @@ mod commands;
 #[cfg(feature = "wdio")]
 mod desktop_e2e;
 mod diagnostics;
+#[cfg(any(windows, test))]
+mod machine_path;
 #[cfg(test)]
 mod record_writes_tests;
 mod rollback_guard;
@@ -432,6 +434,10 @@ pub fn run_terminal_client() -> i32 {
         return terminal_client::EXIT_FAILED;
     }
     let arguments: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    #[cfg(windows)]
+    if let Some(request) = machine_path::requested(&arguments) {
+        return adapters::platform::system_path::run(request);
+    }
     terminal_client::run_from_environment(&arguments)
 }
 

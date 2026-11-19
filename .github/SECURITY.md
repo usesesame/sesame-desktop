@@ -63,6 +63,9 @@ In scope:
   `src-tauri/src/browser_fill*.rs`.
 - The `sesame` command line tool and its approval path: `src-tauri/src/terminal*.rs`,
   `src-tauri/src/bin/sesame-cli.rs` and the terminal approval in the window.
+- The Windows installer's system Path edit: `src-tauri/src/machine_path.rs`,
+  `src-tauri/src/adapters/platform/system_path.rs` and
+  `src-tauri/nsis/native-host-uninstall.nsh`.
 - Sesame Sync in the desktop app: the signed device list, snapshot headers,
   pairing, key packages, request signatures, and the minimum version check.
   Report server findings in [sesame-server](https://github.com/usesesame/sesame-server).
@@ -182,6 +185,18 @@ good-faith report that turns out to be out of scope is not held against you.
 - Windows offers no terminal allowance, because Sesame cannot tell one
   terminal from another there, so every request from the `sesame` command
   asks in the window.
+- On Windows the installer runs `cli\sesame.exe --add-to-machine-path` after
+  copying it and `cli\sesame.exe --remove-from-machine-path` before deleting
+  it, to put the cli folder on the system Path and take it off again. Neither
+  argument appears in `sesame --help`. In this mode the program changes only
+  the `Path` value in the machine environment and never opens the connection
+  to the desktop app, so it has no way to reach the vault. It refuses unless
+  it runs elevated as the copy installed at Program Files\Sesame\cli, it
+  takes no folder from its arguments and refuses any extra argument, and it
+  only removes the entry when it finds exactly one copy in the form it adds.
+  A person or program without administrator rights that runs it gets a
+  refusal and no change. Anyone with administrator rights can already change
+  the system Path.
 - On Linux the `sesame` command only checks that the program answering on its
   socket runs as you. A program of yours that answers in Sesame's place, for
   example in a shell where it changed `XDG_RUNTIME_DIR`, learns which command,

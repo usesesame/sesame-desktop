@@ -152,16 +152,17 @@ test('the Windows uninstaller removes only Sesame native-host registration', () 
   assert.deepEqual(unexpectedRegistryOperations(hook), [])
 })
 
-test('the Path allowlist catches every spelling of the machine registry root', () => {
-  const allowed = 'ReadRegStr $R0 HKEY_LOCAL_MACHINE "${SESAME_ENVIRONMENT_KEY}" "Path"'
+test('the hook allowlist refuses every machine registry operation', () => {
+  const allowed = 'WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_STATUS_VALUE}" "$0"'
   assert.deepEqual(unexpectedRegistryOperations(allowed), [])
   for (const line of [
-    'WriteRegStr HKEY_LOCAL_MACHINE "Software\\Fictional" "Value" "1"',
-    'WriteRegStr hkey_local_machine "${SESAME_ENVIRONMENT_KEY}" "PATHEXT" "1"',
-    'WriteRegStr HKLM "Software\\Fictional" "Value" "1"',
+    'ReadRegStr $R0 HKLM "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment" "Path"',
+    'WriteRegExpandStr HKEY_LOCAL_MACHINE "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment" "Path" "$R1"',
+    'WriteRegStr hkey_local_machine "Software\\Fictional" "Value" "1"',
     'WriteRegStr SHCTX "${MANUPRODUCTKEY}" "Other" "1"',
+    'WriteRegStr SHCTX "${MANUPRODUCTKEY}" "${SESAME_PATH_STATUS_VALUE}" "$1"',
     "System::Call 'advapi32::RegSetValueExW(p 0x80000002, w \"Software\\Fictional\")'",
-    'DeleteRegValue HKLM "${SESAME_ENVIRONMENT_KEY}" "Path"',
+    'DeleteRegValue HKLM "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment" "Path"',
   ]) {
     assert.equal(unexpectedRegistryOperations(line).length, 1, line)
   }
@@ -180,11 +181,11 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
   assert.match(collector, /GetValue\('Path', \$null, \[Microsoft\.Win32\.RegistryValueOptions\]::DoNotExpandEnvironmentNames\)/, 'the collector must record the machine Path as stored, without expanding it')
   assert.match(collector, /GetValueKind\('Path'\)/)
   assert.match(collector, /'machine-path\.json'/)
-  assert.match(collector, /-Name 'TerminalPathAdded'/)
   assert.match(collector, /\$excludedDataRoots = @\('EBWebView', 'quick-access-webview', 'logs'\)/, 'only the WebView2 profiles and the logs may be left out of the data comparison')
   assert.match(collector, /if \(-not \(Test-HeldByAnotherProcess \$_\.Exception\)\) \{ throw \}\s+\$status = 'locked'/, 'a file another process holds open must be recorded as locked, and every other error must still stop the collector')
   assert.match(collector, /\$code -eq 32 -or \$code -eq 33/)
   assert.match(comparer, /\$old\.status -eq 'locked' -or \$new\.status -eq 'locked'\) \{\s+\[pscustomobject\]\[ordered\]@\{ relativePath = \$path; status = 'Unverified'/, 'a locked file must be reported as unverified, never as unchanged')
+  assert.match(collector, /-Name 'TerminalPathAdded'/)
   assert.match(comparer, /\$changes = @\(foreach/)
 
   if (process.platform !== 'win32') {
@@ -354,79 +355,78 @@ test('the command line install test guards the machine Path and checks what the 
     "Uninstall-Sesame @('/S', '/UPDATE')",
     "Install-Sesame @('/S', '/UPDATE')",
     "Install-Sesame @('/P')",
-    "($limit - $folderLength - 3) $true",
-    "($limit - $folderLength - 2) $false",
-    "($limit - 2) $false",
-    "($limit - 1) $false",
-    "($limit * 4) $false",
+    "foreach ($length in @(994, 995, 1022, 1023, 1024, 4096, ($limit * 8))) {",
     "The runner's own Path",
+    "Invoke-ExistingEntryScenario 'in quotes'",
+    "Invoke-ExistingEntryScenario 'written with %ProgramFiles%' '%ProgramFiles%\\Sesame\\cli'",
+    'A Path edit that fails leaves the install working',
+    "Set-MachinePath ($basePath.Replace(';', \"`n\")) 'MultiString'",
+    "Confirm-Status 'an install whose Path edit fails' $installed $statusFailed",
+    'Confirm-PathModeRefusals $installed.machinePath',
+    "/trustlevel:0x20000",
+    "sesame --help does not list the installer arguments",
   ]) {
     assert.ok(script.includes(scenario), `the test no longer covers ${scenario}`)
   }
-  assert.match(script, /makensis[\s\S]*-HDRINFO[\s\S]*NSIS_MAX_STRLEN=\(\\d\+\)/, 'the long Path cases must use the limit of the makensis that built the installer')
+  assert.doesNotMatch(script, /Confirm-PathUnchanged 'an install that must not write Path'/, 'a long Path must get the entry like any other')
+  const pure = read('src-tauri', 'src', 'machine_path.rs')
+  const status = (name) => pure.match(new RegExp(`pub const ${name}: i32 = (\\d+);`))[1]
+  assert.ok(script.includes(`$statusChanged = '${status('EXIT_CHANGED')}'`))
+  assert.ok(script.includes(`$statusUnchanged = '${status('EXIT_UNCHANGED')}'`))
+  assert.ok(script.includes(`$statusRefused = ${status('EXIT_REFUSED')}`))
+  assert.ok(script.includes(`$statusFailed = '${status('EXIT_FAILED')}'`))
   assert.match(script, /\$basePath = '%SystemRoot%\\system32;%SystemRoot%;/)
 })
 
-test('the Windows installer puts only the cli folder on the system Path and never cuts Path short', () => {
+test('the Windows installer hands the system Path to the cli program and records only what it added', () => {
   const hook = read('src-tauri', 'nsis', 'native-host-uninstall.nsh')
   const windowsConfig = JSON.parse(read('src-tauri', 'tauri.windows.conf.json'))
+  const config = JSON.parse(read('src-tauri', 'tauri.conf.json'))
+  const pure = read('src-tauri', 'src', 'machine_path.rs')
+  const native = read('src-tauri', 'src', 'adapters', 'platform', 'system_path.rs')
+  const lib = read('src-tauri', 'src', 'lib.rs')
+  const client = read('src-tauri', 'src', 'terminal_client.rs')
   assert.deepEqual(windowsConfig.bundle.resources, { 'binaries/cli/sesame.exe': 'cli/sesame.exe' })
-  assert.match(hook, /!define SESAME_ENVIRONMENT_KEY "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"/)
   assert.match(hook, /!define SESAME_TERMINAL_FOLDER "\$INSTDIR\\cli"/)
-  assert.doesNotMatch(hook, /"\$INSTDIR"\s*$|Path" "\$INSTDIR"|;\$INSTDIR"/m, 'the install folder itself must never go on Path, because sesame.exe there is the desktop app')
+  assert.doesNotMatch(hook, /NSIS_MAX_STRLEN|System::Call|HKLM|Session Manager|StrLen|WriteRegExpandStr/, 'the hook must not edit Path through NSIS strings, which stop at 1024 characters')
 
   const macro = (name) => {
     const match = hook.match(new RegExp(`!macro ${name}\\b[\\s\\S]*?!macroend`))
     assert.ok(match, `the hook has no ${name} macro`)
     return match[0]
   }
-  const readPath = macro('SESAME_READ_PATH')
-  assert.match(readPath, /ClearErrors\s+ReadRegStr \$R0 HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"/)
-  assert.match(readPath, /\$\{If\} \$\{Errors\}\s+StrCpy \$R3 1/)
-  assert.match(readPath, /StrLen \$R4 \$R0\s+IntOp \$R4 \$R4 \+ 1\s+\$\{If\} \$R4 >= \$\{NSIS_MAX_STRLEN\}\s+StrCpy \$R3 1/, 'a value that fills the string buffer may be cut short and must count as unreadable')
-
-  const write = macro('SESAME_WRITE_PATH')
-  const typed = write.search(/RegGetValueW[^\n]*\n\s*StrCpy \$R7 \$R4/)
-  const reread = write.search(/ClearErrors\s+ReadRegStr \$R4 HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path"\s+\$\{If\} \$\{Errors\}\s+\$\{OrIf\} \$R4 S!= \$R0\s+DetailPrint/)
-  const plain = write.search(/\$\{Else\}\s+ClearErrors\s+\$\{If\} \$R5 = 0\s+\$\{AndIf\} \$R7 = 1\s+WriteRegStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"/)
-  const expanding = write.search(/\$\{ElseIf\} \$R5 = 0\s+\$\{AndIf\} \$R7 = 2\s+WriteRegExpandStr HKLM "\$\{SESAME_ENVIRONMENT_KEY\}" "Path" "\$\{VALUE\}"\s+\$\{Else\}\s+SetErrors/)
-  assert.ok(typed >= 0, 'the Path type is not read before it is replaced')
-  assert.ok(reread > typed, 'the Path is not compared again just before it is replaced')
-  assert.ok(plain > reread && expanding > plain, 'the Path is not written right after the last comparison with the type it had')
-  assert.match(write, /\$\{If\} \$\{Errors\}\s+DetailPrint "\$\{FAILED\}"\s+\$\{Else\}\s+StrCpy \$R6 1\s+SendMessage \$\{HWND_BROADCAST\} \$\{WM_SETTINGCHANGE\} 0 "STR:Environment"/)
-  assert.doesNotMatch(write, /Abort|Quit|SetErrorLevel/, 'a failed Path write must not fail the install')
-  assert.equal((hook.match(/WriteRegExpandStr|WriteRegStr HKLM/g) ?? []).length, 2, 'every Path write goes through the one checked macro')
-
+  const constant = (name) => pure.match(new RegExp(`pub const ${name}: [^=]+= ([^;]+);`))?.[1].trim().replace(/^"|"$/g, '')
   const add = macro('SESAME_ADD_TERMINAL_PATH')
-  assert.match(add, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/)
-  assert.match(add, /\$\{If\} \$R3 >= \$\{NSIS_MAX_STRLEN\}\s+DetailPrint/)
-  assert.match(add, /\$\{If\} \$R9 == ";"\s+StrCpy \$R1 "\$R0\$\{SESAME_TERMINAL_FOLDER\};"\s+\$\{Else\}\s+StrCpy \$R1 "\$R0;\$\{SESAME_TERMINAL_FOLDER\}"/, 'a Path that ends with a semicolon must keep its empty last entry, or uninstall cannot give it back unchanged')
-  assert.match(add, /!insertmacro SESAME_SCAN_PATH \$R0 \$R1 \$R2 \$R4\s+\$\{If\} \$R2 = 0/, 'setup adds the entry again when Path already holds it')
-  assert.match(add, /!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not add[^"]*"\s+\$\{If\} \$R6 = 1\s+WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}" "\$\{SESAME_TERMINAL_FOLDER\}"/, 'Sesame does not record the exact Path entry it added')
-  assert.equal((hook.match(/WriteRegStr SHCTX/g) ?? []).length, 1, 'Sesame marks the Path entry as its own somewhere other than after adding it')
+  assert.ok(add.includes(`ExecWait '"$INSTDIR\\cli\\sesame.exe" ${constant('ADD_ARGUMENT')}' $0`), 'setup no longer asks the cli program to add its folder')
+  assert.match(add, /ClearErrors\s+ExecWait[^\n]+\s+\$\{If\} \$\{Errors\}\s+StrCpy \$0 "not started"/, 'a program that did not start could read as success')
+  assert.match(add, new RegExp(`\\$\\{If\\} \\$0 == "${constant('EXIT_CHANGED')}"\\s+WriteRegStr SHCTX "\\$\\{MANUPRODUCTKEY\\}" "\\$\\{SESAME_PATH_OWNER_VALUE\\}" "\\$\\{SESAME_TERMINAL_FOLDER\\}"`), 'Sesame records an entry it did not add')
+  assert.match(add, new RegExp(`\\$\\{ElseIf\\} \\$0 == "${constant('EXIT_UNCHANGED')}"`))
+  assert.match(add, /WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_STATUS_VALUE\}" "\$0"/, 'the outcome of the Path edit is not recorded where a test can read it')
+  assert.doesNotMatch(add, /Abort|Quit|SetErrorLevel/, 'a failed Path edit must not fail the install')
+  assert.equal((hook.match(/WriteRegStr SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/g) ?? []).length, 1)
 
   const remove = macro('SESAME_REMOVE_TERMINAL_PATH')
-  assert.match(remove, /!insertmacro SESAME_READ_PATH\s+\$\{If\} \$R3 = 1\s+\$\{OrIf\} \$R0 == ""\s+DetailPrint/, 'an unreadable or cut short Path is never written on uninstall')
-  assert.match(remove, /\$\{If\} \$R2 = 1\s+\$\{AndIf\} \$R4 = 1\s+!insertmacro SESAME_WRITE_PATH \$R1 "Sesame could not remove[^"]*"\s+\$\{ElseIf\} \$R2 > 0\s+DetailPrint/, 'uninstall removes more than the one exact entry Sesame added')
-  assert.doesNotMatch(remove, /\$R1 == ""|\$R1 != ""/, 'a Path that held only the Sesame entry is written back empty, which removes only that entry')
-
-  const scan = macro('SESAME_SCAN_PATH')
-  assert.match(scan, /\$R5 == "\$\{SESAME_TERMINAL_FOLDER\}"/)
-  assert.match(scan, /IntOp \$\{FOUND\} \$\{FOUND\} \+ 1\s+\$\{If\} \$R5 S== "\$\{SESAME_TERMINAL_FOLDER\}"\s+IntOp \$\{EXACT\} \$\{EXACT\} \+ 1/, 'the scan does not count each matching entry')
-  assert.doesNotMatch(scan, /WriteReg|DeleteReg/)
-
+  assert.match(remove, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"/, 'uninstall removes a Path entry Sesame did not add, or removes it during an update')
+  assert.ok(remove.includes(`ExecWait '"$INSTDIR\\cli\\sesame.exe" ${constant('REMOVE_ARGUMENT')}' $0`))
+  assert.doesNotMatch(remove, /WriteReg|DeleteReg/)
   assert.match(macro('NSIS_HOOK_POSTINSTALL'), /!insertmacro SESAME_ADD_TERMINAL_PATH/)
-  const preUninstall = macro('NSIS_HOOK_PREUNINSTALL')
-  assert.match(preUninstall, /ReadRegStr \$SesameOwnsTerminalPath SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/)
-  assert.doesNotMatch(preUninstall, /SESAME_REMOVE_TERMINAL_PATH/, 'a cancelled uninstall would leave sesame installed but off Path')
-  assert.match(macro('NSIS_HOOK_POSTUNINSTALL'), /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameOwnsTerminalPath S== "\$\{SESAME_TERMINAL_FOLDER\}"\s+!insertmacro SESAME_REMOVE_TERMINAL_PATH\s+\$\{EndIf\}/, 'uninstall removes a Path entry Sesame did not add')
-  const template = read('src-tauri', 'nsis', 'installer.nsi')
-  const uninstall = template.slice(template.indexOf('Section Uninstall'))
-  const running = uninstall.indexOf('CheckIfAppIsRunning')
-  const cleanup = uninstall.indexOf('NSIS_HOOK_POSTUNINSTALL')
-  assert.ok(running >= 0, 'the uninstaller no longer checks for a running Sesame')
-  assert.ok(cleanup >= 0, 'the uninstaller no longer runs the Path cleanup hook')
-  assert.ok(cleanup > running, 'the Path cleanup runs before the uninstaller checks for a running Sesame')
+  assert.match(macro('NSIS_HOOK_PREUNINSTALL'), /ReadRegStr \$SesameOwnsTerminalPath SHCTX "\$\{MANUPRODUCTKEY\}" "\$\{SESAME_PATH_OWNER_VALUE\}"/)
+  assert.deepEqual(unexpectedRegistryOperations(hook), [])
+
+  assert.match(lib, /#\[cfg\(windows\)\]\s+if let Some\(request\) = machine_path::requested\(&arguments\) \{\s+return adapters::platform::system_path::run\(request\);\s+\}\s+terminal_client::run_from_environment/, 'the Path mode must end the program before the terminal client can start')
+  assert.match(lib, /pub fn run_terminal_client\(\) -> i32 \{\s+if dll_search::harden_process\(\)\.is_err\(\)/, 'the Path mode must run only after the process is hardened')
+  assert.match(pure, /if arguments\.len\(\) == 1 \{\s+Some\(Request::Run\(mode\)\)\s+\} else \{\s+Some\(Request::Malformed\)/, 'the Path mode accepts more than its one argument')
+  assert.doesNotMatch(client, /machine-path/, 'the terminal help must not list the installer arguments')
+  const run = native.slice(native.indexOf('pub fn run(request: Request)'))
+  assert.ok(run.indexOf('is_elevated()') > 0 && run.indexOf('is_elevated()') < run.indexOf('own_install()'), 'the Path mode does not refuse a process that is not elevated first')
+  assert.match(native, /fn own_install\(\) -> Result<Install, String> \{[\s\S]*?program_files\(\)[\s\S]*?current_exe\(\)\.and_then\(std::fs::canonicalize\)[\s\S]*?std::fs::canonicalize\(&expected\)/, 'the Path mode must add only the folder of its own installed copy')
+  assert.match(native, /"ProgramFilesDir"/)
+  assert.match(native, new RegExp(`const PRODUCT_FOLDER: &str = "${config.productName}";`))
+  assert.doesNotMatch(native, /args_os|std::env::args|cli_protocol|browser_pipe|vault|sesame_app/, 'the Path mode must take nothing from its arguments and stay apart from the vault protocol')
+  assert.match(native, /Ok\(\(again_kind, again\)\) if again_kind == kind && again == bytes => \{\}\s+Ok\(_\) => continue/, 'the Path is not compared again just before it is written')
+  assert.match(native, /RegSetValueExW\(\s*key\.0,\s*value_name\.as_ptr\(\),\s*0,\s*kind,/, 'the Path type is not kept')
+  assert.match(native, /WM_SETTINGCHANGE/)
+  assert.match(read('.github', 'SECURITY.md'), /--add-to-machine-path/, 'SECURITY.md does not describe the installer Path mode')
 })
 
 test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
@@ -436,21 +436,22 @@ test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
     .filter((line) => !/^\s*;/.test(line))
     .join('\n')
 
-  assert.equal((hook.match(/!insertmacro SESAME_REMOVE_TERMINAL_PATH\b/g) ?? []).length, 1, 'the Path cleanup runs from more than one place')
-  const post = hook.match(/!macro NSIS_HOOK_POSTUNINSTALL\b[\s\S]*?!macroend/)
-  assert.ok(post, 'the hook has no NSIS_HOOK_POSTUNINSTALL macro')
-  assert.match(post[0], /!insertmacro SESAME_REMOVE_TERMINAL_PATH/)
-
-  assert.equal((code.match(/!insertmacro NSIS_HOOK_POSTUNINSTALL\b/g) ?? []).length, 1, 'the template runs the uninstall cleanup hook more than once')
+  assert.doesNotMatch(hook, /!insertmacro SESAME_REMOVE_TERMINAL_PATH/, 'the hook runs the Path cleanup itself, outside the place the template chose for it')
+  assert.doesNotMatch(hook, /NSIS_HOOK_POSTUNINSTALL/, 'the Path cleanup would run after cli\\sesame.exe is deleted')
+  assert.equal((code.match(/!insertmacro SESAME_REMOVE_TERMINAL_PATH\b/g) ?? []).length, 1, 'the template runs the Path cleanup more than once')
   const section = code.match(/Section Uninstall\b([\s\S]*?)\nSectionEnd/)
   assert.ok(section, 'the template has no uninstall section')
-  const cleanup = section[1].indexOf('!insertmacro NSIS_HOOK_POSTUNINSTALL')
-  assert.ok(cleanup >= 0, 'the uninstall section no longer runs the cleanup hook')
-  assert.ok(section[1].indexOf('!insertmacro CheckIfAppIsRunning') < cleanup, 'the running app check, where a person can cancel, comes after the Path cleanup')
-  assert.doesNotMatch(section[1].slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox|SetErrorLevel/, 'something after the Path cleanup can still cancel the uninstall')
+  const body = section[1]
+  const running = body.indexOf('!insertmacro CheckIfAppIsRunning')
+  const cleanup = body.indexOf('!insertmacro SESAME_REMOVE_TERMINAL_PATH')
+  const deletion = body.indexOf('Delete "$INSTDIR\\')
+  assert.ok(running >= 0 && cleanup > running, 'the running app check, where a person can cancel, comes after the Path cleanup')
+  assert.ok(deletion > cleanup, 'cli\\sesame.exe is deleted before it can remove its Path entry')
+  assert.match(body.slice(running, cleanup + '!insertmacro SESAME_REMOVE_TERMINAL_PATH'.length), /^\s*!insertmacro CheckIfAppIsRunning[^\n]*\n\s*!insertmacro SESAME_REMOVE_TERMINAL_PATH/, 'something runs between the running app check and the Path cleanup')
+  assert.doesNotMatch(body.slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox|SetErrorLevel/, 'something after the Path cleanup can still cancel the uninstall')
 
-  for (const [, name, body] of code.matchAll(/Function (un\.[\w.]+)\b([\s\S]*?)FunctionEnd/g)) {
-    assert.doesNotMatch(body, /SESAME_|NSIS_HOOK_POSTUNINSTALL/, `${name} touches the Path before the uninstall has started`)
+  for (const [, name, fn] of code.matchAll(/Function (un\.[\w.]+)\b([\s\S]*?)FunctionEnd/g)) {
+    assert.doesNotMatch(fn, /SESAME_|machine-path/, `${name} touches the Path before the uninstall has started`)
   }
 })
 

@@ -25,6 +25,8 @@
 ;      existing branch therefore requires elevation and installs under Program
 ;      Files, instead of placing executable code under the current user's
 ;      writable LocalAppData directory.
+;   6. The uninstaller removes the cli folder from the system Path right after
+;      the running app check, while cli\sesame.exe still exists to do it.
 ;
 ; Everything else in this file is kept intentionally equivalent to upstream
 ; (updater handling, WebView2 install, shortcuts, signing) so a
@@ -865,6 +867,9 @@ Section Uninstall
   !endif
 
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+  ; SESAME: change 6.
+  !insertmacro SESAME_REMOVE_TERMINAL_PATH
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
