@@ -11,6 +11,9 @@ import {
   collectSbomAdvisories,
   defaultSbomPath,
   awaitsUbuntuFix,
+  describeComponent,
+  isWithdrawn,
+  onlyUnmaintained,
   loadAllowlist,
   loadUnfixedLibraryRules,
   queryOsv,
@@ -498,4 +501,203 @@ test('the never compiled mark does not hide a package outside cargo', async () =
   const report = await collectSbomAdvisories([{ bom }], { query: async () => [{ id: 'GHSA-fictional-2' }], today: '2026-11-17' })
   assert.equal(report.vulnerable.length, 1)
   assert.equal(report.neverCompiled, 0)
+})
+
+const withdrawnSource = () => [
+  { label: 'locked.cdx.json', bom: { components: [component('fictional-merge', '1.0.0', 'pkg:npm/fictional-merge@1.0.0')] } },
+]
+const auditWithdrawn = (advisories) =>
+  collectSbomAdvisories(withdrawnSource(), {
+    query: async () => advisories,
+    today: '2026-11-17',
+    now: Date.parse('2026-11-17T12:00:00Z'),
+  })
+
+test('an advisory its publisher withdrew is left out and counted', async () => {
+  const report = await auditWithdrawn([{ id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38Z' }])
+  assert.equal(report.vulnerable.length, 0)
+  assert.deepEqual(report.withdrawn.map((entry) => [entry.label, entry.name, entry.ids]), [
+    ['locked.cdx.json', 'fictional-merge', ['GHSA-fictional-gone']],
+  ])
+  const single = await collectAdvisories(withdrawnSource()[0].bom, {
+    query: async () => [{ id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38.123456789Z' }],
+    now: Date.parse('2026-11-17T12:00:00Z'),
+  })
+  assert.equal(single.vulnerable.length, 0)
+  assert.equal(single.withdrawn.length, 1)
+})
+
+test('an advisory without a withdrawn time still fails beside a withdrawn one', async () => {
+  const report = await auditWithdrawn([
+    { id: 'GHSA-fictional-gone', withdrawn: '2026-11-16T18:55:38Z' },
+    { id: 'GHSA-fictional-live' },
+  ])
+  assert.deepEqual(report.vulnerable.map((entry) => entry.ids), [['GHSA-fictional-live']])
+  assert.deepEqual(report.withdrawn.map((entry) => entry.ids), [['GHSA-fictional-gone']])
+})
+
+test('a withdrawn field that is not a valid past time does not withdraw the advisory', async () => {
+  for (const withdrawn of [null, '', 'yes', true, 1763319338, '2026-11-16', '2026-02-30T00:00:00Z', '2026-11-16T25:00:00Z', '2026-11-16T18:55:38+02:00', '2026-11-18T00:00:00Z']) {
+    const report = await auditWithdrawn([{ id: 'GHSA-fictional-live', withdrawn }])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(withdrawn))
+    assert.equal(report.withdrawn.length, 0, JSON.stringify(withdrawn))
+  }
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-16T18:55:38Z' }, Date.parse('2026-11-17T00:00:00Z')), true)
+  assert.equal(isWithdrawn({}, Date.parse('2026-11-17T00:00:00Z')), false)
+})
+
+const crate = (role, { name = 'fictional-crate', pulledInBy = 'fictional-framework' } = {}) => ({
+  ...component(name, '5.0.0', `pkg:cargo/${name}@5.0.0`),
+  properties: [
+    ...(role === undefined ? [] : [].concat(role).map((value) => ({ name: 'sesame:cargo-dependency', value }))),
+    ...(pulledInBy ? [{ name: 'sesame:cargo-pulled-in-by', value: pulledInBy }] : []),
+  ],
+})
+const unmaintainedNotice = ({ id = 'RUSTSEC-2026-9001', name = 'fictional-crate', facts = {}, effects = {}, ...rest } = {}) => ({
+  id,
+  affected: [
+    {
+      package: { ecosystem: 'crates.io', name, purl: `pkg:cargo/${name}` },
+      ecosystem_specific: { affects: { arch: [], os: [], functions: [] }, affected_functions: null, ...effects },
+      database_specific: { categories: [], cvss: null, informational: 'unmaintained', ...facts },
+    },
+  ],
+  database_specific: { license: 'CC0-1.0' },
+  ...rest,
+})
+const auditCrate = (target, advisories) =>
+  collectSbomAdvisories([{ bom: { components: [target] } }], { query: async () => advisories, today: '2026-11-17' })
+
+test('an unmaintained notice for a crate that only arrives through other crates is a notice', async () => {
+  const report = await auditCrate(crate('transitive'), [unmaintainedNotice()])
+  assert.equal(report.vulnerable.length, 0)
+  assert.deepEqual(report.unmaintained.map((entry) => [entry.name, entry.ids, entry.pulledInBy]), [
+    ['fictional-crate', ['RUSTSEC-2026-9001'], 'fictional-framework'],
+  ])
+  assert.deepEqual(report.reviewed, [])
+})
+
+test('an unmaintained notice fails for a direct, unmarked or ambiguously marked crate', async () => {
+  for (const role of ['direct', undefined, 'unknown', ['transitive', 'direct'], '']) {
+    const report = await auditCrate(crate(role), [unmaintainedNotice()])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(role))
+    assert.deepEqual(report.unmaintained, [], JSON.stringify(role))
+  }
+  const npm = { ...crate('transitive'), purl: 'pkg:npm/fictional-crate@5.0.0' }
+  assert.equal((await auditCrate(npm, [unmaintainedNotice()])).vulnerable.length, 1)
+})
+
+test('a notice that carries anything beyond unmaintained still fails for a transitive crate', async () => {
+  const cases = {
+    unsound: unmaintainedNotice({ facts: { informational: 'unsound' } }),
+    notice: unmaintainedNotice({ facts: { informational: 'notice' } }),
+    vulnerability: unmaintainedNotice({ facts: { informational: null } }),
+    'no informational kind': unmaintainedNotice({ facts: { informational: undefined } }),
+    cvss: unmaintainedNotice({ facts: { cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' } }),
+    category: unmaintainedNotice({ facts: { categories: ['memory-corruption'] } }),
+    'affected functions': unmaintainedNotice({ effects: { affected_functions: ['fictional_crate::parse'] } }),
+    'affects functions': unmaintainedNotice({ effects: { affects: { functions: ['fictional_crate::parse'] } } }),
+    severity: unmaintainedNotice({ severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H' }] }),
+    alias: unmaintainedNotice({ aliases: ['CVE-2026-0001'] }),
+    cwe: unmaintainedNotice({ database_specific: { cwe_ids: ['CWE-400'] } }),
+    'github advisory': unmaintainedNotice({ id: 'GHSA-fictional-0001' }),
+    'another crate': unmaintainedNotice({ name: 'another-crate' }),
+    'no affected entry': { ...unmaintainedNotice(), affected: [] },
+  }
+  for (const [label, advisory] of Object.entries(cases)) {
+    const report = await auditCrate(crate('transitive'), [advisory])
+    assert.equal(report.vulnerable.length, 1, label)
+    assert.equal(onlyUnmaintained(advisory, crate('transitive')), false, label)
+  }
+  const mixed = await auditCrate(crate('transitive'), [unmaintainedNotice(), unmaintainedNotice({ id: 'RUSTSEC-2026-9002', facts: { informational: 'unsound' } })])
+  assert.deepEqual(mixed.vulnerable.map((entry) => entry.ids), [['RUSTSEC-2026-9001', 'RUSTSEC-2026-9002']])
+})
+
+const npmPackage = (scope, name = 'fictional-glob') => ({ ...component(name, '4.0.0', `pkg:npm/${name}@4.0.0`), ...(scope === undefined ? {} : { scope }) })
+const availabilityOnly = [
+  { type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H' },
+  { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N' },
+]
+const githubAdvisory = (cweIds, id = 'GHSA-fictional-glob', severity = availabilityOnly) => ({
+  id,
+  affected: [{ package: { ecosystem: 'npm', name: 'fictional-glob' } }],
+  database_specific: cweIds === undefined ? { severity: 'HIGH' } : { severity: 'HIGH', cwe_ids: cweIds },
+  ...(severity === null ? {} : { severity }),
+})
+const auditPackage = (target, advisories) =>
+  collectSbomAdvisories([{ bom: { components: [target] } }], { query: async () => advisories, today: '2026-11-17' })
+
+test('resource exhaustion in an npm package that never ships is a notice', async () => {
+  for (const cweIds of [['CWE-1333'], ['CWE-400'], ['CWE-405'], ['CWE-407'], ['CWE-770'], ['CWE-834'], ['CWE-1333', 'CWE-400']]) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(cweIds)])
+    assert.equal(report.vulnerable.length, 0, cweIds.join())
+    assert.deepEqual(report.buildTools.map((entry) => [entry.name, entry.ids, entry.weaknesses]), [
+      ['fictional-glob', ['GHSA-fictional-glob'], [...cweIds].sort()],
+    ])
+    assert.deepEqual(report.reviewed, [])
+  }
+})
+
+test('any other weakness or a missing weakness list in a build tool still fails', async () => {
+  for (const cweIds of [undefined, null, [], 'CWE-1333', ['CWE-94'], ['CWE-22'], ['CWE-1321'], ['CWE-506'], ['CWE-1333', 'CWE-94'], ['cwe-1333']]) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(cweIds)])
+    assert.equal(report.vulnerable.length, 1, JSON.stringify(cweIds))
+    assert.deepEqual(report.buildTools, [], JSON.stringify(cweIds))
+  }
+  const malware = await auditPackage(npmPackage('excluded'), [{ id: 'MAL-2026-0001', affected: [{ package: { ecosystem: 'npm', name: 'fictional-glob' } }] }])
+  assert.equal(malware.vulnerable.length, 1)
+  const mixed = await auditPackage(npmPackage('excluded'), [githubAdvisory(['CWE-1333']), githubAdvisory(['CWE-78'], 'GHSA-fictional-exec')])
+  assert.deepEqual(mixed.vulnerable.map((entry) => entry.ids), [['GHSA-fictional-glob', 'GHSA-fictional-exec']])
+})
+
+test('resource exhaustion fails in a package that ships or whose shipped state is unknown', async () => {
+  for (const scope of ['required', 'optional', undefined, 'EXCLUDED']) {
+    const report = await auditPackage(npmPackage(scope), [githubAdvisory(['CWE-1333'])])
+    assert.equal(report.vulnerable.length, 1, String(scope))
+  }
+  const cargo = { ...component('fictional-glob', '4.0.0', 'pkg:cargo/fictional-glob@4.0.0'), scope: 'excluded' }
+  assert.equal((await auditPackage(cargo, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
+  const bundled = { ...component('fictional-glob', '4.0.0', 'pkg:deb/ubuntu/fictional-glob@4.0.0'), scope: 'excluded' }
+  assert.equal((await auditPackage(bundled, [githubAdvisory(['CWE-1333'])])).vulnerable.length, 1)
+})
+
+test('a broad resource exhaustion weakness with confidentiality or integrity impact still fails', async () => {
+  const cases = {
+    'high confidentiality and integrity': [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
+    'one vector of two has integrity impact': [availabilityOnly[0], { type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N' }],
+    'subsequent system integrity': [{ type: 'CVSS_V4', score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:L/SA:N' }],
+    'only an ecosystem priority': [{ type: 'Ubuntu', score: 'low' }],
+    'an older vector it cannot read': [{ type: 'CVSS_V2', score: 'AV:N/AC:L/Au:N/C:N/I:N/A:C' }, availabilityOnly[0]],
+    'a malformed vector': [{ type: 'CVSS_V3', score: 'CVSS:3.1/C:N/I:N/A' }],
+    'an empty list': [],
+    'no severity field': null,
+  }
+  for (const [label, severity] of Object.entries(cases)) {
+    const report = await auditPackage(npmPackage('excluded'), [githubAdvisory(['CWE-400'], 'GHSA-fictional-glob', severity)])
+    assert.equal(report.vulnerable.length, 1, label)
+    assert.deepEqual(report.buildTools, [], label)
+  }
+  const malformed = await auditPackage(npmPackage('excluded'), [{ ...githubAdvisory(['CWE-400']), severity: 'HIGH' }])
+  assert.equal(malformed.vulnerable.length, 1)
+})
+
+test('a withdrawal later in the same millisecond has not taken effect yet', () => {
+  const now = Date.parse('2026-11-17T12:00:00.123Z')
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123456789Z' }, now), false)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123000001Z' }, now), false)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123000000Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.123Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.122999999Z' }, now), true)
+  assert.equal(isWithdrawn({ withdrawn: '2026-11-17T12:00:00.124Z' }, now), false)
+})
+
+test('a line names its SBOM only when more than one SBOM was audited', async () => {
+  const sources = [
+    { label: 'first.cdx.json', bom: { components: [npmPackage('excluded')] } },
+    { label: 'second.cdx.json', bom: { components: [npmPackage('required')] } },
+  ]
+  const report = await collectSbomAdvisories(sources, { query: async () => [githubAdvisory(['CWE-1333'])], today: '2026-11-17' })
+  assert.deepEqual(report.buildTools.map((entry) => describeComponent(entry, true)), ['first.cdx.json: fictional-glob@4.0.0: GHSA-fictional-glob'])
+  assert.deepEqual(report.vulnerable.map((entry) => describeComponent(entry, true)), ['second.cdx.json: fictional-glob@4.0.0: GHSA-fictional-glob'])
+  assert.equal(describeComponent(report.vulnerable[0], false), 'fictional-glob@4.0.0: GHSA-fictional-glob')
 })
