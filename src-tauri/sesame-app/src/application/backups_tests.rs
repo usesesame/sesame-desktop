@@ -946,3 +946,106 @@ fn recovery_health_asks_for_no_vault_id_while_locked() {
         }]
     );
 }
+
+#[test]
+fn deleting_a_vault_that_was_replaced_after_the_password_check_removes_nothing() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    create_backup_in_state(&vault.state).expect("created backup");
+    let backup_directory = vault.path().parent().expect("vault parent").join("backups");
+    let (replacement, _) =
+        sesame_core::api::create_vault("fictional other password", "Fictional other vault")
+            .expect("replacement vault");
+    let replacement_file = replacement.file.clone();
+    let path = vault.path().to_path_buf();
+    *vault.state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(move |_, point| {
+        if point == "deleteAuthenticated" {
+            crate::vault::storage::write_vault_file(&path, &replacement_file)
+                .expect("restored another vault");
+        }
+    }));
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    let deleted = delete_local_vault_in_state(&vault.state, &effects, MASTER_PASSWORD.to_string());
+    *vault.state.test_pause.lock().expect("pause") = None;
+
+    assert_eq!(
+        deleted.err().as_deref(),
+        Some(crate::vault::key_proof::VAULT_CHANGED_DURING_CHECK)
+    );
+    assert!(vault.path().exists());
+    assert!(backup_directory.exists());
+    assert!(vault.state.session.lock().expect("session lock").is_some());
+}
+
+#[test]
+fn a_save_during_the_backup_check_still_asks_before_restoring_the_older_backup() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let backup = backup_of(&vault);
+    let presence = ReleasePresence::default();
+    grant(&vault, &presence);
+    let selection = FileSelectionState::default();
+    let token = issue(&selection, FilePurpose::BackupRead, &backup);
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    *vault.state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(|state, point| {
+        if point == "restorePrepared" {
+            let mut session = state.session.lock().expect("session lock");
+            let session = session.as_mut().expect("session");
+            let mut payload = session.open_payload().expect("payload").clone();
+            payload.entries[0].title = "Northwind saved meanwhile".to_string();
+            crate::vault::storage::commit_payload_change(session, payload).expect("saved");
+        }
+    }));
+
+    let restored = restore_backup_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        &selection,
+        restore_request(&token),
+    );
+    *vault.state.test_pause.lock().expect("pause") = None;
+
+    assert_eq!(restored.err().as_deref(), Some("olderBackup:2:3"));
+    assert!(vault.state.session.lock().expect("session lock").is_some());
+    assert!(effects.calls().is_empty());
+}
+
+#[test]
+fn a_lock_and_unlock_during_the_backup_check_restores_nothing() {
+    let vault = TestVault::with_login("fictional-login", "https://northwind.example");
+    let backup = backup_of(&vault);
+    let presence = ReleasePresence::default();
+    grant(&vault, &presence);
+    let selection = FileSelectionState::default();
+    let token = issue(&selection, FilePurpose::BackupRead, &backup);
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+    *vault.state.test_pause.lock().expect("pause") = Some(std::sync::Arc::new(|state, point| {
+        if point == "restorePrepared" {
+            let unlocked = state
+                .session
+                .lock()
+                .expect("session lock")
+                .take()
+                .expect("session");
+            assert_eq!(state.lock_if_unlocked(), Ok(false));
+            state.install_session(&mut state.session.lock().expect("session lock"), unlocked);
+        }
+    }));
+    let before = read(vault.path());
+
+    let restored = restore_backup_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        &selection,
+        restore_request(&token),
+    );
+    *vault.state.test_pause.lock().expect("pause") = None;
+
+    assert_eq!(
+        restored.err().as_deref(),
+        Some(crate::vault::key_proof::VAULT_CHANGED_DURING_CHECK)
+    );
+    assert_eq!(read(vault.path()), before);
+    assert!(vault.state.session.lock().expect("session lock").is_some());
+}

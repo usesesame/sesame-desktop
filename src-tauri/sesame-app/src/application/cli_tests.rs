@@ -13,7 +13,7 @@ use crate::cli_protocol::{
 };
 use crate::release::ReleasePresence;
 use crate::test_support::{grant, TestVault};
-use crate::vault::release_record::{EntryKind, Outcome};
+use crate::vault::release_record::{EntryKind, FieldKind, Outcome};
 use crate::vault::{CustomFieldEntry, VaultEntry};
 
 use super::approval_slot::ApprovalSlot;
@@ -520,7 +520,10 @@ fn a_hidden_value_asked_for_while_locked_needs_the_master_password_after_the_unl
     );
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
     assert!(!wire(&replies).contains(CANARY));
-    assert!(record_entries(&harness).is_empty());
+    let entries = record_entries(&harness);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].kind, EntryKind::TerminalRead);
+    assert_eq!(entries[0].outcome, Outcome::Withdrawn);
 }
 
 #[test]
@@ -873,7 +876,10 @@ fn an_approval_without_presence_still_releases_no_hidden_value() {
         });
     assert_eq!(error_code(&replies), Some(CliErrorCode::Cancelled));
     assert!(!wire(&replies).contains(CANARY));
-    assert!(record_entries(&harness).is_empty());
+    let entries = record_entries(&harness);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].kind, EntryKind::TerminalRead);
+    assert_eq!(entries[0].outcome, Outcome::Withdrawn);
 }
 
 #[test]
@@ -894,7 +900,7 @@ fn presence_without_an_allowance_still_shows_the_approval_and_the_release_is_rec
     );
     let entries = record_entries(&harness);
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, EntryKind::Reveal);
+    assert_eq!(entries[0].kind, EntryKind::TerminalRead);
     assert_eq!(entries[0].outcome, Outcome::Released);
     assert_eq!(entries[0].host.as_deref(), Some("terminal"));
     assert_eq!(entries[0].item_id.as_deref(), Some("fictional-login"));
@@ -933,7 +939,7 @@ fn a_copied_value_never_crosses_the_channel_and_is_recorded_as_a_copy() {
             clear_after_ms: Some(30_000),
         }));
     let entries = record_entries(&harness);
-    assert_eq!(entries[0].kind, EntryKind::Copy);
+    assert_eq!(entries[0].kind, EntryKind::TerminalCopy);
     assert_eq!(entries[0].host.as_deref(), Some("terminal"));
 }
 
@@ -1528,7 +1534,8 @@ fn a_totp_request_returns_a_bounded_code_and_records_it() {
     assert!(code.len() <= 9 && code.bytes().all(|byte| byte.is_ascii_digit()));
     assert!(!wire(&replies).contains(RFC_KEY));
     let entries = record_entries(&harness);
-    assert_eq!(entries[0].kind, EntryKind::Reveal);
+    assert_eq!(entries[0].kind, EntryKind::TerminalCode);
+    assert_eq!(entries[0].fields, vec![FieldKind::TwoFactorCode]);
     assert_eq!(entries[0].host.as_deref(), Some("terminal"));
 }
 
@@ -2126,4 +2133,274 @@ fn a_list_over_the_budget_sends_no_rows_through_the_request() {
         .iter()
         .all(|reply| !matches!(reply.reply_type, CliReplyType::Items | CliReplyType::Done)));
     assert_eq!(error_code(&replies), Some(CliErrorCode::TooLarge));
+}
+
+fn newest(harness: &Harness) -> super::release_record::ReleaseEntryView {
+    record_entries(harness)
+        .into_iter()
+        .next()
+        .expect("a recorded entry")
+}
+
+fn assert_terminal(
+    entry: &super::release_record::ReleaseEntryView,
+    kind: EntryKind,
+    outcome: Outcome,
+    item: Option<&str>,
+) {
+    assert_eq!(entry.kind, kind, "{entry:?}");
+    assert_eq!(entry.outcome, outcome, "{entry:?}");
+    assert_eq!(entry.item_id.as_deref(), item, "{entry:?}");
+}
+
+#[test]
+fn an_allowed_request_is_recorded_as_a_terminal_read_of_the_item() {
+    let harness = Harness::new();
+    harness.run_with(&get(40, Some("username"), false), &terminal(100), |_, _| {
+        harness.allow(false)
+    });
+    let entry = newest(&harness);
+    assert_terminal(
+        &entry,
+        EntryKind::TerminalRead,
+        Outcome::Released,
+        Some("fictional-login"),
+    );
+    assert_eq!(entry.fields, vec![FieldKind::Username]);
+    assert_eq!(entry.host.as_deref(), Some("terminal"));
+}
+
+#[test]
+fn a_denied_request_is_recorded_as_a_refusal_of_that_item() {
+    let harness = Harness::new();
+    harness.run_with(&get(41, Some("password"), false), &terminal(100), |_, _| {
+        harness.deny()
+    });
+    let entry = newest(&harness);
+    assert_terminal(
+        &entry,
+        EntryKind::TerminalRead,
+        Outcome::Denied,
+        Some("fictional-login"),
+    );
+    assert_eq!(entry.fields, vec![FieldKind::Password]);
+}
+
+#[test]
+fn a_dismissed_name_the_vault_lacks_is_recorded_without_the_name() {
+    let harness = Harness::new();
+    let missing = request(
+        42,
+        serde_json::json!({ "type": "get", "item": "Fictional chosen text", "field": "password" }),
+    );
+    harness.run_with(&missing, &terminal(100), |_, _| {
+        let event = harness.pending();
+        harness
+            .decide(&event, CliDecisionKind::Dismiss, None, false)
+            .expect("dismissed");
+    });
+    let entries = record_entries(&harness);
+    assert_eq!(entries.len(), 1);
+    assert_terminal(&entries[0], EntryKind::TerminalRead, Outcome::NoMatch, None);
+    assert!(!format!("{entries:?}").contains("Fictional chosen text"));
+}
+
+#[test]
+fn an_unanswered_request_is_recorded_as_expired() {
+    let harness = Harness::new();
+    harness
+        .approvals
+        .shorten_approval_timeout(Duration::from_millis(150));
+    harness.run_with(&get(43, Some("username"), true), &terminal(100), |_, _| {});
+    assert_terminal(
+        &newest(&harness),
+        EntryKind::TerminalCopy,
+        Outcome::TimedOut,
+        Some("fictional-login"),
+    );
+}
+
+#[test]
+fn a_lock_during_the_approval_is_recorded_as_locked() {
+    let harness = Harness::new();
+    harness.run_with(
+        &request(
+            44,
+            serde_json::json!({ "type": "totp", "item": "Northwind mail" }),
+        ),
+        &terminal(100),
+        |_, effects| {
+            harness.pending();
+            harness.lock(effects);
+        },
+    );
+    harness.vault.reopen();
+    let entry = newest(&harness);
+    assert_eq!(entry.kind, EntryKind::TerminalCode);
+    assert_eq!(entry.outcome, Outcome::Locked);
+}
+
+#[test]
+fn a_lock_during_the_approval_is_recorded_as_locked_even_after_an_unlock() {
+    let harness = Harness::new();
+    let (refused_tx, refused_rx) = std::sync::mpsc::channel::<()>();
+    let (reopened_tx, reopened_rx) = std::sync::mpsc::channel::<()>();
+    let pause_side = std::sync::Mutex::new((refused_tx, reopened_rx));
+    *harness.vault.state.test_pause.lock().expect("pause") =
+        Some(std::sync::Arc::new(move |_, point| {
+            if point == "terminalRefused" {
+                let side = pause_side.lock().expect("pause side");
+                let _ = side.0.send(());
+                let _ = side.1.recv_timeout(Duration::from_secs(60));
+            }
+        }));
+    harness.run_with(
+        &request(
+            46,
+            serde_json::json!({ "type": "totp", "item": "Northwind mail" }),
+        ),
+        &terminal(100),
+        |_, effects| {
+            harness.pending();
+            harness.lock(effects);
+            refused_rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the request was refused");
+            harness.vault.reopen();
+            reopened_tx.send(()).expect("reopened");
+        },
+    );
+    *harness.vault.state.test_pause.lock().expect("pause") = None;
+    let entry = newest(&harness);
+    assert_eq!(entry.kind, EntryKind::TerminalCode);
+    assert_eq!(entry.outcome, Outcome::Locked);
+}
+
+#[test]
+fn a_request_set_aside_for_the_browser_is_recorded_as_turned_away() {
+    let harness = Harness::new();
+    let browser = BrowserFillState::sharing(harness.slot.clone());
+    let epoch = harness.vault.state.session_epoch();
+    let held = browser
+        .begin("fill-1", browser_origin(), epoch, ApprovalRequest::Create)
+        .expect("a browser approval");
+    harness.run_with(&get(45, Some("username"), false), &terminal(100), |_, _| {});
+    browser.revoke(&held.0);
+    assert_terminal(
+        &newest(&harness),
+        EntryKind::TerminalRead,
+        Outcome::Withdrawn,
+        Some("fictional-login"),
+    );
+}
+
+#[test]
+fn a_request_answered_under_an_allowance_names_the_allowance() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    allow_terminal_for_five_minutes(&harness, &origin);
+    harness.run(&get(46, Some("Member number"), false), &origin);
+    let entry = newest(&harness);
+    assert_terminal(
+        &entry,
+        EntryKind::TerminalRead,
+        Outcome::Released,
+        Some("fictional-login"),
+    );
+    assert_eq!(entry.host.as_deref(), Some("terminal-allowance"));
+}
+
+#[test]
+fn a_list_is_recorded_once_it_is_sent() {
+    let harness = Harness::new();
+    harness.run_with(
+        &request(47, serde_json::json!({ "type": "list" })),
+        &terminal(100),
+        |_, _| harness.allow(false),
+    );
+    let entry = newest(&harness);
+    assert_terminal(&entry, EntryKind::TerminalList, Outcome::Released, None);
+    assert!(entry.fields.is_empty());
+}
+
+#[test]
+fn a_closed_terminal_and_a_replayed_request_are_recorded() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.run_with(&get(48, Some("username"), false), &origin, |host, _| {
+        wait_for(host, "approvalRequested");
+        host.gone.store(true, Ordering::SeqCst);
+    });
+    assert_eq!(newest(&harness).outcome, Outcome::ConnectionClosed);
+    harness.run(&get(48, Some("username"), false), &origin);
+    assert_terminal(
+        &newest(&harness),
+        EntryKind::TerminalRead,
+        Outcome::Replayed,
+        None,
+    );
+}
+
+#[test]
+fn requests_turned_away_while_terminals_wait_are_counted_on_one_entry() {
+    let harness = Harness::new();
+    let origin = terminal(100);
+    harness.run_with(&get(49, Some("password"), false), &origin, |_, _| {
+        harness.deny()
+    });
+    for n in 50..80 {
+        let replies = harness.run(&get(n, Some("password"), false), &origin);
+        assert_eq!(error_message(&replies).as_deref(), Some(COOLING_MESSAGE));
+    }
+    let entries = record_entries(&harness);
+    let waiting: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.outcome == Outcome::Busy)
+        .collect();
+    assert_eq!(waiting.len(), 1, "{entries:?}");
+    assert_eq!(waiting[0].item_id, None);
+
+    harness.lock(&harness.effects());
+    harness.vault.reopen();
+    let waiting: Vec<_> = record_entries(&harness)
+        .into_iter()
+        .filter(|entry| entry.outcome == Outcome::Busy)
+        .collect();
+    assert_eq!(waiting.iter().map(|entry| entry.count).sum::<u32>(), 30);
+    assert!(waiting.len() <= 2);
+}
+
+#[test]
+fn terminal_refusals_do_not_count_as_uses_for_a_fill_approval() {
+    let harness = Harness::new();
+    harness.run_with(&get(81, Some("password"), false), &terminal(100), |_, _| {
+        harness.deny()
+    });
+    harness.clock.advance(COOLING_FIRST);
+    harness.run_with(&get(82, Some("username"), false), &terminal(100), |_, _| {
+        harness.allow(false)
+    });
+    let browser = BrowserFillState::sharing(harness.slot.clone());
+    let epoch = harness.vault.state.session_epoch();
+    let (approval_id, _, _) = browser
+        .begin(
+            "fill-hint",
+            browser_origin(),
+            epoch,
+            ApprovalRequest::Fill {
+                candidate_ids: std::collections::HashSet::from(["fictional-login".to_string()]),
+            },
+        )
+        .expect("a browser approval");
+    let hint = super::release_record::release_record_hint_in_state(
+        &harness.vault.state,
+        &browser,
+        &approval_id,
+        1_900_000_000,
+    )
+    .expect("hint")
+    .expect("a pending approval");
+    assert_eq!(hint.denied_recently, 0);
+    assert!(hint.items.iter().all(|item| item.released_here == 0));
+    browser.revoke(&approval_id);
 }

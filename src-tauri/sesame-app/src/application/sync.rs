@@ -18,9 +18,10 @@ use crate::sync::header::{verify_header_chain, Header};
 use crate::sync::identity::{DeviceIdentity, IdentityFiles};
 use crate::sync::key_change::PreparedKeyChange;
 use crate::sync::state::{StateNames, SyncState};
-use crate::vault::crypto::{bytes_match, default_kdf_params, derive_key, encrypt_bytes};
+use crate::vault::crypto::{default_kdf_params, derive_key, encrypt_bytes};
+use crate::vault::key_proof::{KeySettings, SecretProof};
 use crate::vault::util::generate_recovery_kit;
-use crate::vault::{UnlockedVault, VaultResult, VaultState, RECOVERY_WRAP_AAD, WRAP_AAD};
+use crate::vault::{UnlockedVault, VaultResult, VaultState, RECOVERY_WRAP_AAD};
 
 pub const KEY_CHANGE_PENDING: &str =
     "This device has not finished changing the vault key. Open Sync and finish it before syncing.";
@@ -235,20 +236,24 @@ pub fn release_claim_after_failure<T>(
     released
 }
 
+pub const WRONG_MASTER_PASSWORD: &str = "That master password is not correct.";
+
 pub fn verify_master_password(vault: &UnlockedVault, master_password: &str) -> Result<(), String> {
-    let mut confirmed = crate::vault::crypto::unwrap_with_password(
-        master_password,
-        &vault.kdf,
-        &vault.key_wrap,
-        WRAP_AAD,
-    )?
-    .ok_or("That master password is not correct.")?;
-    let matches = vault.expose_vault_key(|key| Ok(bytes_match(confirmed.as_slice(), key)))?;
-    confirmed.zeroize();
-    if !matches {
-        return Err("That master password is not correct.".into());
-    }
-    Ok(())
+    SecretProof::master_password(&KeySettings::of(vault), master_password)?
+        .require(vault, WRONG_MASTER_PASSWORD)
+}
+
+pub fn master_password_proof(
+    state: &VaultState,
+    master_password: &str,
+    locked: &str,
+) -> Result<SecretProof, String> {
+    let settings = crate::application::lifecycle::key_settings_in_state(state, locked)?;
+    SecretProof::master_password(&settings, master_password)
+}
+
+pub fn confirm_master_password(vault: &UnlockedVault, proof: &SecretProof) -> Result<(), String> {
+    proof.require(vault, WRONG_MASTER_PASSWORD)
 }
 
 pub fn prepare_recovery(
@@ -803,15 +808,15 @@ pub fn prepare_key_change_in_state(
     store
         .load_state()?
         .ok_or("Set up Sesame Sync on this device first.")?;
+    const LOCKED: &str = "Unlock Sesame before changing the vault key.";
+    let proof = master_password_proof(state, master_password, LOCKED)?;
     {
         let session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let unlocked = session
-            .as_ref()
-            .ok_or("Unlock Sesame before changing the vault key.")?;
-        verify_master_password(unlocked, master_password)?;
+        let unlocked = session.as_ref().ok_or(LOCKED)?;
+        confirm_master_password(unlocked, &proof)?;
     }
     let mut key = [0u8; 32];
     crate::vault::util::fill_secret(&mut key)?;
