@@ -181,6 +181,10 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
   assert.match(collector, /GetValueKind\('Path'\)/)
   assert.match(collector, /'machine-path\.json'/)
   assert.match(collector, /-Name 'TerminalPathAdded'/)
+  assert.match(collector, /\$excludedDataRoots = @\('EBWebView', 'quick-access-webview', 'logs'\)/, 'only the WebView2 profiles and the logs may be left out of the data comparison')
+  assert.match(collector, /if \(-not \(Test-HeldByAnotherProcess \$_\.Exception\)\) \{ throw \}\s+\$status = 'locked'/, 'a file another process holds open must be recorded as locked, and every other error must still stop the collector')
+  assert.match(collector, /\$code -eq 32 -or \$code -eq 33/)
+  assert.match(comparer, /\$old\.status -eq 'locked' -or \$new\.status -eq 'locked'\) \{\s+\[pscustomobject\]\[ordered\]@\{ relativePath = \$path; status = 'Unverified'/, 'a locked file must be reported as unverified, never as unchanged')
   assert.match(comparer, /\$changes = @\(foreach/)
 
   if (process.platform !== 'win32') {
@@ -199,6 +203,8 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
     mkdirSync(join(dataRoot, 'logs'), { recursive: true })
     mkdirSync(join(dataRoot, 'native-messaging'), { recursive: true })
     writeFileSync(join(dataRoot, 'EBWebView', 'volatile-cache'), 'changes while the app runs')
+    mkdirSync(join(dataRoot, 'quick-access-webview', 'EBWebView', 'Default'), { recursive: true })
+    writeFileSync(join(dataRoot, 'quick-access-webview', 'EBWebView', 'Default', 'DIPS'), 'fictional profile state')
     writeFileSync(join(dataRoot, 'logs', 'sesame.log'), 'fictional diagnostic')
     writeFileSync(join(dataRoot, 'native-messaging', 'app.usesesame.browser.json'), '{}')
 
@@ -225,9 +231,10 @@ test('installer lifecycle evidence scripts emit and compare file rows', { timeou
       /"native-messaging\\app\.usesesame\.browser\.json"/,
       `the manifest has no native host manifest row. The collector read ${policy.dataRoot}`,
     )
-    assert.doesNotMatch(manifest, /EBWebView|sesame\.log/)
+    assert.doesNotMatch(manifest, /EBWebView|quick-access-webview|sesame\.log/)
+    assert.match(manifest, /"vault\.sesame","\d+","[^"]+","[0-9a-f]{64}","hashed"/)
     assert.doesNotMatch(manifest, /"Count","Keys","Values"/)
-    assert.deepEqual(policy.excludedTopLevelRoots, ['EBWebView', 'logs'])
+    assert.deepEqual(policy.excludedTopLevelRoots, ['EBWebView', 'quick-access-webview', 'logs'])
     const nativeHost = JSON.parse(readFileSync(join(before, 'native-host-state.json'), 'utf8').replace(/^\uFEFF/, ''))
     assert.equal(nativeHost.manifestExists, true)
 
