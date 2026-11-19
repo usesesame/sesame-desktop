@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
@@ -28,11 +29,11 @@
   const cancel = () => { if (!working) onCancel() }
 </script>
 
-<ModalShell open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
+<ModalShell approval let:settled settleKey={settleKeyFor(request, $browserCardFill.selectedId)} open={true} onClose={cancel} labelledby="browser-card-heading" describedby="browser-card-description" tone="browser-fill" modalClass="browser-fill-modal" ariaBusy={working}>
   <span class="confirm-icon browser"><Icon name="browser" size={20} /></span>
   <h2 id="browser-card-heading">Fill {request.hostname}?</h2>
   <p id="browser-card-description">Choose a saved card. Every card fill needs this confirmation, and Sesame does not submit the form.</p>
-  <div class="browser-fill-origin"><Icon name="shield" size={15} /><span>Requesting page</span><code>{request.origin}</code></div>
+  <div class="browser-fill-origin"><Icon name="shield" size={15} /><span>Requesting page</span><code><bdi>{vaultText(request.origin)}</bdi></code></div>
   <ReleaseRecordHintLine approvalId={request.approvalId} selectedId={$browserCardFill.selectedId} noun="card" />
   <div class="browser-fill-origin"><Icon name="check" size={15} /><span>Fields requested</span><code>{request.requestedFields.map((field) => FIELD_LABELS[field] ?? field).join(', ')}</code></div>
   <div class="browser-fill-candidates" role="radiogroup" aria-label="Cards for {request.hostname}">
@@ -44,7 +45,7 @@
       </label>
     {/each}
   </div>
-  <div class="browser-fill-footer"><span>{approvalFooterText(remaining, $approvalWait)}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
+  <div class="browser-fill-footer"><span>{approvalFooterText(remaining, $approvalWait)}</span><div class="confirm-actions"><button type="button" class="secondary-button" disabled={working} on:click={cancel}>Cancel</button><button type="button" class="primary-button" disabled={!$browserCardFill.selectedId || working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onConfirm}>{working ? 'Approving…' : 'Fill card'}</button></div></div>
 </ModalShell>
 
 <style>

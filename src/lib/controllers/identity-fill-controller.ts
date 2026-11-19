@@ -14,13 +14,15 @@ interface IdentityFillControllerOptions {
   feedback: FeedbackController
   onVaultLocked: () => void
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createIdentityFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: IdentityFillControllerOptions) {
+export function createIdentityFillController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive = () => false, held = () => false }: IdentityFillControllerOptions) {
   const { browserIdentityFill } = stores
   const loop = approvalLoop<BrowserIdentityFillRequest>({
     store: browserIdentityFill,
+    held,
     mayShow: () => modal.identityFillMayShow(),
     offersNothing: (request) => !request.candidates.length,
     initialSelection: (request) => (request.candidates.length === 1 ? request.candidates[0].id : ''),

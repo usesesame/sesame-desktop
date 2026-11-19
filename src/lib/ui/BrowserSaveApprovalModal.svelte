@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { settleKeyFor } from '../controllers/approval-gate'
   import { vaultText } from '../vault-text'
   import { onDestroy } from 'svelte'
   import { approvalFooterText, approvalWait } from '../approval-wait'
@@ -36,6 +37,9 @@
 </script>
 
 <ModalShell
+  approval
+  let:settled
+  settleKey={settleKeyFor(request, $browserSave.selectedId)}
   open={true}
   onClose={cancel}
   labelledby="browser-save-heading"
@@ -57,13 +61,13 @@
   <div class="browser-fill-origin">
     <Icon name="shield" size={15} />
     <span>Requesting page</span>
-    <code>{request.origin}</code>
+    <code><bdi>{vaultText(request.origin)}</bdi></code>
   </div>
 
   {#if isUpdate && selectedCandidate?.matchKind === 'site'}
     <div class="browser-fill-alias">
       <Icon name="alert" size={16} />
-      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers to update it from <code>{request.origin}</code>.</span></p>
+      <p><strong>Matched by site</strong><span>This login is saved for <code><bdi>{vaultText(selectedCandidate.savedOrigin)}</bdi></code> and set to fill on the whole site, so Sesame offers to update it from <code><bdi>{vaultText(request.origin)}</bdi></code>.</span></p>
     </div>
   {/if}
 
@@ -94,12 +98,12 @@
   <div class="browser-fill-footer">
     <span>{approvalFooterText(remaining, $approvalWait)}</span>
     <div class="confirm-actions">
-      <button type="button" class="text-button" disabled={working || remaining === 0 || $approvalWait.ms > 0} on:click={onNeverForSite}>Never for this site</button>
+      <button type="button" class="text-button" disabled={working || remaining === 0 || $approvalWait.ms > 0 || !settled} on:click={onNeverForSite}>Never for this site</button>
       <button type="button" class="secondary-button" disabled={working} on:click={cancel}>Discard</button>
       <button
         type="button"
         class="primary-button"
-        disabled={working || remaining === 0 || $approvalWait.ms > 0 || (needsChoice && !$browserSave.selectedId)}
+        disabled={working || remaining === 0 || $approvalWait.ms > 0 || !settled || (needsChoice && !$browserSave.selectedId)}
         on:click={onConfirm}
       >
         {working ? (isUpdate ? 'Updating…' : 'Saving…') : isUpdate ? 'Update login' : 'Save login'}

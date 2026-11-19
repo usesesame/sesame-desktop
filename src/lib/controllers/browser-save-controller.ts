@@ -18,10 +18,11 @@ interface BrowserSaveControllerOptions {
   feedback: FeedbackController
   onVaultLocked: () => void
   modal: ModalController
-  blockingOverlayActive: () => boolean
+  blockingOverlayActive?: () => boolean
+  held?: () => boolean
 }
 
-export function createBrowserSaveController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive }: BrowserSaveControllerOptions) {
+export function createBrowserSaveController({ stores, feedback, onVaultLocked: handleVaultLocked, modal, blockingOverlayActive = () => false, held = () => false }: BrowserSaveControllerOptions) {
   const { browserSave, selection, vault } = stores
   let syncTimer: ReturnType<typeof window.setTimeout> | undefined
   let disposed = false
@@ -29,6 +30,7 @@ export function createBrowserSaveController({ stores, feedback, onVaultLocked: h
   let stopLockedListener: (() => void) | undefined
 
   function receive(request: BrowserSaveRequest) {
+    if (held()) return
     if (!modal.browserSaveMayShow() || blockingOverlayActive()) {
       void resolveBrowserSaveRequest(request.approvalId, false)
       return
