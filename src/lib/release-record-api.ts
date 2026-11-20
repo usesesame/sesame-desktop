@@ -96,6 +96,7 @@ export function previewBrowserFillRequest(): BrowserFillRequest | null {
     candidates: [
       { id: 'gmail', title: 'Gmail', username: 'hello@example.test', email: '', savedOrigin: 'https://accounts.example.com', matchKind: 'exact' },
       { id: 'github', title: 'GitHub', username: 'sesame-preview', email: '', savedOrigin: 'https://accounts.example.com', matchKind: 'exact' },
+      { id: 'notion', title: 'Example workspace for the whole team', username: 'a.long.preview.username@workspace.example.com', email: '', savedOrigin: 'https://www.sign-in.workspace-preview.example.com', matchKind: 'site' },
     ],
     expiresInSeconds: 600,
     expiresAtUnixMs: Date.now() + 600_000,

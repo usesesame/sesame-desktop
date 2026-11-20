@@ -540,7 +540,7 @@
     { label: 'Workspace', items: [
       { id: 'vault', label: 'Vault', icon: 'vault' },
       { id: 'authenticator', label: 'Authenticator', icon: 'shield' },
-      { id: 'security', label: 'Security', icon: 'shield' },
+      { id: 'security', label: 'Security', icon: 'shield-alert' },
     ] },
     { label: 'Manage', items: [
       { id: 'tools', label: 'Tools', icon: 'key' },

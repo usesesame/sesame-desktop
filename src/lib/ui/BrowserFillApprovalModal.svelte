@@ -75,7 +75,7 @@
       <label class:selected={$browserFill.selectedId === candidate.id}>
         <input type="radio" name="browser-fill-login" value={candidate.id} checked={$browserFill.selectedId === candidate.id} on:change={() => browserFill.patch({ selectedId: candidate.id })} disabled={working} />
         <span class="entry-avatar">{vaultText(candidate.title).slice(0, 1).toUpperCase() || '?'}</span>
-        <span><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small><small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small></span>
+        <span class="candidate-text"><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small><small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small></span>
         {#if candidate.matchKind === 'wwwAlias'}<span class="candidate-match">www match</span>{:else if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
       </label>
     {/each}

@@ -78,7 +78,7 @@
         <label class:selected={$browserSave.selectedId === candidate.id}>
           <input type="radio" name="browser-save-update-target" value={candidate.id} checked={$browserSave.selectedId === candidate.id} on:change={() => browserSave.patch({ selectedId: candidate.id })} disabled={working} />
           <span class="entry-avatar">{vaultText(candidate.title).slice(0, 1).toUpperCase() || '?'}</span>
-          <span><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small>{#if candidate.matchKind === 'site'}<small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small>{/if}</span>
+          <span class="candidate-text"><strong><bdi>{vaultText(candidate.title)}</bdi></strong><small><bdi>{vaultText(candidate.username || candidate.email) || 'No username saved'}</bdi></small>{#if candidate.matchKind === 'site'}<small class="candidate-origin"><bdi>{vaultText(candidate.savedOrigin)}</bdi></small>{/if}</span>
           {#if candidate.matchKind === 'site'}<span class="candidate-match">Site match</span>{/if}
         </label>
       {/each}
