@@ -50,3 +50,49 @@ test('the linux-rust job also runs the app against a service that predates the h
 test('both test servers are stopped when the step ends', () => {
   assert.match(job, /trap 'kill "\$server" "\$older"/)
 })
+
+const nightly = readFileSync('.github/workflows/sync-server-nightly.yml', 'utf8')
+
+test('the linux-rust job also runs the app against the real self-host server built from the pinned commit', () => {
+  const step = job.slice(job.indexOf('- name: Prove Sync against the real self-host server'))
+  assert.ok(step.includes('timeout-minutes: 20'), 'the real server step needs a timeout')
+  assert.match(step, /run: node tools\/run-real-sync-station\.mjs --server sesame-server\n/)
+  assert.ok(job.indexOf('path: sesame-server\n') < job.indexOf('run-real-sync-station.mjs'), 'the pinned checkout must come before the real server step')
+  assert.ok(job.indexOf('go-version-file: sesame-server/go.mod') < job.indexOf('run-real-sync-station.mjs'), 'Go must be set up before the real server step')
+  assert.equal(job.match(/run-real-sync-station\.mjs/g)?.length, 1)
+})
+
+test('the real server step lets the runner count passes and keeps the four in-memory counts', () => {
+  const runner = readFileSync('tools/run-real-sync-station.mjs', 'utf8')
+  assert.match(runner, /test result: ok\\\. 1 passed; 0 failed;/)
+  assert.match(runner, /code !== 0 \|\| !exactlyOneTestPassed\(output\)/)
+  assert.equal(job.match(/test result: ok\. 1 passed/g)?.length, 4)
+})
+
+test('the nightly workflow runs on a schedule and by hand with read only access', () => {
+  assert.match(nightly, /^on:\n {2}schedule:\n {4}- cron: '[0-9]+ [0-9]+ \* \* \*'\n {2}workflow_dispatch:\n/m)
+  assert.match(nightly, /^permissions:\n {2}contents: read\n/m)
+  assert.ok(!/\bwrite\b/.test(nightly), 'the nightly workflow must not ask for write access')
+  assert.ok(!/pull_request|push:/.test(nightly), 'the nightly workflow must not run on pull requests or pushes')
+  assert.equal(nightly.match(/timeout-minutes: \d+/g)?.length, 2, 'each nightly job needs a timeout')
+})
+
+test('every action in the nightly workflow is pinned to a full commit', () => {
+  const uses = [...nightly.matchAll(/uses: (\S+)/g)].map((match) => match[1])
+  assert.ok(uses.length >= 6)
+  for (const reference of uses) assert.match(reference, /@[0-9a-f]{40}$/, reference)
+})
+
+test('the nightly workflow builds the real server from server main and runs the same station', () => {
+  const real = nightly.slice(nightly.indexOf('  real-server-main:'))
+  assert.match(real, /repository: usesesame\/sesame-server\n\s+ref: main\n\s+path: sesame-server\n\s+persist-credentials: false/)
+  assert.match(real, /go-version-file: sesame-server\/go\.mod/)
+  assert.match(real, /run: node tools\/run-real-sync-station\.mjs --server sesame-server\n/)
+  assert.match(real, /git -C sesame-server log -1/, 'the run must name the server commit it tested')
+})
+
+test('the nightly workflow fails when the pinned server commit is stale', () => {
+  const freshness = nightly.slice(nightly.indexOf('  pin-freshness:'), nightly.indexOf('  real-server-main:'))
+  assert.match(freshness, /run: node tools\/check-sync-server-pin\.mjs\n/)
+  assert.match(freshness, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/)
+})

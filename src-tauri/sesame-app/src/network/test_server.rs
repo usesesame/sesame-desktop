@@ -206,6 +206,7 @@ pub struct FakeSesame {
     pub api_version: u64,
     pub minimum_client_version: String,
     pub maximum_client_version: Option<String>,
+    pub minimum_desktop_version: String,
     pub name: String,
     pub desktop_linking: bool,
     pub capability_expires_at: String,
@@ -220,6 +221,7 @@ impl FakeSesame {
             api_version: 1,
             minimum_client_version: "0.1.0".into(),
             maximum_client_version: None,
+            minimum_desktop_version: "0.1.0".into(),
             name: "Home server".into(),
             desktop_linking: true,
             capability_expires_at: "2099-01-01T00:00:00Z".into(),
@@ -259,7 +261,7 @@ impl FakeSesame {
     pub fn capability_payload(&self) -> serde_json::Value {
         serde_json::json!({
             "schemaVersion": 1,
-            "minimumDesktopVersion": "0.1.0",
+            "minimumDesktopVersion": self.minimum_desktop_version,
             "latestDesktopVersion": "9.9.9",
             "features": { "desktopLinking": self.desktop_linking, "sync": false },
             "serviceStatus": {},

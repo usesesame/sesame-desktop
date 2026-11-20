@@ -393,6 +393,10 @@ jobs:
             a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet -- --ignored 2>&1 | tee "$RUNNER_TEMP/sync-e2e-older.out"
           grep -q 'test result: ok. 1 passed' "$RUNNER_TEMP/sync-e2e-older.out"
 
+      - name: Prove Sync against the real self-host server
+        timeout-minutes: 20
+        run: node tools/run-real-sync-station.mjs --server sesame-server
+
   linux-bundles:
     needs: [lint, typecheck]
     runs-on: ubuntu-24.04
@@ -473,6 +477,30 @@ jobs:
 
       - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
+
+      - name: Prove the shipped deb upgrades from the newest older published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > previous-releases.json
+          tag=$(node tools/previous-linux-release.mjs --candidate "$version" --releases previous-releases.json)
+          mkdir previous-release
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "Sesame_${tag#v}_amd64.deb" --pattern 'SHA256SUMS-linux' --dir previous-release
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format deb \
+            --package "$(ls src-tauri/target/release/bundle/deb/*.deb)" \
+            --previous "previous-release/Sesame_${tag#v}_amd64.deb" \
+            --previous-sums previous-release/SHA256SUMS-linux \
+            --out linux-deb-upgrade-evidence; then
+            echo "--- launch logs ---"
+            cat linux-deb-upgrade-evidence/linux-previous-launch.log 2>/dev/null || true
+            cat linux-deb-upgrade-evidence/linux-upgrade-launch.log 2>/dev/null || true
+            cat linux-deb-upgrade-evidence/linux-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-deb-upgrade-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
@@ -604,6 +632,88 @@ jobs:
           path: linux-package-evidence
           if-no-files-found: error
           retention-days: 30
+
+  extension-station:
+    needs: [lint, typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri
+          key: extension-station
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the webview libraries and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libdbus-1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            dbus \
+            bubblewrap \
+            xdg-dbus-proxy \
+            xvfb
+
+      - name: Allow unprivileged user namespaces for the web view sandbox
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --dev /dev --proc /proc /usr/bin/true
+
+      - name: Read the pinned extension commit
+        id: extension-pin
+        run: |
+          echo "repository=$(jq -r .repository src-tauri/contracts/browser/extension-pin.json)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(jq -r .commit src-tauri/contracts/browser/extension-pin.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.extension-pin.outputs.repository }}
+          ref: ${{ steps.extension-pin.outputs.commit }}
+          path: sesame-browser-extension
+          persist-credentials: false
+
+      - run: npm ci
+
+      - name: Install the extension dependencies and a Chromium that can load it
+        working-directory: sesame-browser-extension
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+
+      - name: Fill a login from the real extension
+        run: |
+          xvfb-run -a dbus-run-session -- node tools/test-extension-native-host.mjs \
+            --extension-directory sesame-browser-extension \
+            --evidence-directory extension-station-evidence
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: extension-station-evidence
+          path: extension-station-evidence
+          if-no-files-found: ignore
+          retention-days: 14
 
   desktop-linux:
     needs: [linux-rust, linux-bundles, linux-installed]

@@ -37,3 +37,11 @@ pub fn write_protected(path: &Path, base: &SyncState) -> VaultResult<()> {
 pub fn read_protected(path: &Path) -> Option<SyncState> {
     read_protected_with(path, &DEVICE_PROTECTOR)
 }
+
+pub fn write_upgrade(path: &Path, upgrade: &sesame_core::UpgradeDigests) -> VaultResult<()> {
+    write_upgrade_with(path, upgrade, &DEVICE_PROTECTOR)
+}
+
+pub fn read_upgrade(path: &Path) -> Option<sesame_core::UpgradeDigests> {
+    read_upgrade_with(path, &DEVICE_PROTECTOR)
+}

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { appProcessAlive, architectureName, browserHostName, chromeHostManifestMatches, launchApp, linuxBrowserEnvironment, platformName, readChromeHostManifest, sha256, stopApp } from './desktop-e2e-bridge.mjs'
+import { appProcessAlive, architectureName, browserHostName, chromeHostManifestMatches, evidenceStep, judgeAppStop, launchApp, linuxBrowserEnvironment, platformName, readChromeHostManifest, sha256, stopApp } from './desktop-e2e-bridge.mjs'
 import { repositoryRoot } from './vault-compatibility-gate.mjs'
 
 const run = promisify(execFile)
@@ -30,7 +30,7 @@ export const requiredShippedSteps = [
   'package.uninstall',
   'browser.registration_removed',
 ]
-export const requiredUpgradeSteps = ['upgrade.previous_launch', 'upgrade.candidate_launch']
+export const requiredUpgradeSteps = ['upgrade.previous_digest', 'upgrade.version_order', 'upgrade.previous_launch', 'upgrade.previous_stop', 'upgrade.candidate_installed', 'upgrade.candidate_launch', 'upgrade.candidate_stop']
 export const requiredRpmSteps = [
   'package.metadata',
   'package.install',
@@ -130,6 +130,7 @@ function parseArguments(argv) {
     if (argument === '--package') options.package = argv[++index]
     else if (argument === '--format') options.format = argv[++index]
     else if (argument === '--previous') options.previous = argv[++index]
+    else if (argument === '--previous-sums') options.previousSums = argv[++index]
     else if (argument === '--out') options.out = argv[++index]
     else if (argument === '--install') options.installKind = argv[++index]
     else if (argument === '--launch-seconds') options.launchSeconds = Number(argv[++index])
@@ -138,7 +139,7 @@ function parseArguments(argv) {
     else throw new Error(`Unknown argument: ${argument}`)
   }
   if (!options.package || !options.out) {
-    throw new Error('Usage: node tools/linux-shipped-package-gate.mjs --package <deb|rpm|AppImage> --out <report-directory> [--format deb|rpm|appimage] [--previous <deb>] [--install dpkg|extracted] [--launch-seconds 8] [--repo <directory>] [--keep]')
+    throw new Error('Usage: node tools/linux-shipped-package-gate.mjs --package <deb|rpm|AppImage> --out <report-directory> [--format deb|rpm|appimage] [--previous <deb> --previous-sums <SHA256SUMS file>] [--install dpkg|extracted] [--launch-seconds 8] [--repo <directory>] [--keep]')
   }
   options.format = options.format ?? formatForPackage(options.package)
   if (!Object.hasOwn(evidenceFilenameByFormat, options.format)) throw new Error(`Unknown Linux package format: ${options.format}`)
@@ -146,6 +147,8 @@ function parseArguments(argv) {
   if (options.format !== 'deb' && options.installKind !== 'dpkg') throw new Error('Only deb packages support the extracted install kind.')
   if (options.previous && options.format !== 'deb') throw new Error('The upgrade check only runs against deb packages.')
   if (options.previous && options.installKind !== 'dpkg') throw new Error('The upgrade check only runs against a real install.')
+  if (options.previous && !options.previousSums) throw new Error('The upgrade check needs --previous-sums, the SHA256SUMS file published with the previous release.')
+  if (options.previousSums && !options.previous) throw new Error('--previous-sums only applies together with --previous.')
   if (!Number.isFinite(options.launchSeconds) || options.launchSeconds < 3) throw new Error('The launch window must be at least 3 seconds.')
   return options
 }
@@ -161,6 +164,43 @@ function record(steps, name, ok, value, error) {
   if (error) step.error = String(error)
   steps.push(step)
   return step
+}
+
+function recordStop(steps, name, stop) {
+  const judged = judgeAppStop(stop)
+  const step = record(steps, name, judged.ok, judged.value, judged.error)
+  step.evidence = true
+  return step
+}
+
+export function parseChecksums(text) {
+  const entries = new Map()
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = /^([0-9a-fA-F]{64}) [ *]([^\s/\\][^/\\]*)$/.exec(line)
+    if (match) entries.set(match[2], match[1].toLowerCase())
+  }
+  return entries
+}
+
+export function judgePreviousDigest({ filename, bytes, checksums }) {
+  const listed = parseChecksums(checksums).get(filename)
+  if (!listed) return { ok: false, error: `The previous release checksums do not list ${filename}.` }
+  const actual = sha256(bytes)
+  return actual === listed
+    ? { ok: true, value: { filename, sha256: actual } }
+    : { ok: false, error: `The previous package ${filename} has digest ${actual}, but the previous release checksums list ${listed}.` }
+}
+
+export function judgeVersionOrder({ previous, candidate, older }) {
+  return older === true
+    ? { ok: true, value: { previous, candidate } }
+    : { ok: false, error: `The previous package ${previous} is not older than the candidate ${candidate}, so installing the candidate would not be an upgrade.` }
+}
+
+export function judgeUpgradedVersion({ installedVersion, expectedVersion }) {
+  return installedVersion === expectedVersion
+    ? { ok: true, value: { version: installedVersion } }
+    : { ok: false, error: `dpkg reports ${installedVersion || 'no version'} after the upgrade, not ${expectedVersion}.` }
 }
 
 async function executableFile(file) {
@@ -310,9 +350,9 @@ async function launchAndStop(binary, { launchSeconds, logPath, environment, extr
   await new Promise((resolve) => setTimeout(resolve, launchSeconds * 1000))
   const alive = appProcessAlive(child)
   if (alive && whileRunning) await whileRunning()
-  await stopApp(child)
+  const stop = await stopApp(child)
   await writeFile(logPath, log.join(''))
-  return alive
+  return { alive, stop }
 }
 
 async function installPackage(packagePath) {
@@ -323,6 +363,50 @@ async function installPackage(packagePath) {
   const host = listing.split('\n').find((line) => line.endsWith('/bin/sesame-browser-host'))
   if (!status.includes('install ok installed') || !binary || !host) throw new Error('dpkg did not install the package and its browser host into a bin directory.')
   return binary
+}
+
+async function installedVersion() {
+  return command('dpkg-query', ['-W', '-f=${Version}', 'sesame']).catch(() => '')
+}
+
+export async function verifyPreviousPackage(steps, { previousPath, sumsPath }) {
+  const bytes = await readFile(previousPath)
+  const checksums = await readFile(sumsPath, 'utf8')
+  const digest = judgePreviousDigest({ filename: path.basename(previousPath), bytes, checksums })
+  record(steps, 'upgrade.previous_digest', digest.ok, digest.value, digest.error)
+  if (!digest.ok) throw new Error(digest.error)
+  return bytes
+}
+
+async function installPreviousRelease(context, metadata) {
+  const { options, out, environment, expectedArchitecture, steps } = context
+  const previousPath = path.resolve(options.previous)
+  const previousBytes = await verifyPreviousPackage(steps, { previousPath, sumsPath: path.resolve(options.previousSums) })
+  const previousMetadata = await packageMetadata(previousPath, expectedArchitecture)
+  const previousPackage = { filename: path.basename(previousPath), sha256: sha256(previousBytes), bytes: previousBytes.length, ...previousMetadata }
+  const order = judgeVersionOrder({
+    previous: previousMetadata.version,
+    candidate: metadata.version,
+    older: await command('dpkg', ['--compare-versions', previousMetadata.version, 'lt', metadata.version]).then(() => true, () => false),
+  })
+  record(steps, 'upgrade.version_order', order.ok, order.value, order.error)
+  if (!order.ok) throw new Error(order.error)
+  const previousBinary = await installPackage(previousPath)
+  const { alive, stop } = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log'), environment })
+  record(steps, 'upgrade.previous_launch', alive, undefined, alive ? undefined : 'The previous package exited before the launch window closed.')
+  recordStop(steps, 'upgrade.previous_stop', stop)
+  await removeBrowserRegistration(environment)
+  return previousPackage
+}
+
+async function launchUpgradedCandidate(context, binary, metadata) {
+  const { options, out, environment, steps } = context
+  const version = await installedVersion()
+  const judged = judgeUpgradedVersion({ installedVersion: version, expectedVersion: metadata.version })
+  record(steps, 'upgrade.candidate_installed', judged.ok, judged.value, judged.error)
+  const { alive, stop } = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-upgrade-launch.log'), environment })
+  record(steps, 'upgrade.candidate_launch', alive, undefined, alive ? undefined : 'The candidate exited before the launch window closed.')
+  recordStop(steps, 'upgrade.candidate_stop', stop)
 }
 
 function buildRecord({ schema, format, installKind, platform, architecture, version, package: packageRecord, previousPackage, binarySha256, steps, startedAt }) {
@@ -337,7 +421,7 @@ function buildRecord({ schema, format, installKind, platform, architecture, vers
     package: packageRecord,
     previousPackage,
     binarySha256,
-    steps: steps.map(({ name, ok, error }) => ({ name, ok, ...(error ? { error } : {}) })),
+    steps: steps.map(evidenceStep),
     result: failed === 0 ? 'passed' : 'failed',
     skipped: false,
     startedAt,
@@ -358,8 +442,10 @@ async function runDebGate(context) {
   let binary
   let previousPackage = null
   if (options.installKind === 'dpkg') {
+    if (options.previous) previousPackage = await installPreviousRelease(context, metadata)
     binary = await installPackage(packagePath)
     record(steps, 'package.install', true, { installKind: 'dpkg', binary })
+    if (options.previous) await launchUpgradedCandidate(context, binary, metadata)
   } else {
     binary = path.join(staging, 'usr/bin/sesame')
     record(steps, 'package.install', true, { installKind: 'extracted', binary })
@@ -367,24 +453,10 @@ async function runDebGate(context) {
   const binarySha256 = sha256(await readFile(binary))
   await checkTerminalVerbs(steps, binary, environment)
 
-  if (options.previous) {
-    const previousPath = path.resolve(options.previous)
-    const previousBytes = await readFile(previousPath)
-    const previousMetadata = await packageMetadata(previousPath, expectedArchitecture)
-    previousPackage = { filename: path.basename(previousPath), sha256: sha256(previousBytes), bytes: previousBytes.length, ...previousMetadata }
-    const previousBinary = await installPackage(previousPath)
-    const previousAlive = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log'), environment })
-    record(steps, 'upgrade.previous_launch', previousAlive, undefined, previousAlive ? undefined : 'The previous package exited before the launch window closed.')
-    await removeBrowserRegistration(environment)
-    binary = await installPackage(packagePath)
-    const candidateAlive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-upgrade-launch.log'), environment })
-    record(steps, 'upgrade.candidate_launch', candidateAlive, undefined, candidateAlive ? undefined : 'The candidate exited before the launch window closed.')
-  }
-
   let reach = appNotRunning
-  const alive = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
+  const { alive, stop } = await launchAndStop(binary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The installed app exited before the launch window closed.')
-  record(steps, 'app.stop', true)
+  recordStop(steps, 'app.stop', stop)
   const registration = browserRegistration(binary, environment)
   record(steps, 'browser.registration', registration.ok, registration.value, registration.error)
   record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
@@ -453,9 +525,9 @@ async function runRpmGate(context) {
   await checkTerminalVerbs(steps, binary, environment)
 
   let reach = appNotRunning
-  const alive = await launchAndStop(binary, { launchSeconds: context.options.launchSeconds, logPath: path.join(out, 'linux-rpm-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
+  const { alive, stop } = await launchAndStop(binary, { launchSeconds: context.options.launchSeconds, logPath: path.join(out, 'linux-rpm-launch.log'), environment, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The installed app exited before the launch window closed.')
-  record(steps, 'app.stop', true)
+  recordStop(steps, 'app.stop', stop)
   const registration = browserRegistration(binary, environment)
   record(steps, 'browser.registration', registration.ok, registration.value, registration.error)
   record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)
@@ -517,9 +589,9 @@ async function runAppImageGate(context) {
 
   await removeBrowserRegistration(environment)
   let reach = appNotRunning
-  const alive = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' }, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
+  const { alive, stop } = await launchAndStop(packagePath, { launchSeconds: context.options.launchSeconds, logPath: path.join(context.out, 'linux-appimage-launch.log'), environment, extraEnv: { APPIMAGE_EXTRACT_AND_RUN: '1' }, whileRunning: async () => { reach = await hostReachesApp(environment, context.capabilitiesRequest) } })
   record(steps, 'app.launch', alive, undefined, alive ? undefined : 'The AppImage exited before the launch window closed.')
-  record(steps, 'app.stop', true)
+  recordStop(steps, 'app.stop', stop)
   const staged = await registrationStaged(environment, await realpath(packagePath))
   record(steps, 'browser.registration_staged', staged.ok, staged.value, staged.error)
   record(steps, 'browser.host_reaches_app', reach.ok, reach.value, reach.error)

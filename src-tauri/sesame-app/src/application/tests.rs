@@ -224,6 +224,11 @@ impl DesktopEffects for FakeEffects<'_> {
         Some((SyncStore::new(data_dir.clone()), run))
     }
 
+    fn sync_store(&self) -> Option<SyncStore> {
+        let (data_dir, _) = self.sync.as_ref()?;
+        Some(SyncStore::new(data_dir.clone()))
+    }
+
     fn observe_lock(&self, state: &VaultState) {
         let session_present = state.session.lock().expect("session lock").is_some();
         self.record(Effect::ObserveLock { session_present });
@@ -750,6 +755,141 @@ fn a_manual_run_stopped_by_the_lock_upgrades_before_it_lets_go() {
     assert!(
         coordinator.begin_manual().is_some(),
         "the run released its claim"
+    );
+}
+
+struct ReleasedFixture {
+    directory: PathBuf,
+    password: String,
+}
+
+impl ReleasedFixture {
+    fn v0_5_3() -> Self {
+        let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sesame-core/tests/fixtures/compatibility");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(corpus.join("manifest.json")).expect("corpus manifest"),
+        )
+        .expect("parsed manifest");
+        let entry = manifest["fixtures"]
+            .as_array()
+            .expect("fixture list")
+            .iter()
+            .find(|fixture| fixture["id"] == "v0.5.3")
+            .expect("0.5.3 fixture");
+        let directory = std::env::temp_dir().join(format!("sesame-released-{}", random_id()));
+        std::fs::create_dir_all(&directory).expect("fixture directory");
+        std::fs::copy(
+            corpus.join(entry["fileName"].as_str().expect("file name")),
+            directory.join("vault.sesame"),
+        )
+        .expect("copied fixture");
+        Self {
+            directory,
+            password: entry["secrets"]["masterPassword"]
+                .as_str()
+                .expect("password")
+                .to_string(),
+        }
+    }
+
+    fn vault(&self) -> PathBuf {
+        self.directory.join("vault.sesame")
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        self.directory.join("data")
+    }
+
+    fn digest_0_5_3_stored(&self) -> String {
+        let file = sesame_core::loader::VaultLoader::read(&self.vault()).expect("fixture file");
+        assert_eq!(file.format_version, 10);
+        let written = sesame_core::loader::VaultLoader::authenticate(
+            &file,
+            sesame_core::loader::Credential::MasterPassword(&self.password),
+        )
+        .expect("authenticated fixture");
+        let bytes = written.bytes();
+        let end = bytes
+            .iter()
+            .rposition(|byte| *byte != b' ')
+            .expect("payload bytes")
+            + 1;
+        crate::sync::state::payload_digest(&bytes[..end])
+    }
+
+    fn unlock(&self, stored: String) -> VaultState {
+        let store = SyncStore::new(self.data_dir());
+        std::fs::create_dir_all(self.data_dir()).expect("sync directory");
+        let mut local = crate::sync::state::SyncState::new("fictional-vault", "fictional-device");
+        local.payload_digest = stored;
+        store.save_state(&local).expect("saved Sync state");
+        let state = VaultState::default();
+        unlock_vault_in_state(
+            &state,
+            &ReleasePresence::default(),
+            &FakeEffects::with_sync(self.vault(), self.data_dir(), Coordinator::new()),
+            Zeroizing::new(self.password.clone()),
+        )
+        .expect("unlocked");
+        state
+    }
+
+    fn unsynced(&self, state: &VaultState) -> bool {
+        let local = SyncStore::new(self.data_dir())
+            .load_state()
+            .expect("Sync state")
+            .expect("saved Sync state");
+        let session = state.session.lock().expect("session lock");
+        super::sync::vault_has_local_changes(&local, session.as_ref().expect("unlocked"))
+            .expect("compared")
+    }
+}
+
+impl Drop for ReleasedFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+#[test]
+fn the_released_0_5_3_vault_upgrades_without_anything_to_sync() {
+    let fixture = ReleasedFixture::v0_5_3();
+    let stored = fixture.digest_0_5_3_stored();
+
+    let state = fixture.unlock(stored);
+
+    assert!(!fixture.unsynced(&state));
+    let session = state.session.lock().expect("session lock");
+    let payload = session
+        .as_ref()
+        .expect("unlocked")
+        .open_payload()
+        .expect("payload");
+    let login = payload
+        .entries
+        .iter()
+        .find(|entry| entry.id == "login-alpha")
+        .expect("fixture login");
+    assert!(login.legacy_fields.is_empty());
+    assert_eq!(login.custom_fields.len(), 2);
+}
+
+#[test]
+fn the_released_0_5_3_vault_keeps_an_edit_it_had_not_synced() {
+    let fixture = ReleasedFixture::v0_5_3();
+    let stored = crate::sync::state::payload_digest(b"fictional earlier vault content");
+
+    let state = fixture.unlock(stored.clone());
+
+    assert!(fixture.unsynced(&state));
+    assert_eq!(
+        SyncStore::new(fixture.data_dir())
+            .load_state()
+            .expect("Sync state")
+            .expect("saved Sync state")
+            .payload_digest,
+        stored
     );
 }
 

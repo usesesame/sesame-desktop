@@ -2913,6 +2913,8 @@ mod adoption_and_publish_tests {
             "a conflict leaves the local edit in place"
         );
     }
+
+    include!("sync_format_upgrade_tests.rs");
 }
 
 #[cfg(test)]
