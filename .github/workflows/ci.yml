@@ -474,6 +474,30 @@ jobs:
       - name: Strip host libraries and patch the sandbox paths from the AppImage
         run: node tools/strip-appimage-host-libs.mjs "$(ls src-tauri/target/release/bundle/appimage/*.AppImage)"
 
+      - name: Prove the shipped deb upgrades from the newest older published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > previous-releases.json
+          tag=$(node tools/previous-linux-release.mjs --candidate "$version" --releases previous-releases.json)
+          mkdir previous-release
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "Sesame_${tag#v}_amd64.deb" --pattern 'SHA256SUMS-linux' --dir previous-release
+          if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
+            --format deb \
+            --package "$(ls src-tauri/target/release/bundle/deb/*.deb)" \
+            --previous "previous-release/Sesame_${tag#v}_amd64.deb" \
+            --previous-sums previous-release/SHA256SUMS-linux \
+            --out linux-deb-upgrade-evidence; then
+            echo "--- launch logs ---"
+            cat linux-deb-upgrade-evidence/linux-previous-launch.log 2>/dev/null || true
+            cat linux-deb-upgrade-evidence/linux-upgrade-launch.log 2>/dev/null || true
+            cat linux-deb-upgrade-evidence/linux-launch.log 2>/dev/null || true
+            echo "--- record ---"
+            cat linux-deb-upgrade-evidence/*.json 2>/dev/null || true
+            exit 1
+          fi
+
       - name: Prove the shipped rpm installs, launches, and unregisters
         run: |
           if ! xvfb-run -a node tools/linux-shipped-package-gate.mjs \
