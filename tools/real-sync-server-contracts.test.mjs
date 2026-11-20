@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
@@ -96,10 +96,11 @@ test('the credentials file is readable only by its owner', { skip: process.platf
     assert.equal(statSync(file).mode & 0o777, 0o600)
     assert.equal(statSync(join(directory, 'nested')).mode & 0o077, 0)
     writeFileSync(file, 'stale', { mode: 0o644 })
-    const stale = statSync(file).ino
+    const stale = join(directory, 'stale-link')
+    linkSync(file, stale)
     writeCredentials(file, { url: 'u', key: 'k', tests: {} })
     assert.equal(statSync(file).mode & 0o777, 0o600)
-    assert.notEqual(statSync(file).ino, stale, 'a stale file is removed and never written into')
+    assert.equal(readFileSync(stale, 'utf8'), 'stale', 'a stale file is removed and never written into')
   })
 })
 
