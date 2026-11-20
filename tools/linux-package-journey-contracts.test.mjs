@@ -512,6 +512,7 @@ test('the candidate itself, newer releases, drafts, prereleases and other tags a
   assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.3.5', { draft: true }), older]], '1.4.0').tag, 'v1.3.0')
   assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.3.5', { prerelease: true }), older]], '1.4.0').tag, 'v1.3.0')
   assert.equal(selectPreviousLinuxRelease([[{ ...fictionalRelease('v1.3.5'), draft: undefined }, older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v01.3.5'), fictionalRelease('v1.03.5'), older]], '1.4.0').tag, 'v1.3.0')
   assert.equal(selectPreviousLinuxRelease([[fictionalRelease('freshness'), fictionalRelease('v1.3.5-beta.1'), older]], '1.4.0').tag, 'v1.3.0')
 })
 
@@ -544,7 +545,7 @@ test('the selection script prints only the tag and refuses bad arguments', async
       let stderr = ''
       child.stdout.on('data', (chunk) => { stdout += chunk })
       child.stderr.on('data', (chunk) => { stderr += chunk })
-      child.once('exit', (code) => resolve({ code, stdout, stderr }))
+      child.once('close', (code) => resolve({ code, stdout, stderr }))
     })
     assert.deepEqual(await run('--candidate', '1.4.0', '--releases', releases), { code: 0, stdout: 'v1.3.0\n', stderr: '' })
     const none = await run('--candidate', '1.3.0', '--releases', releases)
