@@ -39,6 +39,10 @@ impl TwoDevices {
     }
 
     fn upgrade(&self, on_laptop: bool) {
+        self.upgrade_with(on_laptop, &crate::sync::coordinator::Coordinator::new());
+    }
+
+    fn upgrade_with(&self, on_laptop: bool, coordinator: &crate::sync::coordinator::Coordinator) {
         let (vault, _, scratch) = self.device(on_laptop);
         crate::application::lifecycle::unlock_vault_in_state(
             &vault.state,
@@ -46,7 +50,7 @@ impl TwoDevices {
             &FakeEffects::with_sync(
                 vault.path().to_path_buf(),
                 scratch.path.clone(),
-                crate::sync::coordinator::Coordinator::new(),
+                coordinator.clone(),
             ),
             zeroize::Zeroizing::new(PASSWORD.to_string()),
         )
@@ -279,4 +283,66 @@ fn devices_with_imported_fields_upgrade_and_converge_with_the_fields_intact() {
         ]
     );
     assert_eq!(devices.content(true), devices.content(false));
+}
+
+#[test]
+fn an_upgrade_made_while_a_run_held_the_store_survives_a_lock_before_the_run_lets_go() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let stored = || {
+        devices
+            .laptop_store
+            .load_state()
+            .expect("state")
+            .expect("saved state")
+            .payload_digest
+    };
+    let before = stored();
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+
+    devices.upgrade_with(true, &busy);
+    assert_eq!(stored(), before, "the unlock found a run in progress");
+    assert!(devices.laptop_store.load_upgrade().is_some());
+    devices.laptop.state.lock_for_lifecycle().expect("locked");
+    busy.finish(Outcome::AlreadyCurrent);
+
+    let reopened = Coordinator::new();
+    crate::application::lifecycle::unlock_vault_in_state(
+        &devices.laptop.state,
+        &crate::release::ReleasePresence::default(),
+        &FakeEffects::with_sync(
+            devices.laptop.path().to_path_buf(),
+            devices._scratch[0].path.clone(),
+            reopened,
+        ),
+        zeroize::Zeroizing::new(PASSWORD.to_string()),
+    )
+    .expect("unlocked again");
+
+    assert_ne!(stored(), before);
+    assert!(devices.laptop_store.load_upgrade().is_none());
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 2);
+}
+
+#[test]
+fn turning_sync_off_forgets_a_recorded_upgrade() {
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let busy = crate::sync::coordinator::Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    assert!(devices.laptop_store.load_upgrade().is_some());
+
+    devices
+        .laptop_store
+        .forget_everything()
+        .expect("Sync turned off");
+
+    assert!(devices.laptop_store.load_upgrade().is_none());
+    assert!(!devices.laptop_store.upgrade_path().exists());
 }

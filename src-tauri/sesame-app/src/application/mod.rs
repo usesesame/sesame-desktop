@@ -100,6 +100,7 @@ pub trait DesktopEffects: Sync {
     fn report_key_page_fallback(&self, unlocked: &UnlockedVault);
     fn observe_unlock(&self, snapshot: &VaultSnapshot);
     fn claim_idle_sync_store(&self) -> Option<(sync::SyncStore, ManualRun)>;
+    fn sync_store(&self) -> Option<sync::SyncStore>;
     fn observe_lock(&self, state: &VaultState);
     fn clear_armed_clipboard(&self) -> VaultResult<()>;
     fn copy_secret(

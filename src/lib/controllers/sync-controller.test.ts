@@ -717,6 +717,12 @@ describe('syncing without being asked', () => {
     await sync.autoSync()
     await sync.loadLocal()
     expect(describeSyncForChrome(get(sync))?.label).toBe('Synced vault · Needs attention')
+
+    answer({ sync_status: status(), sync_coordinator_status: conflict, sync_local_status: { state: 'approved', revision: 2, unsynced: true } })
+    const opened = createSyncController()
+    await opened.refresh()
+    await opened.loadLocal()
+    expect(describeSyncForChrome(get(opened))?.label).toBe('Synced vault · Needs attention')
   })
 
   it('clears the pending mark when the vault matches the last sync again', async () => {

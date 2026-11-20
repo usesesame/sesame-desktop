@@ -86,6 +86,22 @@ impl SyncStore {
         Ok(())
     }
 
+    pub fn upgrade_path(&self) -> PathBuf {
+        crate::sync::state::upgrade_path(&self.data_dir)
+    }
+
+    pub fn save_upgrade(&self, upgrade: &sesame_core::UpgradeDigests) -> VaultResult<()> {
+        crate::sync::state::write_upgrade(&self.upgrade_path(), upgrade)
+    }
+
+    pub fn load_upgrade(&self) -> Option<sesame_core::UpgradeDigests> {
+        crate::sync::state::read_upgrade(&self.upgrade_path())
+    }
+
+    pub fn forget_upgrade(&self) -> VaultResult<()> {
+        crate::sync::state::forget_protected(&self.upgrade_path())
+    }
+
     pub fn forget_state(&self) -> VaultResult<()> {
         crate::sync::state::forget_protected(&self.state_path())
     }
@@ -113,6 +129,7 @@ impl SyncStore {
     pub fn forget_everything(&self) -> VaultResult<()> {
         crate::sync::rekey_journal::forget(&self.journal_path())?;
         crate::sync::identity::forget(&self.identity_path())?;
+        self.forget_upgrade()?;
         crate::sync::state::forget_protected(&self.state_path())
     }
 }
@@ -238,6 +255,33 @@ pub fn remember_format_upgrade(
     }
 }
 
+pub fn record_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) -> VaultResult<bool> {
+    if store.load_join_state()?.is_none() {
+        return Ok(true);
+    }
+    match vault.upgrade_digests() {
+        Some(upgrade) => store.save_upgrade(upgrade).map(|()| true),
+        None => {
+            if let Some(upgrade) = store.load_upgrade() {
+                vault.remember_upgrade_digests(upgrade);
+            }
+            Ok(true)
+        }
+    }
+}
+
+pub fn adopt_digest(
+    store: &SyncStore,
+    local: &SyncState,
+    digest: String,
+) -> VaultResult<SyncState> {
+    let mut next = local.clone();
+    next.payload_digest = digest;
+    store.save_state(&next)?;
+    store.forget_upgrade()?;
+    Ok(next)
+}
+
 pub fn upgrade_legacy_digest(
     store: &SyncStore,
     vault: &UnlockedVault,
@@ -246,11 +290,12 @@ pub fn upgrade_legacy_digest(
         return Ok(None);
     };
     let Some(digest) = digest_to_adopt(&local, vault)? else {
+        if vault.upgrade_digests().is_some() {
+            store.forget_upgrade()?;
+        }
         return Ok(None);
     };
-    let mut next = local.clone();
-    next.payload_digest = digest;
-    store.save_state(&next)?;
+    adopt_digest(store, &local, digest)?;
     Ok(Some(local))
 }
 

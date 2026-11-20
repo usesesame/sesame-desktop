@@ -12,6 +12,7 @@ use crate::DeviceProtector;
 use sesame_core::VaultResult;
 
 pub const STATE_FILE_NAME: &str = "sync-state.json";
+pub const UPGRADE_FILE_NAME: &str = "sync-format-upgrade.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -273,6 +274,26 @@ fn next_path(path: &Path) -> PathBuf {
 }
 
 const STATE_TAG_LABEL: &[u8] = b"sesame-sync-state-tag-v1";
+const UPGRADE_TAG_LABEL: &[u8] = b"sesame-sync-format-upgrade-tag-v1";
+
+pub fn upgrade_path(app_local_data_dir: &Path) -> PathBuf {
+    app_local_data_dir.join(UPGRADE_FILE_NAME)
+}
+
+pub fn write_upgrade_with(
+    path: &Path,
+    upgrade: &UpgradeDigests,
+    protector: &dyn DeviceProtector,
+) -> VaultResult<()> {
+    let body = serde_json::to_vec(upgrade)
+        .map_err(|_| "Sesame could not record the Sync state.".to_string())?;
+    write_tagged_with(path, UPGRADE_TAG_LABEL, &body, protector)
+}
+
+pub fn read_upgrade_with(path: &Path, protector: &dyn DeviceProtector) -> Option<UpgradeDigests> {
+    let body = read_tagged_with(path, UPGRADE_TAG_LABEL, protector)?;
+    serde_json::from_slice(&body).ok()
+}
 
 fn tag_for(label: &[u8], body: &[u8]) -> Vec<u8> {
     let mut digest = Sha256::new();

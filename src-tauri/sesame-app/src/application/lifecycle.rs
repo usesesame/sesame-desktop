@@ -26,13 +26,18 @@ pub fn install_unlocked_session(
     let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
     crate::application::sync::remember_format_upgrade(&mut unlocked, &file, &opened);
     effects.report_key_page_fallback(&unlocked);
-    let sync = effects.claim_idle_sync_store();
-    let replaced = sync.as_ref().and_then(|(store, _run)| {
-        crate::application::sync::upgrade_legacy_digest(store, &unlocked)
-            .ok()
-            .flatten()
+    let recorded = effects.sync_store().is_none_or(|store| {
+        crate::application::sync::record_format_upgrade(&store, &mut unlocked).unwrap_or(false)
     });
-    if opened.migrated && unlocked.setup_complete {
+    let sync = effects.claim_idle_sync_store();
+    let adopted = sync
+        .as_ref()
+        .map(|(store, _run)| crate::application::sync::upgrade_legacy_digest(store, &unlocked));
+    let replaced = adopted
+        .as_ref()
+        .and_then(|result| result.as_ref().ok().cloned().flatten());
+    let upgrade_kept = recorded || replaced.is_some();
+    if opened.migrated && unlocked.setup_complete && upgrade_kept {
         if let Err(error) = persist_session(&mut unlocked) {
             if let (Some((store, _run)), Some(previous)) = (&sync, replaced) {
                 let _ = store.save_state(&previous);

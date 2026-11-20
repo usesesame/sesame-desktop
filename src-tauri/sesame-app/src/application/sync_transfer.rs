@@ -1197,12 +1197,7 @@ where
         )
     };
     let local = match upgraded_digest {
-        Some(digest) => {
-            let mut next = local;
-            next.payload_digest = digest;
-            store.save_state(&next)?;
-            next
-        }
+        Some(digest) => super::sync::adopt_digest(store, &local, digest)?,
         None => local,
     };
     if has_local_changes || must_publish_after_key_change(&local, &server) {

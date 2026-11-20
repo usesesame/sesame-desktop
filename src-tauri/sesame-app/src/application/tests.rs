@@ -224,6 +224,11 @@ impl DesktopEffects for FakeEffects<'_> {
         Some((SyncStore::new(data_dir.clone()), run))
     }
 
+    fn sync_store(&self) -> Option<SyncStore> {
+        let (data_dir, _) = self.sync.as_ref()?;
+        Some(SyncStore::new(data_dir.clone()))
+    }
+
     fn observe_lock(&self, state: &VaultState) {
         let session_present = state.session.lock().expect("session lock").is_some();
         self.record(Effect::ObserveLock { session_present });

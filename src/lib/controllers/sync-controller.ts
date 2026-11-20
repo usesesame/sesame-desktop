@@ -372,11 +372,12 @@ export function createSyncController() {
       const enrolled = local.state !== 'not_enrolled'
       const { activity, coordinator } = store.value()
       const unsynced = local.state === 'approved' && local.unsynced === true
-      const showsPending = unsynced && activity !== 'syncing' && coordinator.phase !== 'halted'
+      const halted = coordinator.phase === 'halted'
+      const marked = halted ? 'attention' : 'pending'
       store.patch({
         enrolled,
         state: local.state,
-        activity: showsPending ? 'pending' : activity === 'pending' && !unsynced ? 'synced' : activity,
+        activity: unsynced && activity !== 'syncing' ? marked : activity === 'pending' && !unsynced ? 'synced' : activity,
       })
       writeCache(enrolled, local.state)
       return unsynced

@@ -324,7 +324,8 @@ impl VaultState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpgradeDigests {
     pub before: Vec<String>,
     pub after: String,
