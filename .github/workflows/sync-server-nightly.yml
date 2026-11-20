@@ -1,0 +1,65 @@
+name: Sync server nightly
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-server-nightly
+  cancel-in-progress: false
+
+jobs:
+  pin-freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Check the pinned server commit is not too far behind server main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/check-sync-server-pin.mjs
+
+  real-server-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: usesesame/sesame-server
+          ref: main
+          path: sesame-server
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sesame-server/go.mod
+          cache: false
+
+      - uses: dtolnay/rust-toolchain@f8be11a05b1d4f3fcebe6410cc16743212b999b0 # 1.98.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src-tauri
+          key: sync-server-nightly
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Name the server commit under test
+        run: git -C sesame-server log -1 --format='Testing server commit %H from %cI'
+
+      - name: Prove Sync against the real self-host server built from main
+        run: node tools/run-real-sync-station.mjs --server sesame-server

@@ -24,7 +24,11 @@ pub fn install_unlocked_session(
     let hello_unlock_available = opened.file.hello_wrap.is_some();
     // `OpenedVault` zeroizes on drop, so build the session without moving its fields out.
     let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
+    crate::application::sync::remember_format_upgrade(&mut unlocked, &file, &opened);
     effects.report_key_page_fallback(&unlocked);
+    if let Some(store) = effects.sync_store() {
+        crate::application::sync::record_format_upgrade(&store, &mut unlocked);
+    }
     if opened.migrated && unlocked.setup_complete {
         if let Err(error) = persist_session(&mut unlocked) {
             return Err(format!(
@@ -33,7 +37,7 @@ pub fn install_unlocked_session(
         }
     }
     if let Some((store, _run)) = effects.claim_idle_sync_store() {
-        let _ = crate::application::sync::upgrade_legacy_digest(&store, &unlocked);
+        let _ = crate::application::sync::upgrade_legacy_digest(&store, &mut unlocked);
     }
     let snapshot = unlocked.snapshot();
     effects.observe_unlock(&snapshot);

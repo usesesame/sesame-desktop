@@ -10,9 +10,6 @@ pub use sesame_sync::capabilities::{
     CapabilityError, Document, CAPABILITY_INVALID, MAX_CAPABILITY_BYTES,
 };
 
-#[cfg(test)]
-pub(crate) use sesame_sync::capabilities::version_lt;
-
 pub(crate) fn official_capability_public_key() -> VaultResult<String> {
     option_env!("SESAME_CAPABILITY_PUBLIC_KEY")
         .map(str::trim)
@@ -37,13 +34,13 @@ fn official_capability_key() -> VaultResult<VerifyingKey> {
     .map_err(|_| "Desktop capability verification key is invalid.")?)
 }
 
-pub async fn require_desktop_linking() -> VaultResult<()> {
+pub async fn require_desktop_linking(build_version: &str) -> VaultResult<()> {
     let key = official_capability_key()?;
     let client = service_client()?;
     let document = fetch_signed_document(&client, &service_api_base_url()?, &key, None).await?;
     Ok(require_linking_enabled(
         &document,
-        env!("CARGO_PKG_VERSION"),
+        build_version,
         sesame_sync::DESKTOP_PLATFORM,
     )?)
 }
@@ -318,14 +315,6 @@ mod tests {
             ),
             Err(CapabilityError::Unavailable(_))
         ));
-    }
-
-    #[test]
-    fn the_version_comparison_reads_numeric_parts() {
-        assert!(version_lt("0.3.0", "0.10.0"));
-        assert!(!version_lt("0.10.0", "0.3.0"));
-        assert!(!version_lt("1.0.0", "1.0.0"));
-        assert!(version_lt("0.3.0", "1"));
     }
 
     fn fetch(server: &TestServer, fake: &FakeSesame) -> Result<Document, CapabilityError> {

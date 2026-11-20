@@ -370,12 +370,14 @@ export function createSyncController() {
     try {
       const local = await invoke<{ state: string; revision: number; unsynced?: boolean }>('sync_local_status')
       const enrolled = local.state !== 'not_enrolled'
-      const { activity } = store.value()
+      const { activity, coordinator } = store.value()
       const unsynced = local.state === 'approved' && local.unsynced === true
+      const halted = coordinator.phase === 'halted'
+      const marked = halted ? 'attention' : 'pending'
       store.patch({
         enrolled,
         state: local.state,
-        activity: unsynced && activity !== 'syncing' ? 'pending' : activity === 'pending' && !unsynced ? 'synced' : activity,
+        activity: unsynced && activity !== 'syncing' ? marked : activity === 'pending' && !unsynced ? 'synced' : activity,
       })
       writeCache(enrolled, local.state)
       return unsynced

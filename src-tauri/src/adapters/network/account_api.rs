@@ -7,6 +7,7 @@ use super::server_address::{
     normalized_fingerprint, parse_pairing_input, validate_pairing_code, PairingInput,
 };
 use super::server_trust::{inspect_server, verify_pinned_server, InstanceInfo, ServerFailure};
+use crate::app_identity::APP_VERSION;
 use crate::vault::capabilities::require_desktop_linking;
 use crate::vault::platform::protect_for_device;
 use crate::vault::service::{
@@ -228,7 +229,7 @@ pub async fn link_desktop_service(
     code: String,
 ) -> VaultResult<ServiceConnectionStatus> {
     let code = validated_link_code(&code)?;
-    require_desktop_linking().await?;
+    require_desktop_linking(APP_VERSION).await?;
     let api_base_url = service_api_base_url()?;
     let client = service_client()?;
     let linked = redeem_official_link(
@@ -266,7 +267,13 @@ fn parse_custom_input(input: &str) -> VaultResult<PairingInput> {
 pub async fn inspect_custom_server(input: String) -> VaultResult<ServerInspection> {
     let parsed = parse_custom_input(&input)?;
     let client = client_for_base(parsed.address.as_str())?;
-    let info = inspect_server(&client, &parsed.address, parsed.fingerprint.as_deref()).await?;
+    let info = inspect_server(
+        &client,
+        &parsed.address,
+        parsed.fingerprint.as_deref(),
+        APP_VERSION,
+    )
+    .await?;
     Ok(inspection_for(&parsed, &info))
 }
 
@@ -292,7 +299,13 @@ pub(crate) async fn pair_with_server(
         }
     };
     device_ready()?;
-    let info = inspect_server(client, &parsed.address, parsed.fingerprint.as_deref()).await?;
+    let info = inspect_server(
+        client,
+        &parsed.address,
+        parsed.fingerprint.as_deref(),
+        APP_VERSION,
+    )
+    .await?;
     if info.fingerprint != confirmed {
         return Err(ServerFailure::LinkMismatch.message());
     }
@@ -389,7 +402,7 @@ pub async fn get_service_connection_status(app: AppHandle) -> VaultResult<Servic
         )
     };
     if let ServiceTarget::Custom { address, pin } = &target {
-        if let Err(failure) = verify_pinned_server(&client, address, pin).await {
+        if let Err(failure) = verify_pinned_server(&client, address, pin, APP_VERSION).await {
             return Ok(match failure {
                 ServerFailure::Unreachable => held("offline", false),
                 ServerFailure::KeyChanged => held("serverKeyChanged", true),
@@ -406,7 +419,7 @@ pub async fn get_service_connection_status(app: AppHandle) -> VaultResult<Servic
         .post(format!("{base_url}/v1/desktop/heartbeat"))
         .header("Authorization", format!("Sesame {token}"))
         .json(&serde_json::json!({
-            "appVersion": env!("CARGO_PKG_VERSION"),
+            "appVersion": APP_VERSION,
             "platform": std::env::consts::OS,
             "architecture": std::env::consts::ARCH,
             "updateChannel": "beta",
@@ -465,7 +478,10 @@ pub(crate) async fn revoke_on_server(target: &ServiceTarget, token: &str) -> boo
         return false;
     };
     if let ServiceTarget::Custom { address, pin } = target {
-        if verify_pinned_server(&client, address, pin).await.is_err() {
+        if verify_pinned_server(&client, address, pin, APP_VERSION)
+            .await
+            .is_err()
+        {
             return false;
         }
     }
@@ -568,6 +584,71 @@ mod tests {
             .filter(|request| request.method == "POST")
             .map(|request| request.body)
             .collect()
+    }
+
+    fn one_patch_above(version: &str) -> String {
+        let core = version.split(['-', '+']).next().unwrap();
+        let numbers: Vec<u32> = core.split('.').map(|part| part.parse().unwrap()).collect();
+        assert_eq!(numbers.len(), 3, "{version}");
+        format!("{}.{}.{}", numbers[0], numbers[1], numbers[2] + 1)
+    }
+
+    fn with_floors(instance: &str, desktop: &str) -> FakeSesame {
+        let mut fake = FakeSesame::new(1);
+        fake.minimum_client_version = instance.to_string();
+        fake.minimum_desktop_version = desktop.to_string();
+        fake
+    }
+
+    fn pair_against(fake: &FakeSesame) -> (VaultResult<()>, usize) {
+        let server = TestServer::start(fake.handler());
+        let parsed = input(&server, &format!("code={CODE}&fp={}", fake.fingerprint()));
+        let result = pair(&server, &parsed, "", &fake.fingerprint()).map(|_| ());
+        (result, link_posts(&server).len())
+    }
+
+    #[test]
+    fn the_version_compared_with_a_server_is_the_release_version() {
+        assert_eq!(APP_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_ne!(APP_VERSION, "0.1.0");
+        let (result, posts) = pair_against(&with_floors(APP_VERSION, APP_VERSION));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(posts, 1);
+    }
+
+    #[test]
+    fn a_server_instance_floor_one_patch_above_this_release_gets_no_code() {
+        let above = one_patch_above(APP_VERSION);
+        let (result, posts) = pair_against(&with_floors(&above, "0.0.0"));
+        assert_eq!(
+            result.unwrap_err(),
+            format!("This server needs Sesame {above} or newer. Update Sesame, then try again.")
+        );
+        assert_eq!(posts, 0);
+    }
+
+    #[test]
+    fn a_signed_desktop_floor_one_patch_above_this_release_gets_no_code() {
+        let above = one_patch_above(APP_VERSION);
+        let (result, posts) = pair_against(&with_floors("0.0.0", &above));
+        assert_eq!(
+            result.unwrap_err(),
+            "Update Sesame before linking this desktop."
+        );
+        assert_eq!(posts, 0);
+    }
+
+    #[test]
+    fn a_pinned_server_is_checked_against_the_release_version() {
+        let at_release = with_floors(APP_VERSION, APP_VERSION);
+        let server = TestServer::start(at_release.handler());
+        assert!(revoke(&target_for(&server, &at_release)));
+
+        let pinned = FakeSesame::new(1);
+        let raised = with_floors(&one_patch_above(APP_VERSION), "0.0.0");
+        let server = TestServer::start(raised.handler());
+        assert!(!revoke(&target_for(&server, &pinned)));
+        assert!(deletes(&server).is_empty());
     }
 
     #[test]
@@ -848,7 +929,7 @@ mod tests {
     fn target_for(server: &TestServer, fake: &FakeSesame) -> ServiceTarget {
         let pin = crate::adapters::network::server_trust::parse_instance(
             &serde_json::to_vec(&fake.instance()).unwrap(),
-            "0.3.0",
+            APP_VERSION,
         )
         .unwrap()
         .pin();

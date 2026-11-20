@@ -46,6 +46,11 @@ impl DesktopEffects for DesktopHostEffects<'_> {
         Some((SyncStore::new(data_dir), run))
     }
 
+    fn sync_store(&self) -> Option<SyncStore> {
+        let data_dir = self.app.path().app_local_data_dir().ok()?;
+        Some(SyncStore::new(data_dir))
+    }
+
     fn observe_lock(&self, state: &VaultState) {
         crate::rollback_guard::observe_lock(self.app, state);
     }

@@ -86,8 +86,28 @@ impl SyncStore {
         Ok(())
     }
 
+    pub fn upgrade_path(&self) -> PathBuf {
+        crate::sync::state::upgrade_path(&self.data_dir)
+    }
+
+    pub fn save_upgrade(&self, upgrade: &sesame_core::UpgradeDigests) -> VaultResult<()> {
+        crate::sync::state::write_upgrade(&self.upgrade_path(), upgrade)
+    }
+
+    pub fn load_upgrade(&self) -> Option<sesame_core::UpgradeDigests> {
+        crate::sync::state::read_upgrade(&self.upgrade_path())
+    }
+
+    pub fn forget_upgrade(&self) -> VaultResult<()> {
+        crate::sync::state::forget_protected(&self.upgrade_path())
+    }
+
     pub fn forget_state(&self) -> VaultResult<()> {
         crate::sync::state::forget_protected(&self.state_path())
+    }
+
+    pub fn state_files_exist(&self) -> bool {
+        crate::sync::state::tagged_files_exist(&self.state_path())
     }
 
     pub fn identity_present(&self) -> bool {
@@ -113,6 +133,7 @@ impl SyncStore {
     pub fn forget_everything(&self) -> VaultResult<()> {
         crate::sync::rekey_journal::forget(&self.journal_path())?;
         crate::sync::identity::forget(&self.identity_path())?;
+        self.forget_upgrade()?;
         crate::sync::state::forget_protected(&self.state_path())
     }
 }
@@ -202,24 +223,89 @@ pub fn local_payload_bytes(vault: &UnlockedVault) -> Result<(Vec<u8>, usize), St
 
 pub fn vault_has_local_changes(local: &SyncState, vault: &UnlockedVault) -> Result<bool, String> {
     let payload = vault.open_payload()?;
-    local.has_local_changes(&payload)
+    match digest_to_adopt(local, vault)? {
+        Some(digest) => Ok(!crate::sync::state::digest_describes(&digest, &payload)?),
+        None => local.has_local_changes(&payload),
+    }
 }
 
-pub fn upgrade_legacy_digest(store: &SyncStore, vault: &UnlockedVault) -> VaultResult<bool> {
+pub fn digest_to_adopt(local: &SyncState, vault: &UnlockedVault) -> VaultResult<Option<String>> {
+    if let Some(digest) = vault
+        .upgrade_digests()
+        .and_then(|upgrade| local.digest_after_upgrade(upgrade))
+    {
+        return Ok(Some(digest));
+    }
+    let payload = vault.open_payload()?;
+    local.upgraded_digest(&payload)
+}
+
+pub fn remember_format_upgrade(
+    unlocked: &mut UnlockedVault,
+    file: &crate::vault::VaultFile,
+    opened: &sesame_core::api::OpenedVault,
+) {
+    if !opened.migrated {
+        return;
+    }
+    let Ok(original) = sesame_core::loader::VaultLoader::authenticate(
+        file,
+        sesame_core::loader::Credential::VaultKey(&opened.key),
+    ) else {
+        return;
+    };
+    if let Ok(digests) = crate::sync::state::upgrade_digests(original.payload(), &opened.payload) {
+        unlocked.remember_upgrade_digests(digests);
+    }
+}
+
+pub fn record_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) {
+    match vault.upgrade_digests() {
+        Some(upgrade) => {
+            if store.state_files_exist() {
+                let _ = store.save_upgrade(upgrade);
+            }
+        }
+        None => recall_format_upgrade(store, vault),
+    }
+}
+
+pub fn recall_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) {
+    if vault.upgrade_digests().is_some() {
+        return;
+    }
+    if let Some(upgrade) = store.load_upgrade() {
+        vault.remember_upgrade_digests(upgrade);
+    }
+}
+
+pub fn settle_format_upgrade(
+    store: &SyncStore,
+    local: &SyncState,
+    vault: &mut UnlockedVault,
+) -> VaultResult<Option<SyncState>> {
+    if vault.format_upgrade_pending() {
+        return Ok(None);
+    }
+    let adopted = match digest_to_adopt(local, vault)? {
+        Some(digest) => {
+            let mut next = local.clone();
+            next.payload_digest = digest;
+            store.save_state(&next)?;
+            Some(next)
+        }
+        None => None,
+    };
+    vault.forget_upgrade_digests();
+    let _ = store.forget_upgrade();
+    Ok(adopted)
+}
+
+pub fn upgrade_legacy_digest(store: &SyncStore, vault: &mut UnlockedVault) -> VaultResult<bool> {
     let Some(local) = store.load_state()? else {
         return Ok(false);
     };
-    let upgraded = {
-        let payload = vault.open_payload()?;
-        local.upgraded_digest(&payload)?
-    };
-    let Some(digest) = upgraded else {
-        return Ok(false);
-    };
-    let mut next = local;
-    next.payload_digest = digest;
-    store.save_state(&next)?;
-    Ok(true)
+    Ok(settle_format_upgrade(store, &local, vault)?.is_some())
 }
 
 pub fn release_claim_after_failure<T>(
@@ -227,8 +313,9 @@ pub fn release_claim_after_failure<T>(
     store: &SyncStore,
     release: impl FnOnce() -> T,
 ) -> T {
-    let session = state.session.lock();
-    if let Ok(Some(unlocked)) = session.as_deref() {
+    let mut session = state.session.lock();
+    if let Ok(Some(unlocked)) = session.as_deref_mut() {
+        recall_format_upgrade(store, unlocked);
         let _ = upgrade_legacy_digest(store, unlocked);
     }
     let released = release();
@@ -751,7 +838,8 @@ pub async fn reset_vault_in_state(store: &SyncStore, client: &SyncClient) -> Res
         .reset(&identity, server.vault_epoch)
         .await
         .map_err(present)?;
-    store.forget_state()
+    store.forget_state()?;
+    store.forget_upgrade()
 }
 
 pub async fn upgrade_device_key_in_state(
