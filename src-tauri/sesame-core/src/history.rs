@@ -101,6 +101,7 @@ fn field_label(key: &str) -> String {
         "privateKey" => return "private key".to_string(),
         "publicKey" => return "public key".to_string(),
         "legacyFields" => return "imported fields".to_string(),
+        "matchRule" => return "browser filling".to_string(),
         "favourite" => return "favourite".to_string(),
         _ => {}
     }
@@ -284,6 +285,19 @@ mod change_tests {
         assert!(changed.contains(&"password".to_string()));
         assert!(changed.contains(&"username".to_string()));
         assert_eq!(changed.len(), 2);
+    }
+
+    #[test]
+    fn a_changed_match_rule_uses_the_editor_name_for_it() {
+        let previous = login("same", "person");
+        let mut successor = login("same", "person");
+        if let TaggedItem::Login(entry) = &mut successor {
+            entry.match_rule = crate::types::MatchRule::Site;
+        }
+        assert_eq!(
+            changed_fields(&previous, &successor),
+            vec!["browser filling".to_string()]
+        );
     }
 
     /// Saving without editing anything must not invent a change.

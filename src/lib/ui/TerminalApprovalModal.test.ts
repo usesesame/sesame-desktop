@@ -145,6 +145,30 @@ test('a stray Enter or Space cannot allow, because nothing that allows has focus
   expect(props.onDeny).not.toHaveBeenCalled()
 })
 
+test('a hidden value that needs the master password opens with the password field focused and in view', async () => {
+  vi.useFakeTimers()
+  const scrolled: Element[] = []
+  const scrollIntoView = vi.fn(function (this: Element) { scrolled.push(this) })
+  Element.prototype.scrollIntoView = scrollIntoView
+  try {
+    show({ needsPresence: true })
+    await armed()
+    const field = screen.getByLabelText('Master password')
+    expect(document.activeElement).toBe(field)
+    expect(scrolled).toContain(field.closest('.terminal-presence'))
+  } finally {
+    delete (Element.prototype as Partial<Element>).scrollIntoView
+  }
+})
+
+test('a request that needs no master password keeps focus on the dialog', async () => {
+  vi.useFakeTimers()
+  show({ needsPresence: true, candidates: [{ id: 'northwind', kind: 'login', title: 'Northwind mail', fieldName: 'Username', fieldHidden: false }, { id: 'twin', kind: 'login', title: 'Northwind mail', fieldName: 'Username', fieldHidden: false }] })
+  await armed()
+  expect(screen.queryByLabelText('Master password')).toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('dialog'))
+})
+
 test('Enter in the master password field does not allow', async () => {
   vi.useFakeTimers()
   const { props, stores } = show({ needsPresence: true })
