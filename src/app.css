@@ -1031,7 +1031,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .restore-confirm { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--text); font-size: var(--type-2); line-height: 1.4; }
 .restore-modal label[for="restore-secret"] { display: block; margin: var(--space-5) 0 var(--space-2); color: var(--text); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .restore-modal input#restore-secret { width: 100%; border: 1px solid var(--field-border); border-radius: var(--radius-md); padding: var(--space-3); color: var(--text); background: var(--field-bg); font-size: var(--type-3); }
-.restore-modal input#restore-secret:focus-visible { box-shadow: var(--field-ring); outline: none; }
+.restore-modal input#restore-secret:focus-visible { background-color: var(--field-bg-focus); box-shadow: var(--field-ring); outline: none; }
 .restore-confirm input { width: 17px; height: 17px; flex: none; margin: 1px 0 0; }
 .restore-confirm input:checked { border-color: var(--danger); background-color: var(--danger); }
 .restore-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
@@ -1149,7 +1149,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .delete-vault-modal input:focus-visible { border-color: var(--danger); box-shadow: var(--field-ring-danger); outline: none; }
 .presence-modal { width: min(100%, 470px); }
 .presence-modal input:not([type="checkbox"]) { width: 100%; margin-top: var(--space-2); border: 1px solid var(--field-border); border-radius: var(--radius-md); padding: var(--space-3); color: var(--text); background: var(--field-bg); font-size: var(--type-3); outline: none; }
-.presence-modal input:not([type="checkbox"]):focus-visible { box-shadow: var(--field-ring); outline: none; }
+.presence-modal input:not([type="checkbox"]):focus-visible { background-color: var(--field-bg-focus); box-shadow: var(--field-ring); outline: none; }
 .presence-modal .recovery-confirm { margin-top: var(--space-4); }
 
 /* =========================================================================
@@ -1226,7 +1226,7 @@ button.no-totp:hover { filter: brightness(.97); }
 .document-attachment-size { flex: none; color: var(--text-muted); font-size: var(--type-2); }
 .editor-fields > label, .editor-two-column > label, .editor-section > label { display: grid; gap: 7px; color: var(--text-2); font-size: var(--type-2); font-weight: var(--weight-bold); }
 .editor-fields input:not([type="checkbox"]), .editor-fields textarea, .editor-fields select { width: 100%; border: 1px solid var(--field-border); border-radius: var(--radius-md); padding: 10px 11px; color: var(--text); background: var(--field-bg); font-size: var(--type-3); outline: none; transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease; }
-.editor-fields input:not([type="checkbox"]):focus-visible, .editor-fields textarea:focus-visible, .editor-fields select:focus-visible { box-shadow: var(--field-ring); }
+.editor-fields input:not([type="checkbox"]):focus-visible, .editor-fields textarea:focus-visible, .editor-fields select:focus-visible { background-color: var(--field-bg-focus); box-shadow: var(--field-ring); }
 .editor-fields .sort-select-trigger, .editor-two-column .sort-select-trigger, .editor-section .sort-select-trigger, .item-collection-row .sort-select-trigger, .custom-field-row .sort-select-trigger { width: 100%; height: auto; border: 1px solid var(--field-border); border-radius: var(--radius-md); padding: 10px 11px; color: var(--text); background: var(--field-bg); font-size: var(--type-2); font-weight: inherit; }
 .editor-fields .sort-select-trigger:hover:not(:disabled), .editor-two-column .sort-select-trigger:hover:not(:disabled), .editor-section .sort-select-trigger:hover:not(:disabled) { background: var(--field-bg-hover); }
 .editor-fields .sort-control, .editor-two-column .sort-control, .editor-section .sort-control { display: block; }
