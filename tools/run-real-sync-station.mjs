@@ -44,7 +44,14 @@ function runCargo(test, env) {
     child.stdout.on('data', forward(process.stdout))
     child.stderr.on('data', forward(process.stderr))
     child.once('error', reject)
-    child.once('close', (code) => resolveRun({ code, output }))
+    child.once('exit', (code) => {
+      const settle = () => resolveRun({ code, output })
+      const late = setTimeout(settle, 2000)
+      child.once('close', () => {
+        clearTimeout(late)
+        settle()
+      })
+    })
   })
 }
 
