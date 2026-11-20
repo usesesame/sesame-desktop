@@ -257,6 +257,7 @@ async function main() {
     approver.start()
     recordStep(steps, 'extension.suite', await runExtensionSuite(options.extensionDirectory, browserEnvironment, options.testNamePattern, evidenceDirectory))
     await journey({ options, steps, call, approver, hostManifest, environment: browserEnvironment, testRoot, evidenceDirectory, fixtures })
+    await approver.stop()
     const clean = approver.failures.length === 0 && approver.refusals.length === 0
     recordStep(steps, 'approvals.expected', {
       ok: clean && approver.approvals.length > 0,

@@ -120,7 +120,10 @@ export async function openJourney({ extensionDirectory, scratch, hostManifest, e
       `--load-extension=${extensionPath}`,
     ],
   })
-  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 30_000 })
+  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 30_000 }).catch(async (error) => {
+    await context.close().catch(() => undefined)
+    throw error
+  })
   const extensionId = new URL(worker.url()).host
 
   async function connect() {
@@ -157,7 +160,7 @@ export async function openJourney({ extensionDirectory, scratch, hostManifest, e
         (current) => current !== '' && !/waiting for approval/i.test(current),
         values.password === '' ? waitMs : 2_000,
       )
-      return { offered: true, feedback: text, values, page: fixture, popup }
+      return { offered: true, feedback: text, values: await fieldValues(fixture), page: fixture, popup }
     } catch (error) {
       await unpinActiveTab(worker).catch(() => undefined)
       await fixture.close().catch(() => undefined)

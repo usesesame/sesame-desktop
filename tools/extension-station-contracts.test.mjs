@@ -192,6 +192,34 @@ test('the approver records a failure that is not the focus delay and does not re
   assert.equal(calls.filter((command) => command === 'resolve_browser_fill').length, 1)
 })
 
+test('stopping the approver waits for an approval that is still being answered', async () => {
+  let release
+  const held = new Promise((resolveHeld) => { release = resolveHeld })
+  const call = async (command) => {
+    if (command === 'get_pending_browser_fill') return { ok: true, value: fillEvent() }
+    if (command.startsWith('get_pending_')) return { ok: true, value: null }
+    if (command === 'get_browser_approval_wait') return { ok: true, value: 0 }
+    await held
+    return { ok: false, error: 'That browser approval is no longer available.' }
+  }
+  const approver = createApprover({ call, intervalMs: 1, pause: noPause })
+  approver.allow((candidate) => candidate === origin)
+  approver.start()
+  await new Promise((resolveWait) => setTimeout(resolveWait, 20))
+  assert.deepEqual(approver.failures, [])
+  const stopping = approver.stop()
+  release()
+  await stopping
+  assert.equal(approver.failures.length, 1)
+})
+
+test('the station stops the approver before it judges the approvals', () => {
+  const source = readFileSync('tools/test-extension-native-host.mjs', 'utf8')
+  const stop = source.indexOf('await approver.stop()')
+  const judged = source.indexOf('const clean = approver.failures.length === 0')
+  assert.ok(stop >= 0 && judged > stop, 'the approvals are judged while a prompt may still be answered')
+})
+
 test('the approver refuses everything until it is told which origins to expect', async () => {
   const desktop = scriptedDesktop({ pending: { value: fillEvent() } })
   const approver = createApprover({ call: desktop.call, intervalMs: 1, pause: noPause })
