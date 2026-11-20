@@ -36,7 +36,7 @@ function fillEvent(overrides = {}) {
 
 test('the cargo target folder follows CARGO_TARGET_DIR and falls back to the repository target', () => {
   assert.equal(stationTargetDirectory('/work/desktop', {}), join('/work/desktop', 'src-tauri', 'target'))
-  assert.equal(stationTargetDirectory('/work/desktop', { CARGO_TARGET_DIR: '/scratch/target' }), '/scratch/target')
+  assert.equal(stationTargetDirectory('/work/desktop', { CARGO_TARGET_DIR: '/scratch/target' }), resolve('/scratch/target'))
   assert.equal(stationTargetDirectory('/work/desktop', { CARGO_TARGET_DIR: 'relative' }), resolve('/work/desktop', 'relative'))
 })
 
