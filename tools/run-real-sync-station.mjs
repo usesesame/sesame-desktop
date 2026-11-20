@@ -44,7 +44,7 @@ function runCargo(test, env) {
     child.stdout.on('data', forward(process.stdout))
     child.stderr.on('data', forward(process.stderr))
     child.once('error', reject)
-    child.once('exit', (code) => resolveRun({ code, output }))
+    child.once('close', (code) => resolveRun({ code, output }))
   })
 }
 

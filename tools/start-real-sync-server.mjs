@@ -169,7 +169,8 @@ export async function startRealSyncServer({ serverRoot }) {
 
 export function writeCredentials(file, credentials) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  writeFileSync(file, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 })
+  rmSync(file, { force: true })
+  writeFileSync(file, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
   chmodSync(file, 0o600)
 }
 
@@ -178,7 +179,13 @@ async function main() {
   const station = await startRealSyncServer({ serverRoot: options.server })
   const credentialsDir = options.credentials ? null : mkdtempSync(join(tmpdir(), 'sesame-real-sync-credentials-'))
   const file = options.credentials ?? join(credentialsDir, 'credentials.json')
-  writeCredentials(file, station.credentials)
+  try {
+    writeCredentials(file, station.credentials)
+  } catch (error) {
+    await station.stop()
+    if (credentialsDir) rmSync(credentialsDir, { recursive: true, force: true })
+    throw error
+  }
   const finish = async () => {
     await station.stop()
     rmSync(credentialsDir ?? file, { recursive: true, force: true })

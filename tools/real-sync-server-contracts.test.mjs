@@ -96,8 +96,10 @@ test('the credentials file is readable only by its owner', { skip: process.platf
     assert.equal(statSync(file).mode & 0o777, 0o600)
     assert.equal(statSync(join(directory, 'nested')).mode & 0o077, 0)
     writeFileSync(file, 'stale', { mode: 0o644 })
+    const stale = statSync(file).ino
     writeCredentials(file, { url: 'u', key: 'k', tests: {} })
     assert.equal(statSync(file).mode & 0o777, 0o600)
+    assert.notEqual(statSync(file).ino, stale, 'a stale file is removed and never written into')
   })
 })
 
