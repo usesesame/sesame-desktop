@@ -549,7 +549,7 @@ test('a Windows uninstall that leaves a program file behind reports it and can r
   const install = section('Install')
   const uninstall = section('Uninstall')
   for (const body of [install, uninstall]) {
-    assert.match(body, /!insertmacro SESAME_WAIT_FOR_SHELL_TO_RELEASE "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\n\s*!insertmacro CheckIfAppIsRunning "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"/, 'the running app check no longer waits for Explorer to let go of the program')
+    assert.match(body, /!insertmacro SESAME_WAIT_FOR_SHELL_TO_RELEASE "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\s*!insertmacro CheckIfAppIsRunning "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"/, 'the running app check no longer waits for Explorer to let go of the program')
   }
 
   const wait = code.match(/!macro SESAME_WAIT_FOR_SHELL_TO_RELEASE\b([\s\S]*?)!macroend/)
