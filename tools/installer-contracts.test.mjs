@@ -511,7 +511,7 @@ test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
   const body = section[1]
   const running = body.indexOf('!insertmacro CheckIfAppIsRunning')
   const cleanup = body.indexOf('!insertmacro SESAME_REMOVE_TERMINAL_PATH')
-  const deletion = body.indexOf('Delete "$INSTDIR\\')
+  const deletion = body.indexOf('!insertmacro SESAME_REMOVE_PROGRAM_FILE "$INSTDIR\\')
   assert.ok(running >= 0 && cleanup > running, 'the running app check, where a person can cancel, comes after the Path cleanup')
   assert.ok(deletion > cleanup, 'cli\\sesame.exe is deleted before it can remove its Path entry')
   const unregister = body.indexOf('!insertmacro SESAME_UNREGISTER_NATIVE_HOST')
@@ -519,7 +519,9 @@ test('a cancelled Windows uninstall never reaches the Path cleanup', () => {
   assert.doesNotMatch(hook.match(/!macro NSIS_HOOK_PREUNINSTALL\b[\s\S]*?!macroend/)[0], /unregister/, 'the browser host is unregistered before the uninstall can stop on the Path')
   assert.match(hook, /!macro SESAME_UNREGISTER_NATIVE_HOST\s+\$\{If\} \$UpdateMode <> 1\s+ExecWait '"\$INSTDIR\\sesame-browser-host\.exe" unregister'\s+\$\{EndIf\}\s+!macroend/)
   assert.match(body.slice(running, cleanup + '!insertmacro SESAME_REMOVE_TERMINAL_PATH'.length), /^\s*!insertmacro CheckIfAppIsRunning[^\n]*\n\s*!insertmacro SESAME_REMOVE_TERMINAL_PATH/, 'something runs between the running app check and the Path cleanup')
-  assert.doesNotMatch(body.slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox|SetErrorLevel/, 'something after the Path cleanup can still cancel the uninstall')
+  assert.doesNotMatch(body.slice(cleanup), /\bAbort\b|\bQuit\b|MessageBox/, 'something after the Path cleanup can still cancel the uninstall')
+  const errorLevels = body.slice(cleanup).match(/[^\n]*\n[^\n]*SetErrorLevel[^\n]*\n[^\n]*/g) ?? []
+  assert.deepEqual(errorLevels.map((lines) => lines.trim().split(/\s*\n\s*/)), [['${If} $SesameProgramLeft = 1', 'SetErrorLevel 2', '${EndIf}']], 'the uninstall sets an exit code for anything but a program file it could not remove')
 
   for (const [, name, fn] of code.matchAll(/Function (un\.[\w.]+)\b([\s\S]*?)FunctionEnd/g)) {
     assert.doesNotMatch(fn, /SESAME_|machine-path/, `${name} touches the Path before the uninstall has started`)
@@ -536,4 +538,35 @@ test('the Windows command line program is staged before the bundle needs it', ()
   assert.match(helper, /feature: 'terminal-client', bin: 'sesame-cli'/)
   assert.match(read('tools', 'generate-types.mjs'), /import \{ UNSTAGED_TAURI_CONFIG \} from '\.\/browser-host\.mjs'[\s\S]*TAURI_CONFIG: UNSTAGED_TAURI_CONFIG/, 'generate-types.mjs must build without the staged Windows resource')
   assert.match(read('tools', 'test-browser-host-pipe.mjs'), /"externalBin":\[\],"resources":\[\]/, 'test-browser-host-pipe.mjs must build without the staged Windows resource')
+})
+
+test('a Windows uninstall that leaves a program file behind reports it and can run again', () => {
+  const code = read('src-tauri', 'nsis', 'installer.nsi')
+    .split('\n')
+    .filter((line) => !/^\s*;/.test(line))
+    .join('\n')
+  const section = (name) => code.match(new RegExp(`Section ${name}\\b([\\s\\S]*?)\\nSectionEnd`))[1]
+  const install = section('Install')
+  const uninstall = section('Uninstall')
+  for (const body of [install, uninstall]) {
+    assert.match(body, /!insertmacro SESAME_WAIT_FOR_SHELL_TO_RELEASE "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"\n\s*!insertmacro CheckIfAppIsRunning "\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe"/, 'the running app check no longer waits for Explorer to let go of the program')
+  }
+
+  const wait = code.match(/!macro SESAME_WAIT_FOR_SHELL_TO_RELEASE\b([\s\S]*?)!macroend/)
+  assert.ok(wait, 'the template has no wait for Explorer')
+  assert.doesNotMatch(wait[1], /RmShutdown|Abort|Quit|MessageBox|Delete|Exec|Write/, 'the wait does more than look')
+  assert.match(wait[1], /\$\{If\} \$1 <> \$\{RmExplorer\}\s+\$\{AndIf\} \$1 <> \$\{RmCritical\}\s+StrCpy \$5 "app"/, 'the wait holds off the running app check for something other than Explorer or a critical system process')
+  assert.match(wait[1], /\$\{If\} \$6 >= 100\s+\$\{ExitDo\}/, 'the wait for Explorer is unbounded')
+
+  const remove = code.match(/!macro SESAME_REMOVE_PROGRAM_FILE\b([\s\S]*?)!macroend/)
+  assert.ok(remove, 'the template has no checked program file removal')
+  assert.match(remove[1], /Delete "\$\{path\}"\s+\$\{IfNot\} \$\{FileExists\} "\$\{path\}"\s+\$\{ExitDo\}/)
+  assert.match(remove[1], /\$\{If\} \$0 >= 100\s+StrCpy \$SesameProgramLeft 1/, 'a program file that stays is not reported, or the retry is unbounded')
+  assert.doesNotMatch(remove[1], /REBOOTOK|Abort|RMDir/i)
+
+  assert.doesNotMatch(uninstall.replace('Delete "$INSTDIR\\uninstall.exe"', ''), /^\s*Delete "\$INSTDIR/m, 'a program file is deleted without checking that it went')
+  assert.equal((uninstall.match(/!insertmacro SESAME_REMOVE_PROGRAM_FILE /g) ?? []).length, 3, 'the main program, the resources and the external binaries must each be removed with a check')
+  assert.match(uninstall, /\$\{If\} \$SesameProgramLeft <> 1\s+!if "\$\{INSTALLMODE\}" == "both"\s+DeleteRegKey SHCTX "\$\{UNINSTKEY\}"[\s\S]*?!endif\s+\$\{EndIf\}/, 'the uninstall key goes even when the program stays')
+  assert.match(uninstall, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameProgramLeft <> 1\s+DeleteRegKey SHCTX "\$\{MANUPRODUCTKEY\}"/, 'the install location record goes even when the program stays')
+  assert.equal((uninstall.match(/DeleteRegKey (?:SHCTX|HKLM|HKCU) "\$\{(?:UNINSTKEY|MANUPRODUCTKEY)\}"/g) ?? []).length, 4)
 })

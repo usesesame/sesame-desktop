@@ -29,6 +29,13 @@
 ;      the running app check, while cli\sesame.exe still exists to do it, and
 ;      unregisters the browser native host only after that, so an uninstall
 ;      that stops on the Path leaves the browser integration working.
+;   7. The running app checks first wait, for a bounded time, while only
+;      Windows Explorer or a critical system process holds the main
+;      executable, as Explorer does while it reads the icon of a shortcut the
+;      install just made. The uninstaller retries each program file it
+;      removes for a bounded time, and if one is still there it exits 2 and
+;      keeps the uninstall and install location keys so the uninstall can run
+;      again.
 ;
 ; Everything else in this file is kept intentionally equivalent to upstream
 ; (updater handling, WebView2 install, shortcuts, signing) so a
@@ -119,6 +126,92 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var SesameProgramLeft
+
+; SESAME: change 7.
+!macro SESAME_WAIT_FOR_SHELL_TO_RELEASE executablePath
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $R0
+  StrCpy $6 0
+  ${Do}
+    StrCpy $5 "free"
+    !insertmacro RestartManager_StartSession $R0
+    ${If} $R0 != ""
+      !insertmacro RestartManager_RegisterFile $R0 "${executablePath}"
+      ${If} $0 = 0
+        System::Call 'RSTRTMGR::RmGetList(i $R0, *i 0 r1, *i 0 r2, p 0, *i 0 r3) i .r0'
+        ${If} $0 = ${ERROR_MORE_DATA}
+          IntOp $4 $1 * 668
+          System::Alloc $4
+          Pop $4
+          System::Call 'RSTRTMGR::RmGetList(i $R0, *i 0 r1, *i r1 r2, p r4, *i 0 r3) i .r0'
+          ${If} $0 = 0
+            StrCpy $5 "shell"
+            ${For} $3 1 $2
+              IntOp $1 $3 * 668
+              IntOp $1 $1 - 16
+              ${IntPtrOp} $1 $4 + $1
+              System::Call '*$1(i .r1)'
+              ${If} $1 <> ${RmExplorer}
+              ${AndIf} $1 <> ${RmCritical}
+                StrCpy $5 "app"
+              ${EndIf}
+            ${Next}
+          ${ElseIf} $0 = ${ERROR_MORE_DATA}
+            StrCpy $5 "shell"
+          ${Else}
+            StrCpy $5 "app"
+          ${EndIf}
+          System::Free $4
+        ${ElseIf} $0 <> 0
+          StrCpy $5 "app"
+        ${EndIf}
+      ${EndIf}
+      !insertmacro RestartManager_EndSession $R0
+    ${EndIf}
+    ${If} $5 != "shell"
+      ${ExitDo}
+    ${EndIf}
+    IntOp $6 $6 + 1
+    ${If} $6 >= 100
+      ${ExitDo}
+    ${EndIf}
+    Sleep 100
+  ${Loop}
+  Pop $R0
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+!macro SESAME_REMOVE_PROGRAM_FILE path
+  Push $0
+  StrCpy $0 0
+  ${Do}
+    Delete "${path}"
+    ${IfNot} ${FileExists} "${path}"
+      ${ExitDo}
+    ${EndIf}
+    IntOp $0 $0 + 1
+    ${If} $0 >= 100
+      StrCpy $SesameProgramLeft 1
+      DetailPrint "Sesame could not remove ${path} because another program still has it open."
+      ${ExitDo}
+    ${EndIf}
+    Sleep 100
+  ${Loop}
+  Pop $0
+!macroend
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -731,6 +824,7 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
+  !insertmacro SESAME_WAIT_FOR_SHELL_TO_RELEASE "$INSTDIR\${MAINBINARYNAME}.exe"
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
@@ -868,6 +962,7 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
+  !insertmacro SESAME_WAIT_FOR_SHELL_TO_RELEASE "$INSTDIR\${MAINBINARYNAME}.exe"
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; SESAME: change 6.
@@ -876,16 +971,16 @@ Section Uninstall
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
-  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+  !insertmacro SESAME_REMOVE_PROGRAM_FILE "$INSTDIR\${MAINBINARYNAME}.exe"
 
   ; Delete resources
   {{#each resources}}
-    Delete "$INSTDIR\\{{this.[1]}}"
+    !insertmacro SESAME_REMOVE_PROGRAM_FILE "$INSTDIR\\{{this.[1]}}"
   {{/each}}
 
   ; Delete external binaries
   {{#each binaries}}
-    Delete "$INSTDIR\\{{this}}"
+    !insertmacro SESAME_REMOVE_PROGRAM_FILE "$INSTDIR\\{{this}}"
   {{/each}}
 
   ; Delete app associations
@@ -942,13 +1037,15 @@ Section Uninstall
   ${EndIf}
 
   ; Remove registry information for add/remove programs
-  !if "${INSTALLMODE}" == "both"
-    DeleteRegKey SHCTX "${UNINSTKEY}"
-  !else if "${INSTALLMODE}" == "perMachine"
-    DeleteRegKey HKLM "${UNINSTKEY}"
-  !else
-    DeleteRegKey HKCU "${UNINSTKEY}"
-  !endif
+  ${If} $SesameProgramLeft <> 1
+    !if "${INSTALLMODE}" == "both"
+      DeleteRegKey SHCTX "${UNINSTKEY}"
+    !else if "${INSTALLMODE}" == "perMachine"
+      DeleteRegKey HKLM "${UNINSTKEY}"
+    !else
+      DeleteRegKey HKCU "${UNINSTKEY}"
+    !endif
+  ${EndIf}
 
   ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
   ; This ensures the program does not launch automatically after uninstallation if it exists.
@@ -969,6 +1066,7 @@ Section Uninstall
   ; install-location bookkeeping registry keys are cleared below; none of
   ; them hold vault data.
   ${If} $UpdateMode <> 1
+  ${AndIf} $SesameProgramLeft <> 1
     ; Clear the install location $INSTDIR from registry
     DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty SHCTX "${MANUKEY}"
@@ -982,6 +1080,10 @@ Section Uninstall
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL
     !insertmacro NSIS_HOOK_POSTUNINSTALL
   !endif
+
+  ${If} $SesameProgramLeft = 1
+    SetErrorLevel 2
+  ${EndIf}
 
   ; Auto close if passive mode or updating
   ${If} $PassiveMode = 1
