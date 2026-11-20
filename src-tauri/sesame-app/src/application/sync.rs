@@ -202,24 +202,56 @@ pub fn local_payload_bytes(vault: &UnlockedVault) -> Result<(Vec<u8>, usize), St
 
 pub fn vault_has_local_changes(local: &SyncState, vault: &UnlockedVault) -> Result<bool, String> {
     let payload = vault.open_payload()?;
-    local.has_local_changes(&payload)
+    match digest_to_adopt(local, vault)? {
+        Some(digest) => Ok(!crate::sync::state::digest_describes(&digest, &payload)?),
+        None => local.has_local_changes(&payload),
+    }
 }
 
-pub fn upgrade_legacy_digest(store: &SyncStore, vault: &UnlockedVault) -> VaultResult<bool> {
+pub fn digest_to_adopt(local: &SyncState, vault: &UnlockedVault) -> VaultResult<Option<String>> {
+    if let Some(digest) = vault
+        .upgrade_digests()
+        .and_then(|upgrade| local.digest_after_upgrade(upgrade))
+    {
+        return Ok(Some(digest));
+    }
+    let payload = vault.open_payload()?;
+    local.upgraded_digest(&payload)
+}
+
+pub fn remember_format_upgrade(
+    unlocked: &mut UnlockedVault,
+    file: &crate::vault::VaultFile,
+    opened: &sesame_core::api::OpenedVault,
+) {
+    if !opened.migrated {
+        return;
+    }
+    let Ok(original) = sesame_core::loader::VaultLoader::authenticate(
+        file,
+        sesame_core::loader::Credential::VaultKey(&opened.key),
+    ) else {
+        return;
+    };
+    if let Ok(digests) = crate::sync::state::upgrade_digests(original.payload(), &opened.payload) {
+        unlocked.remember_upgrade_digests(digests);
+    }
+}
+
+pub fn upgrade_legacy_digest(
+    store: &SyncStore,
+    vault: &UnlockedVault,
+) -> VaultResult<Option<SyncState>> {
     let Some(local) = store.load_state()? else {
-        return Ok(false);
+        return Ok(None);
     };
-    let upgraded = {
-        let payload = vault.open_payload()?;
-        local.upgraded_digest(&payload)?
+    let Some(digest) = digest_to_adopt(&local, vault)? else {
+        return Ok(None);
     };
-    let Some(digest) = upgraded else {
-        return Ok(false);
-    };
-    let mut next = local;
+    let mut next = local.clone();
     next.payload_digest = digest;
     store.save_state(&next)?;
-    Ok(true)
+    Ok(Some(local))
 }
 
 pub fn release_claim_after_failure<T>(

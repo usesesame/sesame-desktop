@@ -710,6 +710,15 @@ describe('syncing without being asked', () => {
     expect(get(sync).activity).toBe('synced')
   })
 
+  it('keeps a halted conflict in the title bar when the vault also has unsynced changes', async () => {
+    const conflict = { ...idle, phase: 'halted', halt: 'conflict', conflictRevision: 4 }
+    answer({ sync_local_status: { state: 'approved', revision: 2, unsynced: true }, sync_now: conflict })
+    const sync = approved()
+    await sync.autoSync()
+    await sync.loadLocal()
+    expect(describeSyncForChrome(get(sync))?.label).toBe('Synced vault · Needs attention')
+  })
+
   it('clears the pending mark when the vault matches the last sync again', async () => {
     vi.useFakeTimers()
     let unsynced = true

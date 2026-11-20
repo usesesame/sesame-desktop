@@ -24,17 +24,25 @@ pub fn install_unlocked_session(
     let hello_unlock_available = opened.file.hello_wrap.is_some();
     // `OpenedVault` zeroizes on drop, so build the session without moving its fields out.
     let mut unlocked = UnlockedVault::from_opened(path, &opened)?;
+    crate::application::sync::remember_format_upgrade(&mut unlocked, &file, &opened);
     effects.report_key_page_fallback(&unlocked);
+    let sync = effects.claim_idle_sync_store();
+    let replaced = sync.as_ref().and_then(|(store, _run)| {
+        crate::application::sync::upgrade_legacy_digest(store, &unlocked)
+            .ok()
+            .flatten()
+    });
     if opened.migrated && unlocked.setup_complete {
         if let Err(error) = persist_session(&mut unlocked) {
+            if let (Some((store, _run)), Some(previous)) = (&sync, replaced) {
+                let _ = store.save_state(&previous);
+            }
             return Err(format!(
                 "Sesame upgraded your vault but could not save the upgrade: {error}"
             ));
         }
     }
-    if let Some((store, _run)) = effects.claim_idle_sync_store() {
-        let _ = crate::application::sync::upgrade_legacy_digest(&store, &unlocked);
-    }
+    drop(sync);
     let snapshot = unlocked.snapshot();
     effects.observe_unlock(&snapshot);
     state.install_session(session, unlocked);

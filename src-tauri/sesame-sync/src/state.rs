@@ -190,6 +190,11 @@ impl SyncState {
         Ok(Some(current))
     }
 
+    pub fn digest_after_upgrade(&self, upgrade: &UpgradeDigests) -> Option<String> {
+        (self.payload_digest != upgrade.after && upgrade.before.contains(&self.payload_digest))
+            .then(|| upgrade.after.clone())
+    }
+
     pub fn require_join_complete(&self) -> VaultResult<()> {
         if self.pending_join.is_some() {
             return Err(
@@ -229,17 +234,29 @@ pub fn digest_describes(stored: &str, payload: &VaultPayload) -> VaultResult<boo
     matches_full_digest(stored, payload)
 }
 
-fn matches_full_digest(stored: &str, payload: &VaultPayload) -> VaultResult<bool> {
+pub fn upgrade_digests(before: &VaultPayload, after: &VaultPayload) -> VaultResult<UpgradeDigests> {
+    Ok(UpgradeDigests {
+        before: vec![full_digest(before)?, change_digest(before)?],
+        after: change_digest(after)?,
+    })
+}
+
+fn full_digest(payload: &VaultPayload) -> VaultResult<String> {
     let mut bytes = serde_json::to_vec(payload)
         .map_err(|_| "Sesame could not prepare the vault for sync.".to_string())?;
-    let matches = stored == payload_digest(&bytes);
+    let digest = payload_digest(&bytes);
     bytes.zeroize();
-    Ok(matches)
+    Ok(digest)
+}
+
+fn matches_full_digest(stored: &str, payload: &VaultPayload) -> VaultResult<bool> {
+    Ok(stored == full_digest(payload)?)
 }
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use sesame_core::types::VaultPayload;
+use sesame_core::UpgradeDigests;
 use zeroize::Zeroize;
 
 pub fn state_path(app_local_data_dir: &Path) -> PathBuf {

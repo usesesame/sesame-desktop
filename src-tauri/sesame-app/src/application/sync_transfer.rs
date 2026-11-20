@@ -1191,14 +1191,10 @@ where
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
         let unlocked = session.as_ref().ok_or("sync_locked")?;
-        let payload = unlocked.open_payload()?;
-        let changed = local.has_local_changes(&payload)?;
-        let upgraded = if changed {
-            None
-        } else {
-            local.upgraded_digest(&payload)?
-        };
-        (changed, upgraded)
+        (
+            vault_has_local_changes(&local, unlocked)?,
+            super::sync::digest_to_adopt(&local, unlocked)?,
+        )
     };
     let local = match upgraded_digest {
         Some(digest) => {
