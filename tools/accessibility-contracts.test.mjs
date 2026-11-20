@@ -370,6 +370,43 @@ test('the vault grid has a track for every child it renders', () => {
   )
 })
 
+test('an approval row keeps its text in one column and shows the whole saved address', () => {
+  const modals = componentPaths.filter((path) => read(path).includes('class="browser-fill-candidates"'))
+  assert.ok(modals.length >= 6, 'every browser approval with a choice of items renders .browser-fill-candidates')
+  for (const path of modals) {
+    const source = read(path)
+    const start = source.indexOf('class="browser-fill-candidates"')
+    const rows = source.slice(start, source.indexOf('{/each}', start))
+    assert.doesNotMatch(rows, /<span><strong>/, `${path} must wrap a row's text in .candidate-text`)
+    assert.match(rows, /<span class="candidate-text"><strong>/, `${path} must wrap a row's text in .candidate-text`)
+  }
+
+  const css = read(join(projectRoot, 'src', 'app.css'))
+  const rule = (selector) => {
+    const start = css.indexOf(`\n${selector} {`)
+    assert.ok(start >= 0, `app.css must style ${selector}`)
+    return css.slice(start, css.indexOf('}', start))
+  }
+  assert.doesNotMatch(css, /\.browser-fill-candidates label > span:last-child/, 'a match badge is the last child, so the text column needs its own class')
+  assert.match(rule('.browser-fill-candidates .candidate-text'), /display: grid;[\s\S]*min-width: 0;/)
+  const origin = rule('.browser-fill-candidates .candidate-origin')
+  assert.match(origin, /white-space: normal;/, 'the saved address wraps instead of being cut off')
+  assert.match(origin, /overflow-wrap: anywhere;/, 'a long saved address breaks anywhere rather than overflowing')
+  assert.match(rule('.browser-fill-alias code'), /overflow-wrap: anywhere;/, 'the addresses in the match banner wrap')
+})
+
+test('each primary navigation item has its own icon, so the narrow sidebar can tell them apart', () => {
+  const app = read(join(projectRoot, 'src', 'App.svelte'))
+  const navigation = app.slice(app.indexOf('const navigation: NavigationGroup[]'), app.indexOf('const importSources'))
+  const icons = [...navigation.matchAll(/\{ id: '([a-z]+)', label: '[^']+', icon: '([a-z-]+)' \}/g)].map((match) => [match[1], match[2]])
+  assert.ok(icons.length >= 9, 'the navigation list was not found')
+  const seen = new Map()
+  for (const [id, icon] of icons) {
+    assert.ok(!seen.has(icon), `${id} and ${seen.get(icon)} both use the ${icon} icon`)
+    seen.set(icon, id)
+  }
+})
+
 test('the panel resizer is styled globally, not scoped to its component', () => {
   const resizer = component('PanelResizer.svelte')
   assert.ok(!resizer.includes('<style>'), 'PanelResizer must not carry scoped styles')

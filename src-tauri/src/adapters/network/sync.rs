@@ -15,5 +15,5 @@ pub async fn connect(app: &AppHandle) -> VaultResult<SyncClient> {
     let connection = read_service_connection(app)?;
     let target = service_target(&connection)?;
     let token = read_service_token(&connection)?;
-    SyncClient::for_target(&target, token).await
+    SyncClient::for_target(&target, token, crate::app_identity::APP_VERSION).await
 }

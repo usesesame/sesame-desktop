@@ -76,6 +76,15 @@ describe('activity sentences', () => {
     expect(text).not.toMatch(/are not listed/)
   })
 
+  test('a plain custom field is never called hidden, in the window or for a terminal', () => {
+    const fields = (kind: ReleaseEntryView['fields'][number]) => ({ itemId: 'login-a', itemKind: 'login', fields: [kind] })
+    expect(entrySentence(entry({ kind: 'terminalRead', host: 'terminal', ...fields('customField') }), titleFor)).toBe('Read the custom field of ⁨Northwind⁩ for a terminal')
+    expect(entrySentence(entry({ kind: 'terminalCopy', host: 'terminal', ...fields('customField') }), titleFor)).toBe('Copied the custom field of ⁨Northwind⁩ for a terminal')
+    expect(entrySentence(entry({ kind: 'copy', ...fields('customField') }), titleFor)).toBe('Copied the custom field of ⁨Northwind⁩')
+    expect(entrySentence(entry({ kind: 'terminalRead', host: 'terminal', ...fields('hiddenField') }), titleFor)).toBe('Read the hidden field of ⁨Northwind⁩ for a terminal')
+    expect(entrySentence(entry({ kind: 'reveal', ...fields('hiddenField') }), titleFor)).toBe('Showed the hidden field of ⁨Northwind⁩')
+  })
+
   test('a terminal request says what the terminal asked for and what happened', () => {
     const gmail = { itemId: 'login-a', itemKind: 'login', fields: ['password'] as ReleaseEntryView['fields'], host: 'terminal' }
     const said = (partial: Partial<ReleaseEntryView>) => entrySentence(entry({ ...gmail, ...partial }), titleFor)

@@ -72,7 +72,13 @@
   }
 
   function focusDialog(dialog: HTMLElement) {
-    dialog.focus({ preventScroll: true })
+    const password = askSecret ? dialog.querySelector<HTMLInputElement>('#terminal-presence-password') : null
+    if (!password || password.disabled) {
+      dialog.focus({ preventScroll: true })
+      return
+    }
+    password.focus({ preventScroll: true })
+    password.closest('.terminal-presence')?.scrollIntoView?.({ block: 'nearest' })
   }
 </script>
 
@@ -217,7 +223,7 @@
   .terminal-choices small { min-width: 0; overflow-wrap: anywhere; }
   .terminal-choices strong { color: var(--text); font-size: var(--type-3); font-weight: var(--weight-medium); }
   .terminal-choices small { color: var(--text-muted); font-size: var(--type-2); }
-  .terminal-presence { margin-top: var(--space-4); }
+  .terminal-presence { margin-top: var(--space-4); scroll-margin-bottom: calc(var(--space-6) * 3); }
   .terminal-presence p { margin: 0; color: var(--text-muted); font-size: var(--type-2); line-height: 1.5; }
   .terminal-presence :global(input) { width: 100%; margin-top: var(--space-2); border: 1px solid var(--field-border); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--text); background: var(--field-bg); font-size: var(--type-3); outline: none; }
   .terminal-presence :global(input:focus-visible) { box-shadow: var(--field-ring); }

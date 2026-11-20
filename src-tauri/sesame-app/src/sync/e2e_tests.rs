@@ -12,6 +12,10 @@ use super::state::SyncState;
 
 const VAULT: &str = "vault0000000000000009";
 
+fn device_token(device: &str, fixed: &str) -> String {
+    std::env::var(format!("SESAME_SYNC_E2E_TOKEN_{device}")).unwrap_or_else(|_| fixed.to_string())
+}
+
 fn run<T>(future: impl std::future::Future<Output = T>) -> T {
     crate::test_support::block_on(future)
 }
@@ -25,14 +29,14 @@ fn package_key_of(identity: &DeviceIdentity) -> String {
 }
 
 #[test]
-#[ignore = "needs the Go test server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY"]
+#[ignore = "needs the Go server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY, with device tokens in SESAME_SYNC_E2E_TOKEN_A and SESAME_SYNC_E2E_TOKEN_B when it checks them"]
 fn the_rust_client_and_engine_round_trip_against_the_real_service() {
     let url = std::env::var("SESAME_SYNC_E2E_URL").expect("url");
     let instance = std::env::var("SESAME_SYNC_E2E_KEY").expect("key");
     let laptop = DeviceIdentity::generate().expect("identity");
     let phone = DeviceIdentity::generate().expect("identity");
-    let laptop_client = SyncClient::for_tests(&url, "token-a", &instance);
-    let phone_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let laptop_client = SyncClient::for_tests(&url, &device_token("A", "token-a"), &instance);
+    let phone_client = SyncClient::for_tests(&url, &device_token("B", "token-b"), &instance);
     let vault_key = [9u8; 32];
 
     let missing = run(laptop_client.state());
@@ -342,7 +346,7 @@ fn a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet() {
         seal_label(&vault_key, VAULT, &identity.device_id, "Laptop").expect("label")
     };
 
-    let hybrid_client = SyncClient::for_tests(&url, "token-a", &instance);
+    let hybrid_client = SyncClient::for_tests(&url, &device_token("A", "token-a"), &instance);
     let refused =
         run(hybrid_client.create_vault(&hybrid, &create_entry(&hybrid, VAULT, &sealed(&hybrid))));
     assert!(
@@ -384,14 +388,15 @@ fn a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet() {
         );
     }
 
-    let classical_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let classical_client = SyncClient::for_tests(&url, &device_token("B", "token-b"), &instance);
     run(classical_client.create_vault(
         &classical,
         &create_entry(&classical, VAULT, &sealed(&classical)),
     ))
     .expect("the older service accepts a device with only the older key");
     let offer = pairing_offer_of(&older_newcomer, "Tablet", "ABCDEFGHJK");
-    let older_newcomer_client = SyncClient::for_tests(&url, "token-c", &instance);
+    let older_newcomer_client =
+        SyncClient::for_tests(&url, &device_token("C", "token-c"), &instance);
     run(older_newcomer_client.begin_pairing(
         &older_newcomer,
         &older_newcomer.device_id,
@@ -403,7 +408,7 @@ fn a_hybrid_device_is_told_when_the_service_does_not_accept_its_key_yet() {
 }
 
 #[test]
-#[ignore = "needs the Go test server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY"]
+#[ignore = "needs the Go server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY, with device tokens in SESAME_SYNC_E2E_TOKEN_A and SESAME_SYNC_E2E_TOKEN_B when it checks them"]
 fn a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it() {
     let url = std::env::var("SESAME_SYNC_E2E_URL").expect("url");
     let instance = std::env::var("SESAME_SYNC_E2E_KEY").expect("key");
@@ -411,8 +416,8 @@ fn a_hybrid_approver_pairs_an_older_device_only_when_the_person_allows_it() {
     let tablet = DeviceIdentity::generate()
         .expect("identity")
         .without_hybrid_key();
-    let laptop_client = SyncClient::for_tests(&url, "token-a", &instance);
-    let tablet_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let laptop_client = SyncClient::for_tests(&url, &device_token("A", "token-a"), &instance);
+    let tablet_client = SyncClient::for_tests(&url, &device_token("B", "token-b"), &instance);
     let vault_key = [9u8; 32];
 
     let create = create_entry(
@@ -625,7 +630,7 @@ fn admit(
 }
 
 #[test]
-#[ignore = "needs the Go test server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY"]
+#[ignore = "needs the Go server named by SESAME_SYNC_E2E_URL and SESAME_SYNC_E2E_KEY, with device tokens in SESAME_SYNC_E2E_TOKEN_A and SESAME_SYNC_E2E_TOKEN_B when it checks them"]
 fn devices_with_the_older_key_replace_it_and_the_vault_key_rotates_through_the_real_service() {
     let url = std::env::var("SESAME_SYNC_E2E_URL").expect("url");
     let instance = std::env::var("SESAME_SYNC_E2E_KEY").expect("key");
@@ -635,8 +640,8 @@ fn devices_with_the_older_key_replace_it_and_the_vault_key_rotates_through_the_r
     let mut tablet = DeviceIdentity::generate()
         .expect("identity")
         .without_hybrid_key();
-    let laptop_client = SyncClient::for_tests(&url, "token-a", &instance);
-    let tablet_client = SyncClient::for_tests(&url, "token-b", &instance);
+    let laptop_client = SyncClient::for_tests(&url, &device_token("A", "token-a"), &instance);
+    let tablet_client = SyncClient::for_tests(&url, &device_token("B", "token-b"), &instance);
     let vault_key = [9u8; 32];
 
     let create = create_entry(

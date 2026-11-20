@@ -6,10 +6,12 @@ use sesame_core::backup::{inspect_backup_file, preserve_vault_before_upgrade};
 use sesame_core::crypto::{encrypt_bytes, serialize_payload};
 use sesame_core::loader::{LoadFailure, VaultLoader};
 use sesame_core::storage::{
-    complete_recovery_setup_for_session, persist_session, resume_recovery_setup_for_session,
+    complete_recovery_setup_for_session, persist_session, remove_hello_for_session,
+    remove_pin_for_session, replace_recovery_kit_for_session, resume_recovery_setup_for_session,
+    set_hello_for_session, RECOVERY_REPLACEMENT_DELAY_SECS, UPGRADE_NOT_SAVED,
 };
 use sesame_core::{
-    random_id, BackupCompatibility, EmailAliasService, EmailAliasSettings, HistoryEntry,
+    random_id, BackupCompatibility, EmailAliasService, EmailAliasSettings, HelloWrap, HistoryEntry,
     HistoryOperation, LegacyField, MatchRule, TaggedItem, TrashedItem, UnlockedVault, VaultEntry,
     VaultFile, VaultPayload, FORMAT_10_PAYLOAD_AAD, FORMAT_10_PENDING_SETUP_PAYLOAD_AAD,
     PAYLOAD_AAD, PENDING_SETUP_PAYLOAD_AAD, VAULT_FORMAT_VERSION,
@@ -279,6 +281,64 @@ fn a_failed_vault_write_after_the_backup_leaves_the_format_10_vault_in_place() {
         VaultLoader::read(&path).expect("vault").format_version,
         VAULT_FORMAT_VERSION
     );
+}
+
+type CredentialSave = fn(&mut UnlockedVault) -> Result<(), String>;
+
+fn credential_saves() -> [(&'static str, CredentialSave); 4] {
+    [
+        ("removing the PIN", remove_pin_for_session),
+        ("setting Windows Hello", |session| {
+            set_hello_for_session(
+                session,
+                HelloWrap {
+                    key_name: "sesame-vault-hello-fictional".to_string(),
+                    ciphertext: "ZmljdGlvbmFsIGhlbGxvIGNpcGhlcnRleHQ".to_string(),
+                },
+            )
+        }),
+        ("removing Windows Hello", remove_hello_for_session),
+        ("replacing the recovery kit", |session| {
+            replace_recovery_kit_for_session(
+                session,
+                PASSWORD,
+                1_800_000_000,
+                1_800_000_000 + RECOVERY_REPLACEMENT_DELAY_SECS,
+                false,
+            )
+            .map(|_| ())
+        }),
+    ]
+}
+
+#[test]
+fn a_credential_change_never_writes_a_pending_upgrade_without_the_format_10_copy() {
+    for (change, save) in credential_saves() {
+        let directory = TestDirectory::new();
+        let path = directory.vault();
+        let (file, _) = format_10_vault(true);
+        let original = write_file(&path, &file);
+        let (mut session, _) = unlock(&path);
+
+        assert_eq!(
+            save(&mut session).err().as_deref(),
+            Some(UPGRADE_NOT_SAVED),
+            "{change}"
+        );
+        assert_eq!(fs::read(&path).expect("vault bytes"), original, "{change}");
+        assert!(directory.upgrade_backups().is_empty(), "{change}");
+        assert!(session.format_upgrade_pending(), "{change}");
+
+        persist_session(&mut session).expect("the upgrade saves with its copy");
+        save(&mut session).unwrap_or_else(|error| panic!("{change}: {error}"));
+        let backups = directory.upgrade_backups();
+        assert_eq!(backups.len(), 1, "{change}");
+        assert_eq!(
+            fs::read(&backups[0]).expect("backup bytes"),
+            original,
+            "{change}"
+        );
+    }
 }
 
 #[test]

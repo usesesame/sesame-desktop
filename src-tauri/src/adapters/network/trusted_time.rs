@@ -99,7 +99,13 @@ async fn company_reading(url: String, https_only: bool) -> Reading {
 
 async fn linked_reading(linked: LinkedTimeSource) -> Option<u64> {
     let client = client_for_base(linked.address.as_str()).ok()?;
-    pinned_server_time(&client, &linked.address, &linked.pin).await
+    pinned_server_time(
+        &client,
+        &linked.address,
+        &linked.pin,
+        crate::app_identity::APP_VERSION,
+    )
+    .await
 }
 
 async fn collect_time(

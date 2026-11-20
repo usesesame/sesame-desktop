@@ -864,17 +864,17 @@ button.no-totp:hover { filter: brightness(.97); }
 .browser-fill-candidates label:hover { background: var(--tint-hover); }
 .browser-fill-candidates label.selected { border-color: transparent; background: var(--control-active-bg); box-shadow: var(--control-active-edge), var(--control-active-lift); }
 .browser-fill-candidates input { width: 16px; height: 16px; accent-color: var(--accent); }
-.browser-fill-candidates label > span:last-child { display: grid; min-width: 0; gap: 2px; }
+.browser-fill-candidates .candidate-text { display: grid; min-width: 0; gap: 2px; }
 .browser-fill-candidates strong, .browser-fill-candidates small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-fill-candidates strong { color: var(--text); font-size: var(--type-3); }
 .browser-fill-candidates small { color: var(--text-muted); font-size: var(--type-2); }
-.browser-fill-candidates .candidate-origin { color: var(--text-faint); font-family: var(--font-code); font-size: var(--type-2); }
+.browser-fill-candidates .candidate-origin { overflow: visible; color: var(--text-faint); font-family: var(--font-code); font-size: var(--type-2); white-space: normal; overflow-wrap: anywhere; }
 .candidate-match { color: var(--warn-text); background: var(--warn-bg); }
 .browser-fill-alias { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-2); margin-top: var(--space-3); border: 1px solid var(--gold-border); border-radius: var(--radius-sm); padding: var(--space-3); color: var(--warn-text); background: var(--warn-bg); }
 .browser-fill-alias > p { display: grid; gap: 2px; margin: 0; }
 .browser-fill-alias strong { font-size: var(--type-2); }
 .browser-fill-alias span { color: var(--text-muted); font-size: var(--type-2); line-height: 1.45; }
-.browser-fill-alias code { font-family: var(--font-code); }
+.browser-fill-alias code { font-family: var(--font-code); overflow-wrap: anywhere; }
 .browser-fill-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-5); border-top: 1px solid var(--border-soft); padding-top: var(--space-4); }
 .browser-fill-footer > span { color: var(--text-muted); font-size: var(--type-2); }
 .browser-fill-footer .confirm-actions { margin-top: 0; }

@@ -138,11 +138,21 @@ pub fn persist_session_without_previous(session: &mut UnlockedVault) -> VaultRes
     persist_payload(session, payload.clone(), false)
 }
 
+pub const UPGRADE_NOT_SAVED: &str =
+    "Sesame has not finished upgrading this vault. Lock Sesame, unlock it again, and try once more.";
+
 fn persist_payload(
     session: &mut UnlockedVault,
     mut next_payload: VaultPayload,
     keep_previous: bool,
 ) -> VaultResult<()> {
+    if session.format_upgrade_pending
+        && !keep_previous
+        && (session.setup_complete || !pending_setup_is_empty(session)?)
+    {
+        next_payload.zeroize();
+        return Err(UPGRADE_NOT_SAVED.into());
+    }
     let result = (|| {
         next_payload.revision += 1;
         let next_records = VaultRecordStore::from_payload(&next_payload)?;

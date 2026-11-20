@@ -116,7 +116,11 @@ impl Drop for SyncClient {
 }
 
 impl SyncClient {
-    pub async fn for_target(target: &ServiceTarget, mut token: String) -> VaultResult<Self> {
+    pub async fn for_target(
+        target: &ServiceTarget,
+        mut token: String,
+        build_version: &str,
+    ) -> VaultResult<Self> {
         let base_url = target.base_url().to_string();
         let parsed = url::Url::parse(&base_url)
             .map_err(|_| "Sesame account service URL is invalid.".to_string())?;
@@ -141,7 +145,8 @@ impl SyncClient {
         let (key_text, key_id) = match target {
             ServiceTarget::Official { .. } => (official_capability_public_key()?, None),
             ServiceTarget::Custom { address, pin } => {
-                if let Err(failure) = verify_pinned_server(&http, address, pin).await {
+                if let Err(failure) = verify_pinned_server(&http, address, pin, build_version).await
+                {
                     token.zeroize();
                     return Err(failure.message());
                 }
@@ -166,11 +171,9 @@ impl SyncClient {
                 return Err(failure.into());
             }
         };
-        if let Err(failure) = require_sync_enabled(
-            &document,
-            env!("CARGO_PKG_VERSION"),
-            sesame_sync::DESKTOP_PLATFORM,
-        ) {
+        if let Err(failure) =
+            require_sync_enabled(&document, build_version, sesame_sync::DESKTOP_PLATFORM)
+        {
             token.zeroize();
             return Err(failure.into());
         }
@@ -613,6 +616,7 @@ mod tests {
         crate::test_support::block_on(SyncClient::for_target(
             target,
             "fictional-device-token".to_string(),
+            "0.3.0",
         ))
     }
 

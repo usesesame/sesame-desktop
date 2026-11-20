@@ -5,7 +5,7 @@ use crate::application::release::require_release_presence;
 use crate::application::release_record::{record, record_in};
 use crate::application::DesktopEffects;
 use crate::release::ReleasePresence;
-use crate::vault::release_record::{EntryKind, Outcome, ReleaseDraft};
+use crate::vault::release_record::{EntryKind, FieldKind, Outcome, ReleaseDraft};
 use crate::vault::{TaggedItem, UnlockedVault, VaultResult, VaultState};
 
 const BACKUP_CODES: &str = "backupCodes";
@@ -56,11 +56,20 @@ fn field_value(item: &TaggedItem, field: &str) -> VaultResult<Zeroizing<String>>
 }
 
 fn record_field(state: &VaultState, entry: EntryKind, id: &str, kind: &str, field: &str) {
+    let opened = state.session.lock().ok().and_then(|session| {
+        session
+            .as_ref()
+            .and_then(|session| session.open_item(id.trim()).ok())
+    });
+    let released = opened.map_or_else(
+        || FieldKind::from_key(field),
+        |item| FieldKind::of_item_key(&item, field),
+    );
     record(
         state,
         ReleaseDraft::new(entry, Outcome::Released)
             .item(id.trim(), kind)
-            .field(field),
+            .field_kind(released),
     );
 }
 
@@ -73,10 +82,19 @@ pub struct TerminalRelease<'a> {
 }
 
 pub fn terminal_draft(release: &TerminalRelease<'_>, outcome: Outcome) -> ReleaseDraft {
+    terminal_draft_of(release, outcome, None)
+}
+
+fn terminal_draft_of(
+    release: &TerminalRelease<'_>,
+    outcome: Outcome,
+    item: Option<&TaggedItem>,
+) -> ReleaseDraft {
     let draft = ReleaseDraft::new(release.entry, outcome).host(release.source);
-    let draft = match release.field {
-        Some(field) => draft.field(field),
-        None => draft,
+    let draft = match (release.field, item) {
+        (Some(field), Some(item)) => draft.field_kind(FieldKind::of_item_key(item, field)),
+        (Some(field), None) => draft.field(field),
+        (None, _) => draft,
     };
     if release.id.trim().is_empty() {
         draft
@@ -90,10 +108,11 @@ pub fn record_terminal_release_in(
     session: &UnlockedVault,
     release: TerminalRelease<'_>,
 ) {
+    let item = session.open_item(release.id.trim()).ok();
     record_in(
         state,
         Some(session),
-        terminal_draft(&release, Outcome::Released),
+        terminal_draft_of(&release, Outcome::Released, item.as_deref()),
     );
 }
 
