@@ -90,8 +90,8 @@
   --popover-bg: var(--surface);
   --field-border: transparent;
   --field-border-hover: transparent;
-  --field-bg-focus: color-mix(in srgb, var(--text) 4%, var(--surface));
-  --field-ring: 0 0 0 3.5px color-mix(in srgb, var(--focus-ring) 22%, transparent);
+  --field-bg-focus: var(--field-bg);
+  --field-ring: 0 0 0 3.5px color-mix(in srgb, var(--focus-ring) 26%, transparent);
   --field-ring-danger: 0 0 0 3.5px color-mix(in srgb, var(--danger) 22%, transparent);
 
   /* ---- Text ------------------------------------------------------------- */
