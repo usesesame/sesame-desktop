@@ -382,22 +382,33 @@ pub fn converse(
     }
 }
 
+const LIST_HEADINGS: [&str; 3] = ["Name", "Kind", "Id"];
+
 fn print_list(
     items: &[crate::cli_protocol::CliItemSummary],
     streams: &mut Streams<'_>,
 ) -> io::Result<()> {
     if streams.out_terminal {
+        if items.is_empty() {
+            return Ok(());
+        }
         let title_width = items
             .iter()
             .map(|item| printable_line(&item.title).chars().count())
             .max()
             .unwrap_or(0)
-            .min(60);
+            .clamp(LIST_HEADINGS[0].len(), 60);
         let kind_width = items
             .iter()
             .map(|item| printable_line(&item.kind).chars().count())
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(LIST_HEADINGS[1].len());
+        writeln!(
+            streams.out,
+            "{:title_width$}  {:kind_width$}  {}",
+            LIST_HEADINGS[0], LIST_HEADINGS[1], LIST_HEADINGS[2],
+        )?;
         for item in items {
             writeln!(
                 streams.out,
@@ -1512,5 +1523,45 @@ mod tests {
         let err = String::from_utf8(err).expect("utf8");
         assert!(err.contains(NOT_RUNNING));
         assert!(err.contains(NOT_SESAME));
+    }
+    #[test]
+    fn a_terminal_list_names_its_columns_and_a_pipe_does_not() {
+        let items = [
+            CliItemSummary {
+                id: "fictional-login".to_string(),
+                kind: "login".to_string(),
+                title: "Northwind mail".to_string(),
+            },
+            CliItemSummary {
+                id: "fictional-note".to_string(),
+                kind: "note".to_string(),
+                title: "Ab".to_string(),
+            },
+        ];
+        let printed = |items: &[CliItemSummary], terminal: bool| {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let mut streams = Streams {
+                out: &mut out,
+                err: &mut err,
+                out_terminal: terminal,
+                err_terminal: terminal,
+            };
+            print_list(items, &mut streams).expect("printed");
+            String::from_utf8(out).expect("utf8")
+        };
+        assert_eq!(
+            printed(&items, true),
+            "Name            Kind   Id\nNorthwind mail  login  fictional-login\nAb              note   fictional-note\n"
+        );
+        assert_eq!(
+            printed(&items[1..], true),
+            "Name  Kind  Id\nAb    note  fictional-note\n"
+        );
+        assert_eq!(printed(&[], true), "");
+        assert_eq!(
+            printed(&items, false),
+            "fictional-login\tlogin\tNorthwind mail\nfictional-note\tnote\tAb\n"
+        );
     }
 }
