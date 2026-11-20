@@ -23,7 +23,7 @@ export function selectPreviousLinuxRelease(pages, candidateVersion) {
   const eligible = []
   for (const release of releases) {
     if (release?.draft !== false || release?.prerelease !== false) continue
-    const match = /^v(\d+\.\d+\.\d+)$/.exec(release.tag_name ?? '')
+    const match = /^v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(release.tag_name ?? '')
     if (!match || compareVersions(match[1], candidateVersion) >= 0) continue
     const names = uploadedAssetNames(release)
     const deb = previousDebName(match[1])
