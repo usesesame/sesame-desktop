@@ -26,6 +26,7 @@ fn invalid() -> ServerFailure {
 pub async fn fetch_instance(
     client: &Client,
     address: &ServerAddress,
+    build_version: &str,
 ) -> Result<(InstanceInfo, Option<u64>), ServerFailure> {
     let response = client
         .get(address.url("/v1/instance"))
@@ -47,15 +48,16 @@ pub async fn fetch_instance(
     let body = read_limited(response, MAX_INSTANCE_BYTES)
         .await
         .ok_or_else(invalid)?;
-    Ok((parse_instance(&body, env!("CARGO_PKG_VERSION"))?, date))
+    Ok((parse_instance(&body, build_version)?, date))
 }
 
 pub async fn inspect_server(
     client: &Client,
     address: &ServerAddress,
     link_fingerprint: Option<&str>,
+    build_version: &str,
 ) -> Result<InstanceInfo, ServerFailure> {
-    let (info, _) = fetch_instance(client, address).await?;
+    let (info, _) = fetch_instance(client, address, build_version).await?;
     if link_fingerprint.is_some_and(|expected| expected != info.fingerprint) {
         return Err(ServerFailure::LinkMismatch);
     }
@@ -77,12 +79,8 @@ pub async fn inspect_server(
     })?;
     require_instance(&document, &info.instance_id)
         .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
-    require_linking_enabled(
-        &document,
-        env!("CARGO_PKG_VERSION"),
-        sesame_sync::DESKTOP_PLATFORM,
-    )
-    .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
+    require_linking_enabled(&document, build_version, sesame_sync::DESKTOP_PLATFORM)
+        .map_err(|error| ServerFailure::Invalid(String::from(error)))?;
     Ok(info)
 }
 
@@ -90,9 +88,10 @@ pub async fn verify_pinned_server(
     client: &Client,
     address: &ServerAddress,
     pin: &CustomServerPin,
+    build_version: &str,
 ) -> Result<Option<u64>, ServerFailure> {
     let key = pin_key(pin).ok_or_else(invalid)?;
-    let (info, date) = fetch_instance(client, address).await?;
+    let (info, date) = fetch_instance(client, address, build_version).await?;
     check_pinned_instance(&info, pin)?;
     let document =
         fetch_signed_document(client, address.as_str(), &key, Some(&pin.capability_key_id))
@@ -113,8 +112,9 @@ pub async fn pinned_server_time(
     client: &Client,
     address: &ServerAddress,
     pin: &CustomServerPin,
+    build_version: &str,
 ) -> Option<u64> {
-    verify_pinned_server(client, address, pin)
+    verify_pinned_server(client, address, pin, build_version)
         .await
         .ok()
         .flatten()
@@ -368,12 +368,13 @@ mod tests {
         link_fingerprint: Option<&str>,
     ) -> Result<InstanceInfo, ServerFailure> {
         let (client, address) = client(server);
-        crate::test_support::block_on(inspect_server(&client, &address, link_fingerprint))
+        crate::test_support::block_on(inspect_server(&client, &address, link_fingerprint, CLIENT))
     }
 
     fn verify_pin(server: &TestServer, pin: &CustomServerPin) -> Result<(), ServerFailure> {
         let (client, address) = client(server);
-        crate::test_support::block_on(verify_pinned_server(&client, &address, pin)).map(|_| ())
+        crate::test_support::block_on(verify_pinned_server(&client, &address, pin, CLIENT))
+            .map(|_| ())
     }
 
     #[test]
@@ -480,7 +481,8 @@ mod tests {
         let (client, _) = client(&TestServer::start(|_| Reply::bytes(200, Vec::new())));
         let closed = ServerAddress::parse(&closed_port_base()).unwrap();
         assert_eq!(
-            crate::test_support::block_on(inspect_server(&client, &closed, None)).unwrap_err(),
+            crate::test_support::block_on(inspect_server(&client, &closed, None, CLIENT))
+                .unwrap_err(),
             ServerFailure::Unreachable
         );
         let missing = TestServer::start(|_| Reply::bytes(404, b"not found".to_vec()));
@@ -534,7 +536,9 @@ mod tests {
         let base = server.with_prefix("/sesame");
         let client = client_for_base(&base).unwrap();
         let address = ServerAddress::parse(&base).unwrap();
-        assert!(crate::test_support::block_on(inspect_server(&client, &address, None)).is_ok());
+        assert!(
+            crate::test_support::block_on(inspect_server(&client, &address, None, CLIENT)).is_ok()
+        );
         assert_eq!(
             server.paths(),
             vec![
@@ -606,7 +610,7 @@ mod tests {
         let closed = ServerAddress::parse(&closed_port_base()).unwrap();
         let (client, _) = client(&down);
         assert_eq!(
-            crate::test_support::block_on(verify_pinned_server(&client, &closed, &pin)),
+            crate::test_support::block_on(verify_pinned_server(&client, &closed, &pin, CLIENT)),
             Err(ServerFailure::Unreachable)
         );
     }
@@ -623,7 +627,7 @@ mod tests {
 
     fn pinned_time(server: &TestServer, pin: &CustomServerPin) -> Option<u64> {
         let (client, address) = client(server);
-        crate::test_support::block_on(pinned_server_time(&client, &address, pin))
+        crate::test_support::block_on(pinned_server_time(&client, &address, pin, CLIENT))
     }
 
     #[test]
