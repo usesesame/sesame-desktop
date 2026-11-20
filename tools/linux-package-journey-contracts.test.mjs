@@ -24,12 +24,14 @@ import {
   SHIPPED_RUN_SCHEMA,
   judgePreviousDigest,
   judgeUpgradedVersion,
+  judgeVersionOrder,
   parseChecksums,
   requiredShippedSteps,
   requiredUpgradeSteps,
   validateLinuxShippedEvidence,
   verifyPreviousPackage,
 } from './linux-shipped-package-gate.mjs'
+import { selectPreviousLinuxRelease } from './previous-linux-release.mjs'
 
 const repository = process.cwd()
 const journeyStepNames = ['login.save', 'vault.backup.verified', 'vault.backup.entries', 'vault.lock', 'vault.unlock', 'login.read_after_unlock', 'restart.unlock', 'restart.login.read', 'login.edit', 'login.read_after_edit', 'login.delete', 'login.gone', 'login.gone_after_unlock']
@@ -466,17 +468,99 @@ function workflowStep(workflow, jobStart, jobEnd, marker) {
   return step
 }
 
-test('both Linux workflows prove the upgrade from the newest published release with a read-only token', async () => {
+test('both Linux workflows prove the upgrade from the newest older published release with a read-only token', async () => {
   for (const [file, jobStart, jobEnd] of [['ci.yml', '  linux-bundles:', '  linux-installed:'], ['release-linux-early-access.yml', '\n  build-and-test:\n', '\n  sign-and-attest:\n']]) {
     const workflow = await readFile(path.join(repository, '.github', 'workflows', file), 'utf8')
     const step = workflowStep(workflow, jobStart, jobEnd, '--previous ')
     assert.match(step, /GH_TOKEN: \$\{\{ github\.token \}\}/, `${file} does not use the job token`)
-    assert.match(step, /gh release download --repo "\$GITHUB_REPOSITORY" --pattern '\*_amd64\.deb' --pattern 'SHA256SUMS-linux' --dir previous-release/, `${file} does not download the newest release deb and its checksums`)
-    assert.doesNotMatch(step, /--tag|--clobber/, `${file} must take the latest published release`)
+    assert.match(step, /version=\$\(node -p "require\('\.\/package\.json'\)\.version"\)/, `${file} does not take the candidate version from package.json`)
+    assert.match(step, /gh api --paginate --slurp "repos\/\$GITHUB_REPOSITORY\/releases" > previous-releases\.json/, `${file} does not list every release`)
+    assert.match(step, /tag=\$\(node tools\/previous-linux-release\.mjs --candidate "\$version" --releases previous-releases\.json\)/, `${file} does not select the previous release by version and assets`)
+    assert.match(step, /gh release download "\$tag" --repo "\$GITHUB_REPOSITORY" --pattern "Sesame_\$\{tag#v\}_amd64\.deb" --pattern 'SHA256SUMS-linux' --dir previous-release/, `${file} does not download the selected release deb and its checksums`)
+    assert.doesNotMatch(step, /gh release download --repo|--clobber|<\(/, `${file} must download the selected tag and fail when the selection fails`)
     assert.match(step, /--format deb\b/)
+    assert.match(step, /--previous "previous-release\/Sesame_\$\{tag#v\}_amd64\.deb"/, `${file} does not pass the selected deb to the gate`)
     assert.match(step, /--previous-sums previous-release\/SHA256SUMS-linux/, `${file} does not pass the release checksums to the gate`)
+    assert.ok(step.indexOf('previous-linux-release.mjs') < step.indexOf('gh release download'), `${file} must select the release before it downloads`)
     assert.ok(step.indexOf('gh release download') < step.indexOf('linux-shipped-package-gate.mjs'), `${file} must download before it runs the gate`)
     const job = workflow.slice(workflow.indexOf(jobStart), workflow.indexOf(jobEnd))
     assert.doesNotMatch(job, /contents: write/, `${file} gives the upgrade job write access`)
   }
+})
+
+function fictionalRelease(tag, overrides = {}) {
+  const version = tag.slice(1)
+  return {
+    tag_name: tag,
+    draft: false,
+    prerelease: false,
+    assets: [`Sesame_${version}_amd64.deb`, 'SHA256SUMS-linux', `Sesame_${version}_x64-setup.exe`].map((name) => ({ name, state: 'uploaded' })),
+    ...overrides,
+  }
+}
+
+test('the previous release is the newest published one older than the candidate that has the deb and its checksums', () => {
+  const pages = [[fictionalRelease('v1.4.0'), fictionalRelease('v1.3.9')], [fictionalRelease('v1.2.0'), fictionalRelease('v1.10.0', { draft: true })]]
+  assert.deepEqual(selectPreviousLinuxRelease(pages, '1.5.0'), { tag: 'v1.4.0', version: '1.4.0', deb: 'Sesame_1.4.0_amd64.deb' })
+  assert.equal(selectPreviousLinuxRelease([fictionalRelease('v1.2.0'), fictionalRelease('v1.10.0')], '1.11.0').tag, 'v1.10.0')
+})
+
+test('the candidate itself, newer releases, drafts, prereleases and other tags are never the previous release', () => {
+  const older = fictionalRelease('v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.4.0'), older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.5.0'), older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.3.5', { draft: true }), older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('v1.3.5', { prerelease: true }), older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[{ ...fictionalRelease('v1.3.5'), draft: undefined }, older]], '1.4.0').tag, 'v1.3.0')
+  assert.equal(selectPreviousLinuxRelease([[fictionalRelease('freshness'), fictionalRelease('v1.3.5-beta.1'), older]], '1.4.0').tag, 'v1.3.0')
+})
+
+test('a published release still waiting for its Linux files is passed over for the one before it', () => {
+  const older = fictionalRelease('v1.3.0')
+  const windowsOnly = fictionalRelease('v1.3.5', { assets: [{ name: 'Sesame_1.3.5_x64-setup.exe', state: 'uploaded' }] })
+  const withoutSums = fictionalRelease('v1.3.4', { assets: [{ name: 'Sesame_1.3.4_amd64.deb', state: 'uploaded' }] })
+  const halfUploaded = fictionalRelease('v1.3.3', { assets: [{ name: 'Sesame_1.3.3_amd64.deb', state: 'starter' }, { name: 'SHA256SUMS-linux', state: 'uploaded' }] })
+  const wrongDeb = fictionalRelease('v1.3.2', { assets: [{ name: 'Sesame_1.3.0_amd64.deb', state: 'uploaded' }, { name: 'SHA256SUMS-linux', state: 'uploaded' }] })
+  assert.equal(selectPreviousLinuxRelease([[windowsOnly, withoutSums, halfUploaded, wrongDeb, older]], '1.4.0').tag, 'v1.3.0')
+})
+
+test('the selection fails when no older release qualifies or the candidate version is malformed', () => {
+  assert.throws(() => selectPreviousLinuxRelease([], '1.4.0'), /No published release older than 1\.4\.0/)
+  assert.throws(() => selectPreviousLinuxRelease([[fictionalRelease('v1.4.0')]], '1.4.0'), /No published release older than 1\.4\.0/)
+  assert.throws(() => selectPreviousLinuxRelease({ releases: [] }, '1.4.0'), /No published release/)
+  for (const candidate of ['', 'v1.4.0', '1.4', undefined]) {
+    assert.throws(() => selectPreviousLinuxRelease([[fictionalRelease('v1.3.0')]], candidate), /not major\.minor\.patch/)
+  }
+})
+
+test('the selection script prints only the tag and refuses bad arguments', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'sesame-previous-release-'))
+  try {
+    const releases = path.join(directory, 'releases.json')
+    await writeFile(releases, JSON.stringify([[fictionalRelease('v1.3.0'), fictionalRelease('v1.4.0')]]))
+    const run = (...args) => new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(repository, 'tools', 'previous-linux-release.mjs'), ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk) => { stdout += chunk })
+      child.stderr.on('data', (chunk) => { stderr += chunk })
+      child.once('exit', (code) => resolve({ code, stdout, stderr }))
+    })
+    assert.deepEqual(await run('--candidate', '1.4.0', '--releases', releases), { code: 0, stdout: 'v1.3.0\n', stderr: '' })
+    const none = await run('--candidate', '1.3.0', '--releases', releases)
+    assert.equal(none.code, 2)
+    assert.equal(none.stdout, '')
+    assert.match(none.stderr, /No published release older than 1\.3\.0/)
+    const usage = await run('--candidate', '--releases', releases)
+    assert.equal(usage.code, 2)
+    assert.match(usage.stderr, /Usage/)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('the upgrade check needs the previous package to be strictly older than the candidate', () => {
+  assert.deepEqual(judgeVersionOrder({ previous: '1.3.0', candidate: '1.4.0', older: true }), { ok: true, value: { previous: '1.3.0', candidate: '1.4.0' } })
+  assert.match(judgeVersionOrder({ previous: '1.4.0', candidate: '1.4.0', older: false }).error, /1\.4\.0 is not older than the candidate 1\.4\.0/)
+  assert.equal(judgeVersionOrder({ previous: '1.4.0', candidate: '1.4.0', older: 'yes' }).ok, false)
 })

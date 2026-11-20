@@ -191,6 +191,12 @@ export function judgePreviousDigest({ filename, bytes, checksums }) {
     : { ok: false, error: `The previous package ${filename} has digest ${actual}, but the previous release checksums list ${listed}.` }
 }
 
+export function judgeVersionOrder({ previous, candidate, older }) {
+  return older === true
+    ? { ok: true, value: { previous, candidate } }
+    : { ok: false, error: `The previous package ${previous} is not older than the candidate ${candidate}, so installing the candidate would not be an upgrade.` }
+}
+
 export function judgeUpgradedVersion({ installedVersion, expectedVersion }) {
   return installedVersion === expectedVersion
     ? { ok: true, value: { version: installedVersion } }
@@ -378,9 +384,13 @@ async function installPreviousRelease(context, metadata) {
   const previousBytes = await verifyPreviousPackage(steps, { previousPath, sumsPath: path.resolve(options.previousSums) })
   const previousMetadata = await packageMetadata(previousPath, expectedArchitecture)
   const previousPackage = { filename: path.basename(previousPath), sha256: sha256(previousBytes), bytes: previousBytes.length, ...previousMetadata }
-  const notNewer = await command('dpkg', ['--compare-versions', previousMetadata.version, 'le', metadata.version]).then(() => true, () => false)
-  record(steps, 'upgrade.version_order', notNewer, { previous: previousMetadata.version, candidate: metadata.version }, notNewer ? undefined : `The previous package ${previousMetadata.version} is newer than the candidate ${metadata.version}.`)
-  if (!notNewer) throw new Error('The previous package is newer than the candidate, so installing the candidate would be a downgrade.')
+  const order = judgeVersionOrder({
+    previous: previousMetadata.version,
+    candidate: metadata.version,
+    older: await command('dpkg', ['--compare-versions', previousMetadata.version, 'lt', metadata.version]).then(() => true, () => false),
+  })
+  record(steps, 'upgrade.version_order', order.ok, order.value, order.error)
+  if (!order.ok) throw new Error(order.error)
   const previousBinary = await installPackage(previousPath)
   const { alive, stop } = await launchAndStop(previousBinary, { launchSeconds: options.launchSeconds, logPath: path.join(out, 'linux-previous-launch.log'), environment })
   record(steps, 'upgrade.previous_launch', alive, undefined, alive ? undefined : 'The previous package exited before the launch window closed.')
