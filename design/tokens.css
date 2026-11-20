@@ -153,7 +153,7 @@
 
   /* ---- Control surface */
   --control-hover: rgba(0, 0, 0, .035);
-  --control-active-bg: rgba(0, 0, 0, .06);
+  --control-active-bg: linear-gradient(rgba(0, 0, 0, .06), rgba(0, 0, 0, .06));
   --control-active-edge: 0 0 0 0 transparent;
   --control-active-lift: 0 0 0 0 transparent;
   --button-edge: rgba(255, 255, 255, .14);
@@ -297,7 +297,7 @@
       0 10px 28px rgba(0, 0, 0, .4);
 
     --control-hover: rgba(255, 255, 255, .045);
-    --control-active-bg: rgba(255, 255, 255, .085);
+    --control-active-bg: linear-gradient(rgba(255, 255, 255, .085), rgba(255, 255, 255, .085));
     --control-active-edge: 0 0 0 0 transparent;
     --control-active-lift: 0 0 0 0 transparent;
   --button-edge: rgba(255, 255, 255, .08);
@@ -399,7 +399,7 @@
     0 10px 28px rgba(0, 0, 0, .4);
 
   --control-hover: rgba(255, 255, 255, .045);
-  --control-active-bg: rgba(255, 255, 255, .085);
+  --control-active-bg: linear-gradient(rgba(255, 255, 255, .085), rgba(255, 255, 255, .085));
   --control-active-edge: 0 0 0 0 transparent;
   --control-active-lift: 0 0 0 0 transparent;
   --button-edge: rgba(255, 255, 255, .08);
