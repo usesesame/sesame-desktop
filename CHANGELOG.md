@@ -25,6 +25,8 @@ release cannot be published without saying what changed in it.
   it yourself. Until a device on 0.5 is updated, it refuses a snapshot that
   holds anything 0.5 cannot read, such as a custom field, a filling rule, a
   never-save site or an alias token, and it leaves its own vault as it was.
+  It reports this as a connection problem, and changes made on it stay on
+  that device until it is updated.
 
 ### Logins
 
@@ -127,6 +129,13 @@ release cannot be published without saying what changed in it.
   before anything is created on the server.
 - A device that unlocked for the first time after updating while a Sync run
   was in flight kept its old Sync state. The run now upgrades it first.
+- Sesame now compares its real version with the minimum a server asks for.
+  Earlier versions compared a fixed 0.1.0, so a server that raises its
+  minimum above 0.1.0 stops every version before 0.6.0 from syncing and
+  linking, with a message to update. A minimum that is not a version number
+  now refuses Sync instead of being ignored.
+- When Sync has stopped on a conflict the title bar says it needs attention.
+  It used to say the changes were not synced yet.
 
 ### Everyday use
 
@@ -136,6 +145,11 @@ release cannot be published without saying what changed in it.
 - Unlocking no longer freezes the window while the master password is
   checked, and locking during that check keeps the vault locked.
 - Import and merge backups keep the newest five.
+- On Windows, uninstalling or reinstalling straight after an install could
+  fail or leave sesame.exe behind, because Windows Explorer still had the
+  file open to read its icon. The installer now waits for Explorer, and an
+  uninstall that cannot remove a program file keeps its entry in Windows
+  so it can be run again.
 - A name, address or folder that hides a text direction character can no
   longer show a file name or a host backwards. Sesame shows the hidden
   character as a question mark, and a revealed password is still shown
