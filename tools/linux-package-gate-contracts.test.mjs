@@ -380,8 +380,8 @@ test('a signal-terminated app is not counted as alive', async () => {
 
 test('the release lane gates every shipped format before freezing evidence', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'release-linux-early-access.yml'), 'utf8')
-  assert.equal((workflow.match(/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'the lane does not gate each shipped format')
-  assert.equal((workflow.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'the lane does not run each shipped-format gate under a display server')
+  assert.equal((workflow.match(/linux-shipped-package-gate\.mjs/g) ?? []).length, 4, 'the lane does not gate each shipped format and the upgrade from the previous release')
+  assert.equal((workflow.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 4, 'the lane does not run each shipped-format gate and the upgrade gate under a display server')
   for (const format of ['deb', 'rpm', 'appimage']) {
     assert.match(workflow, new RegExp(`--format ${format}\\b`), `the lane does not gate the shipped ${format}`)
   }
@@ -428,13 +428,13 @@ test('a download that does not match its pinned hash is refused before it is wri
   }
 })
 
-test('Linux CI exercises the shipped rpm and AppImage gates before tagging', async () => {
+test('Linux CI exercises the shipped deb upgrade, rpm and AppImage gates before tagging', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
   const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
-  for (const format of ['rpm', 'appimage']) {
+  for (const format of ['deb', 'rpm', 'appimage']) {
     assert.match(job, new RegExp(`--format ${format}\\b`), `the Linux CI job does not gate the shipped ${format}`)
   }
-  assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 2, 'each CI shipped-format gate must run under a display server')
+  assert.equal((job.match(/xvfb-run -a node tools\/linux-shipped-package-gate\.mjs/g) ?? []).length, 3, 'each CI shipped-format gate must run under a display server')
 })
 
 test('Linux package validation uses the pinned release build image', async () => {
@@ -477,11 +477,10 @@ test('Linux bundle builders apply pending library security updates before buildi
   }
 })
 
-test('Linux CI prints the RPM and AppImage evidence when a shipped gate fails', async () => {
+test('Linux CI prints the deb, RPM and AppImage evidence when a shipped gate fails', async () => {
   const workflow = await readFile(path.join(repository, '.github', 'workflows', 'ci.yml'), 'utf8')
   const job = workflow.slice(workflow.indexOf('  linux-bundles:'), workflow.indexOf('  linux-installed:'))
-  for (const [format, log] of [['rpm', 'linux-rpm-launch.log'], ['appimage', 'linux-appimage-launch.log']]) {
-    const directory = `linux-${format}-shipped-evidence`
+  for (const [format, log, directory] of [['rpm', 'linux-rpm-launch.log', 'linux-rpm-shipped-evidence'], ['appimage', 'linux-appimage-launch.log', 'linux-appimage-shipped-evidence'], ['deb', 'linux-launch.log', 'linux-deb-upgrade-evidence']]) {
     const step = job.split('\n      - name:').find((entry) => entry.includes(`--format ${format}`))
     assert.ok(step, `the Linux CI job does not run the ${format} gate`)
     assert.match(step, /if ! xvfb-run -a node tools\/linux-shipped-package-gate\.mjs[\s\S]*; then/, `the ${format} evidence must be printed only when the gate fails`)
