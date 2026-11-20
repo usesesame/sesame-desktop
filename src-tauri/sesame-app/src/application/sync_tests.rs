@@ -425,6 +425,12 @@ fn reset_removes_only_the_local_sync_state_after_the_service_accepts() {
     store
         .save_state(&SyncState::new(VAULT, DEVICE))
         .expect("saved state");
+    store
+        .save_upgrade(&sesame_core::UpgradeDigests {
+            before: vec!["fictional-before".into()],
+            after: "fictional-after".into(),
+        })
+        .expect("saved upgrade");
     let server = TestServer::start(|request| match request.path.as_str() {
         "/v1/sync/state" => Reply::json(200, &state_json(1, 0, "approved", 1)),
         "/v1/sync/reset" => Reply::bytes(204, Vec::new()),
@@ -435,6 +441,7 @@ fn reset_removes_only_the_local_sync_state_after_the_service_accepts() {
     block_on(reset_vault_in_state(&store, &client)).expect("reset");
 
     assert!(store.load_state().expect("state").is_none());
+    assert!(!store.upgrade_path().exists());
     assert!(store.identity_present());
 }
 

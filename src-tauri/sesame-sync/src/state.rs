@@ -405,7 +405,7 @@ pub fn read_protected_with(path: &Path, protector: &dyn DeviceProtector) -> Opti
     Some(state)
 }
 
-pub(crate) fn tagged_files_exist(path: &Path) -> bool {
+pub fn tagged_files_exist(path: &Path) -> bool {
     path.exists() || tag_path(path).exists() || next_path(path).exists()
 }
 

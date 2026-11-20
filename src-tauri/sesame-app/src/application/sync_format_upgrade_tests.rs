@@ -346,3 +346,348 @@ fn turning_sync_off_forgets_a_recorded_upgrade() {
     assert!(devices.laptop_store.load_upgrade().is_none());
     assert!(!devices.laptop_store.upgrade_path().exists());
 }
+
+impl TwoDevices {
+    fn stored_digest(&self, on_laptop: bool) -> String {
+        let (_, store, _) = self.device(on_laptop);
+        store
+            .load_state()
+            .expect("state")
+            .expect("saved state")
+            .payload_digest
+    }
+
+    fn unlock_again(&self, on_laptop: bool) {
+        let (vault, _, _) = self.device(on_laptop);
+        vault.state.lock_for_lifecycle().expect("locked");
+        self.upgrade(on_laptop);
+    }
+
+    fn upgrade_copies(&self, on_laptop: bool) -> Vec<Vec<u8>> {
+        let (vault, _, _) = self.device(on_laptop);
+        let Ok(entries) = std::fs::read_dir(vault.path().with_file_name("backups")) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("sesame-before-upgrade-")
+            })
+            .map(|entry| std::fs::read(entry.path()).expect("backup bytes"))
+            .collect()
+    }
+}
+
+fn block(path: &std::path::Path) {
+    std::fs::create_dir_all(path.join("occupied")).expect("blocked path");
+}
+
+fn unblock(path: &std::path::Path) {
+    std::fs::remove_dir_all(path).expect("unblocked path");
+}
+
+fn upgrade_staging(store: &SyncStore) -> PathBuf {
+    store.upgrade_path().with_extension("json.next")
+}
+
+#[test]
+fn an_unlock_that_cannot_record_or_adopt_the_upgrade_still_saves_it_with_its_format_10_copy() {
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let original = std::fs::read(devices.laptop.path()).expect("format 10 bytes");
+    block(&upgrade_staging(&devices.laptop_store));
+    let busy = crate::sync::coordinator::Coordinator::new();
+    assert!(busy.begin());
+
+    devices.upgrade_with(true, &busy);
+
+    assert_eq!(devices.upgrade_copies(true), std::slice::from_ref(&original));
+    {
+        let mut session = devices.laptop.state.session.lock().expect("session lock");
+        crate::vault::storage::remove_pin_for_session(session.as_mut().expect("unlocked"))
+            .expect("a credential change after the upgrade");
+    }
+    assert_eq!(devices.upgrade_copies(true), [original]);
+}
+
+#[test]
+fn an_upgrade_kept_only_in_the_session_is_adopted_by_the_first_run() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let before = devices.stored_digest(true);
+    block(&upgrade_staging(&devices.laptop_store));
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    assert!(devices.laptop_store.load_upgrade().is_none());
+    busy.finish(Outcome::AlreadyCurrent);
+
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_ne!(devices.stored_digest(true), before);
+    assert_eq!(devices.uploads(), 2);
+}
+
+#[test]
+fn a_lock_before_any_run_with_an_unrecorded_upgrade_counts_it_as_an_edit_and_loses_nothing() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    block(&upgrade_staging(&devices.laptop_store));
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    busy.finish(Outcome::AlreadyCurrent);
+
+    devices.unlock_again(true);
+
+    assert!(devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 3 }));
+    assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 3 }));
+    assert_eq!(devices.content(true), devices.content(false));
+}
+
+#[test]
+fn an_upgrade_made_while_the_sync_state_cannot_be_read_is_adopted_once_it_can() {
+    use crate::sync::coordinator::Outcome;
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let before = devices.stored_digest(true);
+    let tag = devices.laptop_store.state_path().with_extension("json.tag");
+    let readable = std::fs::read(&tag).expect("state tag");
+    std::fs::write(&tag, b"fictional tag the protector cannot open").expect("broken tag");
+
+    devices.upgrade(true);
+    assert!(devices.laptop_store.load_state().expect("state").is_none());
+    assert!(devices.laptop_store.load_upgrade().is_some());
+
+    std::fs::write(&tag, readable).expect("restored tag");
+    devices.unlock_again(true);
+
+    assert_ne!(devices.stored_digest(true), before);
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 2);
+}
+
+#[test]
+fn a_vault_save_that_fails_after_the_mapping_leaves_the_sync_state_alone() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_synced_devices();
+    assert_eq!(login_of(&devices.laptop).created_at, 0);
+    devices.leave_on_format_10(true, unchanged);
+    let before = devices.stored_digest(true);
+    let original = std::fs::read(devices.laptop.path()).expect("format 10 bytes");
+    let previous = devices.laptop.path().with_extension("sesame.prev");
+    block(&previous);
+
+    let failed = crate::application::lifecycle::unlock_vault_in_state(
+        &devices.laptop.state,
+        &crate::release::ReleasePresence::default(),
+        &FakeEffects::with_sync(
+            devices.laptop.path().to_path_buf(),
+            devices._scratch[0].path.clone(),
+            Coordinator::new(),
+        ),
+        zeroize::Zeroizing::new(PASSWORD.to_string()),
+    );
+
+    assert!(failed.is_err());
+    assert_eq!(devices.stored_digest(true), before);
+    assert_eq!(
+        std::fs::read(devices.laptop.path()).expect("vault bytes"),
+        original
+    );
+    assert!(devices.laptop_store.load_upgrade().is_some());
+    unblock(&previous);
+    std::thread::sleep(std::time::Duration::from_millis(1_100));
+    devices.upgrade(true);
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 1);
+}
+
+#[test]
+fn a_stop_after_the_vault_save_finishes_the_adoption_at_the_next_unlock() {
+    use crate::sync::coordinator::Outcome;
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let before = devices.stored_digest(true);
+    let staging = devices.laptop_store.state_path().with_extension("json.next");
+    block(&staging);
+
+    devices.upgrade(true);
+    assert_eq!(devices.stored_digest(true), before);
+    assert!(devices.laptop_store.load_upgrade().is_some());
+    devices.laptop.state.lock_for_lifecycle().expect("locked");
+    unblock(&staging);
+
+    devices.upgrade(true);
+    assert_ne!(devices.stored_digest(true), before);
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 2);
+}
+
+#[test]
+fn a_stop_before_the_mapping_is_removed_changes_nothing_at_the_next_unlock() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    busy.finish(Outcome::AlreadyCurrent);
+    let mapping = devices.laptop_store.upgrade_path();
+    let tag = mapping.with_extension("json.tag");
+    let kept = (
+        std::fs::read(&mapping).expect("mapping"),
+        std::fs::read(&tag).expect("mapping tag"),
+    );
+    devices.unlock_again(true);
+    let adopted = devices.stored_digest(true);
+    assert!(!mapping.exists());
+    std::fs::write(&mapping, kept.0).expect("mapping left behind");
+    std::fs::write(&tag, kept.1).expect("mapping tag left behind");
+
+    devices.unlock_again(true);
+
+    assert_eq!(devices.stored_digest(true), adopted);
+    assert!(!mapping.exists());
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 2);
+}
+
+fn rename_after_the_upgrade(payload: &mut crate::vault::VaultPayload) {
+    payload.entries[0].title = "Northwind renamed on 0.6.0".into();
+}
+
+#[test]
+fn an_edit_made_after_the_upgrade_and_before_the_first_run_uploads() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    busy.finish(Outcome::AlreadyCurrent);
+
+    devices.laptop.seed(rename_after_the_upgrade);
+
+    assert!(devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 3 }));
+    assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 3 }));
+    assert_eq!(
+        login_of(&devices.desktop).title,
+        "Northwind renamed on 0.6.0"
+    );
+}
+
+#[test]
+fn an_edit_made_after_the_upgrade_still_uploads_after_a_lock() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    devices.laptop.seed(rename_after_the_upgrade);
+    devices.laptop.state.lock_for_lifecycle().expect("locked");
+    busy.finish(Outcome::AlreadyCurrent);
+
+    devices.upgrade(true);
+
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert!(devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 3 }));
+    assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 3 }));
+    assert_eq!(
+        login_of(&devices.desktop).title,
+        "Northwind renamed on 0.6.0"
+    );
+}
+
+#[test]
+fn a_corrupt_mapping_is_ignored_and_removed_without_losing_anything() {
+    use crate::sync::coordinator::{Coordinator, Outcome};
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let busy = Coordinator::new();
+    assert!(busy.begin());
+    devices.upgrade_with(true, &busy);
+    busy.finish(Outcome::AlreadyCurrent);
+    std::fs::write(devices.laptop_store.upgrade_path(), b"{\"before\":").expect("corrupt");
+
+    devices.unlock_again(true);
+
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert!(devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::Uploaded { revision: 3 }));
+    assert_eq!(devices.run(false), Ok(Outcome::Downloaded { revision: 3 }));
+}
+
+#[test]
+fn a_mapping_from_another_vault_is_ignored_and_removed() {
+    use crate::sync::coordinator::Outcome;
+
+    let devices = two_synced_devices();
+    let foreign = sesame_core::UpgradeDigests {
+        before: vec![payload_digest(b"fictional other vault")],
+        after: payload_digest(b"fictional other vault upgraded"),
+    };
+    devices
+        .laptop_store
+        .save_upgrade(&foreign)
+        .expect("foreign mapping");
+
+    devices.unlock_again(true);
+
+    assert_ne!(devices.stored_digest(true), foreign.after);
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert!(!devices.unsynced(true));
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert_eq!(devices.uploads(), 1);
+}
+
+#[test]
+fn an_upgrade_during_an_unfinished_join_is_kept_until_the_join_completes() {
+    use crate::sync::coordinator::Outcome;
+
+    let devices = two_devices_synced_by_0_5_3(unchanged);
+    devices.leave_on_format_10(true, unchanged);
+    let before = devices.stored_digest(true);
+    let mut joining = devices.laptop_store.load_state().expect("state").expect("saved state");
+    joining.pending_join = Some(sesame_sync::pairing::ApproverIdentity {
+        device_id: "fictional-approver".into(),
+        signing_key: "fictional-signing-key".into(),
+        vault_id: joining.vault_id.clone(),
+        head_digest: "fictional-head".into(),
+    });
+    devices.laptop_store.save_state(&joining).expect("joining state");
+
+    devices.upgrade(true);
+
+    assert!(devices.laptop_store.load_upgrade().is_some());
+    joining.pending_join = None;
+    devices.laptop_store.save_state(&joining).expect("join finished");
+    assert_eq!(devices.stored_digest(true), before);
+    assert_eq!(devices.run(true), Ok(Outcome::AlreadyCurrent));
+    assert!(!devices.laptop_store.upgrade_path().exists());
+    assert_eq!(devices.uploads(), 2);
+}

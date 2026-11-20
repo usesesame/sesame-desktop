@@ -382,6 +382,10 @@ impl UnlockedVault {
         self.upgrade_digests.as_ref()
     }
 
+    pub fn forget_upgrade_digests(&mut self) {
+        self.upgrade_digests = None;
+    }
+
     pub fn opened_in_lock_generation(&self) -> u64 {
         self.opened_in_lock_generation
     }

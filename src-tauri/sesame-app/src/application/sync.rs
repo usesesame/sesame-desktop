@@ -106,6 +106,10 @@ impl SyncStore {
         crate::sync::state::forget_protected(&self.state_path())
     }
 
+    pub fn state_files_exist(&self) -> bool {
+        crate::sync::state::tagged_files_exist(&self.state_path())
+    }
+
     pub fn identity_present(&self) -> bool {
         self.identity_path().exists()
     }
@@ -255,48 +259,53 @@ pub fn remember_format_upgrade(
     }
 }
 
-pub fn record_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) -> VaultResult<bool> {
-    if store.load_join_state()?.is_none() {
-        return Ok(true);
-    }
+pub fn record_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) {
     match vault.upgrade_digests() {
-        Some(upgrade) => store.save_upgrade(upgrade).map(|()| true),
-        None => {
-            if let Some(upgrade) = store.load_upgrade() {
-                vault.remember_upgrade_digests(upgrade);
+        Some(upgrade) => {
+            if store.state_files_exist() {
+                let _ = store.save_upgrade(upgrade);
             }
-            Ok(true)
         }
+        None => recall_format_upgrade(store, vault),
     }
 }
 
-pub fn adopt_digest(
+pub fn recall_format_upgrade(store: &SyncStore, vault: &mut UnlockedVault) {
+    if vault.upgrade_digests().is_some() {
+        return;
+    }
+    if let Some(upgrade) = store.load_upgrade() {
+        vault.remember_upgrade_digests(upgrade);
+    }
+}
+
+pub fn settle_format_upgrade(
     store: &SyncStore,
     local: &SyncState,
-    digest: String,
-) -> VaultResult<SyncState> {
-    let mut next = local.clone();
-    next.payload_digest = digest;
-    store.save_state(&next)?;
-    store.forget_upgrade()?;
-    Ok(next)
+    vault: &mut UnlockedVault,
+) -> VaultResult<Option<SyncState>> {
+    if vault.format_upgrade_pending() {
+        return Ok(None);
+    }
+    let adopted = match digest_to_adopt(local, vault)? {
+        Some(digest) => {
+            let mut next = local.clone();
+            next.payload_digest = digest;
+            store.save_state(&next)?;
+            Some(next)
+        }
+        None => None,
+    };
+    vault.forget_upgrade_digests();
+    let _ = store.forget_upgrade();
+    Ok(adopted)
 }
 
-pub fn upgrade_legacy_digest(
-    store: &SyncStore,
-    vault: &UnlockedVault,
-) -> VaultResult<Option<SyncState>> {
+pub fn upgrade_legacy_digest(store: &SyncStore, vault: &mut UnlockedVault) -> VaultResult<bool> {
     let Some(local) = store.load_state()? else {
-        return Ok(None);
+        return Ok(false);
     };
-    let Some(digest) = digest_to_adopt(&local, vault)? else {
-        if vault.upgrade_digests().is_some() {
-            store.forget_upgrade()?;
-        }
-        return Ok(None);
-    };
-    adopt_digest(store, &local, digest)?;
-    Ok(Some(local))
+    Ok(settle_format_upgrade(store, &local, vault)?.is_some())
 }
 
 pub fn release_claim_after_failure<T>(
@@ -304,8 +313,9 @@ pub fn release_claim_after_failure<T>(
     store: &SyncStore,
     release: impl FnOnce() -> T,
 ) -> T {
-    let session = state.session.lock();
-    if let Ok(Some(unlocked)) = session.as_deref() {
+    let mut session = state.session.lock();
+    if let Ok(Some(unlocked)) = session.as_deref_mut() {
+        recall_format_upgrade(store, unlocked);
         let _ = upgrade_legacy_digest(store, unlocked);
     }
     let released = release();
@@ -828,7 +838,8 @@ pub async fn reset_vault_in_state(store: &SyncStore, client: &SyncClient) -> Res
         .reset(&identity, server.vault_epoch)
         .await
         .map_err(present)?;
-    store.forget_state()
+    store.forget_state()?;
+    store.forget_upgrade()
 }
 
 pub async fn upgrade_device_key_in_state(

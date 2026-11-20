@@ -1185,20 +1185,16 @@ where
 
     let local = reconcile_pending_upload_in_state(store, client, local).await?;
     let server = client.state().await.map_err(present)?;
-    let (has_local_changes, upgraded_digest) = {
-        let session = state
+    let (has_local_changes, local) = {
+        let mut session = state
             .session
             .lock()
             .map_err(|_| "Sesame could not read the unlocked vault.".to_string())?;
-        let unlocked = session.as_ref().ok_or("sync_locked")?;
-        (
-            vault_has_local_changes(&local, unlocked)?,
-            super::sync::digest_to_adopt(&local, unlocked)?,
-        )
-    };
-    let local = match upgraded_digest {
-        Some(digest) => super::sync::adopt_digest(store, &local, digest)?,
-        None => local,
+        let unlocked = session.as_mut().ok_or("sync_locked")?;
+        super::sync::recall_format_upgrade(store, unlocked);
+        let changed = vault_has_local_changes(&local, unlocked)?;
+        let settled = super::sync::settle_format_upgrade(store, &local, unlocked)?;
+        (changed, settled.unwrap_or(local))
     };
     if has_local_changes || must_publish_after_key_change(&local, &server) {
         let transfer = reconnect().await?;
