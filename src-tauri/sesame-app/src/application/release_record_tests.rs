@@ -9,10 +9,10 @@ use crate::browser_protocol::{
     BrowserRequest, CARD_PROTOCOL_VERSION, LOOKALIKE_PROTOCOL_VERSION, PROTOCOL_VERSION,
     TOTP_PROTOCOL_VERSION,
 };
-use crate::release::ReleasePresence;
+use crate::release::{ReleasePresence, PRESENCE_REQUIRED};
 use crate::test_support::{grant, TestVault};
 use crate::vault::release_record::{EntryKind, FieldKind, MatchKind, Outcome, ReleaseDraft};
-use crate::vault::{Card, CustomFieldEntry, Identity, VaultEntry, VaultState};
+use crate::vault::{Card, CustomFieldEntry, Identity, LegacyField, VaultEntry, VaultState};
 
 use super::backups::{create_backup_in_state, delete_local_vault_in_state};
 use super::browser_fill::{
@@ -665,7 +665,7 @@ fn reveals_copies_and_quick_access_are_recorded_after_presence() {
             (
                 EntryKind::Copy,
                 Some("login-a"),
-                vec![FieldKind::CustomField]
+                vec![FieldKind::HiddenField]
             ),
             (
                 EntryKind::Reveal,
@@ -679,6 +679,54 @@ fn reveals_copies_and_quick_access_are_recorded_after_presence() {
             ),
         ]
     );
+}
+
+#[test]
+fn a_hidden_legacy_field_on_a_card_needs_the_same_check_as_its_security_code() {
+    let vault = canary_vault();
+    vault.seed(|payload| {
+        payload.cards[0].legacy_fields = vec![LegacyField {
+            label: "PIN hint".to_string(),
+            value: format!("{CANARY}-pin-hint"),
+            secret: true,
+        }];
+    });
+    let presence = ReleasePresence::default();
+    let effects = FakeEffects::new(vault.path().to_path_buf());
+
+    for field in ["legacy:0", "securityCode"] {
+        assert_eq!(
+            reveal_item_field_in_state(&vault.state, &presence, "card-a", "card", field)
+                .map(|value| value.to_string()),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+        assert_eq!(
+            copy_item_field_in_state(
+                &vault.state,
+                &presence,
+                &effects,
+                "card-a",
+                "card",
+                field,
+                None
+            ),
+            Err(PRESENCE_REQUIRED.to_string())
+        );
+    }
+    assert!(entries(&vault.state).is_empty());
+
+    grant(&vault, &presence);
+    copy_item_field_in_state(
+        &vault.state,
+        &presence,
+        &effects,
+        "card-a",
+        "card",
+        "legacy:0",
+        None,
+    )
+    .expect("copied");
+    assert_eq!(only(&vault.state).fields, vec![FieldKind::LegacyField]);
 }
 
 #[test]

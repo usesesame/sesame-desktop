@@ -123,14 +123,12 @@ pub fn require_linking_enabled(
         &document.minimum_desktop_version,
         document.minimum_android_version.as_deref(),
     ) {
-        if client_platform == ANDROID_PLATFORM {
-            let malformed = version::parse(minimum).is_none()
-                || version::below(client_version, minimum).is_none();
-            if malformed || version::below(client_version, minimum) == Some(true) {
-                return Err(unavailable("Update Sesame before linking this device."));
-            }
-        } else if version_lt(client_version, minimum) {
-            return Err(unavailable("Update Sesame before linking this desktop."));
+        if version::below(client_version, minimum) != Some(false) {
+            return Err(unavailable(if client_platform == ANDROID_PLATFORM {
+                "Update Sesame before linking this device."
+            } else {
+                "Update Sesame before linking this desktop."
+            }));
         }
     }
     Ok(())
@@ -151,36 +149,11 @@ pub fn require_sync_enabled(
         &document.minimum_desktop_version,
         document.minimum_android_version.as_deref(),
     ) {
-        if client_platform == ANDROID_PLATFORM {
-            let below = version::below(client_version, minimum);
-            if below != Some(false) {
-                return Err(unavailable("Update Sesame before using Sync."));
-            }
-        } else if version_lt(client_version, minimum) {
+        if version::below(client_version, minimum) != Some(false) {
             return Err(unavailable("Update Sesame before using Sync."));
         }
     }
     Ok(())
-}
-
-pub fn version_lt(current: &str, minimum: &str) -> bool {
-    let parse = |value: &str| {
-        value
-            .split('.')
-            .take(3)
-            .map(|part| part.parse::<u32>().unwrap_or(0))
-            .collect::<Vec<_>>()
-    };
-    let current = parse(current);
-    let minimum = parse(minimum);
-    for index in 0..3 {
-        let a = current.get(index).copied().unwrap_or(0);
-        let b = minimum.get(index).copied().unwrap_or(0);
-        if a != b {
-            return a < b;
-        }
-    }
-    false
 }
 
 #[cfg(test)]
@@ -268,6 +241,60 @@ mod tests {
         assert!(require_sync_enabled(&document, "0.1.0", ANDROID_PLATFORM).is_err());
         assert!(require_linking_enabled(&document, "0.1.0", ANDROID_PLATFORM).is_err());
         assert!(require_sync_enabled(&document, "0.5.1", DESKTOP_PLATFORM).is_ok());
+    }
+
+    fn desktop_minimum(minimum: &str) -> Document {
+        let mut value = payload();
+        value["minimumDesktopVersion"] = json!(minimum);
+        document(value)
+    }
+
+    fn desktop_allowed(client: &str, minimum: &str) -> bool {
+        let document = desktop_minimum(minimum);
+        let sync = require_sync_enabled(&document, client, DESKTOP_PLATFORM).is_ok();
+        let linking = require_linking_enabled(&document, client, DESKTOP_PLATFORM).is_ok();
+        assert_eq!(sync, linking, "{client} against {minimum}");
+        sync
+    }
+
+    #[test]
+    fn a_desktop_at_the_minimum_is_allowed_and_one_patch_below_is_refused() {
+        assert!(desktop_allowed("0.6.0", "0.6.0"));
+        assert!(desktop_allowed("0.6.1", "0.6.0"));
+        assert!(!desktop_allowed("0.5.9", "0.6.0"));
+        assert!(!desktop_allowed("0.6.0", "0.6.1"));
+        assert!(!desktop_allowed("0.1.0", "0.6.0"));
+    }
+
+    #[test]
+    fn desktop_versions_compare_by_number_and_not_by_text() {
+        assert!(!desktop_allowed("0.3.0", "0.10.0"));
+        assert!(desktop_allowed("0.10.0", "0.3.0"));
+        assert!(desktop_allowed("1.0.0", "0.99.99"));
+    }
+
+    #[test]
+    fn a_desktop_prerelease_compares_as_its_release_numbers() {
+        assert!(desktop_allowed("0.6.0-rc.1", "0.6.0"));
+        assert!(!desktop_allowed("0.5.3-rc.1", "0.6.0"));
+        assert!(desktop_allowed("0.6.0", "0.6.0-beta.1"));
+        assert!(!desktop_allowed("0.5.9", "0.6.0-beta.1"));
+    }
+
+    #[test]
+    fn a_malformed_desktop_minimum_refuses_sync_and_linking() {
+        for minimum in [
+            "latest", "", "1", "0.6", "0.6.x", "0.6.0.1", " 0.6.0", "v0.6.0",
+        ] {
+            assert!(!desktop_allowed("0.6.0", minimum), "{minimum:?}");
+            assert!(!desktop_allowed("99.0.0", minimum), "{minimum:?}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_desktop_client_version_is_refused() {
+        assert!(!desktop_allowed("not-a-version", "0.0.0"));
+        assert!(!desktop_allowed("", "0.0.0"));
     }
 
     #[test]

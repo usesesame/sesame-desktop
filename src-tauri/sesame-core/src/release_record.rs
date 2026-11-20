@@ -13,7 +13,7 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::crypto::{bytes_match, decrypt_bytes, encrypt_bytes};
 use crate::platform::open_private_append;
 use crate::storage::{atomic_replace, damaged_copy_paths, set_aside_damaged};
-use crate::types::CipherBlob;
+use crate::types::{CipherBlob, TaggedItem};
 use crate::util::{fill_secret, read_file_with_limit, unix_timestamp};
 use crate::{UnlockedVault, VaultResult};
 
@@ -164,6 +164,7 @@ pub enum FieldKind {
     TwoFactorCode,
     BackupCodes,
     CustomField,
+    HiddenField,
     LegacyField,
     CardNumber,
     CardholderName,
@@ -208,6 +209,31 @@ impl FieldKind {
             _ => Self::Other,
         }
     }
+
+    pub fn of_item_key(item: &TaggedItem, key: &str) -> Self {
+        match Self::from_key(key) {
+            Self::CustomField if is_hidden_custom_field(item, key) => Self::HiddenField,
+            kind => kind,
+        }
+    }
+}
+
+fn is_hidden_custom_field(item: &TaggedItem, key: &str) -> bool {
+    let Some(index) = key
+        .trim()
+        .strip_prefix("field:")
+        .and_then(|index| index.parse::<usize>().ok())
+    else {
+        return false;
+    };
+    let fields = match item {
+        TaggedItem::Login(entry) => &entry.custom_fields,
+        TaggedItem::CustomRecord(record) => &record.fields,
+        _ => return false,
+    };
+    fields
+        .get(index)
+        .is_some_and(|field| field.kind == "secret")
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, ts_rs::TS)]
@@ -398,6 +424,11 @@ impl ReleaseDraft {
 
     pub fn field(mut self, key: &str) -> Self {
         self.fields.push(FieldKind::from_key(key));
+        self
+    }
+
+    pub fn field_kind(mut self, kind: FieldKind) -> Self {
+        self.fields.push(kind);
         self
     }
 
@@ -1620,6 +1651,48 @@ impl Inner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{CustomFieldEntry, CustomRecord, VaultEntry};
+
+    fn custom_fields() -> Vec<CustomFieldEntry> {
+        ["text", "secret"]
+            .into_iter()
+            .map(|kind| CustomFieldEntry {
+                label: format!("Fictional {kind} field"),
+                value: "fictional value".to_string(),
+                kind: kind.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_custom_field_is_hidden_only_when_the_item_marks_it_secret() {
+        let mut entry = VaultEntry::default();
+        entry.custom_fields = custom_fields();
+        let mut record = CustomRecord::default();
+        record.fields = custom_fields();
+        for item in [TaggedItem::Login(entry), TaggedItem::CustomRecord(record)] {
+            assert_eq!(
+                FieldKind::of_item_key(&item, "field:0"),
+                FieldKind::CustomField
+            );
+            assert_eq!(
+                FieldKind::of_item_key(&item, " field:1 "),
+                FieldKind::HiddenField
+            );
+            assert_eq!(
+                FieldKind::of_item_key(&item, "field:9"),
+                FieldKind::CustomField
+            );
+            assert_eq!(
+                FieldKind::of_item_key(&item, "field:one"),
+                FieldKind::CustomField
+            );
+            assert_eq!(
+                FieldKind::of_item_key(&item, "password"),
+                FieldKind::Password
+            );
+        }
+    }
 
     fn entry(seq: u64, outcome: Outcome) -> RecordEntry {
         ReleaseDraft::new(EntryKind::BrowserFill, outcome)

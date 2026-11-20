@@ -324,6 +324,13 @@ impl VaultState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpgradeDigests {
+    pub before: Vec<String>,
+    pub after: String,
+}
+
 pub struct UnlockedVault {
     pub path: PathBuf,
     key: vault_key::VaultKey,
@@ -336,6 +343,7 @@ pub struct UnlockedVault {
     pub hello_wrap: Option<HelloWrap>,
     pub setup_complete: bool,
     format_upgrade_pending: bool,
+    upgrade_digests: Option<UpgradeDigests>,
     opened_in_lock_generation: u64,
     records: record_store::VaultRecordStore,
 }
@@ -356,6 +364,7 @@ impl UnlockedVault {
             hello_wrap: opened.file.hello_wrap.clone(),
             setup_complete: opened.file.setup_complete,
             format_upgrade_pending: opened.migration.source_format < VAULT_FORMAT_VERSION,
+            upgrade_digests: None,
             opened_in_lock_generation: 0,
             records: record_store::VaultRecordStore::from_payload(&opened.payload)?,
         })
@@ -363,6 +372,18 @@ impl UnlockedVault {
 
     pub fn format_upgrade_pending(&self) -> bool {
         self.format_upgrade_pending
+    }
+
+    pub fn remember_upgrade_digests(&mut self, digests: UpgradeDigests) {
+        self.upgrade_digests = Some(digests);
+    }
+
+    pub fn upgrade_digests(&self) -> Option<&UpgradeDigests> {
+        self.upgrade_digests.as_ref()
+    }
+
+    pub fn forget_upgrade_digests(&mut self) {
+        self.upgrade_digests = None;
     }
 
     pub fn opened_in_lock_generation(&self) -> u64 {

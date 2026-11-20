@@ -72,8 +72,8 @@ pub fn digest_kept_through_adoption(
     vault: &UnlockedVault,
     adopted_digests: [Option<&str>; 2],
 ) -> Result<Option<String>, String> {
+    let mut unchanged = !crate::application::sync::vault_has_local_changes(state, vault)?;
     let payload = vault.open_payload()?;
-    let mut unchanged = !state.has_local_changes(&payload)?;
     for adopted in adopted_digests.into_iter().flatten() {
         unchanged = unchanged || crate::sync::state::digest_describes(adopted, &payload)?;
     }

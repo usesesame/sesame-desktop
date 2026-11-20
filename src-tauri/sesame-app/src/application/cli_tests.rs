@@ -2171,6 +2171,51 @@ fn an_allowed_request_is_recorded_as_a_terminal_read_of_the_item() {
 }
 
 #[test]
+fn a_plain_custom_field_read_by_a_terminal_is_recorded_as_a_custom_field() {
+    let harness = Harness::new();
+    let (replies, _) = harness.run_with(
+        &get(43, Some("Member number"), false),
+        &terminal(100),
+        |_, _| harness.allow(false),
+    );
+    assert_eq!(
+        replies.last(),
+        Some(&CliReply::value(&id(43), "fictional-member-4471", false))
+    );
+    let entry = newest(&harness);
+    assert_terminal(
+        &entry,
+        EntryKind::TerminalRead,
+        Outcome::Released,
+        Some("fictional-login"),
+    );
+    assert_eq!(entry.fields, vec![FieldKind::CustomField]);
+}
+
+#[test]
+fn a_hidden_custom_field_read_by_a_terminal_is_recorded_as_a_hidden_field() {
+    let harness = Harness::new();
+    grant(&harness.vault, &harness.presence);
+    let (replies, _) = harness.run_with(
+        &get(44, Some("Security answer"), false),
+        &terminal(100),
+        |_, _| harness.allow(false),
+    );
+    assert_eq!(
+        replies.last(),
+        Some(&CliReply::value(&id(44), &format!("{CANARY}-answer"), true))
+    );
+    let entry = newest(&harness);
+    assert_terminal(
+        &entry,
+        EntryKind::TerminalRead,
+        Outcome::Released,
+        Some("fictional-login"),
+    );
+    assert_eq!(entry.fields, vec![FieldKind::HiddenField]);
+}
+
+#[test]
 fn a_denied_request_is_recorded_as_a_refusal_of_that_item() {
     let harness = Harness::new();
     harness.run_with(&get(41, Some("password"), false), &terminal(100), |_, _| {

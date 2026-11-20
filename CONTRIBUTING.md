@@ -149,6 +149,17 @@ Changing either side needs a security-boundary review and the clean-profile
 verification described in the extension repository's
 [README](https://github.com/usesesame/sesame-browser-extension/blob/main/README.md).
 
+`npm run desktop:host:test:linux` runs the real extension in a real Chromium
+against the real native host and a live test build of the desktop. It fills a
+fictional login on a local page, checks that a page on another origin gets
+nothing and that a locked vault fills nothing, and gives the desktop approvals
+through the test bridge. It needs a display, so run it as
+`xvfb-run -a dbus-run-session -- npm run desktop:host:test:linux -- --extension-directory <checkout>`
+with an extension checkout that has its dependencies installed. Pull requests
+run it against the extension release named in
+`src-tauri/contracts/browser/extension-pin.json`, and a nightly workflow runs it
+against the extension's main branch.
+
 ## Reporting a security issue
 
 Do not open a public issue. Follow [.github/SECURITY.md](.github/SECURITY.md).
