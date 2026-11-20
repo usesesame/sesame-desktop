@@ -34,8 +34,8 @@
 ;      executable, as Explorer does while it reads the icon of a shortcut the
 ;      install just made. The uninstaller retries each program file it
 ;      removes for a bounded time, and if one is still there it exits 2 and
-;      keeps the uninstall and install location keys so the uninstall can run
-;      again.
+;      keeps uninstall.exe and the uninstall and install location keys so the
+;      uninstall can run again.
 ;
 ; Everything else in this file is kept intentionally equivalent to upstream
 ; (updater handling, WebView2 install, shortcuts, signing) so a
@@ -1000,7 +1000,9 @@ Section Uninstall
 
 
   ; Delete uninstaller
-  Delete "$INSTDIR\uninstall.exe"
+  ${If} $SesameProgramLeft <> 1
+    Delete "$INSTDIR\uninstall.exe"
+  ${EndIf}
 
   {{#each resources_ancestors}}
   RMDir /REBOOTOK "$INSTDIR\\{{this}}"

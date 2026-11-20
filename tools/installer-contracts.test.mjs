@@ -568,5 +568,6 @@ test('a Windows uninstall that leaves a program file behind reports it and can r
   assert.equal((uninstall.match(/!insertmacro SESAME_REMOVE_PROGRAM_FILE /g) ?? []).length, 3, 'the main program, the resources and the external binaries must each be removed with a check')
   assert.match(uninstall, /\$\{If\} \$SesameProgramLeft <> 1\s+!if "\$\{INSTALLMODE\}" == "both"\s+DeleteRegKey SHCTX "\$\{UNINSTKEY\}"[\s\S]*?!endif\s+\$\{EndIf\}/, 'the uninstall key goes even when the program stays')
   assert.match(uninstall, /\$\{If\} \$UpdateMode <> 1\s+\$\{AndIf\} \$SesameProgramLeft <> 1\s+DeleteRegKey SHCTX "\$\{MANUPRODUCTKEY\}"/, 'the install location record goes even when the program stays')
+  assert.match(uninstall, /\$\{If\} \$SesameProgramLeft <> 1\s+Delete "\$INSTDIR\\uninstall\.exe"\s+\$\{EndIf\}/, 'the uninstaller deletes itself even when the program stays, so the kept uninstall entry points at nothing')
   assert.equal((uninstall.match(/DeleteRegKey (?:SHCTX|HKLM|HKCU) "\$\{(?:UNINSTKEY|MANUPRODUCTKEY)\}"/g) ?? []).length, 4)
 })
