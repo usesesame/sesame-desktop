@@ -78,6 +78,7 @@ on it, as CI does for releases.
 | Auto-type | Yes | No |
 | Account linking | Yes | Secret Service wallet, validation pending |
 | Signed desktop updates | Yes | No |
+| `sesame` command line tool | Yes, every request asks | Yes, DEB and RPM put it on the path |
 
 A few things on Linux need your attention:
 

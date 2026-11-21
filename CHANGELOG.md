@@ -4,6 +4,160 @@ Every released version has a section here. The release workflow reads the
 section matching the tag and puts it at the top of the GitHub release, so a
 release cannot be published without saying what changed in it.
 
+## 0.6.0
+
+### Before you update
+
+- 0.6.0 moves the vault to format 11, and 0.5.3 cannot open a format 11
+  vault. The first time 0.6.0 unlocks an older vault it keeps one untouched
+  copy of it in the backups folder beside the vault, which is
+  ~/.local/share/app.usesesame.desktop/backups on Linux and
+  %LOCALAPPDATA%\app.usesesame.desktop\backups on Windows. Its name starts
+  with sesame-before-upgrade.
+- To go back to 0.5.3, close Sesame, move vault.sesame out of that folder,
+  start 0.5.3 and restore the copy from the welcome screen with the master
+  password you had before the upgrade. Anything saved after the upgrade is
+  lost. Changing the master password removes the local backups, this copy
+  included, so keep it somewhere else first if you might go back.
+- Update every synced device to 0.6.0. On Windows a device on 0.5 stops
+  syncing with a message to update once it learns the new minimum, which it
+  checks at most once an hour. A device on Linux never learns it, so update
+  it yourself. Until a device on 0.5 is updated, it refuses a snapshot that
+  holds anything 0.5 cannot read, such as a custom field, a filling rule, a
+  never-save site or an alias token, and it leaves its own vault as it was.
+  It reports this as a connection problem, and changes made on it stay on
+  that device until it is updated.
+
+### Logins
+
+- A login can hold its own named fields. A hidden field is only revealed or
+  copied after the master password check, and history, Trash, merges and
+  both exports carry the fields. Extra fields from imports and from older
+  vaults now show as custom fields.
+- Each login has a browser filling rule: this address only, the whole site,
+  or never fill. A whole-site login matches another host with the same
+  scheme, port and registrable domain, so tenants of a shared domain such as
+  github.io stay apart, and the approval says when a login matched by site.
+  Whole-site filling needs extension 0.3.0 or newer, and an older extension
+  keeps filling exact matches only.
+- The save prompt has "Never for this site", and Settings lists those sites
+  so they can be removed.
+
+### Browser
+
+- A password changed or generated from the browser is made by Sesame after
+  you approve, saved to the login and then handed to the browser. The old
+  password stays in history, and a notice waits until you keep the new
+  password or go back. This needs extension 0.3.0 or newer.
+- Going back is offered only for the change the login still holds, and the
+  notices survive a master password change and a crash.
+- A browser approval waits while you answer another dialog, set up a
+  vault or read the Sync notice, instead of opening over it. Before, a
+  request that came in during setup or behind a dialog was declined for you.
+  An approval ignores clicks until it has been on screen for a moment.
+- The browser helper registers for Brave and Vivaldi on Linux.
+
+### Email aliases
+
+- Settings has a new Extras tab with email aliases, which stay off until you
+  pick addy.io or SimpleLogin and paste an API token from your account
+  there. The login editor then has a Create alias action that asks the
+  service for a new forwarding address and offers it for the email field.
+- The token is kept in your vault and syncs with it. Turning aliases off
+  removes it from the vault, but older backups and synced versions keep it,
+  so revoke it at the service to stop it working.
+- The service is told which site an alias is for only if you turn that on,
+  and then only the site's host name.
+- If the connection ends before the service answers, Sesame says an alias
+  may have been made, because it cannot tell.
+
+### Command line
+
+- sesame list, sesame get and sesame totp let a terminal ask the running app
+  for an item. Nothing leaves until you allow it in the Sesame window, a
+  hidden value also asks for your master password, and --copy has Sesame
+  copy the value so it never reaches the terminal.
+- On Linux you can allow one terminal for five minutes. The allowance ends
+  when the vault locks and when almost anything in the vault changes, and
+  Settings lists the allowed terminals under Extras. On Windows every
+  request asks.
+- Anything printed in a terminal can be read by other programs running as
+  you. On Linux the tool only checks that the app it reaches runs as you, so
+  a fake app run as you could learn what you typed and print made-up values.
+- The AppImage does not put sesame on your path, so use an alias to the
+  AppImage file.
+- The Windows installer puts sesame on the system Path and the uninstaller
+  takes it off again, leaving every other entry as it was. If adding the
+  folder would make the Path too long for Command Prompt to find commands,
+  the installer leaves the Path alone and says so.
+- A request from a terminal waits behind a dialog you are already answering
+  instead of covering it.
+- In a terminal, sesame list prints a heading row that names the columns.
+  Output sent to a pipe stays as tab separated rows with no heading.
+- Activity records a terminal request that was denied, timed out or stopped
+  by a lock, next to the ones that were allowed.
+
+### Settings
+
+- Settings has six tabs: General, Security, Browser, Sync, Extras and Data.
+  The browser extension and the sites Sesame never saves are under Browser,
+  and the account, Sync and your own server are under Sync.
+
+### Activity
+
+- A new Activity view lists every fill, copy, reveal and export, each item
+  shows its recent use, and the fill approval says how often a login was
+  filled on that site and whether you denied it recently.
+- The list is an encrypted file beside the vault that stays on the device.
+  Another program running as the same user can still change or delete it,
+  and the view says so.
+- How long activity is kept and clearing it are set on the Activity page
+  instead of in Settings. Shortening how long activity is kept asks for the
+  master password and leaves an entry.
+- Copied one-time codes and email alias requests are listed too.
+- An entry written by a newer version of Sesame is kept and shown as one
+  plain line, so going back a version does not make the list look damaged.
+
+### Sync
+
+- Copying or filling a password no longer uploads the whole vault. Sync
+  ignores the last used times when it decides whether the vault changed, so
+  two devices that each only used a password no longer raise a conflict.
+- A busy server, a rate limit and a vault over the size limit are each
+  explained and retried where that helps. They used to read as the server
+  being unreachable. Turning Sync on refuses a vault that is too large
+  before anything is created on the server.
+- A device that unlocked for the first time after updating while a Sync run
+  was in flight kept its old Sync state. The run now upgrades it first.
+- Sesame now compares its real version with the minimum a server asks for.
+  Earlier versions compared a fixed 0.1.0, so a server that raises its
+  minimum above 0.1.0 stops every version before 0.6.0 from syncing and
+  linking, with a message to update. A minimum that is not a version number
+  now refuses Sync instead of being ignored.
+- When Sync has stopped on a conflict the title bar says it needs attention.
+  It used to say the changes were not synced yet.
+
+### Everyday use
+
+- Fields, chips, badges and notices are filled shapes with larger corners
+  where they had thin outlines, and the dark theme sets its background,
+  cards and fields further apart.
+- The item list sorts once per change instead of on every redraw.
+- In a short window the sidebar no longer slides Settings over Lock vault.
+  It tightens its rows and scrolls when it still cannot fit.
+- Unlocking no longer freezes the window while the master password is
+  checked, and locking during that check keeps the vault locked.
+- Import and merge backups keep the newest five.
+- On Windows, uninstalling or reinstalling straight after an install could
+  fail or leave sesame.exe behind, because Windows Explorer still had the
+  file open to read its icon. The installer now waits for Explorer, and an
+  uninstall that cannot remove a program file keeps its entry in Windows
+  so it can be run again.
+- A name, address or folder that hides a text direction character can no
+  longer show a file name or a host backwards. Sesame shows the hidden
+  character as a question mark, and a revealed password is still shown
+  exactly, with a line saying when it holds a character you cannot see.
+
 ## 0.5.3
 
 ### Everyday use

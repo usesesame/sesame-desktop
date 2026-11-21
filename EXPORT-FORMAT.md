@@ -28,7 +28,8 @@ renames a field within the same version number.
 | `customRecords` | Custom records. |
 | `trash` | Items deleted from the vault and not yet removed for good. |
 
-Revision history is not exported.
+Revision history, the sites where Sesame never offers to save and the email
+alias settings are not exported.
 
 ## Items
 

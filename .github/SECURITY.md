@@ -117,6 +117,11 @@ good-faith report that turns out to be out of scope is not held against you.
 - Sync is off until a person turns it on in Settings. The screen says that no
   independent review has happened. A service that refuses to answer, and a
   vault with a single device, are outside what Sync claims to prevent.
+- A vault that 0.6.0 has opened is format 11 and does not open in 0.5.3 or
+  earlier. Sync on Windows stops a device that is below the minimum version
+  it reads from the newest release. A Linux build has no update manifest, so
+  it never reads that minimum and keeps syncing until the server refuses its
+  version.
 - Sync device key transfer adds a post-quantum key exchange, ML-KEM-768
   combined with X25519, when the receiving device has a hybrid key. Nobody
   independent has reviewed it, and Sesame is not quantum safe. A vault key
@@ -210,6 +215,16 @@ good-faith report that turns out to be out of scope is not held against you.
   programs running as you, through the terminal's scrollback or a pipe. Use
   `--copy` to keep a value off the screen, and the clipboard is cleared after
   the time set in Settings.
+- Email aliases send the API token you paste to app.addy.io or
+  app.simplelogin.io, whichever you chose, over HTTPS with no redirects, each
+  time you create an alias. The token is kept in the vault, so it syncs to
+  your other devices and is inside every backup made while aliases were on.
+  Turning aliases off removes it from the vault but not from those copies, so
+  revoke the token at the service to stop it working. The service learns the
+  site's host name only when you turn that on.
+- The Activity list is an encrypted file beside the vault. A program running
+  as you can change or delete it, so the list shows what Sesame recorded and
+  is not proof that nothing else happened.
 - On Linux the browser helper trusts whichever program of yours owns its
   private socket, because Sesame hides its own executable from other
   programs. A program running as you that starts before Sesame could receive
