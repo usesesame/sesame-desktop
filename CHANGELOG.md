@@ -139,6 +139,9 @@ release cannot be published without saying what changed in it.
 
 ### Everyday use
 
+- Fields, chips, badges and notices are filled shapes with larger corners
+  where they had thin outlines, and the dark theme sets its background,
+  cards and fields further apart.
 - The item list sorts once per change instead of on every redraw.
 - In a short window the sidebar no longer slides Settings over Lock vault.
   It tightens its rows and scrolls when it still cannot fit.
